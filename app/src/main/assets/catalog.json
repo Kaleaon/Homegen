@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "materials": [
+    {
+      "id": "wall_white_plaster",
+      "name": "White Plaster",
+      "category": "walls",
+      "tags": ["neutral", "paint"],
+      "texturePath": "textures/walls/white_plaster.png",
+      "thumbnailPath": "textures/walls/thumbnails/white_plaster.webp"
+    },
+    {
+      "id": "floor_oak_honey",
+      "name": "Honey Oak",
+      "category": "floors",
+      "tags": ["wood", "warm"],
+      "texturePath": "textures/floors/oak_honey.png",
+      "thumbnailPath": "textures/floors/thumbnails/oak_honey.webp"
+    },
+    {
+      "id": "ceiling_smooth_white",
+      "name": "Smooth White Ceiling",
+      "category": "ceilings",
+      "tags": ["minimal", "paint"],
+      "texturePath": "textures/ceilings/smooth_white.png",
+      "thumbnailPath": "textures/ceilings/thumbnails/smooth_white.webp"
+    }
+  ],
+  "placeableObjects": [
+    {
+      "id": "chair_scandi_01",
+      "name": "Scandi Chair",
+      "category": "furniture/chairs",
+      "tags": ["wood", "scandinavian"],
+      "modelPath": "models/furniture/chairs/scandi_chair_01.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/scandi_chair_01.webp",
+      "footprintMeters": {
+        "x": 0.56,
+        "y": 0.82,
+        "z": 0.54
+      }
+    },
+    {
+      "id": "table_dining_01",
+      "name": "Dining Table",
+      "category": "furniture/tables",
+      "tags": ["dining", "wood"],
+      "modelPath": "models/furniture/tables/dining_table_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/dining_table_01.webp",
+      "footprintMeters": {
+        "x": 1.6,
+        "y": 0.75,
+        "z": 0.8
+      }
+    }
+  ]
+}
