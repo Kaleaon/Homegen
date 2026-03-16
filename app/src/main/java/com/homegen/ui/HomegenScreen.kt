@@ -48,7 +48,20 @@ import com.homegen.designer3d.input.InteractionMode
 import com.homegen.designer3d.rendering.FilamentSurfaceManager
 import com.homegen.electrical.ElectricalLayer
 import com.homegen.electrical.ElectricalOverlayController
+import com.homegen.styles.model.DesignStyle
+import com.homegen.styles.ui.DesignStyleBrowser
+import com.homegen.templates.model.RoomTemplate
+import com.homegen.templates.ui.RoomTemplatePanel
 import kotlinx.coroutines.launch
+
+/**
+ * Represents which full-screen overlay is currently shown.
+ */
+private enum class OverlayScreen {
+    NONE,
+    STYLE_BROWSER,
+    ROOM_TEMPLATES,
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +77,8 @@ fun HomegenScreen(
     var overlayLegend by remember { mutableStateOf<String?>(null) }
     var currentMode by remember { mutableStateOf<InteractionMode>(InteractionMode.Select) }
     var currentFloor by remember { mutableIntStateOf(0) }
+    var overlayScreen by remember { mutableStateOf(OverlayScreen.NONE) }
+    var activeStyle by remember { mutableStateOf<DesignStyle?>(null) }
 
     val canUndo by commandStack.canUndo.collectAsState()
     val canRedo by commandStack.canRedo.collectAsState()
@@ -89,6 +104,31 @@ fun HomegenScreen(
         catalog = catalogRepository.loadCatalog()
     }
 
+    // Full-screen overlays (Design Styles, Room Templates)
+    when (overlayScreen) {
+        OverlayScreen.STYLE_BROWSER -> {
+            DesignStyleBrowser(
+                onStyleSelected = { style ->
+                    activeStyle = style
+                    overlayScreen = OverlayScreen.NONE
+                },
+                onDismiss = { overlayScreen = OverlayScreen.NONE },
+            )
+            return
+        }
+        OverlayScreen.ROOM_TEMPLATES -> {
+            RoomTemplatePanel(
+                onTemplateSelected = { template ->
+                    // Template selected - would create room with placements
+                    overlayScreen = OverlayScreen.NONE
+                },
+                onDismiss = { overlayScreen = OverlayScreen.NONE },
+            )
+            return
+        }
+        OverlayScreen.NONE -> { /* Show main editor below */ }
+    }
+
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetContent = {
@@ -96,16 +136,15 @@ fun HomegenScreen(
                 CatalogPanel(
                     catalog = cat,
                     repository = catalogRepository,
+                    activeStyleTag = activeStyle?.id,
                     onMaterialPicked = { entry: MaterialEntry ->
-                        // Enter paint mode with selected material
                         interactionController.mode = InteractionMode.Paint(
-                            materialRef = entry.material.diffuseMapPath
+                            materialRef = entry.material.texturePath
                         )
                         currentMode = interactionController.mode
                         scope.launch { scaffoldState.bottomSheetState.hide() }
                     },
                     onPlaceablePicked = { entry: PlaceableEntry ->
-                        // Enter furniture drag mode
                         interactionController.mode = InteractionMode.FurnitureDrag(
                             catalogRef = entry.placeable.modelPath,
                             name = entry.name
@@ -171,6 +210,23 @@ fun HomegenScreen(
                 )
             }
 
+            // Active style indicator
+            activeStyle?.let { style ->
+                Text(
+                    text = "Style: ${style.name}",
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 12.dp, top = 40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = MaterialTheme.shapes.small
+                        )
+                        .padding(horizontal = 10.dp, vertical = 3.dp),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+
             // Top-right: Undo/Redo
             Row(
                 modifier = Modifier
@@ -231,6 +287,7 @@ fun HomegenScreen(
                     .fillMaxWidth()
                     .padding(8.dp)
             ) {
+                // Primary tools row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
@@ -260,13 +317,19 @@ fun HomegenScreen(
                     }
                 }
 
-                // Delete selected
+                // Secondary tools row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
+                    ToolButton("Styles") {
+                        overlayScreen = OverlayScreen.STYLE_BROWSER
+                    }
+                    ToolButton("Templates") {
+                        overlayScreen = OverlayScreen.ROOM_TEMPLATES
+                    }
                     FilledTonalButton(onClick = {
                         val selectedId = surfaceManager.sceneController.selectedObjectId
                         if (selectedId != null) {

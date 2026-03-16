@@ -1,11 +1,11 @@
 {
-  "version": 2,
+  "version": 3,
   "materials": [
     {
       "id": "wall_white_plaster",
       "name": "White Plaster",
       "category": "walls",
-      "tags": ["neutral", "paint"],
+      "tags": ["neutral", "paint", "minimal", "scandinavian"],
       "texturePath": "textures/walls/white_plaster.png",
       "thumbnailPath": "textures/walls/thumbnails/white_plaster.webp"
     },
@@ -13,7 +13,7 @@
       "id": "wall_warm_beige",
       "name": "Warm Beige",
       "category": "walls",
-      "tags": ["neutral", "warm", "paint"],
+      "tags": ["neutral", "warm", "paint", "japandi", "boho"],
       "texturePath": "textures/walls/warm_beige.png",
       "thumbnailPath": "textures/walls/thumbnails/warm_beige.webp"
     },
@@ -21,7 +21,7 @@
       "id": "wall_exposed_brick",
       "name": "Exposed Brick",
       "category": "walls",
-      "tags": ["industrial", "brick", "rustic"],
+      "tags": ["industrial", "brick", "rustic", "loft"],
       "texturePath": "textures/walls/exposed_brick.png",
       "thumbnailPath": "textures/walls/thumbnails/exposed_brick.webp"
     },
@@ -29,15 +29,143 @@
       "id": "wall_soft_gray",
       "name": "Soft Gray",
       "category": "walls",
-      "tags": ["modern", "neutral", "paint"],
+      "tags": ["modern", "neutral", "paint", "scandinavian", "minimalism"],
       "texturePath": "textures/walls/soft_gray.png",
       "thumbnailPath": "textures/walls/thumbnails/soft_gray.webp"
+    },
+    {
+      "id": "wall_charcoal",
+      "name": "Charcoal",
+      "category": "walls",
+      "tags": ["dark", "moody", "paint", "dark-academia", "nordic-noir"],
+      "texturePath": "textures/walls/charcoal.png",
+      "thumbnailPath": "textures/walls/thumbnails/charcoal.webp"
+    },
+    {
+      "id": "wall_terracotta",
+      "name": "Terracotta",
+      "category": "walls",
+      "tags": ["warm", "earthy", "mediterranean", "tuscan", "paint"],
+      "texturePath": "textures/walls/terracotta.png",
+      "thumbnailPath": "textures/walls/thumbnails/terracotta.webp"
+    },
+    {
+      "id": "wall_sage_green",
+      "name": "Sage Green",
+      "category": "walls",
+      "tags": ["nature", "calm", "biophilic", "japandi", "paint"],
+      "texturePath": "textures/walls/sage_green.png",
+      "thumbnailPath": "textures/walls/thumbnails/sage_green.webp"
+    },
+    {
+      "id": "wall_navy_blue",
+      "name": "Navy Blue",
+      "category": "walls",
+      "tags": ["bold", "classic", "paint", "dark-academia", "hollywood-regency"],
+      "texturePath": "textures/walls/navy_blue.png",
+      "thumbnailPath": "textures/walls/thumbnails/navy_blue.webp"
+    },
+    {
+      "id": "wall_concrete_raw",
+      "name": "Raw Concrete",
+      "category": "walls",
+      "tags": ["industrial", "brutalist", "concrete", "modern"],
+      "texturePath": "textures/walls/concrete_raw.png",
+      "thumbnailPath": "textures/walls/thumbnails/concrete_raw.webp"
+    },
+    {
+      "id": "wall_venetian_plaster",
+      "name": "Venetian Plaster",
+      "category": "walls",
+      "tags": ["luxury", "texture", "italian", "mediterranean"],
+      "texturePath": "textures/walls/venetian_plaster.png",
+      "thumbnailPath": "textures/walls/thumbnails/venetian_plaster.webp"
+    },
+    {
+      "id": "wall_limewash_white",
+      "name": "Limewash White",
+      "category": "walls",
+      "tags": ["organic", "texture", "mediterranean", "wabi-sabi"],
+      "texturePath": "textures/walls/limewash_white.png",
+      "thumbnailPath": "textures/walls/thumbnails/limewash_white.webp"
+    },
+    {
+      "id": "wall_blush_pink",
+      "name": "Blush Pink",
+      "category": "walls",
+      "tags": ["soft", "feminine", "paint", "art-deco", "hollywood-regency"],
+      "texturePath": "textures/walls/blush_pink.png",
+      "thumbnailPath": "textures/walls/thumbnails/blush_pink.webp"
+    },
+    {
+      "id": "wall_olive_green",
+      "name": "Olive Green",
+      "category": "walls",
+      "tags": ["earthy", "nature", "paint", "mid-century-modern"],
+      "texturePath": "textures/walls/olive_green.png",
+      "thumbnailPath": "textures/walls/thumbnails/olive_green.webp"
+    },
+    {
+      "id": "wall_cream",
+      "name": "Cream",
+      "category": "walls",
+      "tags": ["warm", "neutral", "paint", "tuscan", "gustavian"],
+      "texturePath": "textures/walls/cream.png",
+      "thumbnailPath": "textures/walls/thumbnails/cream.webp"
+    },
+    {
+      "id": "wall_slate_blue",
+      "name": "Slate Blue",
+      "category": "walls",
+      "tags": ["cool", "sophisticated", "paint", "coastal"],
+      "texturePath": "textures/walls/slate_blue.png",
+      "thumbnailPath": "textures/walls/thumbnails/slate_blue.webp"
+    },
+    {
+      "id": "wall_wood_paneling",
+      "name": "Wood Paneling",
+      "category": "walls",
+      "tags": ["wood", "warm", "cabin", "mid-century-modern", "paneling"],
+      "texturePath": "textures/walls/wood_paneling.png",
+      "thumbnailPath": "textures/walls/thumbnails/wood_paneling.webp"
+    },
+    {
+      "id": "wall_wallpaper_botanical",
+      "name": "Botanical Wallpaper",
+      "category": "walls",
+      "tags": ["wallpaper", "nature", "pattern", "art-nouveau", "maximalism"],
+      "texturePath": "textures/walls/wallpaper_botanical.png",
+      "thumbnailPath": "textures/walls/thumbnails/wallpaper_botanical.webp"
+    },
+    {
+      "id": "wall_wallpaper_geometric",
+      "name": "Geometric Wallpaper",
+      "category": "walls",
+      "tags": ["wallpaper", "pattern", "art-deco", "memphis"],
+      "texturePath": "textures/walls/wallpaper_geometric.png",
+      "thumbnailPath": "textures/walls/thumbnails/wallpaper_geometric.webp"
+    },
+    {
+      "id": "wall_stone_natural",
+      "name": "Natural Stone Wall",
+      "category": "walls",
+      "tags": ["stone", "rustic", "natural", "tuscan", "mediterranean"],
+      "texturePath": "textures/walls/stone_natural.png",
+      "thumbnailPath": "textures/walls/thumbnails/stone_natural.webp"
+    },
+    {
+      "id": "wall_microcement",
+      "name": "Microcement",
+      "category": "walls",
+      "tags": ["modern", "smooth", "industrial", "minimalism"],
+      "texturePath": "textures/walls/microcement.png",
+      "thumbnailPath": "textures/walls/thumbnails/microcement.webp"
     },
     {
       "id": "floor_oak_honey",
       "name": "Honey Oak",
       "category": "floors",
-      "tags": ["wood", "warm"],
+      "tags": ["wood", "warm", "scandinavian"],
       "texturePath": "textures/floors/oak_honey.png",
       "thumbnailPath": "textures/floors/thumbnails/oak_honey.webp"
     },
@@ -45,7 +173,7 @@
       "id": "floor_walnut_dark",
       "name": "Dark Walnut",
       "category": "floors",
-      "tags": ["wood", "dark", "elegant"],
+      "tags": ["wood", "dark", "elegant", "art-deco", "mid-century-modern"],
       "texturePath": "textures/floors/walnut_dark.png",
       "thumbnailPath": "textures/floors/thumbnails/walnut_dark.webp"
     },
@@ -53,7 +181,7 @@
       "id": "floor_marble_white",
       "name": "White Marble",
       "category": "floors",
-      "tags": ["marble", "luxury", "stone"],
+      "tags": ["marble", "luxury", "stone", "hollywood-regency", "art-deco"],
       "texturePath": "textures/floors/marble_white.png",
       "thumbnailPath": "textures/floors/thumbnails/marble_white.webp"
     },
@@ -61,7 +189,7 @@
       "id": "floor_tile_ceramic",
       "name": "Ceramic Tile",
       "category": "floors",
-      "tags": ["tile", "bathroom", "kitchen"],
+      "tags": ["tile", "bathroom", "kitchen", "mediterranean"],
       "texturePath": "textures/floors/tile_ceramic.png",
       "thumbnailPath": "textures/floors/thumbnails/tile_ceramic.webp"
     },
@@ -74,12 +202,156 @@
       "thumbnailPath": "textures/floors/thumbnails/carpet_gray.webp"
     },
     {
+      "id": "floor_herringbone_oak",
+      "name": "Herringbone Oak",
+      "category": "floors",
+      "tags": ["wood", "pattern", "elegant", "scandinavian", "mid-century-modern"],
+      "texturePath": "textures/floors/herringbone_oak.png",
+      "thumbnailPath": "textures/floors/thumbnails/herringbone_oak.webp"
+    },
+    {
+      "id": "floor_terrazzo",
+      "name": "Terrazzo",
+      "category": "floors",
+      "tags": ["stone", "retro", "memphis", "mid-century-modern", "italian"],
+      "texturePath": "textures/floors/terrazzo.png",
+      "thumbnailPath": "textures/floors/thumbnails/terrazzo.webp"
+    },
+    {
+      "id": "floor_concrete_polished",
+      "name": "Polished Concrete",
+      "category": "floors",
+      "tags": ["concrete", "industrial", "modern", "brutalist", "minimalism"],
+      "texturePath": "textures/floors/concrete_polished.png",
+      "thumbnailPath": "textures/floors/thumbnails/concrete_polished.webp"
+    },
+    {
+      "id": "floor_bamboo",
+      "name": "Bamboo",
+      "category": "floors",
+      "tags": ["wood", "eco", "asian-zen", "japandi"],
+      "texturePath": "textures/floors/bamboo.png",
+      "thumbnailPath": "textures/floors/thumbnails/bamboo.webp"
+    },
+    {
+      "id": "floor_slate_tile",
+      "name": "Slate Tile",
+      "category": "floors",
+      "tags": ["stone", "dark", "natural", "rustic"],
+      "texturePath": "textures/floors/slate_tile.png",
+      "thumbnailPath": "textures/floors/thumbnails/slate_tile.webp"
+    },
+    {
+      "id": "floor_marble_black",
+      "name": "Black Marble",
+      "category": "floors",
+      "tags": ["marble", "luxury", "dark", "art-deco", "hollywood-regency"],
+      "texturePath": "textures/floors/marble_black.png",
+      "thumbnailPath": "textures/floors/thumbnails/marble_black.webp"
+    },
+    {
+      "id": "floor_travertine",
+      "name": "Travertine",
+      "category": "floors",
+      "tags": ["stone", "warm", "natural", "tuscan", "mediterranean"],
+      "texturePath": "textures/floors/travertine.png",
+      "thumbnailPath": "textures/floors/thumbnails/travertine.webp"
+    },
+    {
+      "id": "floor_vinyl_plank",
+      "name": "Vinyl Plank",
+      "category": "floors",
+      "tags": ["vinyl", "budget", "modern", "durable"],
+      "texturePath": "textures/floors/vinyl_plank.png",
+      "thumbnailPath": "textures/floors/thumbnails/vinyl_plank.webp"
+    },
+    {
+      "id": "floor_mosaic_tile",
+      "name": "Mosaic Tile",
+      "category": "floors",
+      "tags": ["tile", "pattern", "moroccan", "bathroom", "decorative"],
+      "texturePath": "textures/floors/mosaic_tile.png",
+      "thumbnailPath": "textures/floors/thumbnails/mosaic_tile.webp"
+    },
+    {
+      "id": "floor_cork",
+      "name": "Cork",
+      "category": "floors",
+      "tags": ["eco", "warm", "soft", "natural"],
+      "texturePath": "textures/floors/cork.png",
+      "thumbnailPath": "textures/floors/thumbnails/cork.webp"
+    },
+    {
+      "id": "floor_reclaimed_wood",
+      "name": "Reclaimed Wood",
+      "category": "floors",
+      "tags": ["wood", "rustic", "eco", "industrial", "wabi-sabi"],
+      "texturePath": "textures/floors/reclaimed_wood.png",
+      "thumbnailPath": "textures/floors/thumbnails/reclaimed_wood.webp"
+    },
+    {
+      "id": "floor_encaustic_tile",
+      "name": "Encaustic Cement Tile",
+      "category": "floors",
+      "tags": ["tile", "pattern", "moroccan", "mediterranean", "boho"],
+      "texturePath": "textures/floors/encaustic_tile.png",
+      "thumbnailPath": "textures/floors/thumbnails/encaustic_tile.webp"
+    },
+    {
+      "id": "floor_tatami",
+      "name": "Tatami Mat",
+      "category": "floors",
+      "tags": ["japanese", "natural", "asian-zen", "japandi"],
+      "texturePath": "textures/floors/tatami.png",
+      "thumbnailPath": "textures/floors/thumbnails/tatami.webp"
+    },
+    {
       "id": "ceiling_smooth_white",
       "name": "Smooth White Ceiling",
       "category": "ceilings",
-      "tags": ["minimal", "paint"],
+      "tags": ["minimal", "paint", "clean"],
       "texturePath": "textures/ceilings/smooth_white.png",
       "thumbnailPath": "textures/ceilings/thumbnails/smooth_white.webp"
+    },
+    {
+      "id": "ceiling_exposed_beams",
+      "name": "Exposed Wood Beams",
+      "category": "ceilings",
+      "tags": ["wood", "rustic", "tuscan", "farmhouse"],
+      "texturePath": "textures/ceilings/exposed_beams.png",
+      "thumbnailPath": "textures/ceilings/thumbnails/exposed_beams.webp"
+    },
+    {
+      "id": "ceiling_coffered",
+      "name": "Coffered Ceiling",
+      "category": "ceilings",
+      "tags": ["elegant", "traditional", "hollywood-regency", "luxury"],
+      "texturePath": "textures/ceilings/coffered.png",
+      "thumbnailPath": "textures/ceilings/thumbnails/coffered.webp"
+    },
+    {
+      "id": "ceiling_concrete",
+      "name": "Concrete Ceiling",
+      "category": "ceilings",
+      "tags": ["industrial", "brutalist", "modern", "loft"],
+      "texturePath": "textures/ceilings/concrete.png",
+      "thumbnailPath": "textures/ceilings/thumbnails/concrete.webp"
+    },
+    {
+      "id": "ceiling_wood_plank",
+      "name": "Wood Plank Ceiling",
+      "category": "ceilings",
+      "tags": ["wood", "warm", "cabin", "scandinavian"],
+      "texturePath": "textures/ceilings/wood_plank.png",
+      "thumbnailPath": "textures/ceilings/thumbnails/wood_plank.webp"
+    },
+    {
+      "id": "ceiling_tin_pressed",
+      "name": "Pressed Tin Ceiling",
+      "category": "ceilings",
+      "tags": ["vintage", "pattern", "art-deco", "decorative"],
+      "texturePath": "textures/ceilings/tin_pressed.png",
+      "thumbnailPath": "textures/ceilings/thumbnails/tin_pressed.webp"
     }
   ],
   "placeableObjects": [
@@ -87,10 +359,91 @@
       "id": "chair_scandi_01",
       "name": "Scandi Chair",
       "category": "furniture/chairs",
-      "tags": ["wood", "scandinavian"],
+      "tags": ["wood", "scandinavian", "japandi", "minimalism"],
       "modelPath": "models/furniture/chairs/scandi_chair_01.glb",
       "thumbnailPath": "models/furniture/chairs/thumbnails/scandi_chair_01.webp",
       "footprintMeters": { "x": 0.56, "y": 0.82, "z": 0.54 }
+    },
+    {
+      "id": "chair_eames_lounge",
+      "name": "Eames Lounge Chair",
+      "category": "furniture/chairs",
+      "tags": ["iconic", "mid-century-modern", "leather", "luxury"],
+      "modelPath": "models/furniture/chairs/eames_lounge.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/eames_lounge.webp",
+      "footprintMeters": { "x": 0.84, "y": 0.89, "z": 0.83 }
+    },
+    {
+      "id": "chair_barcelona",
+      "name": "Barcelona Chair",
+      "category": "furniture/chairs",
+      "tags": ["iconic", "mid-century-modern", "leather", "minimalism"],
+      "modelPath": "models/furniture/chairs/barcelona.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/barcelona.webp",
+      "footprintMeters": { "x": 0.75, "y": 0.77, "z": 0.77 }
+    },
+    {
+      "id": "chair_wishbone",
+      "name": "Wishbone Chair",
+      "category": "furniture/chairs",
+      "tags": ["scandinavian", "japandi", "wood", "dining"],
+      "modelPath": "models/furniture/chairs/wishbone.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/wishbone.webp",
+      "footprintMeters": { "x": 0.55, "y": 0.76, "z": 0.51 }
+    },
+    {
+      "id": "chair_egg",
+      "name": "Egg Chair",
+      "category": "furniture/chairs",
+      "tags": ["iconic", "mid-century-modern", "retro-futurist", "accent"],
+      "modelPath": "models/furniture/chairs/egg.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/egg.webp",
+      "footprintMeters": { "x": 0.86, "y": 1.07, "z": 0.79 }
+    },
+    {
+      "id": "chair_papasan",
+      "name": "Papasan Chair",
+      "category": "furniture/chairs",
+      "tags": ["boho", "rattan", "tropical", "cozy"],
+      "modelPath": "models/furniture/chairs/papasan.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/papasan.webp",
+      "footprintMeters": { "x": 1.0, "y": 0.95, "z": 1.0 }
+    },
+    {
+      "id": "chair_wingback",
+      "name": "Wingback Chair",
+      "category": "furniture/chairs",
+      "tags": ["traditional", "fabric", "hollywood-regency", "dark-academia"],
+      "modelPath": "models/furniture/chairs/wingback.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/wingback.webp",
+      "footprintMeters": { "x": 0.82, "y": 1.1, "z": 0.85 }
+    },
+    {
+      "id": "chair_acapulco",
+      "name": "Acapulco Chair",
+      "category": "furniture/chairs",
+      "tags": ["outdoor", "retro", "colorful", "tropical"],
+      "modelPath": "models/furniture/chairs/acapulco.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/acapulco.webp",
+      "footprintMeters": { "x": 0.73, "y": 0.85, "z": 0.73 }
+    },
+    {
+      "id": "armchair_01",
+      "name": "Armchair",
+      "category": "furniture/chairs",
+      "tags": ["living", "comfortable", "fabric"],
+      "modelPath": "models/furniture/chairs/armchair_01.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/armchair_01.webp",
+      "footprintMeters": { "x": 0.85, "y": 0.9, "z": 0.8 }
+    },
+    {
+      "id": "chair_dining_modern",
+      "name": "Modern Dining Chair",
+      "category": "furniture/chairs",
+      "tags": ["dining", "modern", "minimalism"],
+      "modelPath": "models/furniture/chairs/dining_modern.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/dining_modern.webp",
+      "footprintMeters": { "x": 0.47, "y": 0.82, "z": 0.52 }
     },
     {
       "id": "table_dining_01",
@@ -102,10 +455,91 @@
       "footprintMeters": { "x": 1.6, "y": 0.75, "z": 0.8 }
     },
     {
+      "id": "table_dining_round",
+      "name": "Round Dining Table",
+      "category": "furniture/tables",
+      "tags": ["dining", "round", "mid-century-modern"],
+      "modelPath": "models/furniture/tables/dining_round.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/dining_round.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.75, "z": 1.2 }
+    },
+    {
+      "id": "table_dining_extendable",
+      "name": "Extendable Dining Table",
+      "category": "furniture/tables",
+      "tags": ["dining", "versatile", "scandinavian"],
+      "modelPath": "models/furniture/tables/dining_extendable.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/dining_extendable.webp",
+      "footprintMeters": { "x": 1.8, "y": 0.75, "z": 0.9 }
+    },
+    {
+      "id": "nightstand_01",
+      "name": "Nightstand",
+      "category": "furniture/tables",
+      "tags": ["bedroom", "small", "storage"],
+      "modelPath": "models/furniture/tables/nightstand_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/nightstand_01.webp",
+      "footprintMeters": { "x": 0.45, "y": 0.55, "z": 0.4 }
+    },
+    {
+      "id": "coffee_table_01",
+      "name": "Coffee Table",
+      "category": "furniture/tables",
+      "tags": ["living", "wood", "modern"],
+      "modelPath": "models/furniture/tables/coffee_table_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/coffee_table_01.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.45, "z": 0.6 }
+    },
+    {
+      "id": "coffee_table_glass",
+      "name": "Glass Coffee Table",
+      "category": "furniture/tables",
+      "tags": ["living", "glass", "modern", "minimalism"],
+      "modelPath": "models/furniture/tables/coffee_table_glass.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/coffee_table_glass.webp",
+      "footprintMeters": { "x": 1.1, "y": 0.4, "z": 0.6 }
+    },
+    {
+      "id": "side_table_round",
+      "name": "Round Side Table",
+      "category": "furniture/tables",
+      "tags": ["living", "accent", "small", "mid-century-modern"],
+      "modelPath": "models/furniture/tables/side_table_round.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/side_table_round.webp",
+      "footprintMeters": { "x": 0.45, "y": 0.55, "z": 0.45 }
+    },
+    {
+      "id": "console_table",
+      "name": "Console Table",
+      "category": "furniture/tables",
+      "tags": ["entryway", "narrow", "elegant"],
+      "modelPath": "models/furniture/tables/console_table.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/console_table.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.8, "z": 0.35 }
+    },
+    {
+      "id": "desk_office_01",
+      "name": "Office Desk",
+      "category": "furniture/tables",
+      "tags": ["office", "work", "wood"],
+      "modelPath": "models/furniture/tables/desk_office_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/desk_office_01.webp",
+      "footprintMeters": { "x": 1.4, "y": 0.75, "z": 0.7 }
+    },
+    {
+      "id": "desk_standing",
+      "name": "Standing Desk",
+      "category": "furniture/tables",
+      "tags": ["office", "ergonomic", "modern"],
+      "modelPath": "models/furniture/tables/desk_standing.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/desk_standing.webp",
+      "footprintMeters": { "x": 1.5, "y": 1.1, "z": 0.7 }
+    },
+    {
       "id": "sofa_modern_01",
       "name": "Modern Sofa",
       "category": "furniture/sofas",
-      "tags": ["modern", "living", "fabric"],
+      "tags": ["modern", "living", "fabric", "minimalism"],
       "modelPath": "models/furniture/sofas/modern_sofa_01.glb",
       "thumbnailPath": "models/furniture/sofas/thumbnails/modern_sofa_01.webp",
       "footprintMeters": { "x": 2.1, "y": 0.85, "z": 0.9 }
@@ -118,6 +552,42 @@
       "modelPath": "models/furniture/sofas/sectional_01.glb",
       "thumbnailPath": "models/furniture/sofas/thumbnails/sectional_01.webp",
       "footprintMeters": { "x": 2.8, "y": 0.85, "z": 2.0 }
+    },
+    {
+      "id": "sofa_chesterfield",
+      "name": "Chesterfield Sofa",
+      "category": "furniture/sofas",
+      "tags": ["classic", "leather", "tufted", "dark-academia", "hollywood-regency"],
+      "modelPath": "models/furniture/sofas/chesterfield.glb",
+      "thumbnailPath": "models/furniture/sofas/thumbnails/chesterfield.webp",
+      "footprintMeters": { "x": 2.2, "y": 0.75, "z": 0.9 }
+    },
+    {
+      "id": "sofa_modular",
+      "name": "Modular Sofa",
+      "category": "furniture/sofas",
+      "tags": ["modern", "flexible", "living", "large"],
+      "modelPath": "models/furniture/sofas/modular.glb",
+      "thumbnailPath": "models/furniture/sofas/thumbnails/modular.webp",
+      "footprintMeters": { "x": 3.0, "y": 0.7, "z": 1.0 }
+    },
+    {
+      "id": "sofa_daybed",
+      "name": "Daybed",
+      "category": "furniture/sofas",
+      "tags": ["compact", "mid-century-modern", "japandi"],
+      "modelPath": "models/furniture/sofas/daybed.glb",
+      "thumbnailPath": "models/furniture/sofas/thumbnails/daybed.webp",
+      "footprintMeters": { "x": 1.9, "y": 0.75, "z": 0.8 }
+    },
+    {
+      "id": "sofa_velvet_curve",
+      "name": "Curved Velvet Sofa",
+      "category": "furniture/sofas",
+      "tags": ["art-deco", "velvet", "luxury", "hollywood-regency"],
+      "modelPath": "models/furniture/sofas/velvet_curve.glb",
+      "thumbnailPath": "models/furniture/sofas/thumbnails/velvet_curve.webp",
+      "footprintMeters": { "x": 2.4, "y": 0.8, "z": 1.1 }
     },
     {
       "id": "bed_queen_01",
@@ -147,37 +617,37 @@
       "footprintMeters": { "x": 0.9, "y": 0.5, "z": 2.0 }
     },
     {
-      "id": "nightstand_01",
-      "name": "Nightstand",
-      "category": "furniture/tables",
-      "tags": ["bedroom", "small", "storage"],
-      "modelPath": "models/furniture/tables/nightstand_01.glb",
-      "thumbnailPath": "models/furniture/tables/thumbnails/nightstand_01.webp",
-      "footprintMeters": { "x": 0.45, "y": 0.55, "z": 0.4 }
+      "id": "bed_platform",
+      "name": "Platform Bed",
+      "category": "furniture/beds",
+      "tags": ["bedroom", "low", "japandi", "minimalism", "asian-zen"],
+      "modelPath": "models/furniture/beds/platform.glb",
+      "thumbnailPath": "models/furniture/beds/thumbnails/platform.webp",
+      "footprintMeters": { "x": 1.8, "y": 0.35, "z": 2.1 }
     },
     {
-      "id": "coffee_table_01",
-      "name": "Coffee Table",
-      "category": "furniture/tables",
-      "tags": ["living", "wood", "modern"],
-      "modelPath": "models/furniture/tables/coffee_table_01.glb",
-      "thumbnailPath": "models/furniture/tables/thumbnails/coffee_table_01.webp",
-      "footprintMeters": { "x": 1.2, "y": 0.45, "z": 0.6 }
+      "id": "bed_four_poster",
+      "name": "Four-Poster Bed",
+      "category": "furniture/beds",
+      "tags": ["bedroom", "classic", "luxury", "hollywood-regency"],
+      "modelPath": "models/furniture/beds/four_poster.glb",
+      "thumbnailPath": "models/furniture/beds/thumbnails/four_poster.webp",
+      "footprintMeters": { "x": 1.8, "y": 2.2, "z": 2.1 }
     },
     {
-      "id": "desk_office_01",
-      "name": "Office Desk",
-      "category": "furniture/tables",
-      "tags": ["office", "work", "wood"],
-      "modelPath": "models/furniture/tables/desk_office_01.glb",
-      "thumbnailPath": "models/furniture/tables/thumbnails/desk_office_01.webp",
-      "footprintMeters": { "x": 1.4, "y": 0.75, "z": 0.7 }
+      "id": "bed_bunk",
+      "name": "Bunk Bed",
+      "category": "furniture/beds",
+      "tags": ["bedroom", "kids", "compact", "space-saving"],
+      "modelPath": "models/furniture/beds/bunk.glb",
+      "thumbnailPath": "models/furniture/beds/thumbnails/bunk.webp",
+      "footprintMeters": { "x": 1.0, "y": 1.7, "z": 2.0 }
     },
     {
       "id": "bookshelf_01",
       "name": "Bookshelf",
       "category": "furniture/storage",
-      "tags": ["storage", "wood", "books"],
+      "tags": ["storage", "wood", "books", "dark-academia"],
       "modelPath": "models/furniture/storage/bookshelf_01.glb",
       "thumbnailPath": "models/furniture/storage/thumbnails/bookshelf_01.webp",
       "footprintMeters": { "x": 0.8, "y": 1.8, "z": 0.3 }
@@ -210,6 +680,42 @@
       "footprintMeters": { "x": 1.8, "y": 0.55, "z": 0.4 }
     },
     {
+      "id": "sideboard_01",
+      "name": "Sideboard",
+      "category": "furniture/storage",
+      "tags": ["dining", "storage", "mid-century-modern"],
+      "modelPath": "models/furniture/storage/sideboard_01.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/sideboard_01.webp",
+      "footprintMeters": { "x": 1.6, "y": 0.8, "z": 0.45 }
+    },
+    {
+      "id": "cabinet_display",
+      "name": "Display Cabinet",
+      "category": "furniture/storage",
+      "tags": ["glass", "display", "elegant", "art-deco"],
+      "modelPath": "models/furniture/storage/cabinet_display.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/cabinet_display.webp",
+      "footprintMeters": { "x": 0.9, "y": 1.8, "z": 0.4 }
+    },
+    {
+      "id": "shoe_rack",
+      "name": "Shoe Rack",
+      "category": "furniture/storage",
+      "tags": ["entryway", "storage", "compact"],
+      "modelPath": "models/furniture/storage/shoe_rack.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/shoe_rack.webp",
+      "footprintMeters": { "x": 0.8, "y": 0.9, "z": 0.3 }
+    },
+    {
+      "id": "floating_shelf",
+      "name": "Floating Shelf",
+      "category": "furniture/storage",
+      "tags": ["wall", "minimal", "modern", "scandinavian"],
+      "modelPath": "models/furniture/storage/floating_shelf.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/floating_shelf.webp",
+      "footprintMeters": { "x": 1.0, "y": 0.25, "z": 0.2 }
+    },
+    {
       "id": "fridge_01",
       "name": "Refrigerator",
       "category": "kitchen",
@@ -217,6 +723,15 @@
       "modelPath": "models/kitchen/fridge_01.glb",
       "thumbnailPath": "models/kitchen/thumbnails/fridge_01.webp",
       "footprintMeters": { "x": 0.7, "y": 1.8, "z": 0.7 }
+    },
+    {
+      "id": "fridge_double",
+      "name": "French Door Refrigerator",
+      "category": "kitchen",
+      "tags": ["appliance", "kitchen", "large", "luxury"],
+      "modelPath": "models/kitchen/fridge_double.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/fridge_double.webp",
+      "footprintMeters": { "x": 0.9, "y": 1.8, "z": 0.8 }
     },
     {
       "id": "stove_01",
@@ -237,6 +752,15 @@
       "footprintMeters": { "x": 1.2, "y": 0.9, "z": 0.6 }
     },
     {
+      "id": "kitchen_island",
+      "name": "Kitchen Island",
+      "category": "kitchen",
+      "tags": ["kitchen", "counter", "large", "modern"],
+      "modelPath": "models/kitchen/island.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/island.webp",
+      "footprintMeters": { "x": 2.0, "y": 0.9, "z": 0.8 }
+    },
+    {
       "id": "sink_kitchen_01",
       "name": "Kitchen Sink",
       "category": "kitchen",
@@ -244,6 +768,33 @@
       "modelPath": "models/kitchen/sink_01.glb",
       "thumbnailPath": "models/kitchen/thumbnails/sink_01.webp",
       "footprintMeters": { "x": 0.8, "y": 0.9, "z": 0.6 }
+    },
+    {
+      "id": "dishwasher",
+      "name": "Dishwasher",
+      "category": "kitchen",
+      "tags": ["appliance", "kitchen", "essential"],
+      "modelPath": "models/kitchen/dishwasher.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/dishwasher.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.85, "z": 0.6 }
+    },
+    {
+      "id": "microwave",
+      "name": "Microwave",
+      "category": "kitchen",
+      "tags": ["appliance", "kitchen", "small"],
+      "modelPath": "models/kitchen/microwave.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/microwave.webp",
+      "footprintMeters": { "x": 0.5, "y": 0.3, "z": 0.4 }
+    },
+    {
+      "id": "kitchen_hood",
+      "name": "Range Hood",
+      "category": "kitchen",
+      "tags": ["appliance", "kitchen", "ventilation"],
+      "modelPath": "models/kitchen/range_hood.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/range_hood.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.4, "z": 0.5 }
     },
     {
       "id": "toilet_01",
@@ -264,6 +815,15 @@
       "footprintMeters": { "x": 0.7, "y": 0.6, "z": 1.7 }
     },
     {
+      "id": "bathtub_freestanding",
+      "name": "Freestanding Bathtub",
+      "category": "bathroom",
+      "tags": ["bathroom", "luxury", "modern", "spa"],
+      "modelPath": "models/bathroom/bathtub_freestanding.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/bathtub_freestanding.webp",
+      "footprintMeters": { "x": 0.75, "y": 0.6, "z": 1.7 }
+    },
+    {
       "id": "sink_bathroom_01",
       "name": "Bathroom Sink",
       "category": "bathroom",
@@ -273,6 +833,15 @@
       "footprintMeters": { "x": 0.6, "y": 0.85, "z": 0.45 }
     },
     {
+      "id": "sink_double_vanity",
+      "name": "Double Vanity",
+      "category": "bathroom",
+      "tags": ["bathroom", "sink", "large", "luxury"],
+      "modelPath": "models/bathroom/double_vanity.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/double_vanity.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.85, "z": 0.55 }
+    },
+    {
       "id": "shower_01",
       "name": "Shower Enclosure",
       "category": "bathroom",
@@ -280,6 +849,24 @@
       "modelPath": "models/bathroom/shower_01.glb",
       "thumbnailPath": "models/bathroom/thumbnails/shower_01.webp",
       "footprintMeters": { "x": 0.9, "y": 2.1, "z": 0.9 }
+    },
+    {
+      "id": "shower_walk_in",
+      "name": "Walk-in Shower",
+      "category": "bathroom",
+      "tags": ["bathroom", "shower", "modern", "luxury"],
+      "modelPath": "models/bathroom/shower_walk_in.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/shower_walk_in.webp",
+      "footprintMeters": { "x": 1.2, "y": 2.1, "z": 1.2 }
+    },
+    {
+      "id": "bathroom_cabinet",
+      "name": "Bathroom Cabinet",
+      "category": "bathroom",
+      "tags": ["bathroom", "storage", "mirror"],
+      "modelPath": "models/bathroom/cabinet.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/cabinet.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.7, "z": 0.15 }
     },
     {
       "id": "door_interior_01",
@@ -303,10 +890,46 @@
       "id": "door_sliding_01",
       "name": "Sliding Glass Door",
       "category": "doors",
-      "tags": ["door", "sliding", "glass", "patio"],
+      "tags": ["door", "sliding", "glass", "patio", "modern"],
       "modelPath": "models/doors/sliding_01.glb",
       "thumbnailPath": "models/doors/thumbnails/sliding_01.webp",
       "footprintMeters": { "x": 1.8, "y": 2.1, "z": 0.08 }
+    },
+    {
+      "id": "door_barn",
+      "name": "Barn Door",
+      "category": "doors",
+      "tags": ["door", "sliding", "rustic", "farmhouse", "industrial"],
+      "modelPath": "models/doors/barn.glb",
+      "thumbnailPath": "models/doors/thumbnails/barn.webp",
+      "footprintMeters": { "x": 1.0, "y": 2.1, "z": 0.05 }
+    },
+    {
+      "id": "door_french",
+      "name": "French Door",
+      "category": "doors",
+      "tags": ["door", "glass", "elegant", "traditional"],
+      "modelPath": "models/doors/french.glb",
+      "thumbnailPath": "models/doors/thumbnails/french.webp",
+      "footprintMeters": { "x": 1.5, "y": 2.1, "z": 0.05 }
+    },
+    {
+      "id": "door_pocket",
+      "name": "Pocket Door",
+      "category": "doors",
+      "tags": ["door", "space-saving", "modern"],
+      "modelPath": "models/doors/pocket.glb",
+      "thumbnailPath": "models/doors/thumbnails/pocket.webp",
+      "footprintMeters": { "x": 0.9, "y": 2.1, "z": 0.05 }
+    },
+    {
+      "id": "door_pivot",
+      "name": "Pivot Door",
+      "category": "doors",
+      "tags": ["door", "modern", "luxury", "dramatic"],
+      "modelPath": "models/doors/pivot.glb",
+      "thumbnailPath": "models/doors/thumbnails/pivot.webp",
+      "footprintMeters": { "x": 1.2, "y": 2.4, "z": 0.06 }
     },
     {
       "id": "window_standard_01",
@@ -336,31 +959,139 @@
       "footprintMeters": { "x": 2.4, "y": 1.2, "z": 0.6 }
     },
     {
-      "id": "armchair_01",
-      "name": "Armchair",
-      "category": "furniture/chairs",
-      "tags": ["living", "comfortable", "fabric"],
-      "modelPath": "models/furniture/chairs/armchair_01.glb",
-      "thumbnailPath": "models/furniture/chairs/thumbnails/armchair_01.webp",
-      "footprintMeters": { "x": 0.85, "y": 0.9, "z": 0.8 }
+      "id": "window_floor_to_ceiling",
+      "name": "Floor-to-Ceiling Window",
+      "category": "windows",
+      "tags": ["window", "large", "modern", "minimalism", "luxury"],
+      "modelPath": "models/windows/floor_to_ceiling.glb",
+      "thumbnailPath": "models/windows/thumbnails/floor_to_ceiling.webp",
+      "footprintMeters": { "x": 1.5, "y": 2.7, "z": 0.05 }
+    },
+    {
+      "id": "window_arched",
+      "name": "Arched Window",
+      "category": "windows",
+      "tags": ["window", "arch", "traditional", "art-deco", "mediterranean"],
+      "modelPath": "models/windows/arched.glb",
+      "thumbnailPath": "models/windows/thumbnails/arched.webp",
+      "footprintMeters": { "x": 1.0, "y": 1.8, "z": 0.05 }
+    },
+    {
+      "id": "window_skylight",
+      "name": "Skylight",
+      "category": "windows",
+      "tags": ["window", "ceiling", "light", "modern"],
+      "modelPath": "models/windows/skylight.glb",
+      "thumbnailPath": "models/windows/thumbnails/skylight.webp",
+      "footprintMeters": { "x": 1.0, "y": 0.05, "z": 1.0 }
     },
     {
       "id": "plant_indoor_01",
       "name": "Indoor Plant",
       "category": "decorative",
-      "tags": ["plant", "green", "nature"],
+      "tags": ["plant", "green", "nature", "biophilic"],
       "modelPath": "models/decorative/plant_01.glb",
       "thumbnailPath": "models/decorative/thumbnails/plant_01.webp",
       "footprintMeters": { "x": 0.35, "y": 1.2, "z": 0.35 }
     },
     {
+      "id": "plant_fiddle_leaf",
+      "name": "Fiddle Leaf Fig",
+      "category": "decorative",
+      "tags": ["plant", "large", "trendy", "biophilic"],
+      "modelPath": "models/decorative/fiddle_leaf.glb",
+      "thumbnailPath": "models/decorative/thumbnails/fiddle_leaf.webp",
+      "footprintMeters": { "x": 0.5, "y": 1.5, "z": 0.5 }
+    },
+    {
+      "id": "plant_monstera",
+      "name": "Monstera",
+      "category": "decorative",
+      "tags": ["plant", "tropical", "boho", "biophilic"],
+      "modelPath": "models/decorative/monstera.glb",
+      "thumbnailPath": "models/decorative/thumbnails/monstera.webp",
+      "footprintMeters": { "x": 0.6, "y": 1.0, "z": 0.6 }
+    },
+    {
+      "id": "plant_cactus_group",
+      "name": "Cactus Group",
+      "category": "decorative",
+      "tags": ["plant", "desert", "small", "desert-modernism"],
+      "modelPath": "models/decorative/cactus_group.glb",
+      "thumbnailPath": "models/decorative/thumbnails/cactus_group.webp",
+      "footprintMeters": { "x": 0.3, "y": 0.4, "z": 0.3 }
+    },
+    {
       "id": "lamp_floor_01",
       "name": "Floor Lamp",
-      "category": "decorative",
-      "tags": ["lighting", "modern", "lamp"],
-      "modelPath": "models/decorative/lamp_floor_01.glb",
-      "thumbnailPath": "models/decorative/thumbnails/lamp_floor_01.webp",
+      "category": "lighting",
+      "tags": ["lighting", "modern", "lamp", "floor"],
+      "modelPath": "models/lighting/lamp_floor_01.glb",
+      "thumbnailPath": "models/lighting/thumbnails/lamp_floor_01.webp",
       "footprintMeters": { "x": 0.3, "y": 1.6, "z": 0.3 }
+    },
+    {
+      "id": "lamp_arc",
+      "name": "Arc Floor Lamp",
+      "category": "lighting",
+      "tags": ["lighting", "mid-century-modern", "statement", "floor"],
+      "modelPath": "models/lighting/lamp_arc.glb",
+      "thumbnailPath": "models/lighting/thumbnails/lamp_arc.webp",
+      "footprintMeters": { "x": 0.35, "y": 1.9, "z": 0.35 }
+    },
+    {
+      "id": "lamp_table",
+      "name": "Table Lamp",
+      "category": "lighting",
+      "tags": ["lighting", "small", "bedroom", "table"],
+      "modelPath": "models/lighting/lamp_table.glb",
+      "thumbnailPath": "models/lighting/thumbnails/lamp_table.webp",
+      "footprintMeters": { "x": 0.25, "y": 0.5, "z": 0.25 }
+    },
+    {
+      "id": "pendant_light",
+      "name": "Pendant Light",
+      "category": "lighting",
+      "tags": ["lighting", "ceiling", "modern", "scandinavian"],
+      "modelPath": "models/lighting/pendant.glb",
+      "thumbnailPath": "models/lighting/thumbnails/pendant.webp",
+      "footprintMeters": { "x": 0.4, "y": 0.5, "z": 0.4 }
+    },
+    {
+      "id": "chandelier_modern",
+      "name": "Modern Chandelier",
+      "category": "lighting",
+      "tags": ["lighting", "ceiling", "statement", "luxury", "art-deco"],
+      "modelPath": "models/lighting/chandelier_modern.glb",
+      "thumbnailPath": "models/lighting/thumbnails/chandelier_modern.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.8, "z": 0.6 }
+    },
+    {
+      "id": "chandelier_classic",
+      "name": "Classic Chandelier",
+      "category": "lighting",
+      "tags": ["lighting", "ceiling", "traditional", "hollywood-regency"],
+      "modelPath": "models/lighting/chandelier_classic.glb",
+      "thumbnailPath": "models/lighting/thumbnails/chandelier_classic.webp",
+      "footprintMeters": { "x": 0.7, "y": 0.9, "z": 0.7 }
+    },
+    {
+      "id": "wall_sconce",
+      "name": "Wall Sconce",
+      "category": "lighting",
+      "tags": ["lighting", "wall", "ambient", "modern"],
+      "modelPath": "models/lighting/wall_sconce.glb",
+      "thumbnailPath": "models/lighting/thumbnails/wall_sconce.webp",
+      "footprintMeters": { "x": 0.15, "y": 0.3, "z": 0.1 }
+    },
+    {
+      "id": "paper_lantern",
+      "name": "Paper Lantern",
+      "category": "lighting",
+      "tags": ["lighting", "japanese", "japandi", "soft"],
+      "modelPath": "models/lighting/paper_lantern.glb",
+      "thumbnailPath": "models/lighting/thumbnails/paper_lantern.webp",
+      "footprintMeters": { "x": 0.45, "y": 0.5, "z": 0.45 }
     },
     {
       "id": "rug_rectangular_01",
@@ -372,6 +1103,24 @@
       "footprintMeters": { "x": 2.0, "y": 0.02, "z": 1.4 }
     },
     {
+      "id": "rug_round",
+      "name": "Round Rug",
+      "category": "decorative",
+      "tags": ["rug", "floor", "round", "modern"],
+      "modelPath": "models/decorative/rug_round.glb",
+      "thumbnailPath": "models/decorative/thumbnails/rug_round.webp",
+      "footprintMeters": { "x": 1.8, "y": 0.02, "z": 1.8 }
+    },
+    {
+      "id": "rug_moroccan",
+      "name": "Moroccan Rug",
+      "category": "decorative",
+      "tags": ["rug", "floor", "boho", "pattern", "colorful"],
+      "modelPath": "models/decorative/rug_moroccan.glb",
+      "thumbnailPath": "models/decorative/thumbnails/rug_moroccan.webp",
+      "footprintMeters": { "x": 2.4, "y": 0.02, "z": 1.7 }
+    },
+    {
       "id": "mirror_wall_01",
       "name": "Wall Mirror",
       "category": "decorative",
@@ -379,6 +1128,78 @@
       "modelPath": "models/decorative/mirror_01.glb",
       "thumbnailPath": "models/decorative/thumbnails/mirror_01.webp",
       "footprintMeters": { "x": 0.6, "y": 0.9, "z": 0.03 }
+    },
+    {
+      "id": "mirror_full_length",
+      "name": "Full-Length Mirror",
+      "category": "decorative",
+      "tags": ["mirror", "floor", "bedroom", "dressing"],
+      "modelPath": "models/decorative/mirror_full_length.glb",
+      "thumbnailPath": "models/decorative/thumbnails/mirror_full_length.webp",
+      "footprintMeters": { "x": 0.5, "y": 1.7, "z": 0.05 }
+    },
+    {
+      "id": "art_frame_large",
+      "name": "Large Art Frame",
+      "category": "decorative",
+      "tags": ["art", "wall", "statement"],
+      "modelPath": "models/decorative/art_frame_large.glb",
+      "thumbnailPath": "models/decorative/thumbnails/art_frame_large.webp",
+      "footprintMeters": { "x": 1.0, "y": 0.7, "z": 0.03 }
+    },
+    {
+      "id": "art_gallery_wall",
+      "name": "Gallery Wall Set",
+      "category": "decorative",
+      "tags": ["art", "wall", "gallery", "eclectic"],
+      "modelPath": "models/decorative/art_gallery_wall.glb",
+      "thumbnailPath": "models/decorative/thumbnails/art_gallery_wall.webp",
+      "footprintMeters": { "x": 1.5, "y": 1.2, "z": 0.04 }
+    },
+    {
+      "id": "vase_ceramic",
+      "name": "Ceramic Vase",
+      "category": "decorative",
+      "tags": ["vase", "ceramic", "japandi", "wabi-sabi"],
+      "modelPath": "models/decorative/vase_ceramic.glb",
+      "thumbnailPath": "models/decorative/thumbnails/vase_ceramic.webp",
+      "footprintMeters": { "x": 0.2, "y": 0.35, "z": 0.2 }
+    },
+    {
+      "id": "candle_group",
+      "name": "Candle Group",
+      "category": "decorative",
+      "tags": ["candle", "ambient", "hygge", "warm"],
+      "modelPath": "models/decorative/candle_group.glb",
+      "thumbnailPath": "models/decorative/thumbnails/candle_group.webp",
+      "footprintMeters": { "x": 0.3, "y": 0.2, "z": 0.15 }
+    },
+    {
+      "id": "clock_wall",
+      "name": "Wall Clock",
+      "category": "decorative",
+      "tags": ["clock", "wall", "functional"],
+      "modelPath": "models/decorative/clock_wall.glb",
+      "thumbnailPath": "models/decorative/thumbnails/clock_wall.webp",
+      "footprintMeters": { "x": 0.4, "y": 0.4, "z": 0.05 }
+    },
+    {
+      "id": "curtains_sheer",
+      "name": "Sheer Curtains",
+      "category": "decorative",
+      "tags": ["curtain", "window", "soft", "light"],
+      "modelPath": "models/decorative/curtains_sheer.glb",
+      "thumbnailPath": "models/decorative/thumbnails/curtains_sheer.webp",
+      "footprintMeters": { "x": 1.5, "y": 2.5, "z": 0.1 }
+    },
+    {
+      "id": "curtains_blackout",
+      "name": "Blackout Curtains",
+      "category": "decorative",
+      "tags": ["curtain", "window", "privacy", "dark"],
+      "modelPath": "models/decorative/curtains_blackout.glb",
+      "thumbnailPath": "models/decorative/thumbnails/curtains_blackout.webp",
+      "footprintMeters": { "x": 1.5, "y": 2.5, "z": 0.1 }
     },
     {
       "id": "patio_table_01",
@@ -408,6 +1229,114 @@
       "footprintMeters": { "x": 1.2, "y": 1.1, "z": 0.6 }
     },
     {
+      "id": "outdoor_sofa",
+      "name": "Outdoor Sofa",
+      "category": "outdoor",
+      "tags": ["outdoor", "sofa", "patio", "lounge"],
+      "modelPath": "models/outdoor/outdoor_sofa.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/outdoor_sofa.webp",
+      "footprintMeters": { "x": 2.0, "y": 0.7, "z": 0.8 }
+    },
+    {
+      "id": "planter_box",
+      "name": "Planter Box",
+      "category": "outdoor",
+      "tags": ["outdoor", "plant", "garden", "biophilic"],
+      "modelPath": "models/outdoor/planter_box.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/planter_box.webp",
+      "footprintMeters": { "x": 0.8, "y": 0.5, "z": 0.3 }
+    },
+    {
+      "id": "pergola",
+      "name": "Pergola",
+      "category": "outdoor",
+      "tags": ["outdoor", "shade", "garden", "structure"],
+      "modelPath": "models/outdoor/pergola.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/pergola.webp",
+      "footprintMeters": { "x": 3.0, "y": 2.5, "z": 3.0 }
+    },
+    {
+      "id": "fire_pit",
+      "name": "Fire Pit",
+      "category": "outdoor",
+      "tags": ["outdoor", "fire", "gathering", "evening"],
+      "modelPath": "models/outdoor/fire_pit.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/fire_pit.webp",
+      "footprintMeters": { "x": 1.0, "y": 0.5, "z": 1.0 }
+    },
+    {
+      "id": "hammock",
+      "name": "Hammock",
+      "category": "outdoor",
+      "tags": ["outdoor", "relaxation", "tropical", "boho"],
+      "modelPath": "models/outdoor/hammock.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/hammock.webp",
+      "footprintMeters": { "x": 1.5, "y": 1.2, "z": 3.5 }
+    },
+    {
+      "id": "pool_lounger",
+      "name": "Pool Lounger",
+      "category": "outdoor",
+      "tags": ["outdoor", "pool", "lounge", "resort"],
+      "modelPath": "models/outdoor/pool_lounger.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/pool_lounger.webp",
+      "footprintMeters": { "x": 0.7, "y": 0.4, "z": 2.0 }
+    },
+    {
+      "id": "washer",
+      "name": "Washing Machine",
+      "category": "laundry",
+      "tags": ["appliance", "laundry", "essential"],
+      "modelPath": "models/laundry/washer.glb",
+      "thumbnailPath": "models/laundry/thumbnails/washer.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.85, "z": 0.6 }
+    },
+    {
+      "id": "dryer",
+      "name": "Dryer",
+      "category": "laundry",
+      "tags": ["appliance", "laundry", "essential"],
+      "modelPath": "models/laundry/dryer.glb",
+      "thumbnailPath": "models/laundry/thumbnails/dryer.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.85, "z": 0.6 }
+    },
+    {
+      "id": "laundry_sink",
+      "name": "Laundry Sink",
+      "category": "laundry",
+      "tags": ["laundry", "sink", "utility"],
+      "modelPath": "models/laundry/laundry_sink.glb",
+      "thumbnailPath": "models/laundry/thumbnails/laundry_sink.webp",
+      "footprintMeters": { "x": 0.5, "y": 0.85, "z": 0.45 }
+    },
+    {
+      "id": "office_chair",
+      "name": "Office Chair",
+      "category": "office",
+      "tags": ["office", "ergonomic", "chair"],
+      "modelPath": "models/office/office_chair.glb",
+      "thumbnailPath": "models/office/thumbnails/office_chair.webp",
+      "footprintMeters": { "x": 0.65, "y": 1.1, "z": 0.65 }
+    },
+    {
+      "id": "filing_cabinet",
+      "name": "Filing Cabinet",
+      "category": "office",
+      "tags": ["office", "storage", "organization"],
+      "modelPath": "models/office/filing_cabinet.glb",
+      "thumbnailPath": "models/office/thumbnails/filing_cabinet.webp",
+      "footprintMeters": { "x": 0.4, "y": 0.7, "z": 0.5 }
+    },
+    {
+      "id": "monitor_stand",
+      "name": "Monitor Stand",
+      "category": "office",
+      "tags": ["office", "desk", "tech"],
+      "modelPath": "models/office/monitor_stand.glb",
+      "thumbnailPath": "models/office/thumbnails/monitor_stand.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.45, "z": 0.2 }
+    },
+    {
       "id": "staircase_straight_01",
       "name": "Straight Staircase",
       "category": "furniture/stairs",
@@ -415,6 +1344,78 @@
       "modelPath": "models/furniture/stairs/straight_01.glb",
       "thumbnailPath": "models/furniture/stairs/thumbnails/straight_01.webp",
       "footprintMeters": { "x": 1.0, "y": 2.7, "z": 2.5 }
+    },
+    {
+      "id": "staircase_spiral",
+      "name": "Spiral Staircase",
+      "category": "furniture/stairs",
+      "tags": ["stairs", "structural", "compact", "modern"],
+      "modelPath": "models/furniture/stairs/spiral.glb",
+      "thumbnailPath": "models/furniture/stairs/thumbnails/spiral.webp",
+      "footprintMeters": { "x": 1.6, "y": 2.7, "z": 1.6 }
+    },
+    {
+      "id": "staircase_floating",
+      "name": "Floating Staircase",
+      "category": "furniture/stairs",
+      "tags": ["stairs", "structural", "modern", "minimalism", "luxury"],
+      "modelPath": "models/furniture/stairs/floating.glb",
+      "thumbnailPath": "models/furniture/stairs/thumbnails/floating.webp",
+      "footprintMeters": { "x": 1.0, "y": 2.7, "z": 3.0 }
+    },
+    {
+      "id": "fireplace_modern",
+      "name": "Modern Fireplace",
+      "category": "decorative",
+      "tags": ["fireplace", "modern", "statement", "hygge"],
+      "modelPath": "models/decorative/fireplace_modern.glb",
+      "thumbnailPath": "models/decorative/thumbnails/fireplace_modern.webp",
+      "footprintMeters": { "x": 1.2, "y": 1.2, "z": 0.4 }
+    },
+    {
+      "id": "fireplace_traditional",
+      "name": "Traditional Fireplace",
+      "category": "decorative",
+      "tags": ["fireplace", "classic", "mantel", "traditional"],
+      "modelPath": "models/decorative/fireplace_traditional.glb",
+      "thumbnailPath": "models/decorative/thumbnails/fireplace_traditional.webp",
+      "footprintMeters": { "x": 1.5, "y": 1.3, "z": 0.5 }
+    },
+    {
+      "id": "tv_wall_mounted",
+      "name": "Wall-Mounted TV",
+      "category": "decorative",
+      "tags": ["tv", "wall", "media", "modern"],
+      "modelPath": "models/decorative/tv_wall_mounted.glb",
+      "thumbnailPath": "models/decorative/thumbnails/tv_wall_mounted.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.7, "z": 0.05 }
+    },
+    {
+      "id": "ceiling_fan",
+      "name": "Ceiling Fan",
+      "category": "lighting",
+      "tags": ["fan", "ceiling", "tropical", "functional"],
+      "modelPath": "models/lighting/ceiling_fan.glb",
+      "thumbnailPath": "models/lighting/thumbnails/ceiling_fan.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.4, "z": 1.2 }
+    },
+    {
+      "id": "track_lighting",
+      "name": "Track Lighting",
+      "category": "lighting",
+      "tags": ["lighting", "ceiling", "modern", "industrial"],
+      "modelPath": "models/lighting/track_lighting.glb",
+      "thumbnailPath": "models/lighting/thumbnails/track_lighting.webp",
+      "footprintMeters": { "x": 1.5, "y": 0.2, "z": 0.1 }
+    },
+    {
+      "id": "recessed_light",
+      "name": "Recessed Light",
+      "category": "lighting",
+      "tags": ["lighting", "ceiling", "minimal", "modern"],
+      "modelPath": "models/lighting/recessed_light.glb",
+      "thumbnailPath": "models/lighting/thumbnails/recessed_light.webp",
+      "footprintMeters": { "x": 0.15, "y": 0.1, "z": 0.15 }
     }
   ]
 }
