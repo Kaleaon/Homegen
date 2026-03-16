@@ -49,7 +49,13 @@ enum class CatalogCategory {
     WALLS,
     FLOORS,
     CEILINGS,
-    FURNITURE
+    FURNITURE,
+    DOORS,
+    WINDOWS,
+    OUTDOOR,
+    DECORATIVE,
+    BATHROOM,
+    KITCHEN,
 }
 
 sealed interface CatalogEntry {

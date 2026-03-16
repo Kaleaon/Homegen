@@ -25,6 +25,7 @@ data class ObjectData(
     val name: String,
     val transform: TransformData = TransformData(),
     val materialRef: String = "default",
+    val floorLevel: Int = 0,
     val properties: Map<String, String> = emptyMap(),
 )
 

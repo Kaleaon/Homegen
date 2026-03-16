@@ -66,5 +66,11 @@ class CatalogRepository(
         CatalogCategory.FLOORS -> entry.categoryPath == "floors"
         CatalogCategory.CEILINGS -> entry.categoryPath == "ceilings"
         CatalogCategory.FURNITURE -> entry.categoryPath.startsWith("furniture/")
+        CatalogCategory.DOORS -> entry.categoryPath == "doors"
+        CatalogCategory.WINDOWS -> entry.categoryPath == "windows"
+        CatalogCategory.OUTDOOR -> entry.categoryPath == "outdoor"
+        CatalogCategory.DECORATIVE -> entry.categoryPath == "decorative"
+        CatalogCategory.BATHROOM -> entry.categoryPath == "bathroom"
+        CatalogCategory.KITCHEN -> entry.categoryPath == "kitchen"
     }
 }

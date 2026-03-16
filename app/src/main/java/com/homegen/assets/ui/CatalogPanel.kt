@@ -100,13 +100,20 @@ private fun CategoryChips(
         CatalogCategory.WALLS,
         CatalogCategory.FLOORS,
         CatalogCategory.CEILINGS,
-        CatalogCategory.FURNITURE
+        CatalogCategory.FURNITURE,
+        CatalogCategory.DOORS,
+        CatalogCategory.WINDOWS,
+        CatalogCategory.BATHROOM,
+        CatalogCategory.KITCHEN,
+        CatalogCategory.OUTDOOR,
+        CatalogCategory.DECORATIVE,
     )
-    Row(
+    androidx.compose.foundation.lazy.LazyRow(
         modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        categories.forEach { category ->
+        items(categories.size) { index ->
+            val category = categories[index]
             FilterChip(
                 selected = selectedCategory == category,
                 onClick = { onSelected(category) },

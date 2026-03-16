@@ -14,6 +14,7 @@ class CameraController(
     var yawRadians: Float = 0f,
     var pitchRadians: Float = 0.45f,
 ) {
+    var viewMode: ViewMode = ViewMode.PERSPECTIVE_3D
     private val minDistance = 1.5f
     private val maxDistance = 80f
     private val minPitch = (-PI / 2.2).toFloat()
