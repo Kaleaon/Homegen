@@ -1,5 +1,7 @@
 package com.homegen.electrical;
 
+import com.homegen.designer3d.math.Vector3;
+
 /**
  * Responsible for projecting points onto nearby walls.
  */

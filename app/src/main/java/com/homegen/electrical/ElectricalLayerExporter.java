@@ -1,5 +1,7 @@
 package com.homegen.electrical;
 
+import com.homegen.designer3d.math.Vector3;
+
 /**
  * Exports electrical layer data as a JSON fragment suitable for project save files.
  */

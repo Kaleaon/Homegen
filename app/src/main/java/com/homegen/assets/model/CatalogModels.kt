@@ -27,11 +27,11 @@ data class PlaceableAsset(
     val tags: List<String>,
     val modelPath: String,
     val thumbnailPath: String,
-    val footprintMeters: Vector3
+    val footprintMeters: Dimensions3
 )
 
 @Serializable
-data class Vector3(
+data class Dimensions3(
     val x: Float,
     val y: Float,
     val z: Float

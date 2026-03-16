@@ -7,6 +7,8 @@ class TransformGizmo {
   }
 
   move(entity, pointerPoint, context) {
+    if (!entity) throw new Error('TransformGizmo.move: entity is required');
+    if (!pointerPoint) throw new Error('TransformGizmo.move: pointerPoint is required');
     const { point, snap } = getSnappedPoint({
       point: pointerPoint,
       edges: context.edges,
@@ -25,6 +27,7 @@ class TransformGizmo {
   }
 
   rotate(entity, pointerAngleRadians) {
+    if (!entity) throw new Error('TransformGizmo.rotate: entity is required');
     const snapped = snapAngle(pointerAngleRadians, this.settings);
 
     return {
@@ -42,6 +45,8 @@ class TransformGizmo {
   }
 
   scale(entity, pointerPoint, context) {
+    if (!entity) throw new Error('TransformGizmo.scale: entity is required');
+    if (!pointerPoint) throw new Error('TransformGizmo.scale: pointerPoint is required');
     const { point, snap } = getSnappedPoint({
       point: pointerPoint,
       anchor: entity.position,

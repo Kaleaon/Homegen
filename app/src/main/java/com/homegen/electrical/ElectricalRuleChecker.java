@@ -1,6 +1,7 @@
 package com.homegen.electrical;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -10,11 +11,20 @@ import java.util.Set;
  */
 public final class ElectricalRuleChecker {
 
+    private long cachedVersion = -1;
+    private List<String> cachedIssues;
+
     public List<String> run(ElectricalLayer layer) {
+        if (cachedIssues != null && layer.getVersion() == cachedVersion) {
+            return cachedIssues;
+        }
+
         List<String> issues = new ArrayList<>();
         issues.addAll(checkUnconnectedNodes(layer));
         issues.addAll(checkCircuitOverload(layer));
-        return issues;
+        cachedVersion = layer.getVersion();
+        cachedIssues = Collections.unmodifiableList(issues);
+        return cachedIssues;
     }
 
     private List<String> checkUnconnectedNodes(ElectricalLayer layer) {
@@ -41,6 +51,8 @@ public final class ElectricalRuleChecker {
                 ElectricalNode node = layer.getNode(nodeId);
                 if (node != null) {
                     load += node.getExpectedLoadAmps();
+                } else {
+                    issues.add("Circuit '" + circuit.getName() + "' references unknown node '" + nodeId + "'.");
                 }
             }
             if (load > circuit.getBreakerAmps()) {
