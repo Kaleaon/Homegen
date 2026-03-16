@@ -43,6 +43,22 @@ class CatalogRepository(
         }
     }
 
+    /**
+     * Filter entries by a design style tag (e.g. "scandinavian", "japandi").
+     * Returns items whose tags contain the given style identifier.
+     */
+    fun filterByStyleTag(catalog: Catalog, styleTag: String): List<CatalogEntry> {
+        val tag = styleTag.trim().lowercase()
+        if (tag.isBlank()) return emptyList()
+        val entries = buildList {
+            addAll(catalog.materials.map(::MaterialEntry))
+            addAll(catalog.placeableObjects.map(::PlaceableEntry))
+        }
+        return entries.filter { entry ->
+            entry.tags.any { it.lowercase() == tag }
+        }
+    }
+
     suspend fun loadThumbnail(path: String): Bitmap? {
         thumbnailCache.get(path)?.let { return it }
         return withContext(ioDispatcher) {
@@ -66,11 +82,20 @@ class CatalogRepository(
         CatalogCategory.FLOORS -> entry.categoryPath == "floors"
         CatalogCategory.CEILINGS -> entry.categoryPath == "ceilings"
         CatalogCategory.FURNITURE -> entry.categoryPath.startsWith("furniture/")
+        CatalogCategory.CHAIRS -> entry.categoryPath == "furniture/chairs"
+        CatalogCategory.TABLES -> entry.categoryPath == "furniture/tables"
+        CatalogCategory.SOFAS -> entry.categoryPath == "furniture/sofas"
+        CatalogCategory.BEDS -> entry.categoryPath == "furniture/beds"
+        CatalogCategory.STORAGE -> entry.categoryPath == "furniture/storage"
         CatalogCategory.DOORS -> entry.categoryPath == "doors"
         CatalogCategory.WINDOWS -> entry.categoryPath == "windows"
-        CatalogCategory.OUTDOOR -> entry.categoryPath == "outdoor"
+        CatalogCategory.LIGHTING -> entry.categoryPath == "lighting"
         CatalogCategory.DECORATIVE -> entry.categoryPath == "decorative"
         CatalogCategory.BATHROOM -> entry.categoryPath == "bathroom"
         CatalogCategory.KITCHEN -> entry.categoryPath == "kitchen"
+        CatalogCategory.OUTDOOR -> entry.categoryPath == "outdoor"
+        CatalogCategory.OFFICE -> entry.categoryPath == "office"
+        CatalogCategory.LAUNDRY -> entry.categoryPath == "laundry"
+        CatalogCategory.STAIRS -> entry.categoryPath == "furniture/stairs"
     }
 }

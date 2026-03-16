@@ -44,18 +44,27 @@ enum class MaterialCategory {
     ceilings
 }
 
-enum class CatalogCategory {
-    ALL,
-    WALLS,
-    FLOORS,
-    CEILINGS,
-    FURNITURE,
-    DOORS,
-    WINDOWS,
-    OUTDOOR,
-    DECORATIVE,
-    BATHROOM,
-    KITCHEN,
+enum class CatalogCategory(val label: String) {
+    ALL("All"),
+    WALLS("Walls"),
+    FLOORS("Floors"),
+    CEILINGS("Ceilings"),
+    FURNITURE("Furniture"),
+    CHAIRS("Chairs"),
+    TABLES("Tables"),
+    SOFAS("Sofas"),
+    BEDS("Beds"),
+    STORAGE("Storage"),
+    DOORS("Doors"),
+    WINDOWS("Windows"),
+    LIGHTING("Lighting"),
+    DECORATIVE("Decorative"),
+    BATHROOM("Bathroom"),
+    KITCHEN("Kitchen"),
+    OUTDOOR("Outdoor"),
+    OFFICE("Office"),
+    LAUNDRY("Laundry"),
+    STAIRS("Stairs"),
 }
 
 sealed interface CatalogEntry {
