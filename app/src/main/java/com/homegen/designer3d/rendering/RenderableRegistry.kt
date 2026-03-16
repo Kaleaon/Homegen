@@ -7,6 +7,7 @@ import com.google.android.filament.TransformManager
 import com.homegen.designer3d.math.Vector3
 import com.homegen.designer3d.math.toMatrix
 import com.homegen.designer3d.model.Floor
+import com.homegen.designer3d.model.Furniture
 import com.homegen.designer3d.model.HomeObject
 import com.homegen.designer3d.model.Wall
 
@@ -17,10 +18,16 @@ import com.homegen.designer3d.model.Wall
 class RenderableRegistry(
     private val engine: Engine,
     private val scene: Scene,
-    private val materialFactory: MaterialFactory
+    private val materialFactory: MaterialFactory,
 ) {
     private val entityMap = mutableMapOf<String, Int>()
     private val transformManager: TransformManager = engine.transformManager
+
+    /** Optional OBJ loader for Sweet Home 3D / Wavefront models. */
+    var objLoader: ObjLoader? = null
+
+    /** Optional GLB loader for glTF models. */
+    var modelLoader: ModelLoader? = null
 
     fun createRenderable(obj: HomeObject): Int {
         val materialInstance = materialFactory.colorForType(obj.type)
@@ -37,6 +44,7 @@ class RenderableRegistry(
                 obj.depthMeters,
                 materialInstance
             )
+            is Furniture -> loadFurnitureModel(obj, materialInstance)
             else -> MeshFactory.createBox(
                 engine,
                 Vector3(0.4f, 0.4f, 0.4f),
@@ -128,6 +136,41 @@ class RenderableRegistry(
                 }
             }
         }
+    }
+
+    /**
+     * Attempts to load a furniture model in order: OBJ → GLB → placeholder box.
+     * Supports Sweet Home 3D OBJ models and standard GLB/glTF models.
+     */
+    private fun loadFurnitureModel(furniture: Furniture, fallbackMaterial: com.google.android.filament.MaterialInstance): Int {
+        val modelPath = furniture.catalogRef
+
+        // Try OBJ first (Sweet Home 3D models)
+        if (modelPath.endsWith(".obj", ignoreCase = true)) {
+            objLoader?.load(modelPath, fallbackMaterial)?.let { return it }
+        }
+
+        // Try GLB (glTF binary)
+        if (modelPath.endsWith(".glb", ignoreCase = true)) {
+            modelLoader?.loadGlb(modelPath)?.let { asset ->
+                val root = asset.root
+                scene.addEntities(asset.entities)
+                return root
+            }
+        }
+
+        // Try OBJ variant of a GLB path
+        val objPath = modelPath.replaceAfterLast('.', "obj")
+        if (objPath != modelPath) {
+            objLoader?.load(objPath, fallbackMaterial)?.let { return it }
+        }
+
+        // Fallback: colored placeholder box
+        return MeshFactory.createBox(
+            engine,
+            Vector3(0.4f, 0.4f, 0.4f),
+            fallbackMaterial
+        )
     }
 
     fun destroy() {

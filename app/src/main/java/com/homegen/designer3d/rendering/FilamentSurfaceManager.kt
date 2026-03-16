@@ -36,6 +36,8 @@ class FilamentSurfaceManager(context: Context) {
 
     private val materialFactory = MaterialFactory(engine)
     val renderableRegistry = RenderableRegistry(engine, filamentScene, materialFactory)
+    private val objLoader = ObjLoader(engine, context.assets)
+    private val modelLoader = ModelLoader(engine, context.assets)
 
     private val lighting = SceneLighting()
 
@@ -55,6 +57,8 @@ class FilamentSurfaceManager(context: Context) {
     }
 
     init {
+        renderableRegistry.objLoader = objLoader
+        renderableRegistry.modelLoader = modelLoader
         sceneController.renderableRegistry = renderableRegistry
         lighting.setup(engine, filamentScene)
 
@@ -108,6 +112,8 @@ class FilamentSurfaceManager(context: Context) {
         uiHelper.detach()
         lighting.destroy(engine)
         renderableRegistry.destroy()
+        objLoader.clearCache()
+        modelLoader.destroy()
         materialFactory.destroy()
         engine.destroyRenderer(renderer)
         engine.destroyView(filamentView)
