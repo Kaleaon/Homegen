@@ -1,5 +1,6 @@
 package com.homegen.electrical;
 
+import com.homegen.designer3d.math.Vector3;
 import java.util.Objects;
 
 /**

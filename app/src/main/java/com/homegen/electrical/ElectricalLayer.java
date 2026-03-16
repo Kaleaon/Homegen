@@ -13,17 +13,25 @@ public final class ElectricalLayer {
     private final Map<String, ElectricalNode> nodesById = new LinkedHashMap<>();
     private final Map<String, Circuit> circuitsById = new LinkedHashMap<>();
     private final Map<String, WireRoute> routesById = new LinkedHashMap<>();
+    private long version = 0;
 
     public void addNode(ElectricalNode node) {
         nodesById.put(node.getId(), Objects.requireNonNull(node, "node"));
+        version++;
     }
 
     public void addCircuit(Circuit circuit) {
         circuitsById.put(circuit.getId(), Objects.requireNonNull(circuit, "circuit"));
+        version++;
     }
 
     public void addRoute(WireRoute route) {
         routesById.put(route.getId(), Objects.requireNonNull(route, "route"));
+        version++;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public ElectricalNode getNode(String nodeId) {

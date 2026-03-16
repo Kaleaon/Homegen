@@ -28,6 +28,7 @@ public final class ElectricalSummary {
                 if (node != null) {
                     load += node.getExpectedLoadAmps();
                 }
+                // Missing nodes are silently skipped in the summary — see ElectricalRuleChecker for warnings
             }
             String utilization = String.format(Locale.US, "%.1f%%", (load / circuit.getBreakerAmps()) * 100.0);
             lines.add(circuit.getName() + ": " + load + "A / " + circuit.getBreakerAmps() + "A (" + utilization + ")");

@@ -14,6 +14,7 @@ open class HomeObject(
     var name: String,
     var transform: Transform = Transform(),
     var materialRef: String = "default",
+    var floorLevel: Int = 0,
 ) {
     val children: MutableList<HomeObject> = mutableListOf()
 

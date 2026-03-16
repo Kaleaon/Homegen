@@ -1,13 +1,24 @@
 package com.homegen.designer3d.serialization
 
 import com.homegen.designer3d.math.Vector3
+import com.homegen.designer3d.model.Door
 import com.homegen.designer3d.model.Floor
 import com.homegen.designer3d.model.Furniture
 import com.homegen.designer3d.model.HomeObject
 import com.homegen.designer3d.model.Room
+import com.homegen.designer3d.model.Staircase
 import com.homegen.designer3d.model.Transform
 import com.homegen.designer3d.model.Wall
+import com.homegen.designer3d.model.Window
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 class ProjectSerializer(
     private val json: Json = Json {
@@ -15,6 +26,38 @@ class ProjectSerializer(
         ignoreUnknownKeys = true
     },
 ) {
+    companion object {
+        const val CURRENT_SCHEMA_VERSION = 2
+
+        /**
+         * Schema migration functions keyed by source version.
+         * Each transforms a raw JsonObject from version N to N+1.
+         */
+        private val migrations: Map<Int, (JsonObject) -> JsonObject> = mapOf(
+            1 to { obj -> migrateV1ToV2(obj) }
+        )
+
+        /** v1→v2: add floorLevel=0 to all objects. */
+        private fun migrateV1ToV2(root: JsonObject): JsonObject {
+            val scene = root["scene"]?.jsonObject ?: return root
+            val objects = scene["objects"]?.jsonArray ?: return root
+            val migratedObjects = objects.map { element ->
+                val objMap = element.jsonObject.toMutableMap()
+                if ("floorLevel" !in objMap) {
+                    objMap["floorLevel"] = JsonPrimitive(0)
+                }
+                JsonObject(objMap)
+            }
+            val migratedScene = JsonObject(scene.toMutableMap().apply {
+                put("objects", kotlinx.serialization.json.JsonArray(migratedObjects))
+            })
+            return JsonObject(root.toMutableMap().apply {
+                put("schemaVersion", JsonPrimitive(2))
+                put("scene", migratedScene)
+            })
+        }
+    }
+
     fun encode(objects: List<HomeObject>): String {
         val file = ProjectFile(
             scene = SceneData(objects = objects.map { it.toData() }),
@@ -23,8 +66,25 @@ class ProjectSerializer(
     }
 
     fun decode(rawJson: String): List<HomeObject> {
-        val file = json.decodeFromString(ProjectFile.serializer(), rawJson)
+        val raw = json.parseToJsonElement(rawJson).jsonObject
+        val version = raw["schemaVersion"]?.jsonPrimitive?.int ?: 1
+        val migrated = applyMigrations(raw, version)
+        val file = json.decodeFromJsonElement(ProjectFile.serializer(), migrated)
         return file.scene.objects.map { it.toEntity() }
+    }
+
+    private fun applyMigrations(data: JsonObject, fromVersion: Int): JsonObject {
+        var current = data
+        var version = fromVersion
+        while (version < CURRENT_SCHEMA_VERSION) {
+            val migration = migrations[version]
+                ?: throw IllegalStateException(
+                    "No migration from schema version $version to ${version + 1}"
+                )
+            current = migration(current)
+            version++
+        }
+        return current
     }
 }
 
@@ -38,6 +98,7 @@ private fun HomeObject.toData(): ObjectData = ObjectData(
         scale = transform.scale.toFloat3(),
     ),
     materialRef = materialRef,
+    floorLevel = floorLevel,
 )
 
 private fun ObjectData.toEntity(): HomeObject {
@@ -47,13 +108,18 @@ private fun ObjectData.toEntity(): HomeObject {
         scale = transform.scale.toVector3(),
     )
 
-    return when (type) {
+    val entity = when (type) {
         "wall" -> Wall(name = name, transform = transform, materialRef = materialRef)
         "floor" -> Floor(name = name, transform = transform, materialRef = materialRef)
         "room" -> Room(name = name, transform = transform, materialRef = materialRef)
         "furniture" -> Furniture(name = name, transform = transform, materialRef = materialRef)
+        "staircase" -> Staircase(name = name, transform = transform, materialRef = materialRef)
+        "door" -> Door(name = name, transform = transform, materialRef = materialRef)
+        "window" -> Window(name = name, transform = transform, materialRef = materialRef)
         else -> HomeObject(type = type, name = name, transform = transform, materialRef = materialRef)
     }
+    entity.floorLevel = this.floorLevel
+    return entity
 }
 
 private fun Vector3.toFloat3() = Float3(x, y, z)

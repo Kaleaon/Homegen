@@ -7,6 +7,7 @@ import com.homegen.designer3d.camera.CameraController
 import com.homegen.designer3d.math.Vector3
 import com.homegen.designer3d.model.HomeObject
 import com.homegen.designer3d.model.Room
+import com.homegen.designer3d.rendering.RenderableRegistry
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -26,17 +27,27 @@ class SceneController(
     var selectedObjectId: String? = null
         private set
 
+    var renderableRegistry: RenderableRegistry? = null
+
+    var currentFloorLevel: Int = 0
+        private set
+
     init {
         objects += Room(name = "Default room")
     }
 
     fun addObject(object3d: HomeObject) {
+        object3d.floorLevel = currentFloorLevel
         objects += object3d
-        // Hook point: allocate Filament renderables for object3d.
+        renderableRegistry?.createRenderable(object3d)
     }
 
     fun removeObject(objectId: String): Boolean {
+        val obj = objects.find { it.id == objectId }
         val removed = objects.removeAll { it.id == objectId }
+        if (removed) {
+            renderableRegistry?.removeRenderable(objectId)
+        }
         if (selectedObjectId == objectId) {
             selectedObjectId = null
         }
@@ -44,6 +55,13 @@ class SceneController(
     }
 
     fun listObjects(): List<HomeObject> = objects.toList()
+
+    fun objectsOnFloor(level: Int): List<HomeObject> = objects.filter { it.floorLevel == level }
+
+    fun setFloorLevel(level: Int) {
+        currentFloorLevel = level
+        renderableRegistry?.setFloorVisibility(level, objects.toList())
+    }
 
     fun onOrbit(deltaYaw: Float, deltaPitch: Float) {
         cameraController.orbit(deltaYaw, deltaPitch)
@@ -57,12 +75,18 @@ class SceneController(
         cameraController.zoom(delta)
     }
 
+    fun updateObjectTransform(objectId: String) {
+        val obj = objects.find { it.id == objectId } ?: return
+        renderableRegistry?.updateTransform(obj)
+    }
+
     /**
      * Selects the nearest object by ray hit-testing against object centers + radius proxy.
      */
     fun selectByRay(rayOrigin: Vector3, rayDirection: Vector3): HomeObject? {
         val dir = rayDirection.normalized()
         val hit = objects
+            .filter { it.floorLevel == currentFloorLevel }
             .map { obj -> obj to raySphereDistance(rayOrigin, dir, obj.transform.position, radius = 0.75f) }
             .filter { (_, distance) -> distance != null }
             .minByOrNull { (_, distance) -> distance ?: Float.MAX_VALUE }
@@ -70,6 +94,8 @@ class SceneController(
         selectedObjectId = hit?.first?.id
         return hit?.first
     }
+
+    fun findObjectById(id: String): HomeObject? = objects.find { it.id == id }
 
     private fun raySphereDistance(
         origin: Vector3,

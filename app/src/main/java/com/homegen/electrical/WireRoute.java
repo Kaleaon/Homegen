@@ -1,5 +1,6 @@
 package com.homegen.electrical;
 
+import com.homegen.designer3d.math.Vector3;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;

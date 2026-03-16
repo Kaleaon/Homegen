@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "materials": [
     {
       "id": "wall_white_plaster",
@@ -10,12 +10,68 @@
       "thumbnailPath": "textures/walls/thumbnails/white_plaster.webp"
     },
     {
+      "id": "wall_warm_beige",
+      "name": "Warm Beige",
+      "category": "walls",
+      "tags": ["neutral", "warm", "paint"],
+      "texturePath": "textures/walls/warm_beige.png",
+      "thumbnailPath": "textures/walls/thumbnails/warm_beige.webp"
+    },
+    {
+      "id": "wall_exposed_brick",
+      "name": "Exposed Brick",
+      "category": "walls",
+      "tags": ["industrial", "brick", "rustic"],
+      "texturePath": "textures/walls/exposed_brick.png",
+      "thumbnailPath": "textures/walls/thumbnails/exposed_brick.webp"
+    },
+    {
+      "id": "wall_soft_gray",
+      "name": "Soft Gray",
+      "category": "walls",
+      "tags": ["modern", "neutral", "paint"],
+      "texturePath": "textures/walls/soft_gray.png",
+      "thumbnailPath": "textures/walls/thumbnails/soft_gray.webp"
+    },
+    {
       "id": "floor_oak_honey",
       "name": "Honey Oak",
       "category": "floors",
       "tags": ["wood", "warm"],
       "texturePath": "textures/floors/oak_honey.png",
       "thumbnailPath": "textures/floors/thumbnails/oak_honey.webp"
+    },
+    {
+      "id": "floor_walnut_dark",
+      "name": "Dark Walnut",
+      "category": "floors",
+      "tags": ["wood", "dark", "elegant"],
+      "texturePath": "textures/floors/walnut_dark.png",
+      "thumbnailPath": "textures/floors/thumbnails/walnut_dark.webp"
+    },
+    {
+      "id": "floor_marble_white",
+      "name": "White Marble",
+      "category": "floors",
+      "tags": ["marble", "luxury", "stone"],
+      "texturePath": "textures/floors/marble_white.png",
+      "thumbnailPath": "textures/floors/thumbnails/marble_white.webp"
+    },
+    {
+      "id": "floor_tile_ceramic",
+      "name": "Ceramic Tile",
+      "category": "floors",
+      "tags": ["tile", "bathroom", "kitchen"],
+      "texturePath": "textures/floors/tile_ceramic.png",
+      "thumbnailPath": "textures/floors/thumbnails/tile_ceramic.webp"
+    },
+    {
+      "id": "floor_carpet_gray",
+      "name": "Gray Carpet",
+      "category": "floors",
+      "tags": ["carpet", "soft", "neutral"],
+      "texturePath": "textures/floors/carpet_gray.png",
+      "thumbnailPath": "textures/floors/thumbnails/carpet_gray.webp"
     },
     {
       "id": "ceiling_smooth_white",
@@ -34,11 +90,7 @@
       "tags": ["wood", "scandinavian"],
       "modelPath": "models/furniture/chairs/scandi_chair_01.glb",
       "thumbnailPath": "models/furniture/chairs/thumbnails/scandi_chair_01.webp",
-      "footprintMeters": {
-        "x": 0.56,
-        "y": 0.82,
-        "z": 0.54
-      }
+      "footprintMeters": { "x": 0.56, "y": 0.82, "z": 0.54 }
     },
     {
       "id": "table_dining_01",
@@ -47,11 +99,322 @@
       "tags": ["dining", "wood"],
       "modelPath": "models/furniture/tables/dining_table_01.glb",
       "thumbnailPath": "models/furniture/tables/thumbnails/dining_table_01.webp",
-      "footprintMeters": {
-        "x": 1.6,
-        "y": 0.75,
-        "z": 0.8
-      }
+      "footprintMeters": { "x": 1.6, "y": 0.75, "z": 0.8 }
+    },
+    {
+      "id": "sofa_modern_01",
+      "name": "Modern Sofa",
+      "category": "furniture/sofas",
+      "tags": ["modern", "living", "fabric"],
+      "modelPath": "models/furniture/sofas/modern_sofa_01.glb",
+      "thumbnailPath": "models/furniture/sofas/thumbnails/modern_sofa_01.webp",
+      "footprintMeters": { "x": 2.1, "y": 0.85, "z": 0.9 }
+    },
+    {
+      "id": "sofa_sectional_01",
+      "name": "L-Sectional Sofa",
+      "category": "furniture/sofas",
+      "tags": ["modern", "living", "large"],
+      "modelPath": "models/furniture/sofas/sectional_01.glb",
+      "thumbnailPath": "models/furniture/sofas/thumbnails/sectional_01.webp",
+      "footprintMeters": { "x": 2.8, "y": 0.85, "z": 2.0 }
+    },
+    {
+      "id": "bed_queen_01",
+      "name": "Queen Bed",
+      "category": "furniture/beds",
+      "tags": ["bedroom", "queen"],
+      "modelPath": "models/furniture/beds/queen_bed_01.glb",
+      "thumbnailPath": "models/furniture/beds/thumbnails/queen_bed_01.webp",
+      "footprintMeters": { "x": 1.6, "y": 0.6, "z": 2.0 }
+    },
+    {
+      "id": "bed_king_01",
+      "name": "King Bed",
+      "category": "furniture/beds",
+      "tags": ["bedroom", "king", "luxury"],
+      "modelPath": "models/furniture/beds/king_bed_01.glb",
+      "thumbnailPath": "models/furniture/beds/thumbnails/king_bed_01.webp",
+      "footprintMeters": { "x": 1.9, "y": 0.6, "z": 2.0 }
+    },
+    {
+      "id": "bed_single_01",
+      "name": "Single Bed",
+      "category": "furniture/beds",
+      "tags": ["bedroom", "single", "compact"],
+      "modelPath": "models/furniture/beds/single_bed_01.glb",
+      "thumbnailPath": "models/furniture/beds/thumbnails/single_bed_01.webp",
+      "footprintMeters": { "x": 0.9, "y": 0.5, "z": 2.0 }
+    },
+    {
+      "id": "nightstand_01",
+      "name": "Nightstand",
+      "category": "furniture/tables",
+      "tags": ["bedroom", "small", "storage"],
+      "modelPath": "models/furniture/tables/nightstand_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/nightstand_01.webp",
+      "footprintMeters": { "x": 0.45, "y": 0.55, "z": 0.4 }
+    },
+    {
+      "id": "coffee_table_01",
+      "name": "Coffee Table",
+      "category": "furniture/tables",
+      "tags": ["living", "wood", "modern"],
+      "modelPath": "models/furniture/tables/coffee_table_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/coffee_table_01.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.45, "z": 0.6 }
+    },
+    {
+      "id": "desk_office_01",
+      "name": "Office Desk",
+      "category": "furniture/tables",
+      "tags": ["office", "work", "wood"],
+      "modelPath": "models/furniture/tables/desk_office_01.glb",
+      "thumbnailPath": "models/furniture/tables/thumbnails/desk_office_01.webp",
+      "footprintMeters": { "x": 1.4, "y": 0.75, "z": 0.7 }
+    },
+    {
+      "id": "bookshelf_01",
+      "name": "Bookshelf",
+      "category": "furniture/storage",
+      "tags": ["storage", "wood", "books"],
+      "modelPath": "models/furniture/storage/bookshelf_01.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/bookshelf_01.webp",
+      "footprintMeters": { "x": 0.8, "y": 1.8, "z": 0.3 }
+    },
+    {
+      "id": "wardrobe_01",
+      "name": "Wardrobe",
+      "category": "furniture/storage",
+      "tags": ["bedroom", "storage", "clothes"],
+      "modelPath": "models/furniture/storage/wardrobe_01.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/wardrobe_01.webp",
+      "footprintMeters": { "x": 1.5, "y": 2.2, "z": 0.6 }
+    },
+    {
+      "id": "dresser_01",
+      "name": "Dresser",
+      "category": "furniture/storage",
+      "tags": ["bedroom", "storage", "drawers"],
+      "modelPath": "models/furniture/storage/dresser_01.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/dresser_01.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.85, "z": 0.5 }
+    },
+    {
+      "id": "tv_stand_01",
+      "name": "TV Stand",
+      "category": "furniture/storage",
+      "tags": ["living", "media", "modern"],
+      "modelPath": "models/furniture/storage/tv_stand_01.glb",
+      "thumbnailPath": "models/furniture/storage/thumbnails/tv_stand_01.webp",
+      "footprintMeters": { "x": 1.8, "y": 0.55, "z": 0.4 }
+    },
+    {
+      "id": "fridge_01",
+      "name": "Refrigerator",
+      "category": "kitchen",
+      "tags": ["appliance", "kitchen", "essential"],
+      "modelPath": "models/kitchen/fridge_01.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/fridge_01.webp",
+      "footprintMeters": { "x": 0.7, "y": 1.8, "z": 0.7 }
+    },
+    {
+      "id": "stove_01",
+      "name": "Stove/Oven",
+      "category": "kitchen",
+      "tags": ["appliance", "kitchen", "cooking"],
+      "modelPath": "models/kitchen/stove_01.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/stove_01.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.9, "z": 0.6 }
+    },
+    {
+      "id": "kitchen_counter_01",
+      "name": "Kitchen Counter",
+      "category": "kitchen",
+      "tags": ["kitchen", "counter", "surface"],
+      "modelPath": "models/kitchen/counter_01.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/counter_01.webp",
+      "footprintMeters": { "x": 1.2, "y": 0.9, "z": 0.6 }
+    },
+    {
+      "id": "sink_kitchen_01",
+      "name": "Kitchen Sink",
+      "category": "kitchen",
+      "tags": ["kitchen", "sink", "essential"],
+      "modelPath": "models/kitchen/sink_01.glb",
+      "thumbnailPath": "models/kitchen/thumbnails/sink_01.webp",
+      "footprintMeters": { "x": 0.8, "y": 0.9, "z": 0.6 }
+    },
+    {
+      "id": "toilet_01",
+      "name": "Toilet",
+      "category": "bathroom",
+      "tags": ["bathroom", "essential"],
+      "modelPath": "models/bathroom/toilet_01.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/toilet_01.webp",
+      "footprintMeters": { "x": 0.4, "y": 0.75, "z": 0.65 }
+    },
+    {
+      "id": "bathtub_01",
+      "name": "Bathtub",
+      "category": "bathroom",
+      "tags": ["bathroom", "luxury", "bath"],
+      "modelPath": "models/bathroom/bathtub_01.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/bathtub_01.webp",
+      "footprintMeters": { "x": 0.7, "y": 0.6, "z": 1.7 }
+    },
+    {
+      "id": "sink_bathroom_01",
+      "name": "Bathroom Sink",
+      "category": "bathroom",
+      "tags": ["bathroom", "sink", "essential"],
+      "modelPath": "models/bathroom/sink_01.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/sink_01.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.85, "z": 0.45 }
+    },
+    {
+      "id": "shower_01",
+      "name": "Shower Enclosure",
+      "category": "bathroom",
+      "tags": ["bathroom", "shower", "glass"],
+      "modelPath": "models/bathroom/shower_01.glb",
+      "thumbnailPath": "models/bathroom/thumbnails/shower_01.webp",
+      "footprintMeters": { "x": 0.9, "y": 2.1, "z": 0.9 }
+    },
+    {
+      "id": "door_interior_01",
+      "name": "Interior Door",
+      "category": "doors",
+      "tags": ["door", "interior", "wood"],
+      "modelPath": "models/doors/interior_01.glb",
+      "thumbnailPath": "models/doors/thumbnails/interior_01.webp",
+      "footprintMeters": { "x": 0.9, "y": 2.1, "z": 0.05 }
+    },
+    {
+      "id": "door_double_01",
+      "name": "Double Door",
+      "category": "doors",
+      "tags": ["door", "double", "elegant"],
+      "modelPath": "models/doors/double_01.glb",
+      "thumbnailPath": "models/doors/thumbnails/double_01.webp",
+      "footprintMeters": { "x": 1.5, "y": 2.1, "z": 0.05 }
+    },
+    {
+      "id": "door_sliding_01",
+      "name": "Sliding Glass Door",
+      "category": "doors",
+      "tags": ["door", "sliding", "glass", "patio"],
+      "modelPath": "models/doors/sliding_01.glb",
+      "thumbnailPath": "models/doors/thumbnails/sliding_01.webp",
+      "footprintMeters": { "x": 1.8, "y": 2.1, "z": 0.08 }
+    },
+    {
+      "id": "window_standard_01",
+      "name": "Standard Window",
+      "category": "windows",
+      "tags": ["window", "standard"],
+      "modelPath": "models/windows/standard_01.glb",
+      "thumbnailPath": "models/windows/thumbnails/standard_01.webp",
+      "footprintMeters": { "x": 1.2, "y": 1.0, "z": 0.05 }
+    },
+    {
+      "id": "window_large_01",
+      "name": "Large Picture Window",
+      "category": "windows",
+      "tags": ["window", "large", "modern"],
+      "modelPath": "models/windows/large_01.glb",
+      "thumbnailPath": "models/windows/thumbnails/large_01.webp",
+      "footprintMeters": { "x": 2.0, "y": 1.5, "z": 0.05 }
+    },
+    {
+      "id": "window_bay_01",
+      "name": "Bay Window",
+      "category": "windows",
+      "tags": ["window", "bay", "traditional"],
+      "modelPath": "models/windows/bay_01.glb",
+      "thumbnailPath": "models/windows/thumbnails/bay_01.webp",
+      "footprintMeters": { "x": 2.4, "y": 1.2, "z": 0.6 }
+    },
+    {
+      "id": "armchair_01",
+      "name": "Armchair",
+      "category": "furniture/chairs",
+      "tags": ["living", "comfortable", "fabric"],
+      "modelPath": "models/furniture/chairs/armchair_01.glb",
+      "thumbnailPath": "models/furniture/chairs/thumbnails/armchair_01.webp",
+      "footprintMeters": { "x": 0.85, "y": 0.9, "z": 0.8 }
+    },
+    {
+      "id": "plant_indoor_01",
+      "name": "Indoor Plant",
+      "category": "decorative",
+      "tags": ["plant", "green", "nature"],
+      "modelPath": "models/decorative/plant_01.glb",
+      "thumbnailPath": "models/decorative/thumbnails/plant_01.webp",
+      "footprintMeters": { "x": 0.35, "y": 1.2, "z": 0.35 }
+    },
+    {
+      "id": "lamp_floor_01",
+      "name": "Floor Lamp",
+      "category": "decorative",
+      "tags": ["lighting", "modern", "lamp"],
+      "modelPath": "models/decorative/lamp_floor_01.glb",
+      "thumbnailPath": "models/decorative/thumbnails/lamp_floor_01.webp",
+      "footprintMeters": { "x": 0.3, "y": 1.6, "z": 0.3 }
+    },
+    {
+      "id": "rug_rectangular_01",
+      "name": "Rectangular Rug",
+      "category": "decorative",
+      "tags": ["rug", "floor", "textile"],
+      "modelPath": "models/decorative/rug_01.glb",
+      "thumbnailPath": "models/decorative/thumbnails/rug_01.webp",
+      "footprintMeters": { "x": 2.0, "y": 0.02, "z": 1.4 }
+    },
+    {
+      "id": "mirror_wall_01",
+      "name": "Wall Mirror",
+      "category": "decorative",
+      "tags": ["mirror", "wall", "glass"],
+      "modelPath": "models/decorative/mirror_01.glb",
+      "thumbnailPath": "models/decorative/thumbnails/mirror_01.webp",
+      "footprintMeters": { "x": 0.6, "y": 0.9, "z": 0.03 }
+    },
+    {
+      "id": "patio_table_01",
+      "name": "Patio Table",
+      "category": "outdoor",
+      "tags": ["outdoor", "table", "garden"],
+      "modelPath": "models/outdoor/patio_table_01.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/patio_table_01.webp",
+      "footprintMeters": { "x": 1.0, "y": 0.75, "z": 1.0 }
+    },
+    {
+      "id": "patio_chair_01",
+      "name": "Patio Chair",
+      "category": "outdoor",
+      "tags": ["outdoor", "chair", "garden"],
+      "modelPath": "models/outdoor/patio_chair_01.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/patio_chair_01.webp",
+      "footprintMeters": { "x": 0.55, "y": 0.85, "z": 0.6 }
+    },
+    {
+      "id": "grill_01",
+      "name": "BBQ Grill",
+      "category": "outdoor",
+      "tags": ["outdoor", "cooking", "bbq"],
+      "modelPath": "models/outdoor/grill_01.glb",
+      "thumbnailPath": "models/outdoor/thumbnails/grill_01.webp",
+      "footprintMeters": { "x": 1.2, "y": 1.1, "z": 0.6 }
+    },
+    {
+      "id": "staircase_straight_01",
+      "name": "Straight Staircase",
+      "category": "furniture/stairs",
+      "tags": ["stairs", "structural"],
+      "modelPath": "models/furniture/stairs/straight_01.glb",
+      "thumbnailPath": "models/furniture/stairs/thumbnails/straight_01.webp",
+      "footprintMeters": { "x": 1.0, "y": 2.7, "z": 2.5 }
     }
   ]
 }
