@@ -7,7 +7,7 @@ import {
 } from './catalog.js';
 
 export function newState() {
-  return { version: 1, name: 'My home', nextId: 1, rooms: [] };
+  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [] };
 }
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));
@@ -16,7 +16,7 @@ export const roomById = (state, id) => state.rooms.find((r) => r.id === id);
 
 export function createRoom(state, type, x, y, w, h, opts = {}) {
   const room = {
-    id: nid(state, 'r'), type, name: ROOM_TYPES[type].name, x, y, w, h,
+    id: nid(state, 'r'), type, name: ROOM_TYPES[type].name, level: opts.level ?? 0, x, y, w, h,
     ceiling: opts.ceiling ?? 96,
     floor: opts.floor ?? 'floor_oak',
     walls: { N: opts.wallFinish ?? 'paint_white', E: opts.wallFinish ?? 'paint_white', S: opts.wallFinish ?? 'paint_white', W: opts.wallFinish ?? 'paint_white' },
@@ -105,9 +105,9 @@ export function placeFromSpec(state, room, spec) {
 }
 
 /** Create a full room from a room kit at (x,y). Opening offsets are in wall coordinates. */
-export function placeRoomKit(state, kitId, x, y) {
+export function placeRoomKit(state, kitId, x, y, level = 0) {
   const kit = ROOM_KIT_BY_ID[kitId];
-  const room = createRoom(state, kit.type, snap(x), snap(y), kit.w, kit.h, { floor: kit.floor, wallFinish: kit.wallFinish });
+  const room = createRoom(state, kit.type, snap(x), snap(y), kit.w, kit.h, { floor: kit.floor, wallFinish: kit.wallFinish, level });
   for (const o of kit.openings) addOpening(state, room, o.type, o.wall, o.offset);
   for (const spec of kit.items) placeFromSpec(state, room, spec);
   return room;
@@ -130,7 +130,8 @@ export function deserialize(text) {
   const s = JSON.parse(text);
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
-  for (const r of s.rooms) { r.openings ||= []; r.items ||= []; }
+  for (const r of s.rooms) { r.openings ||= []; r.items ||= []; r.level ||= 0; }
+  s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
   return s;
 }
 

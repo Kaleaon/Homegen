@@ -22,7 +22,7 @@ test('every room kit placed alone is accepted and ends with no room-level errors
   for (const kit of ROOM_KITS) {
     const r = c.commit(m.newState(), (n) => m.placeRoomKit(n, kit.id, 0, 0));
     assert.ok(r.ok, `${kit.id}: ${r.reasons?.map((v) => v.msg)}`);
-    const roomLevel = r.report.violations.filter((v) => v.roomId && v.severity === 'error');
+    const roomLevel = r.report.violations.filter((v) => v.roomId && v.severity === 'error' && v.rule !== 'stairs-link');
     // a lone room cannot be reachable from an exit unless auto-comply added one, and it must have.
     assert.deepEqual(roomLevel.map((v) => `${v.rule}`), [], kit.id);
   }
@@ -126,4 +126,74 @@ test('serialization round-trips and history undoes', () => {
   h.push(s);
   assert.equal(h.undo().rooms.length, 0);
   assert.equal(h.redo().rooms.length, s.rooms.length);
+});
+
+function twoStorey() {
+  let s = house();
+  s = c.commit(s, (n) => { m.placeRoomKit(n, 'kit_stairs', 192, 120); n.levels = 2; }).state;
+  for (const [k, x, y] of [['kit_hall', 192, 0], ['kit_bedroom', 240, 0], ['kit_bedroom', 48, 0], ['kit_bath', 234, 144]]) {
+    const r = c.commit(s, (n) => m.placeRoomKit(n, k, x, y, 1));
+    assert.ok(r.ok, `${k}: ${r.reasons?.map((v) => v.msg)}`);
+    s = r.state;
+  }
+  return s;
+}
+
+test('multi-floor: stairs get a partner, upper rooms are reachable, plan reaches zero errors', () => {
+  const s = twoStorey();
+  assert.equal(s.rooms.filter((r) => r.type === 'stairs').length, 2);
+  const rep = c.evaluate(s);
+  assert.equal(rep.errors, 0, rep.violations.map((v) => v.msg).join('\n'));
+});
+
+test('multi-floor: rooms on different levels may overlap in plan, same level may not', () => {
+  const s = c.commit(m.newState(), (n) => { n.levels = 2; m.placeRoomKit(n, 'kit_bedroom', 0, 0, 0); }).state;
+  assert.ok(c.commit(s, (n) => m.placeRoomKit(n, 'kit_office', 0, 0, 1)).ok);
+  assert.equal(c.commit(s, (n) => m.placeRoomKit(n, 'kit_office', 0, 0, 0)).ok, false);
+});
+
+test('multi-floor: upper room without a stair path is unreachable and flagged', () => {
+  const s = c.commit(house(), (n) => { n.levels = 2; m.placeRoomKit(n, 'kit_bedroom', 0, 0, 1); }, { autoFix: true }).state;
+  assert.ok(c.evaluate(s).violations.some((v) => v.rule === 'unreachable'));
+});
+
+import { buildPrompt, hordeRender, rawBase64 } from '../js/photoreal.js';
+import { HD_MATERIALS, polyHavenTextureUrls } from '../js/resources.js';
+import { FLOOR_BY_ID, WALL_BY_ID } from '../js/catalog.js';
+
+test('photoreal prompt describes the room as built', () => {
+  const s = c.commit(m.newState(), (n) => m.placeRoomKit(n, 'kit_bedroom', 0, 0)).state;
+  const p = buildPrompt(s.rooms[0], 'scandi');
+  assert.match(p, /Scandinavian minimalist bedroom/);
+  assert.match(p, /queen bed/);
+  assert.match(p, /gray carpet/);
+  assert.match(p, /blue stripes/);
+  assert.match(p, /window/);
+});
+
+test('HD material map only references real finishes and well-formed texture urls', () => {
+  for (const [id, hd] of Object.entries(HD_MATERIALS)) {
+    assert.ok(FLOOR_BY_ID[id] || WALL_BY_ID[id], id);
+    assert.match(polyHavenTextureUrls(hd.id).diff, /^https:\/\/dl\.polyhaven\.org\/file\/ph-assets\/Textures\/jpg\/1k\/.+_diff_1k\.jpg$/);
+  }
+});
+
+test('AI Horde client sends a depth-ControlNet img2img request and polls to completion', async () => {
+  const calls = [];
+  const fake = async (url, opts = {}) => {
+    calls.push([url, opts.method || 'GET', opts.body && JSON.parse(opts.body)]);
+    const ok = (o) => ({ ok: true, json: async () => o });
+    if (url.endsWith('/generate/async')) return ok({ id: 'job12345' });
+    if (url.includes('/generate/check/')) return ok({ done: true, queue_position: 0, wait_time: 0 });
+    return ok({ generations: [{ img: 'https://example.test/out.webp', censored: false }] });
+  };
+  const out = await hordeRender({ prompt: 'a room', depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] }, fetchImpl: fake });
+  assert.equal(out.url, 'https://example.test/out.webp');
+  const body = calls[0][2];
+  assert.equal(body.params.control_type, 'depth');
+  assert.equal(body.params.image_is_control, true);
+  assert.equal(body.source_processing, 'img2img');
+  assert.equal(body.source_image, 'QUJD');
+  assert.ok(body.params.width * body.params.height <= 576 * 576, 'anonymous work budget');
+  assert.equal(rawBase64('data:x/y;base64,ZZ'), 'ZZ');
 });

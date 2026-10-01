@@ -9,6 +9,7 @@ import * as M from './model.js';
 import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor } from './patterns.js';
+import { initView3D } from './ui3d.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#plan'); const ctx = canvas.getContext('2d');
@@ -27,12 +28,14 @@ let hover = null;                    // world point
 let drag = null;
 let preview = null;                  // {next, ok, fresh}
 let paintAll = false;
+let curLevel = 0;
 
 // ------------------------------------------------------------- helpers
 const toWorld = (e) => { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left - view.ox) / view.scale, y: (e.clientY - r.top - view.oy) / view.scale }; };
 const roomOf = (state, id) => state.rooms.find((r) => r.id === id);
 const inRect = (r, p, pad = 0) => p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
-const roomAt = (p) => [...doc.rooms].filter((r) => inRect(r, p, WT / 2)).sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
+const levelRooms = () => doc.rooms.filter((r) => (r.level || 0) === curLevel);
+const roomAt = (p) => levelRooms().filter((r) => inRect(r, p, WT / 2)).sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
 
 function toast(msg, err = false, ms = 4500) {
   const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : ''; t.style.display = 'block';
@@ -43,7 +46,7 @@ function persist() { try { localStorage.setItem(STORE, M.serialize(doc)); } catc
 
 function refresh() {
   report = evaluate(doc);
-  renderCompliance(); renderInspector(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
+  renderLevels(); renderCompliance(); renderInspector(); window.__scene3d?.update(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
   $('#plan-name').value = doc.name; $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
@@ -68,7 +71,7 @@ function tryPreview(mutate) {
 // ------------------------------------------------------------- geometry picking
 function nearestWall(p, maxDist = 14, only = null) {
   let best = null;
-  for (const room of only ? [only] : doc.rooms) for (const wall of WALLS) {
+  for (const room of only ? [only] : levelRooms()) for (const wall of WALLS) {
     const s = wallSeg(room, wall);
     const t = Math.max(0, Math.min(s.len, (p.x - s.ax) * s.dx + (p.y - s.ay) * s.dy));
     const cx = s.ax + s.dx * t; const cy = s.ay + s.dy * t;
@@ -82,17 +85,17 @@ function nearestWall(p, maxDist = 14, only = null) {
 
 function pickAt(p) {
   const tol = 6 / view.scale + 2;
-  for (const room of [...doc.rooms].reverse()) for (const it of [...room.items].reverse()) {
+  for (const room of levelRooms().reverse()) for (const it of [...room.items].reverse()) {
     const def = ITEM_BY_ID[it.type];
     if (def.mount === 'floor') { const fp = footprint(it, def); if (p.x >= fp.x && p.x <= fp.x + fp.w && p.y >= fp.y && p.y <= fp.y + fp.h && !def.flat) return it.id; }
     else if (def.mount === 'ceiling') { if (Math.hypot(p.x - it.x, p.y - it.y) <= def.w / 2 + 2) return it.id; }
     else { const q = wallPoint(room, it.wall, it.offset, 0); if (Math.hypot(p.x - q.x, p.y - q.y) <= 5) return it.id; }
   }
-  for (const room of doc.rooms) for (const o of room.openings) {
+  for (const room of levelRooms()) for (const o of room.openings) {
     const a = wallPoint(room, o.wall, o.offset, 0); const b = wallPoint(room, o.wall, o.offset + o.width, 0);
     if (p.x >= Math.min(a.x, b.x) - tol && p.x <= Math.max(a.x, b.x) + tol && p.y >= Math.min(a.y, b.y) - tol && p.y <= Math.max(a.y, b.y) + tol) return o.id;
   }
-  for (const room of [...doc.rooms].reverse()) for (const it of room.items) {
+  for (const room of levelRooms().reverse()) for (const it of room.items) {
     const def = ITEM_BY_ID[it.type]; if (def.flat) { const fp = footprint(it, def); if (p.x >= fp.x && p.x <= fp.x + fp.w && p.y >= fp.y && p.y <= fp.y + fp.h) return it.id; }
   }
   const r = roomAt(p); return r ? r.id : null;
@@ -140,7 +143,7 @@ function moveItemMutation(id, target) {
 
 function snapRect(rect, ignoreId) {
   const T = 14; let { x, y } = rect;
-  for (const o of doc.rooms) {
+  for (const o of levelRooms()) {
     if (o.id === ignoreId) continue;
     for (const nx of [o.x + o.w, o.x - rect.w, o.x, o.x + o.w - rect.w]) if (Math.abs(x - nx) < T) x = nx;
     for (const ny of [o.y + o.h, o.y - rect.h, o.y, o.y + o.h - rect.h]) if (Math.abs(y - ny) < T) y = ny;
@@ -162,8 +165,8 @@ function redraw() {
   const state = preview ? preview.next : doc;
   const rep = preview ? evaluate(preview.next) : report;
   const bad = new Set([...badIds(rep)]);
-  draw(ctx, state, view, {
-    dpr, bad, selection,
+  draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
+    dpr, bad, selection, under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
     overlay: (c) => drawOverlay(c, state),
   });
 }
@@ -220,7 +223,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 function focus(id) {
   const hit = M.findOwner(doc, id); if (!hit) return;
-  const r = hit.room; const rect = canvas.getBoundingClientRect();
+  const r = hit.room; const rect = canvas.getBoundingClientRect(); setLevel(r.level || 0, false);
   view.ox = rect.width / 2 - (r.x + r.w / 2) * view.scale; view.oy = rect.height / 2 - (r.y + r.h / 2) * view.scale; redraw();
 }
 
@@ -262,6 +265,23 @@ function rotateSelected() {
   if (!selection) { ghostRot = (ghostRot + 90) % 360; redraw(); return; }
   const hit = M.findOwner(doc, selection);
   if (hit?.kind === 'item' && ITEM_BY_ID[hit.obj.type].mount === 'floor') apply((n) => { const it = M.findOwner(n, selection).obj; it.rot = (it.rot + 90) % 360; });
+}
+
+// ------------------------------------------------------------- levels
+function setLevel(l, redo = true) {
+  curLevel = Math.max(0, Math.min((doc.levels || 1) - 1, l)); selection = null; preview = null;
+  renderLevels(); if (redo) { renderInspector(); redraw(); window.__scene3d?.update(); }
+}
+
+function renderLevels() {
+  const n = doc.levels || 1; if (curLevel >= n) curLevel = n - 1;
+  const el = $('#levels');
+  el.innerHTML = Array.from({ length: n }, (_, i) => `<button data-level="${i}" class="${i === curLevel ? 'on' : ''}">Floor ${i + 1}</button>`).join('')
+    + '<button id="add-floor" title="Add a floor above">+ Floor</button>'
+    + (n > 1 && !doc.rooms.some((r) => (r.level || 0) === n - 1) ? '<button id="del-floor" title="Remove empty top floor">− Floor</button>' : '');
+  el.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => setLevel(Number(b.dataset.level))));
+  $('#add-floor').addEventListener('click', () => { if ((doc.levels || 1) >= 4) return toast('Up to 4 floors are supported.', true); doc.levels = (doc.levels || 1) + 1; hist.push(doc); persist(); setLevel(doc.levels - 1); refresh(); toast(`Floor ${doc.levels} added. Place a stair room on the floor below, then use Fix automatically to add its match here.`); });
+  $('#del-floor')?.addEventListener('click', () => { doc.levels -= 1; hist.push(doc); persist(); renderLevels(); setLevel(Math.min(curLevel, doc.levels - 1)); refresh(); });
 }
 
 // ------------------------------------------------------------- palette
@@ -322,7 +342,7 @@ function updatePreview() {
   preview = null; if (!hover || drag?.kind === 'pan') return;
   if (tool.kind === 'item') { const pl = placeItem(tool.id, hover); if (pl) preview = tryPreview((n) => M.addItem(n, roomOf(n, pl.room.id), tool.id, { ...pl.props })); }
   else if (tool.kind === 'opening') { const nw = nearestWall(hover); if (nw) { const def = OPENING_BY_ID[tool.id]; preview = tryPreview((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, Math.max(0, snap(nw.t - def.w / 2, 3)))); } }
-  else if (tool.kind === 'roomkit') { const kit = ROOM_KIT_BY_ID[tool.id]; const rc = snapRect({ x: snap(hover.x, 6) - kit.w / 2, y: snap(hover.y, 6) - kit.h / 2, w: kit.w, h: kit.h }); preview = tryPreview((n) => M.placeRoomKit(n, tool.id, rc.x, rc.y)); }
+  else if (tool.kind === 'roomkit') { const kit = ROOM_KIT_BY_ID[tool.id]; const rc = snapRect({ x: snap(hover.x, 6) - kit.w / 2, y: snap(hover.y, 6) - kit.h / 2, w: kit.w, h: kit.h }); preview = tryPreview((n) => M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel)); }
 }
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -363,7 +383,7 @@ canvas.addEventListener('pointerdown', (e) => {
     case 'floor': { const r = roomAt(p); if (r) apply((n) => { roomOf(n, r.id).floor = tool.id; }); break; }
     case 'roomkit': {
       const kit = ROOM_KIT_BY_ID[tool.id]; const rc = snapRect({ x: snap(p.x, 6) - kit.w / 2, y: snap(p.y, 6) - kit.h / 2, w: kit.w, h: kit.h });
-      apply((n) => { const r = M.placeRoomKit(n, tool.id, rc.x, rc.y); selection = r.id; }); break;
+      apply((n) => { const r = M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel); selection = r.id; }); break;
     }
     case 'furnkit': {
       const r = roomAt(p); if (!r) { toast('Click inside a room to furnish it.', true, 2000); break; }
@@ -402,7 +422,7 @@ canvas.addEventListener('pointermove', (e) => {
       const x1 = snap(p.x, 6); const y1 = snap(p.y, 6);
       drag.rect = { x: Math.min(drag.x0, x1), y: Math.min(drag.y0, y1), w: Math.abs(x1 - drag.x0), h: Math.abs(y1 - drag.y0) };
       drag.rect = snapRect(drag.rect);
-      preview = drag.rect.w >= 36 && drag.rect.h >= 36 ? tryPreview((n) => M.createRoom(n, tool.type, drag.rect.x, drag.rect.y, drag.rect.w, drag.rect.h)) : null;
+      preview = drag.rect.w >= 36 && drag.rect.h >= 36 ? tryPreview((n) => M.createRoom(n, tool.type, drag.rect.x, drag.rect.y, drag.rect.w, drag.rect.h, { level: curLevel })) : null;
     }
     redraw(); return;
   }
@@ -418,7 +438,7 @@ canvas.addEventListener('pointerup', () => {
   const pv = preview; preview = null;
   if (d.kind === 'room-new') {
     if (d.rect.w >= 36 && d.rect.h >= 36) {
-      const r = apply((n) => { const room = M.createRoom(n, tool.type, d.rect.x, d.rect.y, d.rect.w, d.rect.h); selection = room.id; });
+      const r = apply((n) => { const room = M.createRoom(n, tool.type, d.rect.x, d.rect.y, d.rect.w, d.rect.h, { level: curLevel }); selection = room.id; });
       if (!r.ok) selection = null;
     } else toast('Drag to size the room.', true, 1800);
     refresh(); return;
@@ -459,11 +479,11 @@ function fit() {
 function setDoc(next, label) { doc = next; hist.push(doc); persist(); selection = null; refresh(); }
 
 function sampleHome() {
-  let s = M.newState(); s.name = 'Sample home';
-  for (const [k, x, y] of [['kit_living', 0, 0], ['kit_hall', 192, 0], ['kit_bedroom', 240, 0], ['kit_bath', 240, 144], ['kit_kitchen', 0, 168], ['kit_laundry', 240, 264]]) {
-    const r = commit(s, (n) => M.placeRoomKit(n, k, x, y)); if (r.ok) s = r.state;
-  }
-  setDoc(s); fit(); toast(`Sample home built. ${evaluate(doc).errors === 0 ? 'Fully code-compliant.' : 'Open issues are listed on the right.'}`);
+  let s = M.newState(); s.name = 'Sample home'; s.levels = 2;
+  const plan = [['kit_living', 0, 0, 0], ['kit_hall', 192, 0, 0], ['kit_bedroom', 240, 0, 0], ['kit_bath', 240, 144, 0], ['kit_kitchen', 0, 168, 0], ['kit_laundry', 240, 264, 0], ['kit_stairs', 192, 120, 0],
+    ['kit_hall', 192, 0, 1], ['kit_bedroom', 240, 0, 1], ['kit_bedroom', 48, 0, 1], ['kit_bath', 234, 144, 1]];
+  for (const [k, x, y, l] of plan) { const r = commit(s, (n) => M.placeRoomKit(n, k, x, y, l)); if (r.ok) s = r.state; }
+  curLevel = 0; setDoc(s); fit(); toast(`Sample two-storey home built. ${evaluate(doc).errors === 0 ? 'Fully code-compliant.' : 'Open issues are listed on the right.'}`);
 }
 
 function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
@@ -510,7 +530,8 @@ window.addEventListener('keydown', (e) => {
 
 window.addEventListener('resize', resize);
 new ResizeObserver(resize).observe(canvas);
+const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSelectedRoomId: () => { const h = selection && M.findOwner(doc, selection); return h ? h.room.id : null; }, toast, setLevel });
 renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
 if (doc.rooms.length) fit();
 // test hook for automated browser checks
-window.__homegen = { get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool };
+window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool };

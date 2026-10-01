@@ -45,6 +45,13 @@ function draw(g, f) {
   }
 }
 
+/** Raw tile canvas (96px = 24 world inches) for a finish; used by the 3D view as a texture source. */
+export function tileCanvasFor(finish) {
+  let tile = cache.get(finish.id);
+  if (!tile) { tile = document.createElement('canvas'); tile.width = tile.height = N; draw(tile.getContext('2d'), finish); cache.set(finish.id, tile); }
+  return tile;
+}
+
 /** CanvasPattern for a finish, scaled so one tile = 24 world inches. */
 export function patternFor(ctx, finish) {
   let tile = cache.get(finish.id);

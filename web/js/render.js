@@ -16,6 +16,7 @@ export function draw(ctx, state, view, opts = {}) {
   drawGrid(ctx, view, w / dpr, h / dpr);
 
   const bad = opts.bad || new Set(); // ids of violating rooms/items/openings
+  for (const u of opts.under || []) { ctx.save(); ctx.globalAlpha = 0.22; ctx.fillStyle = '#6b6254'; ctx.fillRect(u.x, u.y, u.w, u.h); ctx.strokeStyle = '#3c3a38'; ctx.lineWidth = WT; ctx.strokeRect(u.x, u.y, u.w, u.h); ctx.restore(); }
   for (const room of state.rooms) drawFloor(ctx, room, opts);
   for (const room of state.rooms) drawItems(ctx, room, bad, opts.selection, true);
   for (const room of state.rooms) drawWalls(ctx, state, room, bad, opts);

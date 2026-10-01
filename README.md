@@ -14,6 +14,9 @@ cd web && npm test         # code-engine tests (node:test, no installs needed)
 - **Buy**: 40+ furniture, fixtures and safety/electrical devices; items snap flush to walls, `R` rotates.
 - **Paint**: 17 wallpapers/paints and 10 floors, per wall or whole room.
 - **Kits**: complete room kits (bedroom, bath, kitchen, living, office, hall, laundry, stairs) and furniture sets.
+- **Floors**: up to 4 levels (Floor tabs, `+ Floor`). Stairs must have a matching stair above/below (auto-created by *Fix automatically*), and every upper room needs a door path down to a ground-floor exit.
+- **3D view**: orbit/zoom, full/cutaway/hidden walls, per-floor display, eye-level camera, lighting presets, optional free **HD textures** and **HDRI skies** streamed from Poly Haven (CC0). three.js is vendored in `web/vendor/three` (MIT), so 3D works offline apart from those optional streams.
+- **Photoreal…**: exports a depth guide + auto-written prompt of the current room and sends them to free generators (AI Horde with depth ControlNet, Pollinations), or downloads them for ComfyUI/Automatic1111. See [`web/RESOURCES.md`](web/RESOURCES.md) for what was verified and the caveats.
 - **Undo/redo, zoom/pan, save/open JSON, PNG export, code report (Markdown).**
 
 ### Automatic code compliance

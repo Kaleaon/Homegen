@@ -5,12 +5,12 @@
 import {
   WT, EPS, WALLS, OPPOSITE, wallSeg, wallLength, interior, floorAreaSqFt, wallPoint, wallNeighbors,
   neighborShift, roomsOverlap, rectsOverlap, rectInside, footprint, fixtureZone,
-  subtractInterval, intersectInterval,
+  subtractInterval, intersectInterval, lv,
 } from './geometry.js';
 import {
   ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics,
 } from './catalog.js';
-import { clone, nid, addItem, addOpening } from './model.js';
+import { clone, nid, addItem, addOpening, createRoom } from './model.js';
 
 const habitable = (r) => !!ROOM_TYPES[r.type].habitable;
 const MOISTURE_ROOMS = new Set(['bathroom', 'laundry']);
@@ -97,6 +97,13 @@ export function outletSegments(state, room) {
   return segs;
 }
 
+/** Stairs rooms on the adjacent levels whose footprint overlaps this one by >= 60%. */
+export function stairPartners(state, room) {
+  if (room.type !== 'stairs') return [];
+  return state.rooms.filter((o) => o.type === 'stairs' && Math.abs(lv(o) - lv(room)) === 1 && overlapArea(o, room) >= 0.6 * Math.min(o.w * o.h, room.w * room.h));
+}
+const overlapArea = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
 function connectivity(state) {
   const adj = new Map(state.rooms.map((r) => [r.id, new Set()]));
   const exits = new Set();
@@ -104,9 +111,10 @@ function connectivity(state) {
     for (const o of r.openings) {
       if (o.kind !== 'door') continue;
       const info = openingInfo(state, r, o);
-      if (info.kind === 'exterior') exits.add(r.id);
+      if (info.kind === 'exterior') { if (lv(r) === 0) exits.add(r.id); }
       else if (info.kind === 'interior') { adj.get(r.id).add(info.neighbor.id); adj.get(info.neighbor.id).add(r.id); }
     }
+    for (const p of stairPartners(state, r)) { adj.get(r.id).add(p.id); adj.get(p.id).add(r.id); }
   }
   const seen = new Set(exits); const q = [...exits];
   while (q.length) { const c = q.shift(); for (const n of adj.get(c)) if (!seen.has(n)) { seen.add(n); q.push(n); } }
@@ -126,7 +134,7 @@ export function evaluate(state) {
   const cx = connectivity(state);
 
   for (let a = 0; a < rooms.length; a++) for (let b = a + 1; b < rooms.length; b++) {
-    if (roomsOverlap(rooms[a], rooms[b])) add('overlap', 'Geometry', 'error', true, `${rooms[a].id}+${rooms[b].id}`, `${rooms[a].name} overlaps ${rooms[b].name}.`, { roomId: rooms[a].id });
+    if (lv(rooms[a]) === lv(rooms[b]) && roomsOverlap(rooms[a], rooms[b])) add('overlap', 'Geometry', 'error', true, `${rooms[a].id}+${rooms[b].id}`, `${rooms[a].name} overlaps ${rooms[b].name}.`, { roomId: rooms[a].id });
   }
 
   for (const room of rooms) {
@@ -151,6 +159,8 @@ export function evaluate(state) {
       const n = stairRisers(room); const rise = (room.ceiling + 10) / n; const runNeeded = 10 * (n - 1);
       if (Math.max(ir.w, ir.h) < runNeeded) R('stair-run', 'IRC R311.7.5', 'error', true, room.id, `${n} risers (${rise.toFixed(2)}" rise, max 7.75") need a ${(runNeeded / 12).toFixed(1)} ft run at 10" treads; room is ${(Math.max(ir.w, ir.h) / 12).toFixed(1)} ft long.`);
     }
+
+    if (t.stairs && !stairPartners(state, room).length) R('stairs-link', 'IRC R311.7', 'error', false, room.id, 'stairs must connect to a matching stair directly above or below (add a floor, then use Fix automatically).', { fixable: (state.levels || 1) > 1 });
 
     // Openings
     for (const o of room.openings) {
@@ -394,10 +404,19 @@ export function autoComply(state) {
         if (ok) log.push(`${r.name}: entry door between rooms changed to interior door`);
       }
     }
+    // 1c. Stairs need a matching stair on the next level
+    for (const r of [...state.rooms]) {
+      if (r.type !== 'stairs' || stairPartners(state, r).length) continue;
+      for (const t of [lv(r) + 1, lv(r) - 1]) {
+        if (t < 0 || t >= (state.levels || 1)) continue;
+        const ok = attempt(state, (s2) => { const p = createRoom(s2, 'stairs', r.x, r.y, r.w, r.h, { level: t, floor: r.floor, ceiling: r.ceiling }); p.walls = { ...r.walls }; });
+        if (ok) { log.push(`${r.name}: added matching stairs on floor ${t + 1}`); break; }
+      }
+    }
     // 2. Exit and door connectivity
     if (state.rooms.length && !connectivity(state).exits.size) {
       const order = ['entry', 'living', 'hallway', 'kitchen', 'dining', 'office', 'bedroom'];
-      const cands = [...state.rooms].sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type) || 0).filter((r) => order.includes(r.type) || true);
+      const cands = state.rooms.filter((r) => lv(r) === 0).sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type) || 0).filter((r) => order.includes(r.type) || true);
       outer: for (const r of cands) for (const wall of WALLS) {
         const spans = freeSpans(state, r, wall, { exterior: true, minLen: 36 });
         if (spans.length && tryOpening(state, r.id, 'door_entry_36', wall, spans, 36)) { log.push(`${r.name}: added entry door (required exterior exit)`); break outer; }

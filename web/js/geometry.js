@@ -5,6 +5,8 @@ export const EPS = 0.5;
 export const WALLS = ['N', 'E', 'S', 'W'];
 export const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
+export const lv = (r) => r.level || 0;
+
 export const snap = (v, g = GRID) => Math.round(v / g) * g;
 
 /** Wall segment of a room. `t` offsets run west->east (N/S) or north->south (E/W). */
@@ -54,7 +56,7 @@ export function wallPoint(room, wall, t, depth = 0) {
 export function wallNeighbors(rooms, room, wall) {
   const out = [];
   for (const r of rooms) {
-    if (r.id === room.id) continue;
+    if (r.id === room.id || lv(r) !== lv(room)) continue;
     let from; let to;
     if (wall === 'N' && Math.abs(r.y + r.h - room.y) < EPS) { from = Math.max(r.x, room.x) - room.x; to = Math.min(r.x + r.w, room.x + room.w) - room.x; }
     else if (wall === 'S' && Math.abs(r.y - (room.y + room.h)) < EPS) { from = Math.max(r.x, room.x) - room.x; to = Math.min(r.x + r.w, room.x + room.w) - room.x; }
