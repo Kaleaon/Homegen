@@ -1,0 +1,89 @@
+// Turns the current 3D design into a prompt + guide images and sends them to free image generators.
+import { ROOM_TYPES, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { interior, floorAreaSqFt } from './geometry.js';
+
+export const STYLES = {
+  modern: 'modern contemporary',
+  scandi: 'Scandinavian minimalist',
+  farmhouse: 'modern farmhouse',
+  industrial: 'industrial loft',
+  traditional: 'warm traditional',
+  boho: 'bohemian eclectic',
+};
+
+export const NEGATIVE = 'cartoon, illustration, 3d render, cgi, low quality, blurry, distorted perspective, warped furniture, text, watermark, people';
+
+const ft = (inches) => Math.round(inches / 12);
+const count = (arr) => arr.reduce((m, k) => m.set(k, (m.get(k) || 0) + 1), new Map());
+
+/** Plain-language prompt describing one room as built (finishes, furniture, windows). */
+export function buildPrompt(room, style = 'modern') {
+  const ir = interior(room);
+  const floor = FLOOR_BY_ID[room.floor]?.name.toLowerCase() || 'wood';
+  const walls = [...count(Object.values(room.walls)).entries()].sort((a, b) => b[1] - a[1]).map(([id]) => WALL_BY_ID[id]?.name.toLowerCase()).filter(Boolean);
+  const wallDesc = walls.length > 1 ? `${walls[0]} walls with ${walls[1]} accent` : `${walls[0] || 'painted'} walls`;
+  const furniture = [...count(room.items.map((i) => ITEM_BY_ID[i.type])
+    .filter((d) => d.mount === 'floor' && !d.flat && (d.cat !== 'decor' || d.shape === 'plant')).map((d) => d.name.toLowerCase())).entries()]
+    .slice(0, 8).map(([n, c]) => (c > 1 ? `${c} ${n}s` : `a ${n}`));
+  const windows = room.openings.filter((o) => o.kind === 'window').length;
+  const rug = room.items.some((i) => ITEM_BY_ID[i.type].shape === 'rug') ? ', an area rug' : '';
+  return [
+    `Photorealistic interior photograph of a ${STYLES[style] || style} ${ROOM_TYPES[room.type].name.toLowerCase()}`,
+    `about ${ft(ir.w)} by ${ft(ir.h)} feet (${floorAreaSqFt(room).toFixed(0)} sq ft) with a ${ft(room.ceiling)} foot ceiling`,
+    `${floor} flooring, ${wallDesc}`,
+    furniture.length ? `furnished with ${furniture.join(', ')}${rug}` : 'unfurnished',
+    windows ? `${windows} window${windows > 1 ? 's' : ''} letting in soft natural daylight` : 'soft artificial lighting',
+    'shot at eye level, 24mm lens, professional architectural photography, realistic materials and shadows, high detail',
+  ].join(', ');
+}
+
+export const pollinationsUrl = (prompt, { width = 1024, height = 768, seed = 1 } = {}) =>
+  `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+
+const HORDE = 'https://aihorde.net/api/v2';
+const CLIENT = 'homegen-web:0.2:github.com/Kaleaon/Homegen';
+
+/** Strip a data URL to raw base64 (the Horde wants the bare string). */
+export const rawBase64 = (dataUrl) => dataUrl.slice(dataUrl.indexOf(',') + 1);
+
+export async function toWebpDataUrl(pngDataUrl, width = 768) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = pngDataUrl; });
+  const c = document.createElement('canvas'); c.width = width; c.height = Math.round((img.height * width) / img.width);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/webp', 0.92);
+}
+
+/** Anonymous Horde users are capped at 576x576 total work; registered keys can go larger (checked with the service's dry_run). */
+export const hordeWidth = (apikey) => (apikey === '0000000000' ? 576 : 768);
+
+/**
+ * Photoreal render via AI Horde with a depth ControlNet so the result follows the 3D layout.
+ * `depthDataUrl` must be the app's depth guide (near = white). Resolves to an image URL.
+ */
+export async function hordeRender({ prompt, depthWebp, apikey = '0000000000', strength = 1, dryRun = false, onStatus = () => {}, signal, fetchImpl = fetch }) {
+  const [w, h] = depthWebp.size || [768, 576];
+  const body = {
+    prompt: `${prompt} ### ${NEGATIVE}`,
+    params: { sampler_name: 'k_euler_a', cfg_scale: 7, steps: apikey === '0000000000' ? 20 : 28, n: 1, width: w, height: h, karras: true, control_type: 'depth', image_is_control: true, control_strength: strength },
+    nsfw: false, censor_nsfw: true, r2: true, shared: false, slow_workers: true, replacement_filter: true, dry_run: dryRun,
+    source_image: rawBase64(depthWebp.url), source_processing: 'img2img',
+  };
+  const headers = { 'Content-Type': 'application/json', apikey, 'Client-Agent': CLIENT };
+  const res = await fetchImpl(`${HORDE}/generate/async`, { method: 'POST', headers, body: JSON.stringify(body), signal });
+  const job = await res.json();
+  if (!res.ok) throw new Error(job.message || `AI Horde rejected the request (${res.status})`);
+  if (dryRun) return { dryRun: true, kudos: job.kudos };
+  onStatus(`Queued (job ${job.id.slice(0, 8)})…`);
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 4000));
+    if (signal?.aborted) { fetchImpl(`${HORDE}/generate/status/${job.id}`, { method: 'DELETE' }).catch(() => {}); throw new DOMException('Cancelled', 'AbortError'); }
+    const c = await (await fetchImpl(`${HORDE}/generate/check/${job.id}`, { headers: { 'Client-Agent': CLIENT } })).json();
+    if (c.faulted) throw new Error('AI Horde job failed. Try again or lower the size.');
+    onStatus(c.done ? 'Finishing…' : `Queue position ${c.queue_position ?? '?'} · ~${c.wait_time ?? '?'}s${apikey === '0000000000' ? ' (anonymous; a free key is faster)' : ''}`);
+    if (c.done) break;
+  }
+  const st = await (await fetchImpl(`${HORDE}/generate/status/${job.id}`, { headers: { 'Client-Agent': CLIENT } })).json();
+  const gen = st.generations?.[0];
+  if (!gen) throw new Error('AI Horde returned no image.');
+  return { url: gen.img, censored: gen.censored };
+}

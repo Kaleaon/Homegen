@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homegen Designer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E🏠%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand">🏠 Homegen <span>Designer</span></div>
+  <input id="plan-name" aria-label="Plan name" value="My home">
+  <div class="spacer"></div>
+  <button id="undo" title="Undo (Ctrl+Z)">↶</button>
+  <button id="redo" title="Redo (Ctrl+Y)">↷</button>
+  <label class="toggle" title="Automatically add the windows, outlets, alarms, doors and finishes the code requires after every edit"><input type="checkbox" id="auto" checked> Auto-comply</label>
+  <button id="sample">Sample home</button>
+  <button id="new">New</button>
+  <button id="save">Save</button>
+  <button id="load">Open</button>
+  <button id="png">PNG</button>
+  <button id="report">Code report</button>
+  <input type="file" id="file" accept="application/json" hidden>
+</header>
+<main>
+  <aside id="left">
+    <nav id="tabs">
+      <button data-tab="build" class="on">Build</button>
+      <button data-tab="buy">Buy</button>
+      <button data-tab="paint">Paint</button>
+      <button data-tab="kits">Kits</button>
+    </nav>
+    <div id="palette"></div>
+  </aside>
+  <section id="stage">
+    <div id="toolbar">
+      <span class="seg"><button data-view="2d" class="on">2D plan</button><button data-view="3d">3D view</button></span>
+      <button data-tool="select" class="on" title="Select / move (V)">⬚ Select</button>
+      <button data-tool="erase" title="Delete things (X)">⌫ Erase</button>
+      <span id="levels"></span><span id="tool-hint"></span>
+      <div class="spacer"></div>
+      <button id="zoom-out">−</button><span id="zoom-label">100%</span><button id="zoom-in">+</button><button id="fit">Fit</button>
+    </div>
+    <div id="bar3d" hidden>
+      <label>Walls <select id="o-walls"><option value="full">Full</option><option value="cut" selected>Cutaway</option><option value="hidden">Hidden</option></select></label>
+      <label>Floors <select id="o-levels"><option value="all">All</option><option value="upto">This floor &amp; below</option></select></label>
+      <label>Sky <select id="o-env"></select></label>
+      <label>Sun <input id="o-sun" type="range" min="0" max="1" step="0.05" value="0.65"></label>
+      <label class="toggle"><input type="checkbox" id="o-ceil"> Ceilings</label>
+      <label class="toggle" title="Streams free CC0 PBR textures from Poly Haven"><input type="checkbox" id="o-hd"> HD textures</label>
+      <button id="o-eye" title="Stand in the selected room at eye height">👁 Eye level</button>
+      <button id="o-reset">Reset view</button>
+      <button id="o-photo" class="primary">📷 Photoreal…</button>
+    </div>
+    <canvas id="plan"></canvas>
+    <canvas id="view3d" hidden></canvas>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </section>
+  <aside id="right">
+    <section id="inspector"></section>
+    <section id="compliance"></section>
+  </aside>
+</main>
+<dialog id="photo">
+  <form method="dialog" class="dlg-head"><h2>Photoreal render</h2><button value="close">✕</button></form>
+  <div class="dlg-body">
+    <div class="row"><label>Room</label><select id="p-room"></select></div>
+    <div class="row"><label>Style</label><select id="p-style"></select></div>
+    <div class="row"><label>Prompt</label><textarea id="p-prompt" rows="5"></textarea></div>
+    <div class="thumbs"><figure><img id="p-beauty" alt="Beauty capture"><figcaption>3D capture</figcaption></figure><figure><img id="p-depth" alt="Depth guide"><figcaption>Depth guide (near = white)</figcaption></figure></div>
+    <div class="btns">
+      <button id="p-capture">Re-capture current camera</button>
+      <button id="p-dl">Download guides + prompt</button>
+      <button id="p-copy">Copy prompt</button>
+    </div>
+    <h3>Generate for free</h3>
+    <div class="btns">
+      <button id="p-poll" class="primary">Pollinations (instant, prompt only)</button>
+      <button id="p-horde" class="primary">AI Horde (follows your 3D layout, queued)</button>
+    </div>
+    <div class="row"><label>Horde key</label><input id="p-key" placeholder="0000000000 (anonymous) — free key at aihorde.net"></div>
+    <p id="p-status" class="note"></p>
+    <img id="p-result" alt="" hidden>
+    <h3>Free resources</h3>
+    <ul id="p-resources" class="res"></ul>
+    <p class="note">Generated images are AI interpretations, not construction documents. Check each service's terms before commercial use.</p>
+  </div>
+</dialog>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js"}}</script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
