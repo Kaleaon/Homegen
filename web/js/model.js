@@ -1,9 +1,22 @@
 // Plan state, edit helpers, kit placement and persistence. State is plain JSON.
 import {
-  WT, GRID, EPS, WALLS, OPPOSITE, snap, wallSeg, wallLength, interior, wallPoint,
+  WT,
+  GRID,
+  EPS,
+  WALLS,
+  OPPOSITE,
+  snap,
+  wallSeg,
+  wallLength,
+  interior,
+  wallPoint,
 } from './geometry.js';
 import {
-  ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID, FURNITURE_KITS,
+  ITEM_BY_ID,
+  OPENING_BY_ID,
+  ROOM_TYPES,
+  ROOM_KIT_BY_ID,
+  FURNITURE_KITS,
 } from './catalog.js';
 
 export function newState() {
@@ -16,11 +29,24 @@ export const roomById = (state, id) => state.rooms.find((r) => r.id === id);
 
 export function createRoom(state, type, x, y, w, h, opts = {}) {
   const room = {
-    id: nid(state, 'r'), type, name: ROOM_TYPES[type].name, level: opts.level ?? 0, x, y, w, h,
+    id: nid(state, 'r'),
+    type,
+    name: ROOM_TYPES[type].name,
+    level: opts.level ?? 0,
+    x,
+    y,
+    w,
+    h,
     ceiling: opts.ceiling ?? 96,
     floor: opts.floor ?? 'floor_oak',
-    walls: { N: opts.wallFinish ?? 'paint_white', E: opts.wallFinish ?? 'paint_white', S: opts.wallFinish ?? 'paint_white', W: opts.wallFinish ?? 'paint_white' },
-    openings: [], items: [],
+    walls: {
+      N: opts.wallFinish ?? 'paint_white',
+      E: opts.wallFinish ?? 'paint_white',
+      S: opts.wallFinish ?? 'paint_white',
+      W: opts.wallFinish ?? 'paint_white',
+    },
+    openings: [],
+    items: [],
   };
   state.rooms.push(room);
   return room;
@@ -45,8 +71,10 @@ export function addItem(state, room, type, props) {
 export function findOwner(state, id) {
   for (const room of state.rooms) {
     if (room.id === id) return { room, kind: 'room', obj: room };
-    const o = room.openings.find((x) => x.id === id); if (o) return { room, kind: 'opening', obj: o };
-    const i = room.items.find((x) => x.id === id); if (i) return { room, kind: 'item', obj: i };
+    const o = room.openings.find((x) => x.id === id);
+    if (o) return { room, kind: 'opening', obj: o };
+    const i = room.items.find((x) => x.id === id);
+    if (i) return { room, kind: 'item', obj: i };
   }
   return null;
 }
@@ -61,14 +89,23 @@ export function removeById(state, id) {
 }
 
 export function moveRoom(room, nx, ny) {
-  const dx = nx - room.x; const dy = ny - room.y;
-  room.x = nx; room.y = ny;
-  for (const it of room.items) if (it.x !== undefined) { it.x += dx; it.y += dy; }
+  const dx = nx - room.x;
+  const dy = ny - room.y;
+  room.x = nx;
+  room.y = ny;
+  for (const it of room.items)
+    if (it.x !== undefined) {
+      it.x += dx;
+      it.y += dy;
+    }
 }
 
 export function resizeRoom(room, x, y, w, h) {
   // Floor/ceiling items keep world position; code engine rejects any that end up outside.
-  room.x = x; room.y = y; room.w = w; room.h = h;
+  room.x = x;
+  room.y = y;
+  room.w = w;
+  room.h = h;
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
     o.offset = Math.max(0, Math.min(o.offset, len - o.width));
@@ -82,12 +119,15 @@ export function backToWall(room, def, wall, along, off = 0) {
   const ir = interior(room);
   const rot = wallDir[wall];
   const swap = rot % 180 !== 0;
-  const w = swap ? def.d : def.w; const d = swap ? def.w : def.d;
+  const w = swap ? def.d : def.w;
+  const d = swap ? def.w : def.d;
   const span = wall === 'N' || wall === 'S' ? ir.w : ir.h;
   const itemLen = wall === 'N' || wall === 'S' ? w : d;
   let c;
-  if (along === 'start') c = itemLen / 2; else if (along === 'end') c = span - itemLen / 2;
-  else if (along === 'center') c = span / 2; else c = along + itemLen / 2;
+  if (along === 'start') c = itemLen / 2;
+  else if (along === 'end') c = span - itemLen / 2;
+  else if (along === 'center') c = span / 2;
+  else c = along + itemLen / 2;
   c += off;
   if (wall === 'N') return { x: ir.x + c, y: ir.y + d / 2, rot };
   if (wall === 'S') return { x: ir.x + c, y: ir.y + ir.h - d / 2, rot };
@@ -99,7 +139,11 @@ export function placeFromSpec(state, room, spec) {
   const def = ITEM_BY_ID[spec.type];
   const ir = interior(room);
   if (spec.pos) {
-    return addItem(state, room, spec.type, { x: ir.x + ir.w * spec.pos[0] + (spec.dx || 0), y: ir.y + ir.h * spec.pos[1] + (spec.dy || 0), rot: spec.rot || 0 });
+    return addItem(state, room, spec.type, {
+      x: ir.x + ir.w * spec.pos[0] + (spec.dx || 0),
+      y: ir.y + ir.h * spec.pos[1] + (spec.dy || 0),
+      rot: spec.rot || 0,
+    });
   }
   return addItem(state, room, spec.type, backToWall(room, def, spec.wall, spec.along, spec.off));
 }
@@ -107,7 +151,11 @@ export function placeFromSpec(state, room, spec) {
 /** Create a full room from a room kit at (x,y). Opening offsets are in wall coordinates. */
 export function placeRoomKit(state, kitId, x, y, level = 0) {
   const kit = ROOM_KIT_BY_ID[kitId];
-  const room = createRoom(state, kit.type, snap(x), snap(y), kit.w, kit.h, { floor: kit.floor, wallFinish: kit.wallFinish, level });
+  const room = createRoom(state, kit.type, snap(x), snap(y), kit.w, kit.h, {
+    floor: kit.floor,
+    wallFinish: kit.wallFinish,
+    level,
+  });
   for (const o of kit.openings) addOpening(state, room, o.type, o.wall, o.offset);
   for (const spec of kit.items) placeFromSpec(state, room, spec);
   return room;
@@ -118,30 +166,57 @@ export function placeFurnitureKit(state, kitId, room) {
   const kit = FURNITURE_KITS.find((k) => k.id === kitId);
   const walls = [...WALLS].sort((a, b) => wallLength(room, b) - wallLength(room, a));
   const longest = walls[0];
-  const resolve = (w) => (w === 'longest' ? longest : w === 'opposite-longest' ? OPPOSITE[longest] : w);
+  const resolve = (w) =>
+    w === 'longest' ? longest : w === 'opposite-longest' ? OPPOSITE[longest] : w;
   const added = [];
-  for (const spec of kit.items) added.push(placeFromSpec(state, room, { ...spec, wall: resolve(spec.wall) }));
+  for (const spec of kit.items)
+    added.push(placeFromSpec(state, room, { ...spec, wall: resolve(spec.wall) }));
   return added;
 }
 
 // ---- persistence ----
-export function serialize(state) { return JSON.stringify(state, null, 1); }
+export function serialize(state) {
+  return JSON.stringify(state, null, 1);
+}
 export function deserialize(text) {
   const s = JSON.parse(text);
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
-  for (const r of s.rooms) { r.openings ||= []; r.items ||= []; r.level ||= 0; }
+  for (const r of s.rooms) {
+    r.openings ||= [];
+    r.items ||= [];
+    r.level ||= 0;
+  }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
   return s;
 }
 
 export class History {
-  constructor(state) { this.stack = [clone(state)]; this.i = 0; }
-  push(state) { this.stack = this.stack.slice(0, this.i + 1); this.stack.push(clone(state)); this.i++; if (this.stack.length > 100) { this.stack.shift(); this.i--; } }
-  canUndo() { return this.i > 0; }
-  canRedo() { return this.i < this.stack.length - 1; }
-  undo() { return this.canUndo() ? clone(this.stack[--this.i]) : null; }
-  redo() { return this.canRedo() ? clone(this.stack[++this.i]) : null; }
+  constructor(state) {
+    this.stack = [clone(state)];
+    this.i = 0;
+  }
+  push(state) {
+    this.stack = this.stack.slice(0, this.i + 1);
+    this.stack.push(clone(state));
+    this.i++;
+    if (this.stack.length > 100) {
+      this.stack.shift();
+      this.i--;
+    }
+  }
+  canUndo() {
+    return this.i > 0;
+  }
+  canRedo() {
+    return this.i < this.stack.length - 1;
+  }
+  undo() {
+    return this.canUndo() ? clone(this.stack[--this.i]) : null;
+  }
+  redo() {
+    return this.canRedo() ? clone(this.stack[++this.i]) : null;
+  }
 }
 
 export { WT, GRID, EPS, wallPoint, wallSeg };

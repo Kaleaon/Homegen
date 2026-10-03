@@ -118,8 +118,10 @@ class GestureHandler(private val listener: GestureListener) : View.OnTouchListen
 
     private fun updateTwoFingerState(event: MotionEvent) {
         if (event.pointerCount < 2) return
-        val x0 = event.getX(0); val y0 = event.getY(0)
-        val x1 = event.getX(1); val y1 = event.getY(1)
+        val x0 = event.getX(0)
+        val y0 = event.getY(0)
+        val x1 = event.getX(1)
+        val y1 = event.getY(1)
         lastSpan = hypot(x1 - x0, y1 - y0)
         lastAngle = atan2(y1 - y0, x1 - x0)
         lastMidX = (x0 + x1) / 2f
@@ -127,8 +129,10 @@ class GestureHandler(private val listener: GestureListener) : View.OnTouchListen
     }
 
     private fun handleTwoFingerMove(event: MotionEvent) {
-        val x0 = event.getX(0); val y0 = event.getY(0)
-        val x1 = event.getX(1); val y1 = event.getY(1)
+        val x0 = event.getX(0)
+        val y0 = event.getY(0)
+        val x1 = event.getX(1)
+        val y1 = event.getY(1)
 
         val span = hypot(x1 - x0, y1 - y0)
         val angle = atan2(y1 - y0, x1 - x0)

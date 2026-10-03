@@ -40,7 +40,7 @@ fun SaveDialog(
         confirmButton = {
             TextButton(
                 onClick = { if (projectName.isNotBlank()) onSave(projectName.trim()) },
-                enabled = projectName.isNotBlank()
+                enabled = projectName.isNotBlank(),
             ) {
                 Text("Save")
             }
@@ -49,6 +49,6 @@ fun SaveDialog(
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
             }
-        }
+        },
     )
 }

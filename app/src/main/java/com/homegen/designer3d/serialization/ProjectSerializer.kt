@@ -13,7 +13,6 @@ import com.homegen.designer3d.model.Window
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -34,7 +33,7 @@ class ProjectSerializer(
          * Each transforms a raw JsonObject from version N to N+1.
          */
         private val migrations: Map<Int, (JsonObject) -> JsonObject> = mapOf(
-            1 to { obj -> migrateV1ToV2(obj) }
+            1 to { obj -> migrateV1ToV2(obj) },
         )
 
         /** v1→v2: add floorLevel=0 to all objects. */
@@ -48,13 +47,17 @@ class ProjectSerializer(
                 }
                 JsonObject(objMap)
             }
-            val migratedScene = JsonObject(scene.toMutableMap().apply {
-                put("objects", kotlinx.serialization.json.JsonArray(migratedObjects))
-            })
-            return JsonObject(root.toMutableMap().apply {
-                put("schemaVersion", JsonPrimitive(2))
-                put("scene", migratedScene)
-            })
+            val migratedScene = JsonObject(
+                scene.toMutableMap().apply {
+                    put("objects", kotlinx.serialization.json.JsonArray(migratedObjects))
+                },
+            )
+            return JsonObject(
+                root.toMutableMap().apply {
+                    put("schemaVersion", JsonPrimitive(2))
+                    put("scene", migratedScene)
+                },
+            )
         }
     }
 
@@ -79,7 +82,7 @@ class ProjectSerializer(
         while (version < CURRENT_SCHEMA_VERSION) {
             val migration = migrations[version]
                 ?: throw IllegalStateException(
-                    "No migration from schema version $version to ${version + 1}"
+                    "No migration from schema version $version to ${version + 1}",
                 )
             current = migration(current)
             version++

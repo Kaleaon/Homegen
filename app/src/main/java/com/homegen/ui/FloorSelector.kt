@@ -24,7 +24,7 @@ fun FloorSelector(
     Column(
         modifier = modifier.padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         IconButton(onClick = onFloorUp) {
             Text("▲")
@@ -35,7 +35,7 @@ fun FloorSelector(
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primaryContainer)
                 .padding(8.dp),
-            style = MaterialTheme.typography.labelMedium
+            style = MaterialTheme.typography.labelMedium,
         )
         IconButton(onClick = onFloorDown) {
             Text("▼")

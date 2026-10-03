@@ -29,21 +29,21 @@ class ProjectSerializerTest {
             transform = TransformData(
                 position = Float3(1f, 0f, 2f),
                 rotationEuler = Float3(0f, 1.57f, 0f),
-                scale = Float3(1f, 1f, 1f)
+                scale = Float3(1f, 1f, 1f),
             ),
             materialRef = "paint/white",
-            properties = mapOf("lengthMeters" to "3.0")
+            properties = mapOf("lengthMeters" to "3.0"),
         )
         val matRef = MaterialRef(
             id = "paint/white",
             albedoTexture = "textures/white.png",
-            roughness = 0.8f
+            roughness = 0.8f,
         )
         val project = ProjectFile(
             scene = SceneData(
                 objects = listOf(obj),
-                materialRefs = mapOf("paint/white" to matRef)
-            )
+                materialRefs = mapOf("paint/white" to matRef),
+            ),
         )
 
         val encoded = json.encodeToString(ProjectFile.serializer(), project)
@@ -75,7 +75,7 @@ class ProjectSerializerTest {
             ObjectData(id = "1", type = "wall", name = "Wall"),
             ObjectData(id = "2", type = "floor", name = "Floor"),
             ObjectData(id = "3", type = "room", name = "Room"),
-            ObjectData(id = "4", type = "furniture", name = "Chair", materialRef = "fabric/gray")
+            ObjectData(id = "4", type = "furniture", name = "Chair", materialRef = "fabric/gray"),
         )
         val project = ProjectFile(scene = SceneData(objects = objects))
 

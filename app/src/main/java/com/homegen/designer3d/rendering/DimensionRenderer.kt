@@ -30,7 +30,7 @@ object DimensionRenderer {
                             worldX = obj.transform.position.x,
                             worldZ = obj.transform.position.z,
                             text = "%.1fm".format(obj.lengthMeters),
-                        )
+                        ),
                     )
                 }
                 is Floor -> {
@@ -40,7 +40,7 @@ object DimensionRenderer {
                             worldX = obj.transform.position.x,
                             worldZ = obj.transform.position.z,
                             text = "%.1fm²".format(area),
-                        )
+                        ),
                     )
                 }
                 else -> {}

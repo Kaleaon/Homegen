@@ -17,7 +17,7 @@ class MaterialApplicationController(
     private val repository: CatalogRepository,
     private val selectionProvider: SurfaceSelectionProvider,
     private val sceneBridge: SceneMaterialBridge,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
 ) {
     /**
      * Tap-to-apply workflow: apply selected material to all selected surfaces.

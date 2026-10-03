@@ -28,7 +28,7 @@ object ElectricalLayerSerializer {
                     type = node.type.name,
                     wallId = node.wallId,
                     expectedLoadAmps = node.expectedLoadAmps,
-                    location = Vec3Data(node.location.x, node.location.y, node.location.z)
+                    location = Vec3Data(node.location.x, node.location.y, node.location.z),
                 )
             },
             circuits = layer.circuits.map { circuit ->
@@ -38,7 +38,7 @@ object ElectricalLayerSerializer {
                     colorHex = circuit.colorHex,
                     breakerAmps = circuit.breakerAmps,
                     nodeIds = circuit.nodeIds,
-                    routeIds = circuit.routeIds
+                    routeIds = circuit.routeIds,
                 )
             },
             routes = layer.routes.map { route ->
@@ -48,9 +48,9 @@ object ElectricalLayerSerializer {
                     fromNodeId = route.fromNodeId,
                     toNodeId = route.toNodeId,
                     path = route.path.map { Vec3Data(it.x, it.y, it.z) },
-                    metadata = route.metadata
+                    metadata = route.metadata,
                 )
-            }
+            },
         )
         return json.encodeToString(data)
     }
@@ -66,8 +66,8 @@ object ElectricalLayerSerializer {
                     ElectricalNodeType.valueOf(nodeData.type),
                     Vector3(nodeData.location.x, nodeData.location.y, nodeData.location.z),
                     nodeData.wallId,
-                    nodeData.expectedLoadAmps
-                )
+                    nodeData.expectedLoadAmps,
+                ),
             )
         }
 
@@ -79,8 +79,8 @@ object ElectricalLayerSerializer {
                     circuitData.colorHex,
                     circuitData.breakerAmps,
                     circuitData.nodeIds,
-                    circuitData.routeIds
-                )
+                    circuitData.routeIds,
+                ),
             )
         }
 
@@ -92,8 +92,8 @@ object ElectricalLayerSerializer {
                     routeData.fromNodeId,
                     routeData.toNodeId,
                     routeData.path.map { Vector3(it.x, it.y, it.z) },
-                    routeData.metadata
-                )
+                    routeData.metadata,
+                ),
             )
         }
 

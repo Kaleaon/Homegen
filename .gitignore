@@ -17,3 +17,5 @@ app/release/
 
 # Node
 node_modules/
+.husky/_
+

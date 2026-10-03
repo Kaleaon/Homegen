@@ -1,0 +1,14 @@
+{
+  "name": "homegen-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prepare": "husky",
+    "lint": "npm --prefix web run lint && npm --prefix designer3d/tools run lint",
+    "format": "npm --prefix web run format && npm --prefix designer3d/tools run format",
+    "format:check": "npm --prefix web run format:check && npm --prefix designer3d/tools run format:check"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}

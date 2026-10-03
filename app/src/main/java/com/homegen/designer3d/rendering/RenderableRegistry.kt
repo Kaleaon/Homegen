@@ -36,19 +36,19 @@ class RenderableRegistry(
             is Wall -> MeshFactory.createBox(
                 engine,
                 Vector3(obj.lengthMeters / 2f, obj.heightMeters / 2f, obj.thicknessMeters / 2f),
-                materialInstance
+                materialInstance,
             )
             is Floor -> MeshFactory.createPlane(
                 engine,
                 obj.widthMeters,
                 obj.depthMeters,
-                materialInstance
+                materialInstance,
             )
             is Furniture -> loadFurnitureModel(obj, materialInstance)
             else -> MeshFactory.createBox(
                 engine,
                 Vector3(0.4f, 0.4f, 0.4f),
-                materialInstance
+                materialInstance,
             )
         }
 
@@ -169,7 +169,7 @@ class RenderableRegistry(
         return MeshFactory.createBox(
             engine,
             Vector3(0.4f, 0.4f, 0.4f),
-            fallbackMaterial
+            fallbackMaterial,
         )
     }
 

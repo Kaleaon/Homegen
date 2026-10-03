@@ -15,7 +15,7 @@ object FilamentCameraSync {
         camera.lookAt(
             eye.x.toDouble(), eye.y.toDouble(), eye.z.toDouble(),
             target.x.toDouble(), target.y.toDouble(), target.z.toDouble(),
-            0.0, 1.0, 0.0 // up vector
+            0.0, 1.0, 0.0, // up vector
         )
     }
 
@@ -23,9 +23,12 @@ object FilamentCameraSync {
         val halfHeight = halfWidth / aspect
         camera.setProjection(
             Camera.Projection.ORTHO,
-            (-halfWidth).toDouble(), halfWidth.toDouble(),
-            (-halfHeight).toDouble(), halfHeight.toDouble(),
-            near.toDouble(), far.toDouble()
+            (-halfWidth).toDouble(),
+            halfWidth.toDouble(),
+            (-halfHeight).toDouble(),
+            halfHeight.toDouble(),
+            near.toDouble(),
+            far.toDouble(),
         )
     }
 

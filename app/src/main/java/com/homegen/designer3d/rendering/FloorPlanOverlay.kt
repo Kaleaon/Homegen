@@ -30,7 +30,7 @@ class FloorPlanOverlay(
                     val entity = MeshFactory.createBox(
                         engine,
                         Vector3(obj.lengthMeters / 2f, 0.01f, obj.thicknessMeters / 2f),
-                        mat
+                        mat,
                     )
                     scene.addEntity(entity)
                     overlayEntities.add(entity)

@@ -37,7 +37,7 @@ object WallCutoutProcessor {
                     engine,
                     Vector3(wall.lengthMeters / 2f, wall.heightMeters / 2f, wall.thicknessMeters / 2f),
                     material,
-                )
+                ),
             )
         }
 
@@ -58,7 +58,7 @@ object WallCutoutProcessor {
                         engine,
                         Vector3(sectionLen / 2f, wall.heightMeters / 2f, halfThick),
                         material,
-                    )
+                    ),
                 )
             }
 
@@ -70,7 +70,7 @@ object WallCutoutProcessor {
                         engine,
                         Vector3(cutout.width / 2f, aboveHeight / 2f, halfThick),
                         material,
-                    )
+                    ),
                 )
             }
 
@@ -81,7 +81,7 @@ object WallCutoutProcessor {
                         engine,
                         Vector3(cutout.width / 2f, cutout.bottomY / 2f, halfThick),
                         material,
-                    )
+                    ),
                 )
             }
 
@@ -96,7 +96,7 @@ object WallCutoutProcessor {
                     engine,
                     Vector3(sectionLen / 2f, wall.heightMeters / 2f, halfThick),
                     material,
-                )
+                ),
             )
         }
 

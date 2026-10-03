@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 data class Catalog(
     val version: Int,
     val materials: List<MaterialAsset>,
-    val placeableObjects: List<PlaceableAsset>
+    val placeableObjects: List<PlaceableAsset>,
 )
 
 @Serializable
@@ -16,7 +16,7 @@ data class MaterialAsset(
     val category: MaterialCategory,
     val tags: List<String>,
     val texturePath: String,
-    val thumbnailPath: String
+    val thumbnailPath: String,
 )
 
 @Serializable
@@ -27,21 +27,21 @@ data class PlaceableAsset(
     val tags: List<String>,
     val modelPath: String,
     val thumbnailPath: String,
-    val footprintMeters: Dimensions3
+    val footprintMeters: Dimensions3,
 )
 
 @Serializable
 data class Dimensions3(
     val x: Float,
     val y: Float,
-    val z: Float
+    val z: Float,
 )
 
 @Serializable
 enum class MaterialCategory {
     walls,
     floors,
-    ceilings
+    ceilings,
 }
 
 enum class CatalogCategory(val label: String) {

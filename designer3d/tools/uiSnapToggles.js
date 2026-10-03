@@ -3,7 +3,11 @@ const { SNAP_MODES } = require('./snapModes');
 const SNAP_TOGGLE_DEFINITIONS = [
   { id: SNAP_MODES.GRID, label: 'Grid Snap', description: 'Snap to major grid spacing.' },
   { id: SNAP_MODES.EDGE, label: 'Edge Snap', description: 'Snap to nearest wall/room edge.' },
-  { id: SNAP_MODES.MIDPOINT, label: 'Midpoint Snap', description: 'Snap to edge midpoints for centered placement.' },
+  {
+    id: SNAP_MODES.MIDPOINT,
+    label: 'Midpoint Snap',
+    description: 'Snap to edge midpoints for centered placement.',
+  },
   {
     id: SNAP_MODES.PERPENDICULAR,
     label: 'Perpendicular Snap',

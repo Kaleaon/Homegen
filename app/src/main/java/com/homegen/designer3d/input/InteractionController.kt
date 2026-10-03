@@ -8,10 +8,8 @@ import com.homegen.designer3d.commands.CommandStack
 import com.homegen.designer3d.commands.MoveObjectCommand
 import com.homegen.designer3d.math.Vector3
 import com.homegen.designer3d.model.Furniture
-import com.homegen.designer3d.model.Wall
 import com.homegen.designer3d.tools.SnapEngine
 import com.homegen.designer3d.tools.WallDrawingTool
-import kotlin.math.atan2
 
 /**
  * Central gesture dispatcher that routes touch events based on the current InteractionMode.
@@ -39,7 +37,11 @@ class InteractionController(
                 val camera = getCamera() ?: return
                 val (viewport) = getViewport()
                 val (origin, direction) = RayCaster.screenToRay(
-                    screenX, screenY, viewport, getViewport().second, camera
+                    screenX,
+                    screenY,
+                    viewport,
+                    getViewport().second,
+                    camera,
                 )
                 sceneController.selectByRay(origin, direction)
             }
@@ -76,7 +78,7 @@ class InteractionController(
                 val snapped = SnapEngine.snapToGrid(worldPos, 0.25f)
                 val furniture = Furniture(
                     name = m.name,
-                    catalogRef = m.catalogRef
+                    catalogRef = m.catalogRef,
                 ).apply {
                     transform.position = snapped
                 }
@@ -91,7 +93,7 @@ class InteractionController(
                 val hit = sceneController.selectByRay(origin, direction)
                 if (hit != null) {
                     commandStack.execute(
-                        ApplyMaterialCommand(sceneController, hit.id, hit.materialRef, m.materialRef)
+                        ApplyMaterialCommand(sceneController, hit.id, hit.materialRef, m.materialRef),
                     )
                 }
             }
@@ -106,7 +108,7 @@ class InteractionController(
                 for (obj in objects) {
                     if (obj.type == "wall" || obj.type == "floor") {
                         commandStack.execute(
-                            ApplyMaterialCommand(sceneController, obj.id, obj.materialRef, m.materialRef)
+                            ApplyMaterialCommand(sceneController, obj.id, obj.materialRef, m.materialRef),
                         )
                     }
                 }
@@ -149,7 +151,7 @@ class InteractionController(
                     val endPos = Vector3(obj.transform.position.x, obj.transform.position.y, obj.transform.position.z)
                     if (startPos.distanceTo(endPos) > 0.01f) {
                         commandStack.execute(
-                            MoveObjectCommand(sceneController, objId, startPos, endPos)
+                            MoveObjectCommand(sceneController, objId, startPos, endPos),
                         )
                     }
                 }

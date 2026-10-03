@@ -8,6 +8,10 @@ class AddObjectCommand(
     private val obj: HomeObject,
 ) : Command {
     override val description = "Add ${obj.name}"
-    override fun execute() { scene.addObject(obj) }
-    override fun undo() { scene.removeObject(obj.id) }
+    override fun execute() {
+        scene.addObject(obj)
+    }
+    override fun undo() {
+        scene.removeObject(obj.id)
+    }
 }

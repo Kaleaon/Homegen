@@ -27,7 +27,9 @@ function createGridSettings(overrides = {}) {
 
   for (const [name, value] of Object.entries(settings)) {
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      throw new Error(`Invalid grid setting '${name}': expected a finite positive number, got '${value}'.`);
+      throw new Error(
+        `Invalid grid setting '${name}': expected a finite positive number, got '${value}'.`
+      );
     }
   }
 

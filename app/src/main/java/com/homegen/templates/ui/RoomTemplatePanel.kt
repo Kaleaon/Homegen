@@ -50,7 +50,7 @@ fun RoomTemplatePanel(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
     ) {
         // Header
         Row(
@@ -90,7 +90,7 @@ fun RoomTemplatePanel(
                         Text(
                             type.name.lowercase()
                                 .replace('_', ' ')
-                                .replaceFirstChar { it.uppercase() }
+                                .replaceFirstChar { it.uppercase() },
                         )
                     },
                 )

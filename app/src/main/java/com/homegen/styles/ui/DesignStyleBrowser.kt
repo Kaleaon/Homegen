@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,7 +59,7 @@ fun DesignStyleBrowser(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
     ) {
         // Header
         Row(
@@ -165,7 +164,7 @@ private fun DesignStyleCard(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(CircleShape)
-                            .background(parseColor(hex))
+                            .background(parseColor(hex)),
                     )
                 }
                 if (style.palette.accent.isNotBlank()) {
@@ -173,7 +172,7 @@ private fun DesignStyleCard(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(parseColor(style.palette.accent))
+                            .background(parseColor(style.palette.accent)),
                     )
                 }
             }
@@ -189,7 +188,7 @@ private fun DesignStyleCard(
                         modifier = Modifier
                             .background(
                                 MaterialTheme.colorScheme.secondaryContainer,
-                                RoundedCornerShape(4.dp)
+                                RoundedCornerShape(4.dp),
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
