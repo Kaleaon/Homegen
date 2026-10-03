@@ -29,6 +29,8 @@ let drag = null;
 let preview = null;                  // {next, ok, fresh}
 let paintAll = false;
 let curLevel = 0;
+let autoFixDiffs = [];
+let hoveredDiffIndex = null;
 
 // ------------------------------------------------------------- helpers
 const toWorld = (e) => { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left - view.ox) / view.scale, y: (e.clientY - r.top - view.oy) / view.scale }; };
@@ -46,7 +48,7 @@ function persist() { try { localStorage.setItem(STORE, M.serialize(doc)); } catc
 
 function refresh() {
   report = evaluate(doc);
-  renderLevels(); renderCompliance(); renderInspector(); window.__scene3d?.update(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
+  renderLevels(); renderCompliance(); renderInspector(); renderDiffDrawer(); window.__scene3d?.update(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
   $('#plan-name').value = doc.name; $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
@@ -55,7 +57,9 @@ function apply(mutate, { quiet = false } = {}) {
   const r = commit(doc, mutate, { autoFix: $('#auto').checked });
   if (!r.ok) { toast(`Blocked by building code:\n• ${[...new Set(r.reasons.map((v) => v.msg))].slice(0, 4).join('\n• ')}`, true); return r; }
   doc = r.state; hist.push(doc); persist();
-  if (!quiet && r.changes.length) toast(`Auto-complied (${r.changes.length}):\n• ${[...new Set(r.changes)].slice(0, 6).join('\n• ')}${r.changes.length > 6 ? '\n• …' : ''}`);
+  autoFixDiffs = r.changes || [];
+  hoveredDiffIndex = null;
+  if (!quiet && r.changes.length) toast(`Auto-complied (${r.changes.length}):\n• ${[...new Set(r.changes.map(c => c.msg || c))].slice(0, 6).join('\n• ')}${r.changes.length > 6 ? '\n• …' : ''}`);
   refresh();
   return r;
 }
@@ -167,6 +171,8 @@ function redraw() {
   const bad = new Set([...badIds(rep)]);
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
     dpr, bad, selection, under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
+    autoFixDiffs: preview ? [] : autoFixDiffs,
+    hoveredDiffIndex,
     overlay: (c) => drawOverlay(c, state),
   });
 }
@@ -269,7 +275,7 @@ function rotateSelected() {
 
 // ------------------------------------------------------------- levels
 function setLevel(l, redo = true) {
-  curLevel = Math.max(0, Math.min((doc.levels || 1) - 1, l)); selection = null; preview = null;
+  curLevel = Math.max(0, Math.min((doc.levels || 1) - 1, l)); selection = null; preview = null; autoFixDiffs = []; hoveredDiffIndex = null;
   renderLevels(); if (redo) { renderInspector(); redraw(); window.__scene3d?.update(); }
 }
 
@@ -391,7 +397,7 @@ canvas.addEventListener('pointerdown', (e) => {
       const walls = [...WALLS].sort((a, b) => wallLength(r, b) - wallLength(r, a)); const longest = walls[0];
       const opp = { N: 'S', S: 'N', E: 'W', W: 'E' }; const res = (w) => (w === 'longest' ? longest : w === 'opposite-longest' ? opp[longest] : w);
       const out = commitSequence(doc, kit.items.map((spec) => (n) => M.placeFromSpec(n, roomOf(n, r.id), { ...spec, wall: res(spec.wall) })), { autoFix: $('#auto').checked });
-      if (out.placed) { doc = out.state; hist.push(doc); persist(); refresh(); }
+      if (out.placed) { doc = out.state; hist.push(doc); persist(); autoFixDiffs = out.changes || []; hoveredDiffIndex = null; refresh(); }
       toast(`${kit.name}: placed ${out.placed} of ${kit.items.length}${out.skipped.length ? `\nSkipped (would break code or not fit): ${[...new Set(out.skipped)].slice(0, 3).join('; ')}` : ''}`, !out.placed);
       break;
     }
@@ -476,7 +482,58 @@ function fit() {
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
-function setDoc(next, label) { doc = next; hist.push(doc); persist(); selection = null; refresh(); }
+function setDoc(next, label) { doc = next; hist.push(doc); persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); }
+
+function renderDiffDrawer() {
+  const drawer = $('#diff-drawer');
+  const countEl = $('#diff-count');
+  const listEl = $('#diff-list');
+  const closeBtn = $('#diff-close');
+
+  if (!drawer || !countEl || !listEl) return;
+
+  if (!autoFixDiffs || !autoFixDiffs.length) {
+    drawer.hidden = true;
+    return;
+  }
+
+  drawer.hidden = false;
+  countEl.textContent = String(autoFixDiffs.length);
+
+  listEl.innerHTML = autoFixDiffs
+    .map((d, i) => `<li data-idx="${i}" class="${hoveredDiffIndex === i ? 'hovered' : ''}"><span class="diff-num">${i + 1}</span><span class="diff-msg">${esc(d.msg || d)}</span></li>`)
+    .join('');
+
+  listEl.querySelectorAll('li[data-idx]').forEach((li) => {
+    const idx = Number(li.dataset.idx);
+    li.addEventListener('mouseenter', () => {
+      hoveredDiffIndex = idx;
+      li.classList.add('hovered');
+      redraw();
+    });
+    li.addEventListener('mouseleave', () => {
+      hoveredDiffIndex = null;
+      li.classList.remove('hovered');
+      redraw();
+    });
+    li.addEventListener('click', () => {
+      const d = autoFixDiffs[idx];
+      if (d && d.id) {
+        select(d.id);
+        focus(d.id);
+      }
+    });
+  });
+
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      autoFixDiffs = [];
+      hoveredDiffIndex = null;
+      renderDiffDrawer();
+      redraw();
+    };
+  }
+}
 
 function sampleHome() {
   let s = M.newState(); s.name = 'Sample home'; s.levels = 2;
@@ -497,8 +554,8 @@ function reportText() {
   return lines.join('\n');
 }
 
-$('#undo').addEventListener('click', () => { const s = hist.undo(); if (s) { doc = s; persist(); selection = null; refresh(); } });
-$('#redo').addEventListener('click', () => { const s = hist.redo(); if (s) { doc = s; persist(); selection = null; refresh(); } });
+$('#undo').addEventListener('click', () => { const s = hist.undo(); if (s) { doc = s; persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); } });
+$('#redo').addEventListener('click', () => { const s = hist.redo(); if (s) { doc = s; persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); } });
 $('#new').addEventListener('click', () => { if (!doc.rooms.length || confirm('Start a new plan? (You can undo this.)')) setDoc(M.newState()); });
 $('#sample').addEventListener('click', sampleHome);
 $('#save').addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}.homegen.json`, M.serialize(doc), 'application/json'));
