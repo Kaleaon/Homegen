@@ -125,6 +125,56 @@ export function placeFurnitureKit(state, kitId, room) {
 }
 
 // ---- persistence ----
+export function applyWallFinish(state, finishId, { scope = 'single', room, wall, level = 0 } = {}) {
+  if (scope === 'plan') {
+    for (const r of state.rooms) for (const w of WALLS) r.walls[w] = finishId;
+  } else if (scope === 'level') {
+    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) for (const w of WALLS) r.walls[w] = finishId;
+  } else if (scope === 'room') {
+    if (room) for (const w of WALLS) room.walls[w] = finishId;
+  } else {
+    if (room && wall) room.walls[wall] = finishId;
+  }
+}
+
+export function applyFloorFinish(state, finishId, { scope = 'single', room, level = 0 } = {}) {
+  if (scope === 'plan') {
+    for (const r of state.rooms) r.floor = finishId;
+  } else if (scope === 'level') {
+    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) r.floor = finishId;
+  } else {
+    if (room) room.floor = finishId;
+  }
+}
+
+export function nearestWallOnLevel(state, p, level = 0, maxDist = 24, onlyRoom = null) {
+  let best = null;
+  const rooms = (onlyRoom ? [onlyRoom] : state.rooms.filter((r) => (r.level || 0) === level));
+  for (const room of rooms) for (const wall of WALLS) {
+    const s = wallSeg(room, wall);
+    const t = Math.max(0, Math.min(s.len, (p.x - s.ax) * s.dx + (p.y - s.ay) * s.dy));
+    const cx = s.ax + s.dx * t; const cy = s.ay + s.dy * t;
+    const d = Math.hypot(p.x - cx, p.y - cy);
+    const inside = (p.x >= room.x && p.x <= room.x + room.w && p.y >= room.y && p.y <= room.y + room.h) ? 0 : 1;
+    const score = d + inside * 0.3;
+    if (d <= maxDist && (!best || score < best.score)) best = { room, wall, t, d, score };
+  }
+  return best;
+}
+
+export function roomAtOnLevel(state, p, level = 0) {
+  return state.rooms.filter((r) => (r.level || 0) === level && p.x >= r.x - WT / 2 && p.x <= r.x + r.w + WT / 2 && p.y >= r.y - WT / 2 && p.y <= r.y + r.h + WT / 2)
+    .sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
+}
+
+export function sampleFinishAt(state, p, level = 0, maxDist = 24) {
+  const nw = nearestWallOnLevel(state, p, level, maxDist);
+  if (nw) return { kind: 'wall', finishId: nw.room.walls[nw.wall], room: nw.room, wall: nw.wall };
+  const r = roomAtOnLevel(state, p, level);
+  if (r) return { kind: 'floor', finishId: r.floor, room: r };
+  return null;
+}
+
 export function serialize(state) { return JSON.stringify(state, null, 1); }
 export function deserialize(text) {
   const s = JSON.parse(text);

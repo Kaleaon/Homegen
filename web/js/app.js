@@ -4,7 +4,7 @@ import {
 } from './geometry.js';
 import {
   ROOM_TYPES, OPENINGS, OPENING_BY_ID, ITEMS, ITEM_BY_ID, ITEM_CATEGORIES, WALL_FINISHES, FLOOR_FINISHES,
-  ROOM_KITS, ROOM_KIT_BY_ID, FURNITURE_KITS,
+  WALL_BY_ID, FLOOR_BY_ID, ROOM_KITS, ROOM_KIT_BY_ID, FURNITURE_KITS,
 } from './catalog.js';
 import * as M from './model.js';
 import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
@@ -56,7 +56,7 @@ let ghostRot = 0;
 let hover = null;                    // world point
 let drag = null;
 let preview = null;                  // {next, ok, fresh}
-let paintAll = false;
+let paintScope = 'single';           // single | room | level | plan
 let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
@@ -331,10 +331,41 @@ function drawOverlay(c, state) {
     if (pl) { const room = roomOf(preview ? preview.next : doc, pl.room.id) || pl.room; drawItem(c, room, { id: 'ghost', type: tool.id, ...pl.props }, def, preview && !preview.ok, false, true); }
   } else if (tool.kind === 'opening') {
     const nw = nearestWall(hover); if (nw) { const def = OPENING_BY_ID[tool.id]; const a = wallPoint(nw.room, nw.wall, snap(nw.t - def.w / 2, 3), 0); const b = wallPoint(nw.room, nw.wall, snap(nw.t - def.w / 2, 3) + def.w, 0); c.save(); c.strokeStyle = preview && !preview.ok ? '#c43b3b' : '#2f8f5b'; c.lineWidth = 5; c.globalAlpha = 0.7; c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke(); c.restore(); }
+  } else if (tool.kind === 'eyedropper') {
+    const nw = nearestWall(hover, 24);
+    if (nw) {
+      c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 4; c.globalAlpha = 0.7;
+      const a = wallPoint(nw.room, nw.wall, 0, 0); const b = wallPoint(nw.room, nw.wall, wallLength(nw.room, nw.wall), 0);
+      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke(); c.restore();
+    } else {
+      const r = roomAt(hover);
+      if (r) { c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 3; c.strokeRect(r.x, r.y, r.w, r.h); c.restore(); }
+    }
   } else if (tool.kind === 'wall') {
-    const nw = nearestWall(hover, 24); if (nw) { const targets = paintAll ? WALLS : [nw.wall]; c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 4; c.globalAlpha = 0.7; for (const w of targets) { const a = wallPoint(nw.room, w, 0, 0); const b = wallPoint(nw.room, w, wallLength(nw.room, w), 0); c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke(); } c.restore(); }
+    const nw = nearestWall(hover, 24);
+    if (nw) {
+      c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 4; c.globalAlpha = 0.7;
+      const roomsToDraw = (paintScope === 'level' || paintScope === 'plan') ? levelRooms() : [nw.room];
+      for (const rm of roomsToDraw) {
+        const wallsToDraw = (paintScope === 'single' && rm === nw.room) ? [nw.wall] : WALLS;
+        for (const w of wallsToDraw) {
+          const a = wallPoint(rm, w, 0, 0); const b = wallPoint(rm, w, wallLength(rm, w), 0);
+          c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
+        }
+      }
+      c.restore();
+    }
   } else if (tool.kind === 'floor' || tool.kind === 'furnkit') {
-    const r = roomAt(hover); if (r) { c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 3; c.strokeRect(r.x, r.y, r.w, r.h); c.restore(); }
+    const r = roomAt(hover);
+    if (r) {
+      c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 3;
+      if (tool.kind === 'floor' && (paintScope === 'level' || paintScope === 'plan')) {
+        for (const rm of levelRooms()) c.strokeRect(rm.x, rm.y, rm.w, rm.h);
+      } else {
+        c.strokeRect(r.x, r.y, r.w, r.h);
+      }
+      c.restore();
+    }
   }
   if (tool.kind === 'calibrate') {
     c.save();
@@ -600,7 +631,8 @@ function renderPalette() {
   } else if (tab === 'buy') {
     for (const [cat, label] of ITEM_CATEGORIES) h += `<h4>${label}</h4><div class="grid">` + ITEMS.filter((i) => i.cat === cat).map((i) => card(i.name, i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount, tool.kind === 'item' && tool.id === i.id, `data-tool="item" data-id="${i.id}"`, `background:${i.color}`)).join('') + '</div>';
   } else if (tab === 'paint') {
-    h += `<label class="toggle" style="margin:10px 0"><input type="checkbox" id="paint-all" ${paintAll ? 'checked' : ''}> Paint all walls of the room</label>`;
+    h += `<div class="row" style="margin:8px 0 12px"><label style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
+    h += '<h4>Sampler</h4><div class="grid">' + card('Eyedropper', 'Sample wall or floor finish', tool.kind === 'eyedropper', 'data-tool="eyedropper"') + '</div>';
     h += '<h4>Wallpaper & paint (click a wall)</h4><div class="grid">' + WALL_FINISHES.map((f) => card(f.name, f.wet ? 'moisture-rated' : '', tool.kind === 'wall' && tool.id === f.id, `data-tool="wall" data-id="${f.id}"`, swatchStyle(f))).join('') + '</div>';
     h += '<h4>Flooring (click a room)</h4><div class="grid">' + FLOOR_FINISHES.map((f) => card(f.name, f.wet ? 'moisture-rated' : '', tool.kind === 'floor' && tool.id === f.id, `data-tool="floor" data-id="${f.id}"`, swatchStyle(f))).join('') + '</div>';
   } else {
@@ -610,12 +642,13 @@ function renderPalette() {
   }
   p.innerHTML = h;
   p.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool, type: b.dataset.type, id: b.dataset.id })));
-  $('#paint-all')?.addEventListener('change', (e) => { paintAll = e.target.checked; });
+  $('#paint-scope')?.addEventListener('change', (e) => { paintScope = e.target.value; redraw(); });
 }
 
 const HINTS = {
   select: 'Click to select · drag to move · drag room corners to resize',
   erase: 'Click anything to delete it',
+  eyedropper: 'Click a wall or floor to sample its finish',
   room: 'Drag on the plan to draw the room',
   opening: 'Click a wall to place',
   item: 'Click to place · R rotates · items snap to walls',
@@ -699,12 +732,31 @@ canvas?.addEventListener('pointerdown', (e) => {
       apply((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, Math.max(0, snap(nw.t - def.w / 2, 3))));
       break;
     }
-    case 'wall': {
-      const nw = nearestWall(p, 24); if (!nw) break;
-      apply((n) => { const r = roomOf(n, nw.room.id); for (const w of paintAll ? WALLS : [nw.wall]) r.walls[w] = tool.id; });
+    case 'eyedropper': {
+      const sampled = M.sampleFinishAt(doc, p, curLevel, 24);
+      if (sampled) {
+        setTool({ kind: sampled.kind, id: sampled.finishId });
+        const finishObj = sampled.kind === 'wall' ? WALL_BY_ID[sampled.finishId] : FLOOR_BY_ID[sampled.finishId];
+        toast(`Sampled ${finishObj ? finishObj.name : sampled.finishId}`);
+      }
       break;
     }
-    case 'floor': { const r = roomAt(p); if (r) apply((n) => { roomOf(n, r.id).floor = tool.id; }); break; }
+    case 'wall': {
+      const nw = nearestWall(p, 24); if (!nw) break;
+      apply((n) => {
+        const r = roomOf(n, nw.room.id);
+        M.applyWallFinish(n, tool.id, { scope: paintScope, room: r, wall: nw.wall, level: curLevel });
+      });
+      break;
+    }
+    case 'floor': {
+      const r = roomAt(p); if (!r) break;
+      apply((n) => {
+        const rm = roomOf(n, r.id);
+        M.applyFloorFinish(n, tool.id, { scope: paintScope, room: rm, level: curLevel });
+      });
+      break;
+    }
     case 'roomkit': {
       const kit = ROOM_KIT_BY_ID[tool.id]; const rc = snapRect({ x: snap(p.x, 6) - kit.w / 2, y: snap(p.y, 6) - kit.h / 2, w: kit.w, h: kit.h });
       apply((n) => { const r = M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel); selection = r.id; }); break;
@@ -1025,6 +1077,7 @@ if (typeof window !== 'undefined') {
     }
     else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
+  else if (lk === 'i') setTool({ kind: 'eyedropper' });
     else if (k === '+' || k === '=') $('#zoom-in').click();
     else if (k === '-') $('#zoom-out').click();
   });
