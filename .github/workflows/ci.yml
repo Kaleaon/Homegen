@@ -1,0 +1,71 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Test (${{ matrix.project.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - name: web
+            working-directory: web
+            type: node
+            command: npm test
+            cache: false
+          - name: designer3d-tools
+            working-directory: designer3d/tools
+            type: node
+            command: npm test
+            cache: true
+          - name: app
+            working-directory: .
+            type: gradle
+            command: ./gradlew test
+            cache: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (with cache)
+        if: matrix.project.type == 'node' && matrix.project.cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: '${{ matrix.project.working-directory }}/package-lock.json'
+
+      - name: Setup Node.js (without cache)
+        if: matrix.project.type == 'node' && !matrix.project.cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node.js dependencies
+        if: matrix.project.name == 'designer3d-tools'
+        run: npm ci
+        working-directory: ${{ matrix.project.working-directory }}
+
+      - name: Setup Java JDK 17
+        if: matrix.project.type == 'gradle'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        if: matrix.project.type == 'gradle'
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Run subproject tests
+        run: ${{ matrix.project.command }}
+        working-directory: ${{ matrix.project.working-directory }}

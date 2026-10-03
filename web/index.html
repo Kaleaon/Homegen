@@ -58,14 +58,24 @@
     <canvas id="plan"></canvas>
     <canvas id="view3d" hidden></canvas>
     <div id="toast" role="status" aria-live="polite"></div>
+    <div id="diff-drawer" class="diff-drawer" hidden>
+      <div class="diff-header">
+        <div class="diff-title">
+          <span>✨ Auto-Fix Summary</span>
+          <span id="diff-count" class="diff-badge-count">0</span>
+        </div>
+        <button id="diff-close" class="diff-close-btn" title="Dismiss highlights">✕</button>
+      </div>
+      <ul id="diff-list" class="diff-items"></ul>
+    </div>
   </section>
   <aside id="right">
     <section id="inspector"></section>
     <section id="compliance"></section>
   </aside>
 </main>
-<dialog id="photo">
-  <form method="dialog" class="dlg-head"><h2>Photoreal render</h2><button value="close">✕</button></form>
+<dialog id="photo" aria-labelledby="photo-title">
+  <form method="dialog" class="dlg-head"><h2 id="photo-title">Photoreal render</h2><button value="close" aria-label="Close dialog">✕</button></form>
   <div class="dlg-body">
     <div class="row"><label>Room</label><select id="p-room"></select></div>
     <div class="row"><label>Style</label><select id="p-style"></select></div>
