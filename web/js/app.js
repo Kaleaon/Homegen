@@ -59,6 +59,7 @@ let paintAll = false;
 let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
+let calibPoints = [];
 
 // ------------------------------------------------------------- helpers
 const toWorld = (e) => { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left - view.ox) / view.scale, y: (e.clientY - r.top - view.oy) / view.scale }; };
@@ -94,10 +95,24 @@ function renderSnapToggles() {
   });
 }
 
+function renderBgToolbar() {
+  const bgBar = $('#bg-toolbar');
+  if (!bgBar) return;
+  if (doc.background && doc.background.dataUrl) {
+    bgBar.hidden = false;
+    const bg = doc.background;
+    const vis = $('#bg-visible'); if (vis) vis.checked = bg.visible !== false;
+    const op = $('#bg-opacity'); if (op) op.value = bg.opacity ?? 0.5;
+    const lockBtn = $('#bg-lock-btn'); if (lockBtn) lockBtn.textContent = bg.locked ? '🔒 Locked' : '🔓 Unlocked';
+  } else {
+    bgBar.hidden = true;
+  }
+}
+
 function refresh() {
   report = evaluate(doc);
   renderSnapToggles();
-  renderLevels(); renderCompliance(); renderInspector(); renderDiffDrawer(); window.__scene3d?.update(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
+  renderLevels(); renderCompliance(); renderInspector(); renderBgToolbar(); renderDiffDrawer(); window.__scene3d?.update(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
   $('#plan-name').value = doc.name; $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
@@ -319,6 +334,36 @@ function drawOverlay(c, state) {
     const nw = nearestWall(hover, 24); if (nw) { const targets = paintAll ? WALLS : [nw.wall]; c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 4; c.globalAlpha = 0.7; for (const w of targets) { const a = wallPoint(nw.room, w, 0, 0); const b = wallPoint(nw.room, w, wallLength(nw.room, w), 0); c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke(); } c.restore(); }
   } else if (tool.kind === 'floor' || tool.kind === 'furnkit') {
     const r = roomAt(hover); if (r) { c.save(); c.strokeStyle = '#2a7fff'; c.lineWidth = 3; c.strokeRect(r.x, r.y, r.w, r.h); c.restore(); }
+  }
+  if (tool.kind === 'calibrate') {
+    c.save();
+    c.lineWidth = 2 / view.scale;
+    const p1 = calibPoints[0];
+    const p2 = calibPoints[1] || hover;
+    if (p1) {
+      c.strokeStyle = '#e63946'; c.fillStyle = '#e63946';
+      c.beginPath(); c.arc(p1.x, p1.y, 6 / view.scale, 0, 7); c.stroke();
+      c.beginPath(); c.arc(p1.x, p1.y, 2 / view.scale, 0, 7); c.fill();
+    }
+    if (p1 && p2) {
+      c.strokeStyle = '#e63946';
+      c.beginPath(); c.moveTo(p1.x, p1.y); c.lineTo(p2.x, p2.y); c.stroke();
+      c.fillStyle = '#e63946';
+      c.beginPath(); c.arc(p2.x, p2.y, 6 / view.scale, 0, 7); c.stroke();
+      c.beginPath(); c.arc(p2.x, p2.y, 2 / view.scale, 0, 7); c.fill();
+
+      const distInches = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const mx = (p1.x + p2.x) / 2; const my = (p1.y + p2.y) / 2;
+      const fs = Math.max(10, 14 / view.scale);
+      c.font = `${fs}px sans-serif`;
+      const txt = fmtLen(distInches);
+      const tw = c.measureText(txt).width + 8 / view.scale;
+      c.fillStyle = 'rgba(0,0,0,0.75)';
+      c.fillRect(mx - tw / 2, my - 10 / view.scale, tw, 20 / view.scale);
+      c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(txt, mx, my);
+    }
+    c.restore();
   }
 }
 
@@ -572,10 +617,12 @@ const HINTS = {
   floor: 'Click a room to apply',
   roomkit: 'Click to place · kits snap to neighbouring rooms',
   furnkit: 'Click a room to furnish it',
+  calibrate: 'Click 2 points on a dimension line to calibrate scale',
 };
 
 function setTool(t) {
   tool = t; preview = null; drag = null;
+  if (t.kind !== 'calibrate') calibPoints = [];
   document.querySelectorAll('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t.kind));
   $('#tool-hint').textContent = HINTS[t.kind] || '';
   canvas.style.cursor = t.kind === 'select' ? 'default' : 'crosshair';
@@ -603,13 +650,33 @@ canvas.addEventListener('pointerdown', (e) => {
   switch (tool.kind) {
     case 'select': {
       const id = pickAt(p); select(id);
-      if (!id) { drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy }; break; }
+      if (!id) {
+        if (doc.background && doc.background.dataUrl && doc.background.visible && !doc.background.locked) {
+          drag = { kind: 'background', sx: p.x, sy: p.y, x0: doc.background.x || 0, y0: doc.background.y || 0, moved: false };
+        } else {
+          drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
+        }
+        break;
+      }
       const hit = M.findOwner(doc, id);
       if (hit.kind === 'item') drag = { kind: 'item', id, moved: false };
       else if (hit.kind === 'opening') drag = { kind: 'opening', id, moved: false };
       else {
         const r = hit.room; const hs = handles(r).findIndex(([hx, hy]) => Math.hypot(hx - p.x, hy - p.y) < 8 / view.scale + 2);
         drag = hs >= 0 ? { kind: 'resize', id, corner: hs, moved: false } : { kind: 'room', id, dx: p.x - r.x, dy: p.y - r.y, moved: false };
+      }
+      break;
+    }
+    case 'calibrate': {
+      if (!doc.background) { toast('Import a blueprint image first.', true, 2000); break; }
+      if (calibPoints.length === 0) {
+        calibPoints.push({ x: p.x, y: p.y });
+        toast('Point 1 set. Click Point 2 on the dimension line.');
+        redraw();
+      } else if (calibPoints.length === 1) {
+        calibPoints.push({ x: p.x, y: p.y });
+        redraw();
+        triggerCalibrationDialog(calibPoints[0], calibPoints[1]);
       }
       break;
     }
@@ -654,6 +721,12 @@ canvas.addEventListener('pointermove', (e) => {
   const p = toWorld(e); hover = p;
   if (drag) {
     if (drag.kind === 'pan') { view.ox = drag.ox + e.clientX - drag.sx; view.oy = drag.oy + e.clientY - drag.sy; redraw(); return; }
+    if (drag.kind === 'background') {
+      drag.moved = true;
+      doc.background.x = drag.x0 + (p.x - drag.sx);
+      doc.background.y = drag.y0 + (p.y - drag.sy);
+      redraw(); return;
+    }
     drag.moved = true;
     if (drag.kind === 'item') { const it = M.findOwner(doc, drag.id).obj; const pl = placeItem(it.type, p, it.rot || 0); if (pl) { drag.target = pl; preview = tryPreview(moveItemTo(drag.id, pl)); } }
     else if (drag.kind === 'opening') {
@@ -693,6 +766,10 @@ canvas.addEventListener('pointerup', () => {
   const d = drag; drag = null;
   if (!d) return;
   if (d.kind === 'pan') return;
+  if (d.kind === 'background') {
+    if (d.moved) { hist.push(doc); persist(); refresh(); }
+    return;
+  }
   const pv = preview; preview = null;
   if (d.kind === 'room-new') {
     if (d.rect.w >= 36 && d.rect.h >= 36) {
@@ -949,5 +1026,107 @@ new ResizeObserver(resize).observe(canvas);
 const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSelectedRoomId: () => { const h = selection && M.findOwner(doc, selection); return h ? h.room.id : null; }, toast, setLevel });
 renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
 if (doc.rooms.length) fit();
+function triggerCalibrationDialog(p1, p2) {
+  const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  if (distPx <= 0) { calibPoints = []; toast('Invalid calibration points.', true); redraw(); return; }
+  const dlg = $('#calib-dlg');
+  const input = $('#calib-distance');
+  if (input) input.value = fmtLen(distPx);
+  if (dlg && typeof dlg.showModal === 'function') {
+    dlg.showModal();
+  } else {
+    const str = prompt('Enter real-world distance (e.g. 10 ft, 120 in, 10\' 6"):', fmtLen(distPx));
+    applyCalibration(p1, p2, distPx, str);
+  }
+}
+
+function applyCalibration(p1, p2, distPx, valStr) {
+  const targetInches = M.parseDistanceInInches(valStr);
+  if (!targetInches || targetInches <= 0) {
+    toast('Invalid distance entered. Calibration cancelled.', true);
+    calibPoints = [];
+    setTool({ kind: 'select' });
+    redraw();
+    return;
+  }
+  if (!doc.background) return;
+  const factor = targetInches / distPx;
+  const bg = doc.background;
+  bg.scale = (bg.scale || 1) * factor;
+  bg.x = p1.x - (p1.x - (bg.x || 0)) * factor;
+  bg.y = p1.y - (p1.y - (bg.y || 0)) * factor;
+  hist.push(doc);
+  persist();
+  calibPoints = [];
+  setTool({ kind: 'select' });
+  refresh();
+  toast(`Blueprint scale calibrated (${fmtLen(targetInches)}).`);
+}
+
+function handleBlueprintImport(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    const img = new Image();
+    img.onload = () => {
+      let finalDataUrl = dataUrl;
+      let w = img.width;
+      let h = img.height;
+      const MAX_DIM = 2048;
+      if (w > MAX_DIM || h > MAX_DIM) {
+        const scale = MAX_DIM / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cctx = cv.getContext('2d');
+        cctx.drawImage(img, 0, 0, w, h);
+        finalDataUrl = cv.toDataURL('image/jpeg', 0.85);
+      }
+      doc.background = {
+        dataUrl: finalDataUrl,
+        x: 0,
+        y: 0,
+        scale: 1,
+        opacity: 0.5,
+        visible: true,
+        locked: false,
+        width: w,
+        height: h,
+      };
+      hist.push(doc);
+      persist();
+      calibPoints = [];
+      setTool({ kind: 'calibrate' });
+      refresh();
+      toast('Blueprint image imported. Click 2 points on a known dimension line to calibrate scale.');
+    };
+    img.onerror = () => toast('Failed to load blueprint image.', true);
+    img.src = dataUrl;
+  };
+  reader.readAsDataURL(file);
+}
+
+$('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
+$('#blueprint-file')?.addEventListener('change', (e) => { handleBlueprintImport(e.target.files[0]); e.target.value = ''; });
+$('#bg-visible')?.addEventListener('change', (e) => { if (doc.background) { doc.background.visible = e.target.checked; hist.push(doc); persist(); redraw(); } });
+$('#bg-opacity')?.addEventListener('input', (e) => { if (doc.background) { doc.background.opacity = parseFloat(e.target.value); hist.push(doc); persist(); redraw(); } });
+$('#bg-lock-btn')?.addEventListener('click', () => { if (doc.background) { doc.background.locked = !doc.background.locked; hist.push(doc); persist(); refresh(); } });
+$('#bg-calibrate-btn')?.addEventListener('click', () => { calibPoints = []; setTool({ kind: 'calibrate' }); });
+$('#bg-remove-btn')?.addEventListener('click', () => { if (confirm('Remove blueprint image?')) { doc.background = null; hist.push(doc); persist(); setTool({ kind: 'select' }); refresh(); toast('Blueprint removed.'); } });
+
+$('#calib-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const valStr = $('#calib-distance')?.value;
+  $('#calib-dlg')?.close();
+  if (calibPoints.length === 2) {
+    const distPx = Math.hypot(calibPoints[1].x - calibPoints[0].x, calibPoints[1].y - calibPoints[0].y);
+    applyCalibration(calibPoints[0], calibPoints[1], distPx, valStr);
+  }
+});
+$('#calib-cancel')?.addEventListener('click', () => { $('#calib-dlg')?.close(); calibPoints = []; setTool({ kind: 'select' }); refresh(); });
+$('#calib-close')?.addEventListener('click', () => { $('#calib-dlg')?.close(); calibPoints = []; setTool({ kind: 'select' }); refresh(); });
+
 // test hook for automated browser checks
-window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements, interaction, generatePDF };
+window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements, interaction, generatePDF, applyCalibration, handleBlueprintImport };

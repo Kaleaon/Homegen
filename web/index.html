@@ -19,12 +19,14 @@
   <button id="new">New</button>
   <button id="save">Save</button>
   <button id="load">Open</button>
+  <button id="import-blueprint">Import Blueprint</button>
   <button id="png">PNG</button>
   <button id="svg-btn">Export SVG</button>
   <button id="print-btn">Print Sheet</button>
   <button id="export-pdf">Export PDF</button>
   <button id="report">Code report</button>
   <input type="file" id="file" accept="application/json" hidden>
+  <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
 </header>
 <main>
   <aside id="left">
@@ -42,6 +44,14 @@
       <button data-tool="select" class="on" title="Select / move (V)"><span aria-hidden="true">⬚</span> Select</button>
       <button data-tool="erase" title="Delete things (X)"><span aria-hidden="true">⌫</span> Erase</button>
       <span id="snap-toggles" class="seg"></span>
+      <span id="bg-toolbar" hidden>
+        <span class="toolbar-sep">|</span>
+        <label class="toggle" title="Toggle blueprint visibility"><input type="checkbox" id="bg-visible" checked> Blueprint</label>
+        <label title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+        <button id="bg-lock-btn" title="Toggle blueprint position lock">🔓 Unlocked</button>
+        <button id="bg-calibrate-btn" title="Calibrate scale with 2 points">📏 Calibrate</button>
+        <button id="bg-remove-btn" title="Remove blueprint image">✕</button>
+      </span>
       <span id="levels"></span><span id="tool-hint"></span>
       <div class="spacer"></div>
       <button id="zoom-out" aria-label="Zoom out"><span aria-hidden="true">−</span></button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in"><span aria-hidden="true">+</span></button><button id="fit">Fit</button>
@@ -180,6 +190,22 @@
       <button id="pdf-generate" class="primary" type="button">Download PDF</button>
     </div>
   </div>
+</dialog>
+<dialog id="calib-dlg">
+  <form id="calib-form" method="dialog">
+    <div class="dlg-head"><h2>Calibrate Blueprint Scale</h2><button type="button" id="calib-close">✕</button></div>
+    <div class="dlg-body">
+      <p>Enter the known real-world distance between the two selected points:</p>
+      <div class="row">
+        <label for="calib-distance">Distance</label>
+        <input id="calib-distance" placeholder="e.g. 10 ft, 120 in, or 10' 6&quot;" required autofocus>
+      </div>
+      <div class="btns">
+        <button type="submit" id="calib-submit" class="primary">Apply Scale</button>
+        <button type="button" id="calib-cancel">Cancel</button>
+      </div>
+    </div>
+  </form>
 </dialog>
 <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","jspdf":"./vendor/jspdf/jspdf.es.min.js"}}</script>
 <script type="module" src="js/app.js"></script>
