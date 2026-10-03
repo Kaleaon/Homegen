@@ -93,6 +93,14 @@
     </div>
     <div class="row"><label>Horde key</label><input id="p-key" placeholder="0000000000 (anonymous) — free key at aihorde.net"></div>
     <p id="p-status" class="note"></p>
+    <div id="p-error" class="p-error-box" hidden>
+      <div id="p-error-msg" class="p-error-msg"></div>
+      <div id="p-recovery-btns" class="p-recovery-btns">
+        <button id="p-retry" class="secondary" type="button" hidden>Retry Render</button>
+        <button id="p-use-anon" class="secondary" type="button" hidden>Use Anonymous Key</button>
+        <button id="p-lower-res" class="secondary" type="button" hidden>Lower Resolution</button>
+      </div>
+    </div>
     <img id="p-result" alt="" hidden>
     <h3>Free resources</h3>
     <ul id="p-resources" class="res"></ul>

@@ -76,7 +76,7 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   });
 
   // ------------------------------------------------------------ photoreal dialog
-  const dlg = $('#photo'); let guides = { beauty: '', depth: '' }; let triggerEl = null;
+  const dlg = $('#photo'); let guides = { beauty: '', depth: '' }; let triggerEl = null; let overrideResolution = null;
   $('#p-style').innerHTML = Object.entries(STYLES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#p-key').value = (() => { try { return localStorage.getItem(KEY) || ''; } catch { return ''; } })();
   $('#p-resources').innerHTML = FREE_RESOURCES.map((r) => `<li><a href="${r.url}" target="_blank" rel="noopener">${r.name}</a>${r.license ? ` · <b>${r.license}</b>` : ''}<small>${r.group} — ${r.note}</small></li>`).join('');
@@ -90,6 +90,40 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     $('#p-beauty').src = guides.beauty; $('#p-depth').src = guides.depth;
   }
 
+  function clearPhotorealError() {
+    $('#p-key').classList.remove('invalid', 'error');
+    const errBox = $('#p-error'); if (errBox) errBox.hidden = true;
+    const msg = $('#p-error-msg'); if (msg) msg.textContent = '';
+    $('#p-retry').hidden = true;
+    $('#p-use-anon').hidden = true;
+    $('#p-lower-res').hidden = true;
+  }
+
+  function showPhotorealError(e) {
+    const errBox = $('#p-error');
+    const msg = $('#p-error-msg');
+    if (!errBox || !msg) return;
+
+    errBox.hidden = false;
+    msg.textContent = e.message || 'An error occurred during render.';
+
+    const isAuth = e.type === 'auth' || e.status === 401 || e.status === 403;
+    const isFault = e.type === 'fault';
+    const isTimeout = e.type === 'timeout';
+
+    if (isAuth) {
+      $('#p-key').classList.add('invalid');
+    }
+
+    $('#p-retry').hidden = false;
+    if (isAuth || $('#p-key').value.trim() !== '0000000000') {
+      $('#p-use-anon').hidden = false;
+    }
+    if (isFault || isTimeout || overrideResolution === null) {
+      $('#p-lower-res').hidden = false;
+    }
+  }
+
   function openPhoto(e) {
     if (!rooms().length) return toast('Add a room first.', true);
     triggerEl = (e && e.currentTarget) || $('#o-photo');
@@ -98,7 +132,10 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     const pick = rooms().find((r) => r.id === sel) || rooms().find((r) => (r.level || 0) === getLevel()) || rooms()[0];
     $('#p-room').value = pick.id; refreshPrompt();
     if (!api.eyeLevelUsed) { /* keep the user's current camera; they can press Eye level first */ }
-    capture(); $('#p-status').textContent = 'Tip: press “Eye level” in the room you want, then re-capture, for a photo-like angle.';
+    capture();
+    clearPhotorealError();
+    overrideResolution = null;
+    $('#p-status').textContent = 'Tip: press “Eye level” in the room you want, then re-capture, for a photo-like angle.';
     $('#p-result').hidden = true; dlg.showModal();
     const pRoom = $('#p-room');
     if (pRoom && typeof pRoom.focus === 'function') {
@@ -107,11 +144,19 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   }
 
   dlg.addEventListener('close', () => {
+    if (abort) {
+      abort.abort();
+      abort = null;
+    }
+    $('#p-horde').textContent = 'AI Horde (follows your 3D layout, queued)';
+    clearPhotorealError();
     const trigger = triggerEl || $('#o-photo');
     if (trigger && typeof trigger.focus === 'function' && !trigger.disabled) {
       trigger.focus();
     }
   });
+
+  $('#p-key').addEventListener('input', () => $('#p-key').classList.remove('invalid', 'error'));
   $('#p-room').addEventListener('change', () => { const r = selectedRoom(); setLevel(r.level || 0); refreshPrompt(); });
   $('#p-style').addEventListener('change', refreshPrompt);
   $('#p-capture').addEventListener('click', capture);
@@ -128,18 +173,50 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     const img = $('#p-result'); img.hidden = false; img.onload = () => { $('#p-status').textContent = 'Done.'; }; img.onerror = () => { $('#p-status').textContent = 'Pollinations did not return an image (rate limit or service change). Try again shortly or use AI Horde.'; };
     img.src = pollinationsUrl($('#p-prompt').value, { seed: Math.floor(Math.random() * 1e6) });
   });
-  $('#p-horde').addEventListener('click', async () => {
-    if (abort) { abort.abort(); abort = null; return; }
-    const btn = $('#p-horde'); const key = $('#p-key').value.trim() || '0000000000';
-    try { localStorage.setItem(KEY, $('#p-key').value.trim()); } catch { /* ignore */ }
+
+  async function runHordeRender() {
+    if (abort) {
+      abort.abort();
+      abort = null;
+      $('#p-horde').textContent = 'AI Horde (follows your 3D layout, queued)';
+      $('#p-status').textContent = 'Cancelled.';
+      return;
+    }
+    clearPhotorealError();
+    const btn = $('#p-horde'); const rawKey = $('#p-key').value.trim(); const key = rawKey || '0000000000';
+    try { localStorage.setItem(KEY, rawKey); } catch { /* ignore */ }
+    const width = overrideResolution ?? hordeWidth(key);
     abort = new AbortController(); btn.textContent = 'Cancel AI Horde job';
     try {
-      const webp = await toWebpDataUrl(guides.depth, hordeWidth(key));
+      const webp = await toWebpDataUrl(guides.depth, width);
       const img = new Image(); await new Promise((r) => { img.onload = r; img.src = webp; });
-      const out = await hordeRender({ prompt: $('#p-prompt').value, depthWebp: { url: webp, size: [Math.round(img.width / 64) * 64, Math.round(img.height / 64) * 64] }, apikey: key, signal: abort.signal, onStatus: (t) => { $('#p-status').textContent = t; } });
+      const depthWebp = { url: webp, size: [Math.round(img.width / 64) * 64, Math.round(img.height / 64) * 64] };
+      const out = await hordeRender({ prompt: $('#p-prompt').value, depthWebp, apikey: key, signal: abort.signal, onStatus: (t) => { $('#p-status').textContent = t; } });
       result(out.url); $('#p-status').textContent = out.censored ? 'The service censored this image; try different wording.' : 'Done. Generated by AI Horde workers using a depth ControlNet from your 3D layout.';
-    } catch (e) { $('#p-status').textContent = e.name === 'AbortError' ? 'Cancelled.' : `AI Horde: ${e.message}`; }
-    abort = null; btn.textContent = 'AI Horde (follows your 3D layout, queued)';
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        $('#p-status').textContent = 'Cancelled.';
+      } else {
+        $('#p-status').textContent = `AI Horde: ${e.message}`;
+        showPhotorealError(e);
+      }
+    } finally {
+      abort = null; btn.textContent = 'AI Horde (follows your 3D layout, queued)';
+    }
+  }
+
+  $('#p-horde').addEventListener('click', runHordeRender);
+  $('#p-retry').addEventListener('click', () => { clearPhotorealError(); runHordeRender(); });
+  $('#p-use-anon').addEventListener('click', () => {
+    $('#p-key').value = '0000000000';
+    try { localStorage.setItem(KEY, '0000000000'); } catch { /* ignore */ }
+    clearPhotorealError();
+    runHordeRender();
+  });
+  $('#p-lower-res').addEventListener('click', () => {
+    overrideResolution = 576;
+    clearPhotorealError();
+    runHordeRender();
   });
 
   return { setView, isThree: () => mode === '3d' };

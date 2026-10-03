@@ -90,3 +90,7 @@ ul.res{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap
 .diff-items li:hover,.diff-items li.hovered{background:var(--bg);border-color:var(--accent)}
 .diff-num{width:20px;height:20px;border-radius:50%;background:var(--ok);color:#fff;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .diff-msg{flex:1;line-height:1.25;color:var(--ink)}
+input.invalid,input.error{border-color:var(--err) !important;outline:2px solid var(--err);background-color:rgba(239,107,107,0.1) !important}
+.p-error-box{margin-top:10px;padding:10px 12px;border-radius:8px;border-left:4px solid var(--err);background:var(--bg)}
+.p-error-msg{font-weight:600;color:var(--err);font-size:12.5px;margin-bottom:8px}
+.p-recovery-btns{display:flex;gap:8px;flex-wrap:wrap}
