@@ -19,6 +19,10 @@ export function polyHavenTextureUrls(id) {
   return { diff: `${base}_diff_1k.jpg`, nor_gl: `${base}_nor_gl_1k.jpg`, rough: `${base}_rough_1k.jpg` };
 }
 
+export function polyHavenHdriUrl(id) {
+  return `https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/${id}_1k.hdr`;
+}
+
 /** Lighting environments. 'studio' is built in (works offline); the others stream a 1k HDRI from Poly Haven (CC0). */
 export const HDRI_ENVS = [
   { id: 'studio', name: 'Studio (offline)' },
