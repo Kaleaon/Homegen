@@ -197,3 +197,77 @@ test('AI Horde client sends a depth-ControlNet img2img request and polls to comp
   assert.ok(body.params.width * body.params.height <= 576 * 576, 'anonymous work budget');
   assert.equal(rawBase64('data:x/y;base64,ZZ'), 'ZZ');
 });
+
+test('spatial material sampling accurately identifies wall and floor finishes', () => {
+  const s = twoStorey();
+  const room = s.rooms.find((r) => r.level === 0);
+  room.walls.N = 'paint_navy';
+  room.floor = 'floor_walnut';
+
+  // Sample North wall point
+  const wallHit = m.sampleFinishAt(s, { x: room.x + room.w / 2, y: room.y }, 0);
+  assert.ok(wallHit);
+  assert.equal(wallHit.kind, 'wall');
+  assert.equal(wallHit.finishId, 'paint_navy');
+
+  // Sample interior floor point
+  const floorHit = m.sampleFinishAt(s, { x: room.x + room.w / 2, y: room.y + room.h / 2 }, 0);
+  assert.ok(floorHit);
+  assert.equal(floorHit.kind, 'floor');
+  assert.equal(floorHit.finishId, 'floor_walnut');
+
+  // Sample empty canvas point
+  const emptyHit = m.sampleFinishAt(s, { x: -1000, y: -1000 }, 0);
+  assert.equal(emptyHit, null);
+});
+
+test('bulk painting updates finishes across single, room, level, and plan scopes', () => {
+  const s = twoStorey();
+  const lvl0Rooms = s.rooms.filter((r) => (r.level || 0) === 0);
+  const lvl1Rooms = s.rooms.filter((r) => (r.level || 0) === 1);
+  const targetRoom = lvl0Rooms[0];
+
+  // 1. Scope: single wall
+  m.applyWallFinish(s, 'paint_sage', { scope: 'single', room: targetRoom, wall: 'N', level: 0 });
+  assert.equal(targetRoom.walls.N, 'paint_sage');
+  assert.notEqual(targetRoom.walls.S, 'paint_sage');
+
+  // 2. Scope: room (all walls)
+  m.applyWallFinish(s, 'paint_beige', { scope: 'room', room: targetRoom, level: 0 });
+  assert.ok(Object.values(targetRoom.walls).every((w) => w === 'paint_beige'));
+  assert.ok(!lvl0Rooms.slice(1).every((r) => Object.values(r.walls).every((w) => w === 'paint_beige')));
+
+  // 3. Scope: level (all walls on level 0)
+  m.applyWallFinish(s, 'paint_navy', { scope: 'level', level: 0 });
+  for (const r of lvl0Rooms) assert.ok(Object.values(r.walls).every((w) => w === 'paint_navy'));
+  for (const r of lvl1Rooms) assert.ok(!Object.values(r.walls).every((w) => w === 'paint_navy'));
+
+  // 4. Scope: plan (all walls across all levels)
+  m.applyWallFinish(s, 'paint_charcoal', { scope: 'plan' });
+  for (const r of s.rooms) assert.ok(Object.values(r.walls).every((w) => w === 'paint_charcoal'));
+
+  // 5. Scope: level floor
+  m.applyFloorFinish(s, 'floor_herringbone', { scope: 'level', level: 0 });
+  for (const r of lvl0Rooms) assert.equal(r.floor, 'floor_herringbone');
+  for (const r of lvl1Rooms) assert.notEqual(r.floor, 'floor_herringbone');
+
+  // 6. Scope: plan floor
+  m.applyFloorFinish(s, 'floor_marble', { scope: 'plan' });
+  for (const r of s.rooms) assert.equal(r.floor, 'floor_marble');
+});
+
+test('bulk applying dry finishes triggers code compliance auto-fixes when auto-comply is active', () => {
+  const s = twoStorey();
+  const bath = s.rooms.find((r) => r.type === 'bathroom');
+  assert.ok(bath);
+
+  const res = c.commit(s, (n) => {
+    const r = n.rooms.find((x) => x.id === bath.id);
+    m.applyWallFinish(n, 'wp_floral', { scope: 'plan' });
+  }, { autoFix: true });
+
+  assert.ok(res.ok);
+  const bathAfter = res.state.rooms.find((r) => r.id === bath.id);
+  // Dry wallpaper in bathroom should be auto-fixed to moisture-rated wall tile/paint
+  assert.ok(Object.values(bathAfter.walls).every((w) => w !== 'wp_floral'));
+});
