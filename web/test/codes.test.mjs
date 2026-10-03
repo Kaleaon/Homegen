@@ -319,7 +319,7 @@ import {
   polyHavenTextureUrls,
   polyHavenHdriUrl,
 } from '../js/resources.js';
-import { FLOOR_BY_ID, WALL_BY_ID } from '../js/catalog.js';
+import { FLOOR_BY_ID, WALL_BY_ID, WINDOW_FRAME_BY_ID } from '../js/catalog.js';
 
 test('photoreal prompt describes the room as built', () => {
   const s = c.commit(m.newState(), (n) => m.placeRoomKit(n, 'kit_bedroom', 0, 0)).state;
@@ -333,7 +333,7 @@ test('photoreal prompt describes the room as built', () => {
 
 test('HD material map only references real finishes and well-formed texture urls', () => {
   for (const [id, hd] of Object.entries(HD_MATERIALS)) {
-    assert.ok(FLOOR_BY_ID[id] || WALL_BY_ID[id], id);
+    assert.ok(FLOOR_BY_ID[id] || WALL_BY_ID[id] || WINDOW_FRAME_BY_ID[id], id);
     assert.match(
       polyHavenTextureUrls(hd.id).diff,
       /^https:\/\/dl\.polyhaven\.org\/file\/ph-assets\/Textures\/jpg\/1k\/.+_diff_1k\.jpg$/
