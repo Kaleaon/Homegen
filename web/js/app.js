@@ -10,6 +10,7 @@ import { evaluate, blockingIds, commit, commitSequence, autoComply } from './cod
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor } from './patterns.js';
 import { initView3D } from './ui3d.js';
+import { exportSVG } from './svg.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#plan'); const ctx = canvas.getContext('2d');
@@ -506,6 +507,52 @@ $('#load').addEventListener('click', () => $('#file').click());
 $('#file').addEventListener('change', async (e) => { const f = e.target.files[0]; if (!f) return; try { setDoc(M.deserialize(await f.text())); fit(); } catch (err) { toast(`Could not open file: ${err.message}`, true); } e.target.value = ''; });
 $('#png').addEventListener('click', () => { redraw(); canvas.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${doc.name || 'plan'}.png`; a.click(); }); });
 $('#report').addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`, reportText(), 'text/markdown'));
+
+let currentSvg = '';
+function updateExportPreview() {
+  const sheet = $('#e-sheet')?.value || 'letter';
+  const orient = $('#e-orient')?.value || 'landscape';
+  const scale = $('#e-scale')?.value || 'fit';
+  const lvlVal = $('#e-level')?.value || '0';
+  const level = lvlVal === 'all' ? 'all' : Number(lvlVal);
+  currentSvg = exportSVG(doc, { sheetSize: sheet, orientation: orient, scale, level });
+  const prevEl = $('#svg-preview');
+  if (prevEl) prevEl.innerHTML = currentSvg;
+}
+
+function openExportDialog() {
+  const dlg = $('#dlg-export');
+  if (!dlg) return;
+  const levelSel = $('#e-level');
+  if (levelSel) {
+    const numLevels = doc.levels || 1;
+    let options = Array.from({ length: numLevels }, (_, i) => `<option value="${i}">Floor ${i + 1}</option>`).join('');
+    if (numLevels > 1) options += '<option value="all">All Floors</option>';
+    levelSel.innerHTML = options;
+    levelSel.value = String(curLevel < numLevels ? curLevel : 0);
+  }
+  updateExportPreview();
+  dlg.showModal();
+}
+
+$('#svg-btn')?.addEventListener('click', openExportDialog);
+$('#print-btn')?.addEventListener('click', openExportDialog);
+$('#e-sheet')?.addEventListener('change', updateExportPreview);
+$('#e-orient')?.addEventListener('change', updateExportPreview);
+$('#e-scale')?.addEventListener('change', updateExportPreview);
+$('#e-level')?.addEventListener('change', updateExportPreview);
+
+$('#e-download')?.addEventListener('click', () => {
+  updateExportPreview();
+  download(`${doc.name.replace(/\W+/g, '_') || 'plan'}.svg`, currentSvg, 'image/svg+xml');
+});
+
+$('#e-print')?.addEventListener('click', () => {
+  updateExportPreview();
+  const printSheet = $('#print-sheet');
+  if (printSheet) printSheet.innerHTML = currentSvg;
+  window.print();
+});
 $('#plan-name').addEventListener('change', (e) => { doc.name = e.target.value; hist.push(doc); persist(); });
 $('#zoom-in').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.2); });
 $('#zoom-out').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1 / 1.2); });

@@ -64,3 +64,12 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .thumbs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.thumbs img,#p-result{width:100%;border-radius:8px;border:1px solid var(--line);background:#222;display:block}
 .thumbs figure{margin:0}.thumbs figcaption{font-size:11px;color:var(--muted)}
 ul.res{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}ul.res li small{display:block;color:var(--muted)}ul.res a{color:var(--accent)}
+#svg-preview svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.print-only{display:none}
+@media print{
+  html,body{background:#fff;color:#000;margin:0;padding:0;height:auto}
+  header,main,dialog,#toast,#top,#left,#right,#stage,#toolbar,#bar3d{display:none !important}
+  .print-only,#print-sheet{display:block !important;position:absolute;left:0;top:0;width:100%;height:100%;margin:0;padding:0}
+  #print-sheet svg{width:100% !important;height:100% !important;display:block}
+  @page{margin:0;size:auto}
+}

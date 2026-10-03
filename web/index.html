@@ -20,6 +20,8 @@
   <button id="save">Save</button>
   <button id="load">Open</button>
   <button id="png">PNG</button>
+  <button id="svg-btn">Export SVG</button>
+  <button id="print-btn">Print Sheet</button>
   <button id="report">Code report</button>
   <input type="file" id="file" accept="application/json" hidden>
 </header>
@@ -87,6 +89,22 @@
     <p class="note">Generated images are AI interpretations, not construction documents. Check each service's terms before commercial use.</p>
   </div>
 </dialog>
+<dialog id="dlg-export">
+  <form method="dialog" class="dlg-head"><h2>SVG Vector Export &amp; Print Sheet</h2><button value="close">✕</button></form>
+  <div class="dlg-body">
+    <div class="row"><label>Sheet Size</label><select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></select></div>
+    <div class="row"><label>Orientation</label><select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></select></div>
+    <div class="row"><label>Scale</label><select id="e-scale"><option value="fit" selected>Fit to Page</option><option value="1/4">1/4" = 1'-0" (1:48)</option><option value="1/8">1/8" = 1'-0" (1:96)</option><option value="1/2">1/2" = 1'-0" (1:24)</option></select></div>
+    <div class="row"><label>Floor Level</label><select id="e-level"></select></div>
+    <div id="svg-preview" style="border:1px solid var(--line);border-radius:6px;padding:10px;background:#fff;margin:12px 0;max-height:300px;overflow:auto;text-align:center"></div>
+    <div class="btns">
+      <button id="e-download" class="primary">Download Vector SVG</button>
+      <button id="e-print" class="primary">Print / Save PDF</button>
+    </div>
+    <p class="note">For PDF prints: set page scale to 100% and enable background graphics in your browser's print dialog.</p>
+  </div>
+</dialog>
+<div id="print-sheet" class="print-only"></div>
 <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>
