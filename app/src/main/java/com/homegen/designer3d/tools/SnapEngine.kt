@@ -31,17 +31,16 @@ object SnapEngine {
     }
 
     /**
-     * Find the closest point on a line segment (a→b) to a given [point], in xz-plane.
-     * Returns the snapped point (y preserved from input) and the distance.
+     * Find the closest point on a line segment (a→b) to a given [point] in 3D space.
+     * Returns the snapped point and the distance to [point].
      */
     fun closestPointOnSegment(point: Vector3, a: Vector3, b: Vector3): Pair<Vector3, Float> {
-        val ab = Vector3(b.x - a.x, 0f, b.z - a.z)
-        val ap = Vector3(point.x - a.x, 0f, point.z - a.z)
-        val abLenSq = ab.x * ab.x + ab.z * ab.z
-        if (abLenSq < 1e-8f) return a to point.distanceTo(a)
+        val seg = b - a
+        val lenSq = seg.dot(seg)
+        if (lenSq < 1e-8f) return a to point.distanceTo(a)
 
-        val t = ((ap.x * ab.x + ap.z * ab.z) / abLenSq).coerceIn(0f, 1f)
-        val closest = Vector3(a.x + ab.x * t, point.y, a.z + ab.z * t)
+        val t = ((point - a).dot(seg) / lenSq).coerceIn(0f, 1f)
+        val closest = a + seg * t
         return closest to point.distanceTo(closest)
     }
 

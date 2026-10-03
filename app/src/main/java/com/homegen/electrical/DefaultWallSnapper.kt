@@ -2,6 +2,7 @@ package com.homegen.electrical
 
 import com.homegen.designer3d.math.Vector3
 import com.homegen.designer3d.model.Wall
+import com.homegen.designer3d.tools.SnapEngine
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -28,8 +29,7 @@ class DefaultWallSnapper(
             val start = Vector3(pos.x - dx, pos.y, pos.z - dz)
             val end = Vector3(pos.x + dx, pos.y, pos.z + dz)
 
-            val projected = closestPointOnLine(point, start, end)
-            val dist = projected.distanceTo(point)
+            val (projected, dist) = SnapEngine.closestPointOnSegment(point, start, end)
 
             if (dist < bestDistance && dist <= snapThreshold) {
                 bestDistance = dist
@@ -38,14 +38,5 @@ class DefaultWallSnapper(
         }
 
         return bestPoint
-    }
-
-    private fun closestPointOnLine(point: Vector3, start: Vector3, end: Vector3): Vector3 {
-        val seg = end - start
-        val lenSq = seg.dot(seg)
-        if (lenSq == 0f) return start
-
-        val t = ((point - start).dot(seg) / lenSq).coerceIn(0f, 1f)
-        return start + seg * t
     }
 }
