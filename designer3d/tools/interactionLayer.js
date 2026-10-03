@@ -25,7 +25,8 @@ class InteractionLayer {
 
   resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options = {}) {
     if (!room) throw new Error('resizeRoomWithConstraints: room is required');
-    if (handleIndexOrId === undefined || handleIndexOrId === null) throw new Error('resizeRoomWithConstraints: handleIndexOrId is required');
+    if (handleIndexOrId === undefined || handleIndexOrId === null)
+      throw new Error('resizeRoomWithConstraints: handleIndexOrId is required');
     if (!pointerPoint) throw new Error('resizeRoomWithConstraints: pointerPoint is required');
     return resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options);
   }

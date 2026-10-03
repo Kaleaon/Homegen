@@ -20,10 +20,38 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
   test('getConstraintHandles returns 4 corner handles', () => {
     const handles = getConstraintHandles(room);
     expect(handles).toHaveLength(4);
-    expect(handles[0]).toEqual({ id: 'nw', index: 0, x: 0, y: 0, cursor: 'nwse-resize', name: 'Top-Left' });
-    expect(handles[1]).toEqual({ id: 'ne', index: 1, x: 144, y: 0, cursor: 'nesw-resize', name: 'Top-Right' });
-    expect(handles[2]).toEqual({ id: 'sw', index: 2, x: 0, y: 120, cursor: 'nesw-resize', name: 'Bottom-Left' });
-    expect(handles[3]).toEqual({ id: 'se', index: 3, x: 144, y: 120, cursor: 'nwse-resize', name: 'Bottom-Right' });
+    expect(handles[0]).toEqual({
+      id: 'nw',
+      index: 0,
+      x: 0,
+      y: 0,
+      cursor: 'nwse-resize',
+      name: 'Top-Left',
+    });
+    expect(handles[1]).toEqual({
+      id: 'ne',
+      index: 1,
+      x: 144,
+      y: 0,
+      cursor: 'nesw-resize',
+      name: 'Top-Right',
+    });
+    expect(handles[2]).toEqual({
+      id: 'sw',
+      index: 2,
+      x: 0,
+      y: 120,
+      cursor: 'nesw-resize',
+      name: 'Bottom-Left',
+    });
+    expect(handles[3]).toEqual({
+      id: 'se',
+      index: 3,
+      x: 144,
+      y: 120,
+      cursor: 'nwse-resize',
+      name: 'Bottom-Right',
+    });
   });
 
   test('InteractionLayer getConstraintHandles matches utility', () => {
