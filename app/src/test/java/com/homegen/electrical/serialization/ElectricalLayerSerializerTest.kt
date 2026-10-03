@@ -27,20 +27,23 @@ class ElectricalLayerSerializerTest {
     fun `layer with nodes circuits and routes round trips`() {
         val layer = ElectricalLayer()
         layer.addNode(
-            ElectricalNode("n1", ElectricalNodeType.PANEL, Vector3(0f, 1f, 2f), "w1", 0.0)
+            ElectricalNode("n1", ElectricalNodeType.PANEL, Vector3(0f, 1f, 2f), "w1", 0.0),
         )
         layer.addNode(
-            ElectricalNode("n2", ElectricalNodeType.OUTLET, Vector3(3f, 1f, 2f), "w2", 12.0)
+            ElectricalNode("n2", ElectricalNodeType.OUTLET, Vector3(3f, 1f, 2f), "w2", 12.0),
         )
         layer.addCircuit(
-            Circuit("c1", "Kitchen", "#FF0000", 20.0, listOf("n1", "n2"), listOf("r1"))
+            Circuit("c1", "Kitchen", "#FF0000", 20.0, listOf("n1", "n2"), listOf("r1")),
         )
         layer.addRoute(
             WireRoute(
-                "r1", "c1", "n1", "n2",
+                "r1",
+                "c1",
+                "n1",
+                "n2",
                 listOf(Vector3(0f, 1f, 2f), Vector3(1.5f, 1f, 2f), Vector3(3f, 1f, 2f)),
-                mapOf("conduit" to "EMT")
-            )
+                mapOf("conduit" to "EMT"),
+            ),
         )
 
         val json = ElectricalLayerSerializer.encode(layer)

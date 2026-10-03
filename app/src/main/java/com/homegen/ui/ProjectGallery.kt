@@ -31,13 +31,13 @@ fun ProjectGallery(
 
     LazyColumn(
         modifier = Modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(projects, key = { it.name }) { project ->
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onProjectSelected(project.name) }
+                    .clickable { onProjectSelected(project.name) },
             ) {
                 Row(
                     modifier = Modifier

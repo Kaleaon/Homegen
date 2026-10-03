@@ -9,7 +9,7 @@ class AndroidEditingContext(
     private val onShowOverlay: (String) -> Unit,
     private val onHideOverlay: (String) -> Unit,
     private val onSetLegend: (String, String) -> Unit,
-    private var is3DMode: Boolean = true
+    private var is3DMode: Boolean = true,
 ) : EditingContext {
 
     override fun isIn3DMode(): Boolean = is3DMode

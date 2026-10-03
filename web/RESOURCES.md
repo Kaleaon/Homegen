@@ -4,13 +4,13 @@ Checked against the live services on 2026-10-01. Terms change, so re-check befor
 
 ## How the app uses them
 
-| Feature (3D view) | Resource | Notes |
-|---|---|---|
-| **HD textures** checkbox | [Poly Haven](https://polyhaven.com) PBR textures (CC0) | 9 finishes map to real photo-scanned textures (diffuse, normal, roughness at 1k). Streamed on demand; falls back to the built-in procedural look offline. See `HD_MATERIALS` in `js/resources.js`. |
-| **Sky** menu | Poly Haven HDRIs (CC0) | 1k `.hdr` files streamed for lighting and reflections. "Studio" is built in and works offline. |
-| **Photoreal… → AI Horde** | [AI Horde](https://aihorde.net) | Sends a *depth ControlNet* guide rendered from your 3D view plus an auto-written prompt, so the picture follows your actual layout. |
-| **Photoreal… → Pollinations** | [Pollinations](https://pollinations.ai) | Instant, no key, but prompt-only: it cannot see your layout. |
-| **Download guides + prompt** | any local tool | Beauty PNG, depth PNG and prompt for ComfyUI / Automatic1111 / Fooocus. |
+| Feature (3D view)             | Resource                                               | Notes                                                                                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **HD textures** checkbox      | [Poly Haven](https://polyhaven.com) PBR textures (CC0) | 9 finishes map to real photo-scanned textures (diffuse, normal, roughness at 1k). Streamed on demand; falls back to the built-in procedural look offline. See `HD_MATERIALS` in `js/resources.js`. |
+| **Sky** menu                  | Poly Haven HDRIs (CC0)                                 | 1k `.hdr` files streamed for lighting and reflections. "Studio" is built in and works offline.                                                                                                     |
+| **Photoreal… → AI Horde**     | [AI Horde](https://aihorde.net)                        | Sends a _depth ControlNet_ guide rendered from your 3D view plus an auto-written prompt, so the picture follows your actual layout.                                                                |
+| **Photoreal… → Pollinations** | [Pollinations](https://pollinations.ai)                | Instant, no key, but prompt-only: it cannot see your layout.                                                                                                                                       |
+| **Download guides + prompt**  | any local tool                                         | Beauty PNG, depth PNG and prompt for ComfyUI / Automatic1111 / Fooocus.                                                                                                                            |
 
 ## What we verified
 

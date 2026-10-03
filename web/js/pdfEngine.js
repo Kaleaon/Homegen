@@ -15,12 +15,33 @@ export const SHEET_SIZES = {
 
 // Scale definitions (model is in inches; 1 in paper = 72 pt)
 export const SCALE_OPTIONS = {
-  '1/4"=1\'0"': { label: '1/4" = 1\'-0" (1:48)', ptPerInch: 1.5, ratioStr: '1/4" = 1\'-0"', feetPerSeg: 4 },
-  '1/8"=1\'0"': { label: '1/8" = 1\'-0" (1:96)', ptPerInch: 0.75, ratioStr: '1/8" = 1\'-0"', feetPerSeg: 8 },
-  '1/2"=1\'0"': { label: '1/2" = 1\'-0" (1:24)', ptPerInch: 3.0, ratioStr: '1/2" = 1\'-0"', feetPerSeg: 2 },
+  '1/4"=1\'0"': {
+    label: '1/4" = 1\'-0" (1:48)',
+    ptPerInch: 1.5,
+    ratioStr: '1/4" = 1\'-0"',
+    feetPerSeg: 4,
+  },
+  '1/8"=1\'0"': {
+    label: '1/8" = 1\'-0" (1:96)',
+    ptPerInch: 0.75,
+    ratioStr: '1/8" = 1\'-0"',
+    feetPerSeg: 8,
+  },
+  '1/2"=1\'0"': {
+    label: '1/2" = 1\'-0" (1:24)',
+    ptPerInch: 3.0,
+    ratioStr: '1/2" = 1\'-0"',
+    feetPerSeg: 2,
+  },
   '1:50': { label: '1:50 (Metric)', ptPerInch: 1.44, ratioStr: '1:50', metric: true, mPerSeg: 1 },
-  '1:100': { label: '1:100 (Metric)', ptPerInch: 0.72, ratioStr: '1:100', metric: true, mPerSeg: 2 },
-  'fit': { label: 'Fit to Page', fit: true, ratioStr: 'Fit to Page' },
+  '1:100': {
+    label: '1:100 (Metric)',
+    ptPerInch: 0.72,
+    ratioStr: '1:100',
+    metric: true,
+    mPerSeg: 2,
+  },
+  fit: { label: 'Fit to Page', fit: true, ratioStr: 'Fit to Page' },
 };
 
 const fmtLen = (inches) => {
@@ -38,8 +59,14 @@ export function generatePDF(docState, options = {}) {
   const sheetDef = SHEET_SIZES[sheetKey] || SHEET_SIZES.Letter;
   const orientation = options.orientation === 'portrait' ? 'portrait' : 'landscape';
 
-  const pageWidth = orientation === 'landscape' ? Math.max(sheetDef.w, sheetDef.h) : Math.min(sheetDef.w, sheetDef.h);
-  const pageHeight = orientation === 'landscape' ? Math.min(sheetDef.w, sheetDef.h) : Math.max(sheetDef.w, sheetDef.h);
+  const pageWidth =
+    orientation === 'landscape'
+      ? Math.max(sheetDef.w, sheetDef.h)
+      : Math.min(sheetDef.w, sheetDef.h);
+  const pageHeight =
+    orientation === 'landscape'
+      ? Math.min(sheetDef.w, sheetDef.h)
+      : Math.max(sheetDef.w, sheetDef.h);
 
   const pdf = new jsPDF({
     orientation,
@@ -48,9 +75,10 @@ export function generatePDF(docState, options = {}) {
   });
 
   const levelOpt = options.level !== undefined ? options.level : 'all';
-  const levelsToDraw = levelOpt === 'all'
-    ? Array.from(new Set(docState.rooms.map((r) => r.level || 0))).sort((a, b) => a - b)
-    : [parseInt(levelOpt, 10) || 0];
+  const levelsToDraw =
+    levelOpt === 'all'
+      ? Array.from(new Set(docState.rooms.map((r) => r.level || 0))).sort((a, b) => a - b)
+      : [parseInt(levelOpt, 10) || 0];
 
   if (levelsToDraw.length === 0) levelsToDraw.push(0);
 
@@ -67,8 +95,13 @@ export function generatePDF(docState, options = {}) {
     totalPages++;
 
     // Compute sheet content areas
-    const borderRect = { x: margin, y: margin, w: pageWidth - margin * 2, h: pageHeight - margin * 2 };
-    
+    const borderRect = {
+      x: margin,
+      y: margin,
+      w: pageWidth - margin * 2,
+      h: pageHeight - margin * 2,
+    };
+
     // Draw sheet border
     drawSheetBorder(pdf, borderRect);
 
@@ -105,7 +138,10 @@ export function generatePDF(docState, options = {}) {
     let actualRatioStr = scaleOpt.ratioStr;
 
     // Model bounds
-    let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
     for (const r of levelRooms) {
       if (r.x < minX) minX = r.x;
       if (r.y < minY) minY = r.y;
@@ -113,7 +149,12 @@ export function generatePDF(docState, options = {}) {
       if (r.y + r.h > maxY) maxY = r.y + r.h;
     }
 
-    if (minX === Infinity) { minX = 0; minY = 0; maxX = 240; maxY = 240; }
+    if (minX === Infinity) {
+      minX = 0;
+      minY = 0;
+      maxX = 240;
+      maxY = 240;
+    }
     const modelW = maxX - minX;
     const modelH = maxY - minY;
 
@@ -202,7 +243,7 @@ function drawFloorplanVector(pdf, state, levelRooms, transform) {
 
     const fDef = FLOOR_BY_ID[room.floor];
     const roomType = ROOM_TYPES[room.type] || { color: '#f7f5f0' };
-    
+
     pdf.setFillColor(roomType.color || '#f7f5f0');
     pdf.setDrawColor('#cccccc');
     pdf.setLineWidth(0.4);
@@ -337,10 +378,13 @@ function drawOpeningVector(pdf, room, o, transform) {
   } else {
     // Door leaf and swing arc
     const dir = o.swing === 'out' ? -1 : 1;
-    const nx = s.nx * dir; const ny = s.ny * dir;
+    const nx = s.nx * dir;
+    const ny = s.ny * dir;
 
-    const hx = a.x; const hy = a.y;
-    const lx = hx + nx * o.width; const ly = hy + ny * o.width;
+    const hx = a.x;
+    const hy = a.y;
+    const lx = hx + nx * o.width;
+    const ly = hy + ny * o.width;
 
     // Door leaf line
     pdf.setDrawColor('#2d2a26');
@@ -348,7 +392,8 @@ function drawOpeningVector(pdf, room, o, transform) {
     pdf.line(toPdfX(hx), toPdfY(hy), toPdfX(lx), toPdfY(ly));
 
     // Swing arc
-    const ex = hx + s.dx * o.width; const ey = hy + s.dy * o.width;
+    const ex = hx + s.dx * o.width;
+    const ey = hy + s.dy * o.width;
     const ang0 = Math.atan2(ny * o.width, nx * o.width);
     const ang1 = Math.atan2(s.dy * o.width, s.dx * o.width);
 
@@ -417,7 +462,12 @@ function drawItemVector(pdf, room, item, def, transform) {
     if (def.shape === 'light') sym = '*';
     else if (def.shape === 'fan') sym = 'F';
     else if (def.shape === 'alarm') {
-      sym = (def.func || []).includes('co') && (def.func || []).includes('smoke') ? 'S+C' : (def.func || []).includes('co') ? 'CO' : 'S';
+      sym =
+        (def.func || []).includes('co') && (def.func || []).includes('smoke')
+          ? 'S+C'
+          : (def.func || []).includes('co')
+            ? 'CO'
+            : 'S';
     }
     pdf.text(sym, cx, cy + rPt * 0.3, { align: 'center' });
     return;
@@ -438,7 +488,14 @@ function drawItemVector(pdf, room, item, def, transform) {
     return { x: toPdfX(wx), y: toPdfY(wy) };
   };
 
-  const drawLocalRect = (lx, ly, lw, lh, fillColor = def.color || '#dddddd', strokeColor = '#333333') => {
+  const drawLocalRect = (
+    lx,
+    ly,
+    lw,
+    lh,
+    fillColor = def.color || '#dddddd',
+    strokeColor = '#333333'
+  ) => {
     const p0 = transformPoint(lx, ly);
     const p1 = transformPoint(lx + lw, ly);
     const p2 = transformPoint(lx + lw, ly + lh);
@@ -554,7 +611,9 @@ function drawGraphicScaleBar(pdf, x, y, scalePt, scaleOpt, ratioStr) {
   pdf.text(`SCALE: ${ratioStr}`, x, y - 4);
 
   const metric = scaleOpt.metric;
-  const stepModelUnits = metric ? (scaleOpt.mPerSeg || 1) * 39.3701 : (scaleOpt.feetPerSeg || 4) * 12;
+  const stepModelUnits = metric
+    ? (scaleOpt.mPerSeg || 1) * 39.3701
+    : (scaleOpt.feetPerSeg || 4) * 12;
   const segCount = 4;
   const segPtWidth = stepModelUnits * scalePt;
   const barHeight = 4;
@@ -569,12 +628,16 @@ function drawGraphicScaleBar(pdf, x, y, scalePt, scaleOpt, ratioStr) {
     // Label
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(5.5);
-    const labelVal = metric ? `${k * (scaleOpt.mPerSeg || 1)}m` : `${k * (scaleOpt.feetPerSeg || 4)}'`;
+    const labelVal = metric
+      ? `${k * (scaleOpt.mPerSeg || 1)}m`
+      : `${k * (scaleOpt.feetPerSeg || 4)}'`;
     pdf.text(labelVal, segX, y + barHeight + 8, { align: 'center' });
   }
 
   // Final end label
-  const endVal = metric ? `${segCount * (scaleOpt.mPerSeg || 1)}m` : `${segCount * (scaleOpt.feetPerSeg || 4)}'`;
+  const endVal = metric
+    ? `${segCount * (scaleOpt.mPerSeg || 1)}m`
+    : `${segCount * (scaleOpt.feetPerSeg || 4)}'`;
   pdf.text(endVal, x + segCount * segPtWidth, y + barHeight + 8, { align: 'center' });
 }
 
@@ -582,30 +645,48 @@ function drawGraphicScaleBar(pdf, x, y, scalePt, scaleOpt, ratioStr) {
  * Renders the Room Schedule Table across one or multiple pages.
  */
 function drawRoomSchedulePages(pdf, docState, opts) {
-  const { pageWidth, pageHeight, margin, orientation, projectTitle, designer, date, includeTitleBlock } = opts;
+  const {
+    pageWidth,
+    pageHeight,
+    margin,
+    orientation,
+    projectTitle,
+    designer,
+    date,
+    includeTitleBlock,
+  } = opts;
 
   pdf.addPage([pageWidth, pageHeight], orientation);
 
-  const borderRect = { x: margin, y: margin, w: pageWidth - margin * 2, h: pageHeight - margin * 2 };
+  const borderRect = {
+    x: margin,
+    y: margin,
+    w: pageWidth - margin * 2,
+    h: pageHeight - margin * 2,
+  };
   drawSheetBorder(pdf, borderRect);
 
   if (includeTitleBlock) {
     const tbWidth = Math.min(220, borderRect.w * 0.35);
     const tbHeight = 64;
-    drawTitleBlock(pdf, {
-      x: borderRect.x + borderRect.w - tbWidth,
-      y: borderRect.y + borderRect.h - tbHeight,
-      w: tbWidth,
-      h: tbHeight,
-    }, {
-      projectTitle,
-      designer,
-      date,
-      sheetTitle: 'ROOM SCHEDULE',
-      sheetNumber: 'A-201',
-      scaleLabel: 'N/A (SCHEDULE)',
-      notes: '',
-    });
+    drawTitleBlock(
+      pdf,
+      {
+        x: borderRect.x + borderRect.w - tbWidth,
+        y: borderRect.y + borderRect.h - tbHeight,
+        w: tbWidth,
+        h: tbHeight,
+      },
+      {
+        projectTitle,
+        designer,
+        date,
+        sheetTitle: 'ROOM SCHEDULE',
+        sheetNumber: 'A-201',
+        scaleLabel: 'N/A (SCHEDULE)',
+        notes: '',
+      }
+    );
   }
 
   // Header banner
@@ -620,7 +701,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
 
   const cols = [
     { name: 'ROOM NAME', w: tableWidth * 0.28 },
-    { name: 'TYPE', w: tableWidth * 0.20 },
+    { name: 'TYPE', w: tableWidth * 0.2 },
     { name: 'LEVEL', w: tableWidth * 0.12 },
     { name: 'DIMENSIONS', w: tableWidth * 0.22 },
     { name: 'NET AREA', w: tableWidth * 0.18 },
@@ -662,20 +743,24 @@ function drawRoomSchedulePages(pdf, docState, opts) {
       if (includeTitleBlock) {
         const tbWidth = Math.min(220, borderRect.w * 0.35);
         const tbHeight = 64;
-        drawTitleBlock(pdf, {
-          x: borderRect.x + borderRect.w - tbWidth,
-          y: borderRect.y + borderRect.h - tbHeight,
-          w: tbWidth,
-          h: tbHeight,
-        }, {
-          projectTitle,
-          designer,
-          date,
-          sheetTitle: 'ROOM SCHEDULE (CONT.)',
-          sheetNumber: 'A-202',
-          scaleLabel: 'N/A (SCHEDULE)',
-          notes: '',
-        });
+        drawTitleBlock(
+          pdf,
+          {
+            x: borderRect.x + borderRect.w - tbWidth,
+            y: borderRect.y + borderRect.h - tbHeight,
+            w: tbWidth,
+            h: tbHeight,
+          },
+          {
+            projectTitle,
+            designer,
+            date,
+            sheetTitle: 'ROOM SCHEDULE (CONT.)',
+            sheetNumber: 'A-202',
+            scaleLabel: 'N/A (SCHEDULE)',
+            notes: '',
+          }
+        );
       }
       currentY = startY;
       drawTableHeader(currentY);

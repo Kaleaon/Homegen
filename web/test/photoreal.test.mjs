@@ -120,7 +120,10 @@ function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) 
 test('toWebpDataUrl encodes depth guide asynchronously using OffscreenCanvas when available', async () => {
   const env = setupEnvironment({ useOffscreen: true });
   try {
-    const result = await toWebpDataUrl('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 512);
+    const result = await toWebpDataUrl(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      512
+    );
     assert.match(result, /^data:image\/webp;base64,/);
     assert.equal(env.wasOffscreenCalled(), true);
     assert.equal(env.wasCanvasToBlobCalled(), false);
@@ -132,7 +135,10 @@ test('toWebpDataUrl encodes depth guide asynchronously using OffscreenCanvas whe
 test('toWebpDataUrl falls back to asynchronous canvas.toBlob() when OffscreenCanvas is unavailable', async () => {
   const env = setupEnvironment({ useOffscreen: false });
   try {
-    const result = await toWebpDataUrl('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 512);
+    const result = await toWebpDataUrl(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      512
+    );
     assert.match(result, /^data:image\/webp;base64,/);
     assert.equal(env.wasOffscreenCalled(), false);
     assert.equal(env.wasCanvasToBlobCalled(), true);
@@ -144,7 +150,10 @@ test('toWebpDataUrl falls back to asynchronous canvas.toBlob() when OffscreenCan
 test('toWebpDataUrl falls back to canvas.toBlob() if OffscreenCanvas.convertToBlob fails', async () => {
   const env = setupEnvironment({ useOffscreen: true, offscreenFails: true });
   try {
-    const result = await toWebpDataUrl('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 512);
+    const result = await toWebpDataUrl(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      512
+    );
     assert.match(result, /^data:image\/webp;base64,/);
     assert.equal(env.wasCanvasToBlobCalled(), true);
   } finally {
@@ -165,11 +174,14 @@ test('toWebpDataUrl revokes temporary Blob URL when given a Blob input', async (
   }
 });
 
-
 test('hordeRender retries network drops during polling up to 3 times and succeeds when network recovers', async () => {
   let checkAttempts = 0;
   const fakeFetch = async (url) => {
-    const ok = (o, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => o });
+    const ok = (o, status = 200) => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => o,
+    });
     if (url.endsWith('/generate/async')) {
       return ok({ id: 'job-net-retry' });
     }
@@ -370,5 +382,8 @@ test('hordeRender abort signal cancels polling cleanly and sends delete request'
     return true;
   });
 
-  assert.ok(deletedJobs.some((u) => u.includes('/generate/status/job-abort')), 'sent DELETE request to cancel job on Horde');
+  assert.ok(
+    deletedJobs.some((u) => u.includes('/generate/status/job-abort')),
+    'sent DELETE request to cancel job on Horde'
+  );
 });

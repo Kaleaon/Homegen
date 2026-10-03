@@ -76,9 +76,7 @@ describe('getSnappedPoint', () => {
       [SNAP_MODES.PERPENDICULAR]: false,
     });
 
-    const edges = [
-      { start: { x: 0, y: 0 }, end: { x: 2, y: 0 }, index: 0 },
-    ];
+    const edges = [{ start: { x: 0, y: 0 }, end: { x: 2, y: 0 }, index: 0 }];
 
     const result = getSnappedPoint({
       point: { x: 1, y: 0.1 },
@@ -103,9 +101,7 @@ describe('getSnappedPoint', () => {
       [SNAP_MODES.PERPENDICULAR]: false,
     });
 
-    const edges = [
-      { start: { x: 0, y: 0 }, end: { x: 2, y: 0 }, index: 0 },
-    ];
+    const edges = [{ start: { x: 0, y: 0 }, end: { x: 2, y: 0 }, index: 0 }];
 
     const result = getSnappedPoint({
       point: { x: 1.05, y: 0.05 },
@@ -132,9 +128,7 @@ describe('getSnappedPoint', () => {
       [SNAP_MODES.PERPENDICULAR]: false,
     });
 
-    const edges = [
-      { start: { x: 0, y: 0.05 }, end: { x: 2, y: 0.05 }, index: 0 },
-    ];
+    const edges = [{ start: { x: 0, y: 0.05 }, end: { x: 2, y: 0.05 }, index: 0 }];
 
     // Point at (0.9, 0.1) — grid snap would go to (1, 0), edge snap to (0.9, 0.05)
     const result = getSnappedPoint({

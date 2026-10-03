@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 data class ElectricalLayerData(
     val nodes: List<ElectricalNodeData> = emptyList(),
     val circuits: List<CircuitData> = emptyList(),
-    val routes: List<WireRouteData> = emptyList()
+    val routes: List<WireRouteData> = emptyList(),
 )
 
 @Serializable
@@ -15,7 +15,7 @@ data class ElectricalNodeData(
     val type: String,
     val wallId: String? = null,
     val expectedLoadAmps: Double,
-    val location: Vec3Data
+    val location: Vec3Data,
 )
 
 @Serializable
@@ -25,7 +25,7 @@ data class CircuitData(
     val colorHex: String,
     val breakerAmps: Double,
     val nodeIds: List<String> = emptyList(),
-    val routeIds: List<String> = emptyList()
+    val routeIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -35,12 +35,12 @@ data class WireRouteData(
     val fromNodeId: String,
     val toNodeId: String,
     val path: List<Vec3Data>,
-    val metadata: Map<String, String> = emptyMap()
+    val metadata: Map<String, String> = emptyMap(),
 )
 
 @Serializable
 data class Vec3Data(
     val x: Float,
     val y: Float,
-    val z: Float
+    val z: Float,
 )

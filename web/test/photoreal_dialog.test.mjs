@@ -17,7 +17,10 @@ test('web/index.html includes required ARIA attributes on photoreal dialog and c
   assert.match(html, /<h2\s+id="photo-title">Photoreal render<\/h2>/);
 
   // Verify header close button has aria-label="Close photoreal render"
-  assert.match(html, /<button\s+value="close"\s+aria-label="Close photoreal render"><span\s+aria-hidden="true">✕<\/span><\/button>/);
+  assert.match(
+    html,
+    /<button\s+value="close"\s+aria-label="Close photoreal render"><span\s+aria-hidden="true">✕<\/span><\/button>/
+  );
 });
 
 test('web/js/ui3d.js manages focus when opening and closing photoreal dialog', async () => {

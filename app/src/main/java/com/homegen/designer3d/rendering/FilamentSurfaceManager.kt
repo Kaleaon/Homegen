@@ -13,7 +13,6 @@ import com.google.android.filament.Viewport
 import com.google.android.filament.android.DisplayHelper
 import com.google.android.filament.android.UiHelper
 import com.homegen.designer3d.SceneController
-import com.homegen.designer3d.camera.CameraController
 
 /**
  * Encapsulates the Filament engine lifecycle: init, frame loop, destroy.

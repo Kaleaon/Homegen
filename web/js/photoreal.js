@@ -11,7 +11,8 @@ export const STYLES = {
   boho: 'bohemian eclectic',
 };
 
-export const NEGATIVE = 'cartoon, illustration, 3d render, cgi, low quality, blurry, distorted perspective, warped furniture, text, watermark, people';
+export const NEGATIVE =
+  'cartoon, illustration, 3d render, cgi, low quality, blurry, distorted perspective, warped furniture, text, watermark, people';
 
 const ft = (inches) => Math.round(inches / 12);
 const count = (arr) => arr.reduce((m, k) => m.set(k, (m.get(k) || 0) + 1), new Map());
@@ -20,11 +21,24 @@ const count = (arr) => arr.reduce((m, k) => m.set(k, (m.get(k) || 0) + 1), new M
 export function buildPrompt(room, style = 'modern') {
   const ir = interior(room);
   const floor = FLOOR_BY_ID[room.floor]?.name.toLowerCase() || 'wood';
-  const walls = [...count(Object.values(room.walls)).entries()].sort((a, b) => b[1] - a[1]).map(([id]) => WALL_BY_ID[id]?.name.toLowerCase()).filter(Boolean);
-  const wallDesc = walls.length > 1 ? `${walls[0]} walls with ${walls[1]} accent` : `${walls[0] || 'painted'} walls`;
-  const furniture = [...count(room.items.map((i) => ITEM_BY_ID[i.type])
-    .filter((d) => d.mount === 'floor' && !d.flat && (d.cat !== 'decor' || d.shape === 'plant')).map((d) => d.name.toLowerCase())).entries()]
-    .slice(0, 8).map(([n, c]) => (c > 1 ? `${c} ${n}s` : `a ${n}`));
+  const walls = [...count(Object.values(room.walls)).entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => WALL_BY_ID[id]?.name.toLowerCase())
+    .filter(Boolean);
+  const wallDesc =
+    walls.length > 1
+      ? `${walls[0]} walls with ${walls[1]} accent`
+      : `${walls[0] || 'painted'} walls`;
+  const furniture = [
+    ...count(
+      room.items
+        .map((i) => ITEM_BY_ID[i.type])
+        .filter((d) => d.mount === 'floor' && !d.flat && (d.cat !== 'decor' || d.shape === 'plant'))
+        .map((d) => d.name.toLowerCase())
+    ).entries(),
+  ]
+    .slice(0, 8)
+    .map(([n, c]) => (c > 1 ? `${c} ${n}s` : `a ${n}`));
   const windows = room.openings.filter((o) => o.kind === 'window').length;
   const rug = room.items.some((i) => ITEM_BY_ID[i.type].shape === 'rug') ? ', an area rug' : '';
   return [
@@ -32,7 +46,9 @@ export function buildPrompt(room, style = 'modern') {
     `about ${ft(ir.w)} by ${ft(ir.h)} feet (${floorAreaSqFt(room).toFixed(0)} sq ft) with a ${ft(room.ceiling)} foot ceiling`,
     `${floor} flooring, ${wallDesc}`,
     furniture.length ? `furnished with ${furniture.join(', ')}${rug}` : 'unfurnished',
-    windows ? `${windows} window${windows > 1 ? 's' : ''} letting in soft natural daylight` : 'soft artificial lighting',
+    windows
+      ? `${windows} window${windows > 1 ? 's' : ''} letting in soft natural daylight`
+      : 'soft artificial lighting',
     'shot at eye level, 24mm lens, professional architectural photography, realistic materials and shadows, high detail',
   ].join(', ');
 }
@@ -82,10 +98,14 @@ export async function toWebpDataUrl(pngDataUrl, width = 768) {
       const ctx = c.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
       blob = await new Promise((res, rej) => {
-        c.toBlob((b) => {
-          if (b) res(b);
-          else rej(new Error('Canvas toBlob encoding failed'));
-        }, 'image/webp', 0.92);
+        c.toBlob(
+          (b) => {
+            if (b) res(b);
+            else rej(new Error('Canvas toBlob encoding failed'));
+          },
+          'image/webp',
+          0.92
+        );
       });
     }
 
@@ -129,7 +149,14 @@ function sleep(ms, signal) {
   });
 }
 
-async function fetchWithRetry(url, options, fetchImpl, signal, retries = 3, retryDelays = [1000, 2000, 4000]) {
+async function fetchWithRetry(
+  url,
+  options,
+  fetchImpl,
+  signal,
+  retries = 3,
+  retryDelays = [1000, 2000, 4000]
+) {
   let lastErr = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (signal?.aborted) {
@@ -149,7 +176,10 @@ async function fetchWithRetry(url, options, fetchImpl, signal, retries = 3, retr
       }
     }
   }
-  const netErr = new HordeError(`Network error while reaching AI Horde: ${lastErr?.message || 'Failed to fetch'}`, 'network');
+  const netErr = new HordeError(
+    `Network error while reaching AI Horde: ${lastErr?.message || 'Failed to fetch'}`,
+    'network'
+  );
   netErr.cause = lastErr;
   throw netErr;
 }
@@ -159,7 +189,11 @@ function classifyResponseError(status, message) {
     return new HordeError(message || `AI Horde authorization failed (${status})`, 'auth', status);
   }
   if (status === 429) {
-    return new HordeError(message || `AI Horde rate limit exceeded (${status})`, 'rate_limit', status);
+    return new HordeError(
+      message || `AI Horde rate limit exceeded (${status})`,
+      'rate_limit',
+      status
+    );
   }
   if (status >= 500) {
     return new HordeError(message || `AI Horde worker/server error (${status})`, 'fault', status);
@@ -187,13 +221,38 @@ export async function hordeRender({
   const [w, h] = depthWebp.size || [768, 576];
   const body = {
     prompt: `${prompt} ### ${NEGATIVE}`,
-    params: { sampler_name: 'k_euler_a', cfg_scale: 7, steps: apikey === '0000000000' ? 20 : 28, n: 1, width: w, height: h, karras: true, control_type: 'depth', image_is_control: true, control_strength: strength },
-    nsfw: false, censor_nsfw: true, r2: true, shared: false, slow_workers: true, replacement_filter: true, dry_run: dryRun,
-    source_image: rawBase64(depthWebp.url), source_processing: 'img2img',
+    params: {
+      sampler_name: 'k_euler_a',
+      cfg_scale: 7,
+      steps: apikey === '0000000000' ? 20 : 28,
+      n: 1,
+      width: w,
+      height: h,
+      karras: true,
+      control_type: 'depth',
+      image_is_control: true,
+      control_strength: strength,
+    },
+    nsfw: false,
+    censor_nsfw: true,
+    r2: true,
+    shared: false,
+    slow_workers: true,
+    replacement_filter: true,
+    dry_run: dryRun,
+    source_image: rawBase64(depthWebp.url),
+    source_processing: 'img2img',
   };
   const headers = { 'Content-Type': 'application/json', apikey, 'Client-Agent': CLIENT };
 
-  const res = await fetchWithRetry(`${HORDE}/generate/async`, { method: 'POST', headers, body: JSON.stringify(body) }, fetchImpl, signal, 3, retryDelays);
+  const res = await fetchWithRetry(
+    `${HORDE}/generate/async`,
+    { method: 'POST', headers, body: JSON.stringify(body) },
+    fetchImpl,
+    signal,
+    3,
+    retryDelays
+  );
   const job = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw classifyResponseError(res.status, job.message);
@@ -215,7 +274,14 @@ export async function hordeRender({
         throw new HordeError('AI Horde render job timed out after 15 minutes.', 'timeout');
       }
 
-      const checkRes = await fetchWithRetry(`${HORDE}/generate/check/${job.id}`, { headers: { 'Client-Agent': CLIENT } }, fetchImpl, signal, 3, retryDelays);
+      const checkRes = await fetchWithRetry(
+        `${HORDE}/generate/check/${job.id}`,
+        { headers: { 'Client-Agent': CLIENT } },
+        fetchImpl,
+        signal,
+        3,
+        retryDelays
+      );
       if (!checkRes.ok) {
         const checkErrData = await checkRes.json().catch(() => ({}));
         throw classifyResponseError(checkRes.status, checkErrData.message);
@@ -225,7 +291,11 @@ export async function hordeRender({
       if (c.faulted) {
         throw new HordeError('AI Horde job failed. Try again or lower the size.', 'fault');
       }
-      onStatus(c.done ? 'Finishing…' : `Queue position ${c.queue_position ?? '?'} · ~${c.wait_time ?? '?'}s${apikey === '0000000000' ? ' (anonymous; a free key is faster)' : ''}`);
+      onStatus(
+        c.done
+          ? 'Finishing…'
+          : `Queue position ${c.queue_position ?? '?'} · ~${c.wait_time ?? '?'}s${apikey === '0000000000' ? ' (anonymous; a free key is faster)' : ''}`
+      );
       if (c.done) break;
     } catch (err) {
       if (err.name === 'AbortError' || signal?.aborted) {
@@ -236,7 +306,14 @@ export async function hordeRender({
     }
   }
 
-  const stRes = await fetchWithRetry(`${HORDE}/generate/status/${job.id}`, { headers: { 'Client-Agent': CLIENT } }, fetchImpl, signal, 3, retryDelays);
+  const stRes = await fetchWithRetry(
+    `${HORDE}/generate/status/${job.id}`,
+    { headers: { 'Client-Agent': CLIENT } },
+    fetchImpl,
+    signal,
+    3,
+    retryDelays
+  );
   if (!stRes.ok) {
     const stErrData = await stRes.json().catch(() => ({}));
     throw classifyResponseError(stRes.status, stErrData.message);

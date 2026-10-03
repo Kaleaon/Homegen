@@ -17,7 +17,7 @@ import kotlinx.serialization.json.Json
 class CatalogRepository(
     private val context: Context,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     private val thumbnailCache = object : LruCache<String, Bitmap>((8 * 1024 * 1024)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
@@ -37,9 +37,11 @@ class CatalogRepository(
 
         return entries.filter { entry ->
             matchesCategory(entry, category) &&
-                (normalizedQuery.isBlank() ||
-                    entry.name.lowercase().contains(normalizedQuery) ||
-                    entry.tags.any { it.lowercase().contains(normalizedQuery) })
+                (
+                    normalizedQuery.isBlank() ||
+                        entry.name.lowercase().contains(normalizedQuery) ||
+                        entry.tags.any { it.lowercase().contains(normalizedQuery) }
+                    )
         }
     }
 

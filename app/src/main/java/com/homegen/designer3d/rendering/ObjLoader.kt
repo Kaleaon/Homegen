@@ -226,8 +226,12 @@ class ObjLoader(
         RenderableManager.Builder(1)
             .boundingBox(Box(cx, cy, cz, hx, hy, hz))
             .geometry(
-                0, RenderableManager.PrimitiveType.TRIANGLES,
-                vertexBuffer, indexBuffer, 0, parsed.indexCount
+                0,
+                RenderableManager.PrimitiveType.TRIANGLES,
+                vertexBuffer,
+                indexBuffer,
+                0,
+                parsed.indexCount,
             )
             .material(0, materialInstance)
             .castShadows(true)

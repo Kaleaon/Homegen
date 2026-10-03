@@ -11,7 +11,7 @@ import kotlin.math.sin
  */
 class DefaultWallSnapper(
     private val wallsProvider: () -> List<Wall>,
-    private val snapThreshold: Float = 0.5f
+    private val snapThreshold: Float = 0.5f,
 ) : WallSnapper {
 
     override fun snapToNearestWall(point: Vector3): Vector3 {

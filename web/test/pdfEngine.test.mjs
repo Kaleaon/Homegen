@@ -20,7 +20,11 @@ test('pdfEngine scale options map 1/4"=1\'0" scale correctly', () => {
 
   // 1 inch = 72 pt, so 18 pt = 0.25 inches (1/4 inch)
   const paperInches = paperPoints / 72;
-  assert.equal(paperInches, 0.25, '12 inches of model distance must map to 0.25 (1/4) inches on paper');
+  assert.equal(
+    paperInches,
+    0.25,
+    '12 inches of model distance must map to 0.25 (1/4) inches on paper'
+  );
 });
 
 test('generatePDF creates valid vector PDF for a sample home', () => {
@@ -106,5 +110,8 @@ test('generatePDF automatically paginates room schedule if many rooms present', 
   });
 
   const pageCount = pdf.getNumberOfPages();
-  assert.ok(pageCount >= 3, `PDF with 30 rooms must paginate across at least 3 pages (got ${pageCount})`);
+  assert.ok(
+    pageCount >= 3,
+    `PDF with 30 rooms must paginate across at least 3 pages (got ${pageCount})`
+  );
 });

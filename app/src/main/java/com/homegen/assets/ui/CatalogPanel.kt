@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -21,9 +20,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,7 +46,7 @@ fun CatalogPanel(
     repository: CatalogRepository,
     activeStyleTag: String? = null,
     onMaterialPicked: (MaterialEntry) -> Unit,
-    onPlaceablePicked: (PlaceableEntry) -> Unit
+    onPlaceablePicked: (PlaceableEntry) -> Unit,
 ) {
     var search by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(CatalogCategory.ALL) }
@@ -109,7 +105,7 @@ fun CatalogPanel(
         // Category chips — grouped for easier browsing
         CategoryChips(
             selectedCategory = selectedCategory,
-            onSelected = { selectedCategory = it }
+            onSelected = { selectedCategory = it },
         )
 
         // Items grid
@@ -186,7 +182,7 @@ private fun CatalogGridItem(
 @Composable
 private fun CategoryChips(
     selectedCategory: CatalogCategory,
-    onSelected: (CatalogCategory) -> Unit
+    onSelected: (CatalogCategory) -> Unit,
 ) {
     // Group categories logically
     val materialCategories = listOf(
@@ -221,14 +217,14 @@ private fun CategoryChips(
 
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items(allCategories.size) { index ->
             val category = allCategories[index]
             FilterChip(
                 selected = selectedCategory == category,
                 onClick = { onSelected(category) },
-                label = { Text(category.label) }
+                label = { Text(category.label) },
             )
         }
     }

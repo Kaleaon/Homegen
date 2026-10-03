@@ -47,13 +47,21 @@ test('renderViolationItem displays plain-language titles and technical citations
     severity: 'error',
     blocking: true,
     msg: 'Bedroom: habitable rooms need at least 70 sq ft (this is 36).',
-    fixable: true
+    fixable: true,
   };
 
   const html = renderViolationItem(violation);
   assert.match(html, /<b>Minimum Room Area<\/b>/, 'Header should be plain-language title');
-  assert.match(html, /<div class="msg">Bedroom: habitable rooms need at least 70 sq ft \(this is 36\)\.<\/div>/, 'Message body should be in .msg container');
-  assert.match(html, /<span class="ref" title="IRC R304\.1">IRC R304\.1 · auto-fixable<\/span>/, 'Citation should be formatted as secondary reference with tooltip');
+  assert.match(
+    html,
+    /<div class="msg">Bedroom: habitable rooms need at least 70 sq ft \(this is 36\)\.<\/div>/,
+    'Message body should be in .msg container'
+  );
+  assert.match(
+    html,
+    /<span class="ref" title="IRC R304\.1">IRC R304\.1 · auto-fixable<\/span>/,
+    'Citation should be formatted as secondary reference with tooltip'
+  );
 });
 
 test('renderViolationItem defaults gracefully to Design Guidance for unmapped or custom violations', () => {
@@ -63,10 +71,18 @@ test('renderViolationItem defaults gracefully to Design Guidance for unmapped or
     ref: 'CUSTOM 100',
     severity: 'warn',
     blocking: false,
-    msg: 'Custom rule warning.'
+    msg: 'Custom rule warning.',
   };
 
   const html = renderViolationItem(customViolation);
-  assert.match(html, /<b>Design Guidance<\/b>/, 'Unmapped violation should default title to Design Guidance');
-  assert.match(html, /<span class="ref" title="CUSTOM 100">CUSTOM 100<\/span>/, 'Secondary citation should render with tooltip');
+  assert.match(
+    html,
+    /<b>Design Guidance<\/b>/,
+    'Unmapped violation should default title to Design Guidance'
+  );
+  assert.match(
+    html,
+    /<span class="ref" title="CUSTOM 100">CUSTOM 100<\/span>/,
+    'Secondary citation should render with tooltip'
+  );
 });

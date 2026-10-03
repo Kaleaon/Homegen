@@ -26,10 +26,12 @@ object DesignStyleRepository {
         val q = query.trim().lowercase()
         return catalog.styles.filter { style ->
             matchesCategory(style, category) &&
-                (q.isBlank() ||
-                    style.name.lowercase().contains(q) ||
-                    style.tags.any { it.lowercase().contains(q) } ||
-                    style.description.lowercase().contains(q))
+                (
+                    q.isBlank() ||
+                        style.name.lowercase().contains(q) ||
+                        style.tags.any { it.lowercase().contains(q) } ||
+                        style.description.lowercase().contains(q)
+                    )
         }
     }
 

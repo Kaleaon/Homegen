@@ -12,16 +12,30 @@ test('canvas elements in index.html have correct focus and ARIA attributes', () 
   const html = fs.readFileSync(htmlPath, 'utf8');
 
   // #plan canvas check
-  assert.match(html, /<canvas\s+id="plan"\s+tabindex="0"\s+role="region"\s+aria-label="2D floor plan">\s*<\/canvas>/, '#plan canvas must accept focus with tabindex="0", role="region", and aria-label');
+  assert.match(
+    html,
+    /<canvas\s+id="plan"\s+tabindex="0"\s+role="region"\s+aria-label="2D floor plan">\s*<\/canvas>/,
+    '#plan canvas must accept focus with tabindex="0", role="region", and aria-label'
+  );
 
   // #view3d canvas check
-  assert.match(html, /<canvas\s+id="view3d"\s+tabindex="0"\s+role="region"\s+aria-label="3D viewport"/, '#view3d canvas must accept focus with tabindex="0", role="region", and aria-label');
+  assert.match(
+    html,
+    /<canvas\s+id="view3d"\s+tabindex="0"\s+role="region"\s+aria-label="3D viewport"/,
+    '#view3d canvas must accept focus with tabindex="0", role="region", and aria-label'
+  );
 });
 
 test('style.css defines focus rings for canvas elements', () => {
   const cssPath = path.join(__dirname, '../css/style.css');
   const css = fs.readFileSync(cssPath, 'utf8');
 
-  assert.ok(css.includes('#plan:focus') || css.includes('#plan:focus-visible'), 'CSS must include focus state for #plan');
-  assert.ok(css.includes('#view3d:focus') || css.includes('#view3d:focus-visible'), 'CSS must include focus state for #view3d');
+  assert.ok(
+    css.includes('#plan:focus') || css.includes('#plan:focus-visible'),
+    'CSS must include focus state for #plan'
+  );
+  assert.ok(
+    css.includes('#view3d:focus') || css.includes('#view3d:focus-visible'),
+    'CSS must include focus state for #view3d'
+  );
 });

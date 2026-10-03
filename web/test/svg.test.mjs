@@ -55,5 +55,8 @@ test('Graphic scale bar accurately displays feet and inches in viewbox units', (
 test('SVG uses standard system fonts', () => {
   const doc = M.newState();
   const svg = exportSVG(doc);
-  assert.ok(svg.includes('font-family: Arial, Helvetica, sans-serif;'), 'uses standard system fonts');
+  assert.ok(
+    svg.includes('font-family: Arial, Helvetica, sans-serif;'),
+    'uses standard system fonts'
+  );
 });

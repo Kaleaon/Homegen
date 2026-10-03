@@ -28,8 +28,13 @@ function createMockElement(id = '') {
       if (listeners[type]) listeners[type].forEach((fn) => fn(evt));
     },
     click: () => element.dispatchEvent('click'),
-    showModal: () => { element.hidden = false; },
-    close: () => { element.hidden = true; element.dispatchEvent('close'); },
+    showModal: () => {
+      element.hidden = false;
+    },
+    close: () => {
+      element.hidden = true;
+      element.dispatchEvent('close');
+    },
   };
   return element;
 }

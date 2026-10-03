@@ -38,9 +38,7 @@ test('Multi-mode snapping uses getSnappedPoint for grid, edge, and midpoint snap
     snapModes: { grid: true, edge: true, midpoint: true, perpendicular: false },
   });
 
-  const rooms = [
-    { id: 'r1', x: 0, y: 0, w: 120, h: 120, level: 0 },
-  ];
+  const rooms = [{ id: 'r1', x: 0, y: 0, w: 120, h: 120, level: 0 }];
   const edges = extractRoomEdges(rooms);
 
   // Near midpoint (60, 0) on North wall segment with midpoint mode active
@@ -49,7 +47,12 @@ test('Multi-mode snapping uses getSnappedPoint for grid, edge, and midpoint snap
     point: nearMidpoint,
     edges,
     settings: layer.gridSettings,
-    snapModes: new (layer.snapModes.constructor)({ grid: false, edge: false, midpoint: true, perpendicular: false }),
+    snapModes: new layer.snapModes.constructor({
+      grid: false,
+      edge: false,
+      midpoint: true,
+      perpendicular: false,
+    }),
   });
 
   assert.ok(snapped.snap);
@@ -59,9 +62,7 @@ test('Multi-mode snapping uses getSnappedPoint for grid, edge, and midpoint snap
 });
 
 test('validatePlacement and createPlacementFeedback return ghost preview and valid status', () => {
-  const existingRooms = [
-    roomToPolygon({ x: 0, y: 0, w: 120, h: 120 }),
-  ];
+  const existingRooms = [roomToPolygon({ x: 0, y: 0, w: 120, h: 120 })];
 
   // Candidate non-overlapping room
   const nonOverlappingCandidate = roomToPolygon({ x: 130, y: 0, w: 120, h: 120 });

@@ -8,12 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SheetValue
@@ -32,8 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.homegen.assets.data.CatalogRepository
@@ -50,7 +46,6 @@ import com.homegen.electrical.ElectricalLayer
 import com.homegen.electrical.ElectricalOverlayController
 import com.homegen.styles.model.DesignStyle
 import com.homegen.styles.ui.DesignStyleBrowser
-import com.homegen.templates.model.RoomTemplate
 import com.homegen.templates.ui.RoomTemplatePanel
 import kotlinx.coroutines.launch
 
@@ -87,7 +82,7 @@ fun HomegenScreen(
         AndroidEditingContext(
             onShowOverlay = { overlayLegend = "" },
             onHideOverlay = { overlayLegend = null },
-            onSetLegend = { _, text -> overlayLegend = text }
+            onSetLegend = { _, text -> overlayLegend = text },
         )
     }
     val electricalLayer = remember { ElectricalLayer() }
@@ -96,8 +91,8 @@ fun HomegenScreen(
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(
             initialValue = SheetValue.Hidden,
-            skipHiddenState = false
-        )
+            skipHiddenState = false,
+        ),
     )
 
     LaunchedEffect(Unit) {
@@ -139,7 +134,7 @@ fun HomegenScreen(
                     activeStyleTag = activeStyle?.id,
                     onMaterialPicked = { entry: MaterialEntry ->
                         interactionController.mode = InteractionMode.Paint(
-                            materialRef = entry.material.texturePath
+                            materialRef = entry.material.texturePath,
                         )
                         currentMode = interactionController.mode
                         scope.launch { scaffoldState.bottomSheetState.hide() }
@@ -147,20 +142,20 @@ fun HomegenScreen(
                     onPlaceablePicked = { entry: PlaceableEntry ->
                         interactionController.mode = InteractionMode.FurnitureDrag(
                             catalogRef = entry.placeable.modelPath,
-                            name = entry.name
+                            name = entry.name,
                         )
                         currentMode = interactionController.mode
                         scope.launch { scaffoldState.bottomSheetState.hide() }
-                    }
+                    },
                 )
             } ?: Text("Loading catalog...", modifier = Modifier.padding(16.dp))
         },
-        sheetPeekHeight = 0.dp
+        sheetPeekHeight = 0.dp,
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
         ) {
             // Filament SurfaceView with gesture handler
             AndroidView(
@@ -169,7 +164,7 @@ fun HomegenScreen(
                     surfaceManager.createSurfaceView(ctx).also { sv ->
                         sv.setOnTouchListener(GestureHandler(interactionController))
                     }
-                }
+                },
             )
 
             // Overlay legend
@@ -181,7 +176,7 @@ fun HomegenScreen(
                             .align(Alignment.TopStart)
                             .padding(12.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -202,11 +197,11 @@ fun HomegenScreen(
                         .padding(top = 12.dp)
                         .background(
                             MaterialTheme.colorScheme.primaryContainer,
-                            shape = MaterialTheme.shapes.small
+                            shape = MaterialTheme.shapes.small,
                         )
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    style = MaterialTheme.typography.labelMedium
+                    style = MaterialTheme.typography.labelMedium,
                 )
             }
 
@@ -219,7 +214,7 @@ fun HomegenScreen(
                         .padding(start = 12.dp, top = 40.dp)
                         .background(
                             MaterialTheme.colorScheme.tertiaryContainer,
-                            shape = MaterialTheme.shapes.small
+                            shape = MaterialTheme.shapes.small,
                         )
                         .padding(horizontal = 10.dp, vertical = 3.dp),
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -232,17 +227,17 @@ fun HomegenScreen(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 IconButton(
                     onClick = { commandStack.undo() },
-                    enabled = canUndo
+                    enabled = canUndo,
                 ) {
                     Text("↩", style = MaterialTheme.typography.titleLarge)
                 }
                 IconButton(
                     onClick = { commandStack.redo() },
-                    enabled = canRedo
+                    enabled = canRedo,
                 ) {
                     Text("↪", style = MaterialTheme.typography.titleLarge)
                 }
@@ -254,7 +249,7 @@ fun HomegenScreen(
                     .align(Alignment.CenterEnd)
                     .padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 IconButton(onClick = {
                     currentFloor++
@@ -268,7 +263,7 @@ fun HomegenScreen(
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primaryContainer)
                         .padding(8.dp),
-                    style = MaterialTheme.typography.labelMedium
+                    style = MaterialTheme.typography.labelMedium,
                 )
                 IconButton(onClick = {
                     if (currentFloor > 0) {
@@ -285,12 +280,12 @@ fun HomegenScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(8.dp)
+                    .padding(8.dp),
             ) {
                 // Primary tools row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     ToolButton("Select", currentMode is InteractionMode.Select) {
                         interactionController.mode = InteractionMode.Select
@@ -322,7 +317,7 @@ fun HomegenScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     ToolButton("Styles") {
                         overlayScreen = OverlayScreen.STYLE_BROWSER
@@ -359,7 +354,7 @@ private fun ToolButton(
             )
         } else {
             androidx.compose.material3.ButtonDefaults.filledTonalButtonColors()
-        }
+        },
     ) {
         Text(label)
     }

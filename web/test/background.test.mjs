@@ -10,7 +10,8 @@ test('newState initializes background as null', () => {
 test('serialization round-trips document background state', () => {
   const s = m.newState();
   s.background = {
-    dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    dataUrl:
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     x: 12,
     y: 24,
     scale: 1.5,
@@ -27,19 +28,19 @@ test('serialization round-trips document background state', () => {
 
 test('parseDistanceInInches parses various measurement formats correctly', () => {
   assert.equal(m.parseDistanceInInches("10'"), 120);
-  assert.equal(m.parseDistanceInInches("10 ft"), 120);
-  assert.equal(m.parseDistanceInInches("10 feet"), 120);
+  assert.equal(m.parseDistanceInInches('10 ft'), 120);
+  assert.equal(m.parseDistanceInInches('10 feet'), 120);
   assert.equal(m.parseDistanceInInches('10\' 6"'), 126);
-  assert.equal(m.parseDistanceInInches("10ft 6in"), 126);
+  assert.equal(m.parseDistanceInInches('10ft 6in'), 126);
   assert.equal(m.parseDistanceInInches('120"'), 120);
-  assert.equal(m.parseDistanceInInches("120 in"), 120);
-  assert.equal(m.parseDistanceInInches("120 inches"), 120);
-  assert.equal(m.parseDistanceInInches("120"), 120);
-  assert.equal(m.parseDistanceInInches("10"), 120);
-  assert.ok(Math.abs(m.parseDistanceInInches("1 m") - 39.3701) < 0.01);
-  assert.equal(m.parseDistanceInInches(""), null);
-  assert.equal(m.parseDistanceInInches("abc"), null);
-  assert.equal(m.parseDistanceInInches("-10"), null);
+  assert.equal(m.parseDistanceInInches('120 in'), 120);
+  assert.equal(m.parseDistanceInInches('120 inches'), 120);
+  assert.equal(m.parseDistanceInInches('120'), 120);
+  assert.equal(m.parseDistanceInInches('10'), 120);
+  assert.ok(Math.abs(m.parseDistanceInInches('1 m') - 39.3701) < 0.01);
+  assert.equal(m.parseDistanceInInches(''), null);
+  assert.equal(m.parseDistanceInInches('abc'), null);
+  assert.equal(m.parseDistanceInInches('-10'), null);
 });
 
 test('2-point scale calibration recalculates scale and anchor position', () => {

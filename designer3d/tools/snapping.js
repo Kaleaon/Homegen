@@ -74,10 +74,12 @@ function snapToPerpendicular(point, anchor, edges, threshold) {
 }
 
 function chooseBestSnap(candidates, magneticThreshold) {
-  return candidates
-    .filter(Boolean)
-    .filter((candidate) => candidate.distance <= magneticThreshold)
-    .sort((a, b) => a.distance - b.distance)[0] || null;
+  return (
+    candidates
+      .filter(Boolean)
+      .filter((candidate) => candidate.distance <= magneticThreshold)
+      .sort((a, b) => a.distance - b.distance)[0] || null
+  );
 }
 
 function getSnappedPoint({ point, anchor = point, edges = [], settings, snapModes }) {

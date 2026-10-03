@@ -10,8 +10,6 @@ import com.google.android.filament.VertexBuffer
 import com.homegen.designer3d.math.Vector3
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
-import java.nio.ShortBuffer
 
 /**
  * Creates procedural Filament meshes for walls, floors, boxes, and grid planes.
@@ -29,25 +27,25 @@ object MeshFactory {
         // 24 vertices (4 per face, unique normals)
         val positions = floatArrayOf(
             // Front face (z+)
-            -hx, -hy, hz,  hx, -hy, hz,  hx, hy, hz,  -hx, hy, hz,
+            -hx, -hy, hz, hx, -hy, hz, hx, hy, hz, -hx, hy, hz,
             // Back face (z-)
-            hx, -hy, -hz,  -hx, -hy, -hz,  -hx, hy, -hz,  hx, hy, -hz,
+            hx, -hy, -hz, -hx, -hy, -hz, -hx, hy, -hz, hx, hy, -hz,
             // Top face (y+)
-            -hx, hy, hz,  hx, hy, hz,  hx, hy, -hz,  -hx, hy, -hz,
+            -hx, hy, hz, hx, hy, hz, hx, hy, -hz, -hx, hy, -hz,
             // Bottom face (y-)
-            -hx, -hy, -hz,  hx, -hy, -hz,  hx, -hy, hz,  -hx, -hy, hz,
+            -hx, -hy, -hz, hx, -hy, -hz, hx, -hy, hz, -hx, -hy, hz,
             // Right face (x+)
-            hx, -hy, hz,  hx, -hy, -hz,  hx, hy, -hz,  hx, hy, hz,
+            hx, -hy, hz, hx, -hy, -hz, hx, hy, -hz, hx, hy, hz,
             // Left face (x-)
-            -hx, -hy, -hz,  -hx, -hy, hz,  -hx, hy, hz,  -hx, hy, -hz,
+            -hx, -hy, -hz, -hx, -hy, hz, -hx, hy, hz, -hx, hy, -hz,
         )
 
         val normals = floatArrayOf(
-            0f, 0f, 1f,  0f, 0f, 1f,  0f, 0f, 1f,  0f, 0f, 1f,
+            0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f,
             0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f,
-            0f, 1f, 0f,  0f, 1f, 0f,  0f, 1f, 0f,  0f, 1f, 0f,
+            0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f,
             0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f, 0f,
-            1f, 0f, 0f,  1f, 0f, 0f,  1f, 0f, 0f,  1f, 0f, 0f,
+            1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f,
             -1f, 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f,
         )
 
@@ -61,9 +59,9 @@ object MeshFactory {
         )
 
         val indices = shortArrayOf(
-            0, 1, 2, 0, 2, 3,       // front
-            4, 5, 6, 4, 6, 7,       // back
-            8, 9, 10, 8, 10, 11,    // top
+            0, 1, 2, 0, 2, 3, // front
+            4, 5, 6, 4, 6, 7, // back
+            8, 9, 10, 8, 10, 11, // top
             12, 13, 14, 12, 14, 15, // bottom
             16, 17, 18, 16, 18, 19, // right
             20, 21, 22, 20, 22, 23, // left
@@ -120,10 +118,14 @@ object MeshFactory {
             0f, 1f, 0f,
         )
         val uvs = floatArrayOf(
-            0f, 0f,
-            width, 0f,
-            width, depth,
-            0f, depth,
+            0f,
+            0f,
+            width,
+            0f,
+            width,
+            depth,
+            0f,
+            depth,
         )
         val indices = shortArrayOf(0, 1, 2, 0, 2, 3)
 

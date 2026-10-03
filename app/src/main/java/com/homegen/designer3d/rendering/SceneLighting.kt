@@ -30,14 +30,14 @@ class SceneLighting {
         // Ambient indirect light using flat SH bands (uniform ambient)
         val harmonics = floatArrayOf(
             0.5f, 0.5f, 0.5f, // Band 0 (ambient)
-            0f, 0f, 0f,       // Band 1
+            0f, 0f, 0f, // Band 1
             0f, 0f, 0f,
             0f, 0f, 0f,
-            0f, 0f, 0f,       // Band 2
+            0f, 0f, 0f, // Band 2
             0f, 0f, 0f,
             0f, 0f, 0f,
             0f, 0f, 0f,
-            0f, 0f, 0f
+            0f, 0f, 0f,
         )
         indirectLight = IndirectLight.Builder()
             .irradiance(3, harmonics)

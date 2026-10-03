@@ -17,7 +17,7 @@ object RayCaster {
         screenY: Float,
         viewportWidth: Int,
         viewportHeight: Int,
-        camera: Camera
+        camera: Camera,
     ): Pair<Vector3, Vector3> {
         // Normalized device coordinates
         val ndcX = (2f * screenX / viewportWidth) - 1f
@@ -41,7 +41,10 @@ object RayCaster {
         val farView = multiplyMV(invProjection, farClip)
 
         // Perspective divide
-        for (i in 0..2) { nearView[i] /= nearView[3]; farView[i] /= farView[3] }
+        for (i in 0..2) {
+            nearView[i] /= nearView[3]
+            farView[i] /= farView[3]
+        }
 
         // Transform through inverse view (camera model matrix)
         val nearWorld = multiplyMV(invView, nearView)
@@ -64,7 +67,7 @@ object RayCaster {
         return Vector3(
             origin.x + direction.x * t,
             planeY,
-            origin.z + direction.z * t
+            origin.z + direction.z * t,
         )
     }
 
@@ -91,7 +94,7 @@ object RayCaster {
         val result = DoubleArray(4)
         for (i in 0..3) {
             result[i] = matrix[i] * vec[0] + matrix[i + 4] * vec[1] +
-                    matrix[i + 8] * vec[2] + matrix[i + 12] * vec[3]
+                matrix[i + 8] * vec[2] + matrix[i + 12] * vec[3]
         }
         return result
     }

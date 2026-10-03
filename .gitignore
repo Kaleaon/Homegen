@@ -19,3 +19,5 @@ app/release/
 node_modules/
 *.zip
 *.tgz
+.husky/_
+

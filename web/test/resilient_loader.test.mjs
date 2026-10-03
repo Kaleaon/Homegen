@@ -18,7 +18,11 @@ globalThis.document = {
   removeEventListener: () => {},
 };
 globalThis.window = globalThis;
-globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 globalThis.requestAnimationFrame = () => 1;
 globalThis.cancelAnimationFrame = () => {};
 
@@ -41,7 +45,7 @@ function createCanvas() {
       if (prop in target) return target[prop];
       if (typeof prop === 'string' && prop.startsWith('create')) return () => ({});
       return () => {};
-    }
+    },
   });
   return {
     style: {},
@@ -69,12 +73,17 @@ function setupScene(callbacks = {}) {
         y: 0,
         ceiling: 96,
         floor: 'floor_oak',
-        walls: { N: 'wall_paint_blue', S: 'wall_paint_blue', E: 'wall_paint_blue', W: 'wall_paint_blue' },
+        walls: {
+          N: 'wall_paint_blue',
+          S: 'wall_paint_blue',
+          E: 'wall_paint_blue',
+          W: 'wall_paint_blue',
+        },
         openings: [],
-        items: []
-      }
+        items: [],
+      },
     ],
-    levels: 1
+    levels: 1,
   });
   const getLevel = () => 0;
   return createScene3D(canvas, getState, getLevel, callbacks);
@@ -85,8 +94,12 @@ test('HDRI failure resets scene background, environment, and intensity to studio
   let errorMsg = null;
 
   const scene3d = setupScene({
-    onEnvChange: (env) => { envChanged = env; },
-    onError: (msg) => { errorMsg = msg; }
+    onEnvChange: (env) => {
+      envChanged = env;
+    },
+    onError: (msg) => {
+      errorMsg = msg;
+    },
   });
 
   // Simulate network rejection / timeout for Poly Haven HDRI fetch
@@ -115,15 +128,19 @@ test('HDRI HTTP error status triggers studio state rollback', async () => {
   let errorMsg = null;
 
   const scene3d = setupScene({
-    onEnvChange: (env) => { envChanged = env; },
-    onError: (msg) => { errorMsg = msg; }
+    onEnvChange: (env) => {
+      envChanged = env;
+    },
+    onError: (msg) => {
+      errorMsg = msg;
+    },
   });
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: false,
     status: 500,
-    json: async () => ({})
+    json: async () => ({}),
   });
 
   try {
@@ -144,8 +161,12 @@ test('Failed texture loads in applyHD clear userData.wait, evict hdBase entry, n
   let errorMsg = null;
 
   const scene3d = setupScene({
-    onHDChange: (hd) => { hdChanged = hd; },
-    onError: (msg) => { errorMsg = msg; }
+    onHDChange: (hd) => {
+      hdChanged = hd;
+    },
+    onError: (msg) => {
+      errorMsg = msg;
+    },
   });
 
   scene3d.opts.hd = true;
@@ -169,10 +190,16 @@ test('Failed texture loads in applyHD clear userData.wait, evict hdBase entry, n
   baseTex.userData.wait = [];
   scene3d.hdBase.delete(key);
   scene3d.callbacks.onHDChange?.(false);
-  scene3d.callbacks.onError?.('HD texture loading failed. Falling back to local procedural textures.');
+  scene3d.callbacks.onError?.(
+    'HD texture loading failed. Falling back to local procedural textures.'
+  );
 
   assert.equal(baseTex.userData.wait.length, 0, 'userData.wait should be empty');
-  assert.equal(scene3d.hdBase.has(key), false, 'Failed texture entry should be evicted from hdBase');
+  assert.equal(
+    scene3d.hdBase.has(key),
+    false,
+    'Failed texture entry should be evicted from hdBase'
+  );
   assert.equal(hdChanged, false, 'UI toggle state should sync to false');
   assert.match(errorMsg, /HD texture loading failed/);
 });
