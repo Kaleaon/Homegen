@@ -39,6 +39,7 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
     h,
     ceiling: opts.ceiling ?? 96,
     floor: opts.floor ?? 'floor_oak',
+    cladding: opts.cladding ?? undefined,
     walls: {
       N: opts.wallFinish ?? 'paint_white',
       E: opts.wallFinish ?? 'paint_white',
@@ -52,9 +53,24 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
   return room;
 }
 
-export function addOpening(state, room, type, wall, offset) {
-  const def = OPENING_BY_ID[type];
-  const o = { id: nid(state, 'o'), type, kind: def.kind, wall, offset, width: def.w, swing: 'in' };
+export function addOpening(state, room, type, wall, offset, props = {}) {
+  const def = OPENING_BY_ID[type] || {};
+  const o = {
+    id: nid(state, 'o'),
+    type,
+    kind: def.kind,
+    wall,
+    offset,
+    width: def.w,
+    swing: 'in',
+    ...props,
+  };
+  if (def.frameMaterial && !o.frameMaterial) o.frameMaterial = def.frameMaterial;
+  if (def.frameColor && !o.frameColor) o.frameColor = def.frameColor;
+  if (def.mullions && !o.mullions)
+    o.mullions = typeof def.mullions === 'object' ? { ...def.mullions } : def.mullions;
+  if (def.casing && !o.casing)
+    o.casing = typeof def.casing === 'object' ? { ...def.casing } : def.casing;
   room.openings.push(o);
   return o;
 }
@@ -185,6 +201,16 @@ export function applyWallFinish(state, finishId, { scope = 'single', room, wall,
     if (room) for (const w of WALLS) room.walls[w] = finishId;
   } else {
     if (room && wall) room.walls[wall] = finishId;
+  }
+}
+
+export function applyCladding(state, finishId, { scope = 'single', room, level = 0 } = {}) {
+  if (scope === 'plan') {
+    for (const r of state.rooms) r.cladding = finishId;
+  } else if (scope === 'level') {
+    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) r.cladding = finishId;
+  } else {
+    if (room) room.cladding = finishId;
   }
 }
 
