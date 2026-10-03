@@ -51,7 +51,7 @@ jobs:
           node-version: '20'
 
       - name: Install Node.js dependencies
-        if: matrix.project.name == 'designer3d-tools'
+        if: matrix.project.type == 'node'
         run: npm ci
         working-directory: ${{ matrix.project.working-directory }}
 
