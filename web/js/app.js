@@ -10,6 +10,7 @@ import { evaluate, blockingIds, commit, commitSequence, autoComply } from './cod
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor } from './patterns.js';
 import { initView3D } from './ui3d.js';
+import { ComplianceOverlayScene } from './complianceOverlay.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#plan'); const ctx = canvas.getContext('2d');
@@ -19,6 +20,7 @@ let doc = M.newState();
 try { const saved = localStorage.getItem(STORE); if (saved) doc = M.deserialize(saved); } catch { /* ignore corrupt/blocked storage */ }
 let hist = new M.History(doc);
 let report = evaluate(doc);
+const complianceScene = new ComplianceOverlayScene();
 let view = { scale: 1.6, ox: 40, oy: 40 };
 let tool = { kind: 'select' };       // select | erase | room{type} | opening{type} | item{type} | wall{id} | floor{id} | roomkit{id} | furnkit{id}
 let tab = 'build';
@@ -165,8 +167,9 @@ function redraw() {
   const state = preview ? preview.next : doc;
   const rep = preview ? evaluate(preview.next) : report;
   const bad = new Set([...badIds(rep)]);
+  complianceScene.update(state, rep, { curLevel, selection, drag, hover, view });
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
-    dpr, bad, selection, under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
+    dpr, bad, selection, complianceScene, under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
     overlay: (c) => drawOverlay(c, state),
   });
 }
@@ -452,6 +455,26 @@ canvas.addEventListener('pointerup', () => {
 });
 
 canvas.addEventListener('pointerleave', () => { hover = null; preview = null; redraw(); });
+canvas.addEventListener('dblclick', (e) => {
+  const p = toWorld(e);
+  const hitNode = complianceScene.hitTest(p, view);
+  if (hitNode && (hitNode.type === 'dimensionLabel' || hitNode.type === 'constraintHandle')) {
+    const r = roomOf(doc, hitNode.data.roomId);
+    if (r) {
+      const currentFtW = (r.w / 12).toFixed(1);
+      const currentFtH = (r.h / 12).toFixed(1);
+      const input = prompt(`Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or width in inches "144"):`, `${currentFtW} × ${currentFtH}`);
+      if (input) {
+        const parts = input.split(/[×x,]/).map((s) => parseFloat(s.trim())).filter((n) => !isNaN(n) && n > 0);
+        if (parts.length >= 1) {
+          const newWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
+          const newHInches = parts.length >= 2 ? (parts[1] < 30 ? Math.round(parts[1] * 12) : Math.round(parts[1])) : r.h;
+          apply((n) => M.resizeRoom(roomOf(n, r.id), r.x, r.y, Math.max(36, newWInches), Math.max(36, newHInches)));
+        }
+      }
+    }
+  }
+});
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -534,4 +557,4 @@ const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSele
 renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
 if (doc.rooms.length) fit();
 // test hook for automated browser checks
-window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool };
+window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, complianceScene };

@@ -5,6 +5,13 @@ const { TransformGizmo } = require('./transformGizmos');
 const { RoomDrawingTool } = require('./roomDrawingTool');
 const { validatePlacement, createPlacementFeedback } = require('./collision');
 const { buildToggleViewModel, SNAP_TOGGLE_DEFINITIONS } = require('./uiSnapToggles');
+const {
+  getConstraintHandles,
+  resizeRoomWithConstraints,
+  validateRoomDimensions,
+  fmtDimensionText,
+  fmtLenInches,
+} = require('./constraintHandles');
 
 module.exports = {
   InteractionLayer,
@@ -18,4 +25,10 @@ module.exports = {
   createPlacementFeedback,
   buildToggleViewModel,
   SNAP_TOGGLE_DEFINITIONS,
+  getConstraintHandles,
+  resizeRoomWithConstraints,
+  validateRoomDimensions,
+  fmtDimensionText,
+  fmtLenInches,
 };
+
