@@ -10,6 +10,7 @@ import { evaluate, blockingIds, commit, commitSequence, autoComply } from './cod
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor } from './patterns.js';
 import { initView3D } from './ui3d.js';
+import { generatePDF } from './pdfEngine.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#plan'); const ctx = canvas.getContext('2d');
@@ -505,6 +506,48 @@ $('#save').addEventListener('click', () => download(`${doc.name.replace(/\W+/g, 
 $('#load').addEventListener('click', () => $('#file').click());
 $('#file').addEventListener('change', async (e) => { const f = e.target.files[0]; if (!f) return; try { setDoc(M.deserialize(await f.text())); fit(); } catch (err) { toast(`Could not open file: ${err.message}`, true); } e.target.value = ''; });
 $('#png').addEventListener('click', () => { redraw(); canvas.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${doc.name || 'plan'}.png`; a.click(); }); });
+$('#export-pdf')?.addEventListener('click', () => {
+  $('#pdf-title').value = doc.name || 'My home';
+  $('#pdf-date').value = new Date().toISOString().slice(0, 10);
+  const levelSelect = $('#pdf-level');
+  if (levelSelect) {
+    levelSelect.innerHTML = '<option value="all" selected>All levels (Multi-page)</option>';
+    const maxLevel = Math.max(0, ...(doc.rooms || []).map((r) => r.level || 0), (doc.levels || 1) - 1);
+    for (let l = 0; l <= maxLevel; l++) {
+      const opt = document.createElement('option');
+      opt.value = String(l);
+      opt.textContent = `Level ${l + 1}${l === curLevel ? ' (Current)' : ''}`;
+      levelSelect.appendChild(opt);
+    }
+  }
+  $('#pdf-export')?.showModal();
+});
+$('#pdf-cancel')?.addEventListener('click', () => { $('#pdf-export')?.close(); });
+$('#pdf-generate')?.addEventListener('click', () => {
+  try {
+    const opts = {
+      pageSize: $('#pdf-size').value,
+      orientation: $('#pdf-orientation').value,
+      scale: $('#pdf-scale').value,
+      level: $('#pdf-level').value,
+      projectTitle: $('#pdf-title').value,
+      designer: $('#pdf-designer').value,
+      date: $('#pdf-date').value,
+      sheetTitle: $('#pdf-subtitle').value,
+      notes: $('#pdf-notes').value,
+      includeTitleBlock: $('#pdf-tb').checked,
+      includeScaleBar: $('#pdf-scalebar').checked,
+      includeRoomSchedule: $('#pdf-schedule').checked,
+    };
+    const pdf = generatePDF(doc, opts);
+    const fileName = `${(doc.name || 'plan').replace(/\W+/g, '_')}_scaled_plan.pdf`;
+    pdf.save(fileName);
+    $('#pdf-export')?.close();
+    toast('Vector PDF sheet generated.');
+  } catch (err) {
+    toast(`Failed to export PDF: ${err.message}`, true);
+  }
+});
 $('#report').addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`, reportText(), 'text/markdown'));
 $('#plan-name').addEventListener('change', (e) => { doc.name = e.target.value; hist.push(doc); persist(); });
 $('#zoom-in').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.2); });
@@ -534,4 +577,4 @@ const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSele
 renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
 if (doc.rooms.length) fit();
 // test hook for automated browser checks
-window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool };
+window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, generatePDF };
