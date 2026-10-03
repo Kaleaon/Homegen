@@ -277,8 +277,8 @@ function renderLevels() {
   const n = doc.levels || 1; if (curLevel >= n) curLevel = n - 1;
   const el = $('#levels');
   el.innerHTML = Array.from({ length: n }, (_, i) => `<button data-level="${i}" class="${i === curLevel ? 'on' : ''}">Floor ${i + 1}</button>`).join('')
-    + '<button id="add-floor" title="Add a floor above">+ Floor</button>'
-    + (n > 1 && !doc.rooms.some((r) => (r.level || 0) === n - 1) ? '<button id="del-floor" title="Remove empty top floor">− Floor</button>' : '');
+    + '<button id="add-floor" title="Add a floor above" aria-label="Add floor above"><span aria-hidden="true">+</span> Floor</button>'
+    + (n > 1 && !doc.rooms.some((r) => (r.level || 0) === n - 1) ? '<button id="del-floor" title="Remove empty top floor" aria-label="Remove top floor"><span aria-hidden="true">−</span> Floor</button>' : '');
   el.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => setLevel(Number(b.dataset.level))));
   $('#add-floor').addEventListener('click', () => { if ((doc.levels || 1) >= 4) return toast('Up to 4 floors are supported.', true); doc.levels = (doc.levels || 1) + 1; hist.push(doc); persist(); setLevel(doc.levels - 1); refresh(); toast(`Floor ${doc.levels} added. Place a stair room on the floor below, then use Fix automatically to add its match here.`); });
   $('#del-floor')?.addEventListener('click', () => { doc.levels -= 1; hist.push(doc); persist(); renderLevels(); setLevel(Math.min(curLevel, doc.levels - 1)); refresh(); });

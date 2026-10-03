@@ -12,8 +12,8 @@
   <div class="brand">🏠 Homegen <span>Designer</span></div>
   <input id="plan-name" aria-label="Plan name" value="My home">
   <div class="spacer"></div>
-  <button id="undo" title="Undo (Ctrl+Z)">↶</button>
-  <button id="redo" title="Redo (Ctrl+Y)">↷</button>
+  <button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></button>
+  <button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></button>
   <label class="toggle" title="Automatically add the windows, outlets, alarms, doors and finishes the code requires after every edit"><input type="checkbox" id="auto" checked> Auto-comply</label>
   <button id="sample">Sample home</button>
   <button id="new">New</button>
@@ -36,11 +36,11 @@
   <section id="stage">
     <div id="toolbar">
       <span class="seg"><button data-view="2d" class="on">2D plan</button><button data-view="3d">3D view</button></span>
-      <button data-tool="select" class="on" title="Select / move (V)">⬚ Select</button>
-      <button data-tool="erase" title="Delete things (X)">⌫ Erase</button>
+      <button data-tool="select" class="on" title="Select / move (V)"><span aria-hidden="true">⬚</span> Select</button>
+      <button data-tool="erase" title="Delete things (X)"><span aria-hidden="true">⌫</span> Erase</button>
       <span id="levels"></span><span id="tool-hint"></span>
       <div class="spacer"></div>
-      <button id="zoom-out">−</button><span id="zoom-label">100%</span><button id="zoom-in">+</button><button id="fit">Fit</button>
+      <button id="zoom-out" aria-label="Zoom out"><span aria-hidden="true">−</span></button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in"><span aria-hidden="true">+</span></button><button id="fit">Fit</button>
     </div>
     <div id="bar3d" hidden>
       <label>Walls <select id="o-walls"><option value="full">Full</option><option value="cut" selected>Cutaway</option><option value="hidden">Hidden</option></select></label>
@@ -49,9 +49,9 @@
       <label>Sun <input id="o-sun" type="range" min="0" max="1" step="0.05" value="0.65"></label>
       <label class="toggle"><input type="checkbox" id="o-ceil"> Ceilings</label>
       <label class="toggle" title="Streams free CC0 PBR textures from Poly Haven"><input type="checkbox" id="o-hd"> HD textures</label>
-      <button id="o-eye" title="Stand in the selected room at eye height">👁 Eye level</button>
+      <button id="o-eye" title="Stand in the selected room at eye height"><span aria-hidden="true">👁</span> Eye level</button>
       <button id="o-reset">Reset view</button>
-      <button id="o-photo" class="primary">📷 Photoreal…</button>
+      <button id="o-photo" class="primary"><span aria-hidden="true">📷</span> Photoreal…</button>
     </div>
     <canvas id="plan"></canvas>
     <canvas id="view3d" hidden></canvas>
@@ -63,7 +63,7 @@
   </aside>
 </main>
 <dialog id="photo">
-  <form method="dialog" class="dlg-head"><h2>Photoreal render</h2><button value="close">✕</button></form>
+  <form method="dialog" class="dlg-head"><h2>Photoreal render</h2><button value="close" aria-label="Close photoreal render"><span aria-hidden="true">✕</span></button></form>
   <div class="dlg-body">
     <div class="row"><label>Room</label><select id="p-room"></select></div>
     <div class="row"><label>Style</label><select id="p-style"></select></div>
