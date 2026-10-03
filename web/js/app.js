@@ -215,15 +215,23 @@ function renderCompliance() {
   const status = !doc.rooms.length ? '<span class="chip mid">Empty plan</span>' : report.compliant ? '<span class="chip ok">✔ Code compliant</span>' : `<span class="chip">${errs.length} issue${errs.length === 1 ? '' : 's'}</span>`;
   el.innerHTML = `<h3>Building code</h3><div class="score">${status}<span class="note" style="margin:0">${doc.rooms.length} rooms · ${sqft.toFixed(0)} sq ft</span></div>
     <div class="btns"><button id="fix" class="primary" ${errs.some((v) => v.fixable) ? '' : 'disabled'}>Fix automatically</button></div>
-    <ul class="v">${[...errs, ...warns].map((v) => `<li class="${v.severity}" data-id="${v.id}"><b>${esc(v.msg)}</b><span class="ref">${esc(v.ref)}${v.fixable ? ' · auto-fixable' : ''}</span></li>`).join('') || (doc.rooms.length ? '<li style="border-color:var(--ok);cursor:default">No issues found.</li>' : '<li style="border-color:var(--muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
+    <ul class="v">${[...errs, ...warns].map((v) => `<li class="${v.severity}" data-id="${v.id}" tabindex="0"><b>${esc(v.msg)}</b><span class="ref">${esc(v.ref)}${v.fixable ? ' · auto-fixable' : ''}</span></li>`).join('') || (doc.rooms.length ? '<li style="border-color:var(--ok);cursor:default">No issues found.</li>' : '<li style="border-color:var(--muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
     <p class="note">Rules follow the 2021 IRC and NEC residential provisions plus marked “Practice” items. Hard rules (overlaps, room sizes, blocked doors, fixture clearances) reject the edit; everything else is auto-fixed. This is a design aid — your local authority having jurisdiction has the final say.</p>`;
   $('#fix')?.addEventListener('click', () => {
     const r = apply(() => {}, { quiet: true });
     if (r.ok) toast(r.changes.length ? `Fixed ${r.changes.length} item(s):\n• ${[...new Set(r.changes)].slice(0, 8).join('\n• ')}` : 'Nothing more can be fixed automatically — see the remaining issues.');
   });
-  el.querySelectorAll('li[data-id]').forEach((li) => li.addEventListener('click', () => {
-    const v = report.violations.find((x) => x.id === li.dataset.id); const id = v.itemId || v.openingId || v.roomId; if (id) { select(id); focus(id); }
-  }));
+  el.querySelectorAll('li[data-id]').forEach((li) => {
+    li.addEventListener('click', () => {
+      const v = report.violations.find((x) => x.id === li.dataset.id); const id = v.itemId || v.openingId || v.roomId; if (id) { select(id); focus(id); }
+    });
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        li.click();
+      }
+    });
+  });
 }
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
