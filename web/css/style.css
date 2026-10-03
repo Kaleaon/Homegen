@@ -429,6 +429,7 @@ ul.v .msg {
   font-size: 12.5px;
 }
 #bar3d[hidden],
+#bg-toolbar[hidden],
 #plan[hidden],
 #view3d[hidden] {
   display: none;
