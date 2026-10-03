@@ -30,6 +30,7 @@ class FilamentSurfaceManager(context: Context) {
     private val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK)
     private val displayHelper = DisplayHelper(context)
 
+    private var swapChain: com.google.android.filament.SwapChain? = null
     private var camera: Camera? = null
     private var viewportWidth = 0
     private var viewportHeight = 0
@@ -49,7 +50,8 @@ class FilamentSurfaceManager(context: Context) {
             camera?.let { cam ->
                 FilamentCameraSync.sync(sceneController.cameraController, cam)
             }
-            if (renderer.beginFrame(uiHelper.swapChain!!, frameTimeNanos)) {
+            val sc = swapChain
+            if (sc != null && renderer.beginFrame(sc, frameTimeNanos)) {
                 renderer.render(filamentView)
                 renderer.endFrame()
             }
@@ -72,11 +74,12 @@ class FilamentSurfaceManager(context: Context) {
         val sv = SurfaceView(context)
         uiHelper.renderCallback = object : UiHelper.RendererCallback {
             override fun onNativeWindowChanged(surface: android.view.Surface) {
-                uiHelper.swapChain = engine.createSwapChain(surface)
+                swapChain = engine.createSwapChain(surface)
             }
 
             override fun onDetachedFromSurface() {
-                uiHelper.swapChain?.let { engine.destroySwapChain(it) }
+                swapChain?.let { engine.destroySwapChain(it) }
+                swapChain = null
             }
 
             override fun onResized(width: Int, height: Int) {
