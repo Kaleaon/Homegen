@@ -3,6 +3,12 @@ import { SnapModeState } from './snapModes.mjs';
 import { TransformGizmo } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback } from './collision.mjs';
+import {
+  getConstraintHandles,
+  resizeRoomWithConstraints,
+  validateRoomDimensions,
+  fmtDimensionText,
+} from './constraintHandles.mjs';
 
 export class InteractionLayer {
   constructor(options = {}) {
@@ -10,6 +16,27 @@ export class InteractionLayer {
     this.snapModes = new SnapModeState(options.snapModes);
     this.transformGizmo = new TransformGizmo(this.gridSettings, this.snapModes);
     this.roomTool = new RoomDrawingTool(this.gridSettings, this.snapModes);
+  }
+
+  getConstraintHandles(room, options = {}) {
+    if (!room) throw new Error('getConstraintHandles: room is required');
+    return getConstraintHandles(room, options);
+  }
+
+  resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options = {}) {
+    if (!room) throw new Error('resizeRoomWithConstraints: room is required');
+    if (handleIndexOrId === undefined || handleIndexOrId === null)
+      throw new Error('resizeRoomWithConstraints: handleIndexOrId is required');
+    if (!pointerPoint) throw new Error('resizeRoomWithConstraints: pointerPoint is required');
+    return resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options);
+  }
+
+  validateRoomDimensions(roomType, w, h) {
+    return validateRoomDimensions(roomType, w, h);
+  }
+
+  fmtDimensionText(w, h) {
+    return fmtDimensionText(w, h);
   }
 
   setGridSettings(partialSettings) {

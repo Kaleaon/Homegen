@@ -43,6 +43,7 @@ import {
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
+import { SnappingBridge } from './snapping-bridge.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -89,6 +90,28 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+
+const snappingBridge = new SnappingBridge({
+  canvas,
+  interaction,
+  getRooms: () => levelRooms(),
+  toWorld: (e) => toWorld(e),
+  onSnap: () => {
+    redraw();
+  },
+});
+
+if (typeof document !== 'undefined') {
+  document.querySelectorAll('[data-view]').forEach((b) => {
+    b.addEventListener('click', () => {
+      if (b.dataset.view === '3d') {
+        snappingBridge.detach();
+      } else {
+        snappingBridge.attach(canvas);
+      }
+    });
+  });
+}
 
 // ------------------------------------------------------------- helpers
 const toWorld = (e) => {
@@ -416,6 +439,7 @@ function redraw() {
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
     dpr,
     complianceScene,
+    snappingBridge,
     bad,
     selection,
     under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
