@@ -134,48 +134,203 @@ export function createScene3D(canvas, getState, getLevel) {
     return elev;
   }
 
-  function build() {
+  const entityMap = new Map();
+
+  function disposeNode(node) {
+    if (!node) return;
+    if (node.parent) node.parent.remove(node);
+    node.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) {
+          o.material.forEach((m) => m && m.dispose());
+        } else {
+          o.material.dispose();
+        }
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- scene build & reconciliation
+  function levelElevations(state) {
+    const n = state.levels || 1; const elev = [0];
+    for (let l = 1; l < n; l++) {
+      const rs = state.rooms.filter((r) => lv(r) === l - 1);
+      elev.push(elev[l - 1] + (rs.length ? Math.max(...rs.map((r) => r.ceiling)) : 96) + SLAB);
+    }
+    return elev;
+  }
+
+  function reconcile() {
     const state = getState(); const cur = getLevel();
-    for (const c of [...world.children]) { world.remove(c); c.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     const elev = levelElevations(state);
     const rooms = state.rooms.filter((r) => (opts.levels === 'all' ? true : lv(r) <= cur));
+    const activeKeys = new Set();
     const box = new THREE.Box3();
 
     for (const room of rooms) {
-      const e = elev[lv(room)]; const g = new THREE.Group(); world.add(g);
+      const e = elev[lv(room)];
       const L = lv(room);
       const showWalls = opts.walls !== 'hidden';
       const wallH = opts.walls === 'cut' && L === cur ? Math.min(room.ceiling, 42) : room.ceiling;
 
-      // floor slab with finish on top
-      const ff = FLOOR_BY_ID[room.floor] || FLOOR_BY_ID.floor_oak;
-      const fm = finishMaterial(ff, room.w, room.h, room.floor, 0.55);
-      const slab = boxMesh(room.w, SLAB, room.h, faceMats(plain('#b9b2a4', 0.95), 2, fm));
-      slab.position.set((room.x + room.w / 2) * S, (e - SLAB / 2) * S, (room.y + room.h / 2) * S); g.add(slab);
-      box.expandByObject(slab);
-
-      if (room.type === 'stairs') addStairs(g, room, e);
-
-      if (opts.ceilings) {
-        const c = new THREE.Mesh(new THREE.PlaneGeometry(room.w * S, room.h * S), plain('#f4f2ec', 0.95, { side: THREE.FrontSide }));
-        c.rotation.x = Math.PI / 2; c.position.set((room.x + room.w / 2) * S, (e + room.ceiling) * S, (room.y + room.h / 2) * S); c.receiveShadow = true; g.add(c);
+      // Room container group (keyed by room.id)
+      const roomId = room.id;
+      activeKeys.add(roomId);
+      let roomGroup = entityMap.get(roomId);
+      if (!roomGroup) {
+        roomGroup = new THREE.Group();
+        roomGroup.userData = { id: roomId, entityType: 'room' };
+        world.add(roomGroup);
+        entityMap.set(roomId, roomGroup);
       }
 
-      if (showWalls) for (const wall of WALLS) buildWall(g, state, room, wall, e, wallH);
-      for (const it of room.items) { const o = buildItem(it, room, e); if (o) g.add(o); }
+      // Floor slab (keyed by `${room.id}:slab`)
+      const slabKey = `${room.id}:slab`;
+      activeKeys.add(slabKey);
+      const ff = FLOOR_BY_ID[room.floor] || FLOOR_BY_ID.floor_oak;
+      const slabSig = JSON.stringify({ w: room.w, h: room.h, floor: room.floor, hd: opts.hd });
+      let slab = entityMap.get(slabKey);
+      if (!slab || slab.userData.sig !== slabSig) {
+        if (slab) disposeNode(slab);
+        const fm = finishMaterial(ff, room.w, room.h, room.floor, 0.55);
+        slab = boxMesh(room.w, SLAB, room.h, faceMats(plain('#b9b2a4', 0.95), 2, fm));
+        slab.userData = { id: slabKey, entityType: 'slab', sig: slabSig };
+        roomGroup.add(slab);
+        entityMap.set(slabKey, slab);
+      }
+      slab.position.set((room.x + room.w / 2) * S, (e - SLAB / 2) * S, (room.y + room.h / 2) * S);
+      box.expandByObject(slab);
+
+      // Stairs (keyed by `${room.id}:stairs`)
+      if (room.type === 'stairs') {
+        const stairsKey = `${room.id}:stairs`;
+        activeKeys.add(stairsKey);
+        const stairsSig = JSON.stringify({ w: room.w, h: room.h, ceiling: room.ceiling, x: room.x, y: room.y, e });
+        let stairsGroup = entityMap.get(stairsKey);
+        if (!stairsGroup || stairsGroup.userData.sig !== stairsSig) {
+          if (stairsGroup) disposeNode(stairsGroup);
+          stairsGroup = new THREE.Group();
+          addStairs(stairsGroup, room, e);
+          stairsGroup.userData = { id: stairsKey, entityType: 'stairs', sig: stairsSig };
+          roomGroup.add(stairsGroup);
+          entityMap.set(stairsKey, stairsGroup);
+        }
+      }
+
+      // Ceiling (keyed by `${room.id}:ceiling`)
+      if (opts.ceilings) {
+        const ceilKey = `${room.id}:ceiling`;
+        activeKeys.add(ceilKey);
+        const ceilSig = JSON.stringify({ w: room.w, h: room.h });
+        let ceilMesh = entityMap.get(ceilKey);
+        if (!ceilMesh || ceilMesh.userData.sig !== ceilSig) {
+          if (ceilMesh) disposeNode(ceilMesh);
+          ceilMesh = new THREE.Mesh(new THREE.PlaneGeometry(room.w * S, room.h * S), plain('#f4f2ec', 0.95, { side: THREE.FrontSide }));
+          ceilMesh.rotation.x = Math.PI / 2;
+          ceilMesh.receiveShadow = true;
+          ceilMesh.userData = { id: ceilKey, entityType: 'ceiling', sig: ceilSig };
+          roomGroup.add(ceilMesh);
+          entityMap.set(ceilKey, ceilMesh);
+        }
+        ceilMesh.position.set((room.x + room.w / 2) * S, (e + room.ceiling) * S, (room.y + room.h / 2) * S);
+      }
+
+      // Walls & Openings (keyed by `${room.id}:wall:${wall}`)
+      if (showWalls) {
+        for (const wall of WALLS) {
+          const wallKey = `${room.id}:wall:${wall}`;
+          activeKeys.add(wallKey);
+          const ops = wallOpenings(state, room, wall);
+          const nbrs = wallNeighbors(state.rooms, room, wall);
+          const wallSig = JSON.stringify({
+            rx: room.x, ry: room.y, rw: room.w, rh: room.h, ceiling: room.ceiling,
+            finish: room.walls[wall], e, wallH, wallOpt: opts.walls, hd: opts.hd, cur,
+            ops, nbrs,
+          });
+          let wallGroup = entityMap.get(wallKey);
+          if (!wallGroup || wallGroup.userData.sig !== wallSig) {
+            if (wallGroup) disposeNode(wallGroup);
+            wallGroup = new THREE.Group();
+            buildWall(wallGroup, state, room, wall, e, wallH);
+            wallGroup.userData = { id: wallKey, entityType: 'wall', sig: wallSig };
+            roomGroup.add(wallGroup);
+            entityMap.set(wallKey, wallGroup);
+            for (const { o } of ops) {
+              if (room.openings.includes(o)) activeKeys.add(o.id);
+            }
+          } else {
+            for (const { o } of ops) {
+              if (room.openings.includes(o)) activeKeys.add(o.id);
+            }
+          }
+        }
+      }
+
+      // Items (keyed by `it.id`)
+      for (const it of room.items) {
+        const itemKey = it.id;
+        activeKeys.add(itemKey);
+        const def = ITEM_BY_ID[it.type];
+        const structSig = JSON.stringify({ type: it.type, hd: opts.hd, e, roomCeiling: room.ceiling });
+        let itemNode = entityMap.get(itemKey);
+
+        if (!itemNode || itemNode.userData.structSig !== structSig) {
+          if (itemNode) disposeNode(itemNode);
+          itemNode = buildItem(it, room, e);
+          if (itemNode) {
+            itemNode.userData = { id: itemKey, entityType: 'item', structSig };
+            roomGroup.add(itemNode);
+            entityMap.set(itemKey, itemNode);
+          }
+        } else {
+          if (def && def.mount === 'wall') {
+            const s = wallSeg(room, it.wall); const t = it.offset;
+            const y = def.shape === 'switch' ? 48 : 16;
+            itemNode.position.set((s.ax + s.dx * t + s.nx * (WT / 2 + 0.3)) * S, (e + y) * S, (s.ay + s.dy * t + s.ny * (WT / 2 + 0.3)) * S);
+          } else if (def && def.mount === 'ceiling') {
+            itemNode.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
+          } else if (itemNode) {
+            itemNode.position.set(it.x * S, e * S, it.y * S);
+            itemNode.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+          }
+        }
+      }
     }
+
+    // Dismount & dispose unreferenced entity nodes
+    for (const [key, node] of entityMap.entries()) {
+      if (!activeKeys.has(key)) {
+        if (node.userData && node.userData.id === key) {
+          disposeNode(node);
+        }
+        entityMap.delete(key);
+      }
+    }
+
     box.expandByScalar(0.5);
     const size = box.getSize(new THREE.Vector3()); const ctr = box.getCenter(new THREE.Vector3());
     if (!rooms.length) { size.set(20, 10, 20); ctr.set(10, 0, 10); }
-    // ground + sun framing
-    if (ground) { scene.remove(ground); ground.geometry.dispose(); }
+
+    // Ground plane: update in place
     const gs = Math.max(size.x, size.z) * 6 + 60;
-    ground = new THREE.Mesh(new THREE.PlaneGeometry(gs, gs), plain('#93a07f', 1));
-    ground.rotation.x = -Math.PI / 2; ground.position.set(ctr.x, -(SLAB + 0.2) * S, ctr.z); ground.receiveShadow = true; scene.add(ground);
+    if (!ground) {
+      ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), plain('#93a07f', 1));
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+    }
+    ground.scale.set(gs, gs, 1);
+    ground.position.set(ctr.x, -(SLAB + 0.2) * S, ctr.z);
+
+    // Sun light: update in place
     const r = Math.max(size.x, size.z) * 0.75 + 6;
-    sun.position.set(ctr.x + r * 0.9, size.y + r * 1.4, ctr.z + r * 0.6); sun.target.position.copy(ctr);
-    Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 0.5, far: r * 5 }); sun.shadow.camera.updateProjectionMatrix();
+    sun.position.set(ctr.x + r * 0.9, size.y + r * 1.4, ctr.z + r * 0.6);
+    sun.target.position.copy(ctr);
+    Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 0.5, far: r * 5 });
+    sun.shadow.camera.updateProjectionMatrix();
     sun.intensity = 4 * opts.sun;
+
     scene.userData.center = ctr; scene.userData.size = size;
     if (!framed) { frame(); framed = true; }
     render();
@@ -210,8 +365,10 @@ export function createScene3D(canvas, getState, getLevel) {
     for (const { o, from, to, d } of cuts) {
       if (!room.openings.includes(o)) continue; // draw each opening once, from its owner
       const info = openingInfo(state, room, o);
-      if (d.kind === 'window') addWindow(group, room, wall, o, d, e);
-      else addDoor(group, room, wall, o, d, e, info.kind === 'exterior');
+      let og = null;
+      if (d.kind === 'window') og = addWindow(group, room, wall, o, d, e);
+      else og = addDoor(group, room, wall, o, d, e, info.kind === 'exterior');
+      if (og) entityMap.set(o.id, og);
     }
   }
 
@@ -227,24 +384,27 @@ export function createScene3D(canvas, getState, getLevel) {
     return boxMesh(horizontal ? along : thick, h, horizontal ? thick : along, mat);
   }
   function addWindow(group, room, wall, o, d, e) {
+    const og = new THREE.Group(); og.userData = { id: o.id, entityType: 'opening' };
     const mid = o.offset + o.width / 2; const yMid = d.sill + d.h / 2; const fw = 1.6;
-    const pane = wallAlignedBox(room, wall, o.width, d.h, 0.3, glassMat); pane.castShadow = false; group.add(placeInWall(room, wall, mid, yMid, 0, e, pane));
+    const pane = wallAlignedBox(room, wall, o.width, d.h, 0.3, glassMat); pane.castShadow = false; og.add(placeInWall(room, wall, mid, yMid, 0, e, pane));
     for (const [along, h, yy, tt] of [[o.width, fw, d.sill + fw / 2, mid], [o.width, fw, d.sill + d.h - fw / 2, mid], [fw, d.h, yMid, o.offset + fw / 2], [fw, d.h, yMid, o.offset + o.width - fw / 2]]) {
-      const bar = wallAlignedBox(room, wall, along, h, 2.2, frameMat); group.add(placeInWall(room, wall, tt, yy, 0, e, bar));
+      const bar = wallAlignedBox(room, wall, along, h, 2.2, frameMat); og.add(placeInWall(room, wall, tt, yy, 0, e, bar));
     }
-    if (d.style === 'hung') { const bar = wallAlignedBox(room, wall, o.width, fw, 2.6, frameMat); group.add(placeInWall(room, wall, mid, d.sill + d.h / 2, 0, e, bar)); }
-    // sill
-    const sill = wallAlignedBox(room, wall, o.width + 3, 1.2, WT + 2, frameMat); group.add(placeInWall(room, wall, mid, d.sill - 0.6, 0, e, sill));
+    if (d.style === 'hung') { const bar = wallAlignedBox(room, wall, o.width, fw, 2.6, frameMat); og.add(placeInWall(room, wall, mid, d.sill + d.h / 2, 0, e, bar)); }
+    const sill = wallAlignedBox(room, wall, o.width + 3, 1.2, WT + 2, frameMat); og.add(placeInWall(room, wall, mid, d.sill - 0.6, 0, e, sill));
+    group.add(og);
+    return og;
   }
   const doorMat = plain('#a9825a', 0.55);
   function addDoor(group, room, wall, o, d, e, exterior) {
+    const og = new THREE.Group(); og.userData = { id: o.id, entityType: 'opening' };
     const s = wallSeg(room, wall); const dir = o.swing === 'out' ? -1 : 1;
-    const head = wallAlignedBox(room, wall, o.width + 3, 2, WT + 1, frameMat); group.add(placeInWall(room, wall, o.offset + o.width / 2, d.h + 1, 0, e, head));
+    const head = wallAlignedBox(room, wall, o.width + 3, 2, WT + 1, frameMat); og.add(placeInWall(room, wall, o.offset + o.width / 2, d.h + 1, 0, e, head));
     if (exterior || d.pocket) {
-      const slabDoor = wallAlignedBox(room, wall, o.width - 1, d.h - 1, 1.75, d.glass ? glassMat : doorMat); group.add(placeInWall(room, wall, o.offset + o.width / 2, (d.h - 1) / 2, 0, e, slabDoor));
-      return;
+      const slabDoor = wallAlignedBox(room, wall, o.width - 1, d.h - 1, 1.75, d.glass ? glassMat : doorMat); og.add(placeInWall(room, wall, o.offset + o.width / 2, (d.h - 1) / 2, 0, e, slabDoor));
+      group.add(og);
+      return og;
     }
-    // interior door leaf hinged at the start of the span, swung ~80 degrees
     const ang = (80 * Math.PI) / 180;
     const sn = { x: s.nx * dir, y: s.ny * dir };
     const leaf = boxMesh(o.width - 1, d.h - 1, 1.75, doorMat);
@@ -252,11 +412,12 @@ export function createScene3D(canvas, getState, getLevel) {
     const hx = s.ax + s.dx * o.offset; const hy = s.ay + s.dy * o.offset;
     pivot.position.set(hx * S, (e + (d.h - 1) / 2) * S, hy * S);
     leaf.position.set(((o.width - 1) / 2) * S, 0, 0); pivot.add(leaf);
-    // leaf starts along wall direction (+t); rotate toward swing normal
     const alongAng = Math.atan2(s.dy, s.dx); const normAng = Math.atan2(sn.y, sn.x);
     let delta = normAng - alongAng; while (delta > Math.PI) delta -= 2 * Math.PI; while (delta < -Math.PI) delta += 2 * Math.PI;
     pivot.rotation.y = -(alongAng + Math.sign(delta) * ang);
-    group.add(pivot);
+    og.add(pivot);
+    group.add(og);
+    return og;
   }
 
   function addStairs(group, room, e) {
@@ -328,14 +489,15 @@ export function createScene3D(canvas, getState, getLevel) {
 
   return {
     opts,
-    show() { active = true; resize(); build(); cancelAnimationFrame(raf); loop(); },
+    entityMap,
+    show() { active = true; resize(); reconcile(); cancelAnimationFrame(raf); loop(); },
     hide() { active = false; cancelAnimationFrame(raf); },
     isActive: () => active,
-    update() { if (!active) return; clearTimeout(timer); timer = setTimeout(build, 60); },
-    rebuild: build,
+    update() { if (!active) return; reconcile(); },
+    rebuild: reconcile,
     frame,
     setEnv,
-    setOption(k, v) { opts[k] = v; if (k === 'sun') { sun.intensity = 4 * v; render(); } else build(); },
+    setOption(k, v) { opts[k] = v; if (k === 'sun') { sun.intensity = 4 * v; render(); } else reconcile(); },
     /** Stand inside a room at eye height looking along its longest axis. */
     eyeLevel(roomId) {
       const state = getState(); const room = state.rooms.find((r) => r.id === roomId) || state.rooms.find((r) => lv(r) === getLevel()); if (!room) return false;
