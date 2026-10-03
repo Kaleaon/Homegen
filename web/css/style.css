@@ -64,3 +64,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .thumbs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.thumbs img,#p-result{width:100%;border-radius:8px;border:1px solid var(--line);background:#222;display:block}
 .thumbs figure{margin:0}.thumbs figcaption{font-size:11px;color:var(--muted)}
 ul.res{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}ul.res li small{display:block;color:var(--muted)}ul.res a{color:var(--accent)}
+input.invalid,input.error{border-color:var(--err) !important;outline:2px solid var(--err);background-color:rgba(239,107,107,0.1) !important}
+.p-error-box{margin-top:10px;padding:10px 12px;border-radius:8px;border-left:4px solid var(--err);background:var(--bg)}
+.p-error-msg{font-weight:600;color:var(--err);font-size:12.5px;margin-bottom:8px}
+.p-recovery-btns{display:flex;gap:8px;flex-wrap:wrap}
