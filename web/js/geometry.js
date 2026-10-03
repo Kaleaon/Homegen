@@ -1,3 +1,5 @@
+import { quantize } from '../../designer3d/tools/gridSettings.mjs';
+
 // Geometry helpers. All units are inches; +x is east, +y is south (screen coordinates).
 export const WT = 4.5; // wall thickness, rooms are measured centerline-to-centerline
 export const GRID = 6;
@@ -7,7 +9,7 @@ export const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 export const lv = (r) => r.level || 0;
 
-export const snap = (v, g = GRID) => Math.round(v / g) * g;
+export const snap = (v, g = GRID) => quantize(v, g);
 
 /** Wall segment of a room. `t` offsets run west->east (N/S) or north->south (E/W). */
 export function wallSeg(room, wall) {
@@ -117,3 +119,37 @@ export function fixtureZone(item, def, half, front) {
   const h = alongFront ? lateral : depthTotal;
   return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
+
+export function extractRoomEdges(rooms) {
+  const edges = [];
+  let index = 0;
+  for (const r of rooms) {
+    for (const wall of WALLS) {
+      const s = wallSeg(r, wall);
+      const start = { x: s.ax, y: s.ay };
+      const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+      edges.push({ start, end, index: index++, roomId: r.id, wall });
+    }
+  }
+  return edges;
+}
+
+export function roomToPolygon(room) {
+  return [
+    { x: room.x, y: room.y },
+    { x: room.x + room.w, y: room.y },
+    { x: room.x + room.w, y: room.y + room.h },
+    { x: room.x, y: room.y + room.h },
+  ];
+}
+
+export function itemToPolygon(item, def) {
+  const fp = footprint(item, def);
+  return [
+    { x: fp.x, y: fp.y },
+    { x: fp.x + fp.w, y: fp.y },
+    { x: fp.x + fp.w, y: fp.y + fp.h },
+    { x: fp.x, y: fp.y + fp.h },
+  ];
+}
+

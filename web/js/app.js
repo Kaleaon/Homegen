@@ -1,5 +1,6 @@
 import {
   WT, WALLS, snap, wallSeg, wallLength, wallPoint, interior, footprint, floorAreaSqFt,
+  extractRoomEdges, roomToPolygon, itemToPolygon,
 } from './geometry.js';
 import {
   ROOM_TYPES, OPENINGS, OPENING_BY_ID, ITEMS, ITEM_BY_ID, ITEM_CATEGORIES, WALL_FINISHES, FLOOR_FINISHES,
@@ -11,10 +12,35 @@ import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor } from './patterns.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
+import {
+  InteractionLayer,
+  getSnappedPoint,
+  validatePlacement,
+  createPlacementFeedback,
+  buildToggleViewModel,
+  SNAP_TOGGLE_DEFINITIONS,
+} from '../../designer3d/tools/index.mjs';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#plan'); const ctx = canvas.getContext('2d');
 const STORE = 'homegen.plan.v1';
+
+const interaction = new InteractionLayer({
+  gridSettings: {
+    unitSize: 6,
+    angleSnapDegrees: 15,
+    magneticThreshold: 14,
+    edgeThreshold: 14,
+    midpointThreshold: 14,
+    perpendicularThreshold: 14,
+  },
+  snapModes: {
+    grid: true,
+    edge: true,
+    midpoint: false,
+    perpendicular: false,
+  },
+});
 
 let doc = M.newState();
 try { const saved = localStorage.getItem(STORE); if (saved) doc = M.deserialize(saved); } catch { /* ignore corrupt/blocked storage */ }
@@ -47,8 +73,29 @@ function toast(msg, err = false, ms = 4500) {
 
 function persist() { try { localStorage.setItem(STORE, M.serialize(doc)); } catch { /* storage unavailable */ } }
 
+function renderSnapToggles() {
+  const container = $('#snap-toggles');
+  if (!container) return;
+  const viewModels = buildToggleViewModel(interaction);
+  container.innerHTML = viewModels.map((vm) =>
+    `<button data-snap-id="${vm.id}" class="${vm.enabled ? 'on' : ''}" title="${esc(vm.description)}">${esc(vm.label)}</button>`
+  ).join('');
+  container.querySelectorAll('button[data-snap-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.snapId;
+      const vm = viewModels.find((x) => x.id === id);
+      if (vm) {
+        vm.onToggle(!vm.enabled);
+        renderSnapToggles();
+        redraw();
+      }
+    });
+  });
+}
+
 function refresh() {
   report = evaluate(doc);
+  renderSnapToggles();
   renderLevels(); renderCompliance(); renderInspector(); renderDiffDrawer(); window.__scene3d?.update(); $('#undo').disabled = !hist.canUndo(); $('#redo').disabled = !hist.canRedo();
   $('#plan-name').value = doc.name; $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
@@ -106,18 +153,44 @@ function pickAt(p) {
   const r = roomAt(p); return r ? r.id : null;
 }
 
-/** Compute where an item lands for a pointer position. Returns {room, props} or null. */
+/** Compute where an item lands for a pointer position. Returns {room, props, feedback} or null. */
 function placeItem(type, p, rot = ghostRot) {
   const def = ITEM_BY_ID[type]; const room = roomAt(p); if (!room) return null;
   const ir = interior(room);
+
+  const levelRooms = doc.rooms.filter((r) => (r.level || 0) === curLevel);
+  const edges = extractRoomEdges(levelRooms);
+  const existingPolygons = [];
+  for (const r of levelRooms) {
+    for (const it of r.items) {
+      const itDef = ITEM_BY_ID[it.type];
+      if (itDef) existingPolygons.push(itemToPolygon(it, itDef));
+    }
+  }
+  const context = { edges, existingPolygons };
+
   if (def.mount === 'wall') {
     const nw = nearestWall(p, 40, room); if (!nw) return null;
     const len = wallLength(room, nw.wall);
-    return { room, props: { wall: nw.wall, offset: Math.max(8, Math.min(len - 8, snap(nw.t, 2))) } };
+    const rawOffset = Math.max(8, Math.min(len - 8, nw.t));
+    const snappedPt = getSnappedPoint({
+      point: { x: rawOffset, y: 0 },
+      edges: [],
+      settings: interaction.gridSettings,
+      snapModes: interaction.snapModes,
+    }).point;
+    return { room, props: { wall: nw.wall, offset: Math.max(8, Math.min(len - 8, snap(snappedPt.x, 2))) } };
   }
-  if (def.mount === 'ceiling') return { room, props: { x: Math.max(ir.x + 6, Math.min(ir.x + ir.w - 6, snap(p.x, 6))), y: Math.max(ir.y + 6, Math.min(ir.y + ir.h - 6, snap(p.y, 6))), rot: 0 } };
+  if (def.mount === 'ceiling') {
+    const candPt = { x: p.x, y: p.y };
+    const entity = { position: candPt, rotation: 0, polygon: [{ x: candPt.x - 6, y: candPt.y - 6 }, { x: candPt.x + 6, y: candPt.y - 6 }, { x: candPt.x + 6, y: candPt.y + 6 }, { x: candPt.x - 6, y: candPt.y + 6 }] };
+    const moveRes = interaction.moveEntity(entity, candPt, context);
+    const sp = moveRes.position;
+    const cx = Math.max(ir.x + 6, Math.min(ir.x + ir.w - 6, sp.x));
+    const cy = Math.max(ir.y + 6, Math.min(ir.y + ir.h - 6, sp.y));
+    return { room, props: { x: cx, y: cy, rot: 0 }, feedback: moveRes.placementFeedback };
+  }
   if (!def.flat) {
-    // snap flush to the nearest wall face when close
     let best = null;
     for (const wall of WALLS) {
       const s = wallSeg(room, wall);
@@ -130,11 +203,30 @@ function placeItem(type, p, rot = ghostRot) {
       const itemLen = swap ? def.d : def.w;
       const span = horizontal ? ir.w : ir.h;
       const start = horizontal ? ir.x : ir.y;
-      const along = Math.max(0, Math.min(span - itemLen, snap((horizontal ? p.x : p.y) - start - itemLen / 2, 3)));
-      return { room, props: M.backToWall(room, def, best.wall, along, 0) };
+      const rawAlong = (horizontal ? p.x : p.y) - start - itemLen / 2;
+      const snappedPt = getSnappedPoint({
+        point: { x: rawAlong, y: 0 },
+        edges: [],
+        settings: interaction.gridSettings,
+        snapModes: interaction.snapModes,
+      }).point;
+      const along = Math.max(0, Math.min(span - itemLen, snap(snappedPt.x, 3)));
+      const props = M.backToWall(room, def, best.wall, along, 0);
+      const candPoly = itemToPolygon({ ...props }, def);
+      const validation = validatePlacement(candPoly, existingPolygons);
+      return { room, props, feedback: createPlacementFeedback(candPoly, validation) };
     }
   }
-  return { room, props: { x: snap(p.x, 3), y: snap(p.y, 3), rot } };
+
+  const candidateItem = { x: p.x, y: p.y, rot };
+  const candPoly = itemToPolygon(candidateItem, def);
+  const entity = { position: { x: p.x, y: p.y }, rotation: rot, polygon: candPoly };
+  const moveRes = interaction.moveEntity(entity, { x: p.x, y: p.y }, context);
+  return {
+    room,
+    props: { x: moveRes.position.x, y: moveRes.position.y, rot },
+    feedback: moveRes.placementFeedback,
+  };
 }
 
 function moveItemMutation(id, target) {
@@ -186,6 +278,27 @@ function drawOverlay(c, state) {
   }
   const errRooms = new Set(report.violations.filter((v) => v.severity === 'error' && v.roomId).map((v) => v.roomId));
   if (!preview) for (const id of errRooms) { const r = roomOf(doc, id); c.save(); c.strokeStyle = 'rgba(196,59,59,.65)'; c.lineWidth = 2 / view.scale; c.setLineDash([6 / view.scale, 4 / view.scale]); c.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4); c.restore(); }
+
+  if (preview && preview.feedback) {
+    const fb = preview.feedback;
+    if (fb.ghostPreview && fb.ghostPreview.length >= 3) {
+      c.save();
+      c.fillStyle = fb.style ? fb.style.color : (preview.ok ? okColor : badColor);
+      c.globalAlpha = fb.style ? fb.style.alpha : 0.35;
+      c.strokeStyle = fb.style ? fb.style.outline : (preview.ok ? '#22c55e' : '#ef4444');
+      c.lineWidth = 2 / view.scale;
+      c.beginPath();
+      c.moveTo(fb.ghostPreview[0].x, fb.ghostPreview[0].y);
+      for (let i = 1; i < fb.ghostPreview.length; i++) {
+        c.lineTo(fb.ghostPreview[i].x, fb.ghostPreview[i].y);
+      }
+      c.closePath();
+      c.fill();
+      c.stroke();
+      c.restore();
+    }
+  }
+
   if (!hover && !drag) return;
   const okColor = 'rgba(47,143,91,.5)'; const badColor = 'rgba(196,59,59,.55)';
   if (drag && drag.kind === 'room-new') {
@@ -381,10 +494,18 @@ function moveSelectedSpatial(dx, dy) {
 }
 
 function rotateSelected() {
-  if (!selection) { ghostRot = (ghostRot + 90) % 360; redraw(); toast(`Placement rotation set to ${ghostRot}°`, false, 1500); return; }
+  if (!selection) {
+    const currentRad = (ghostRot * Math.PI) / 180;
+    const rotated = interaction.rotateEntity({ rotation: currentRad }, currentRad + Math.PI / 2);
+    ghostRot = Math.round((rotated.rotation * 180) / Math.PI) % 360;
+    redraw(); toast(`Placement rotation set to ${ghostRot}°`, false, 1500);
+    return;
+  }
   const hit = M.findOwner(doc, selection);
   if (hit?.kind === 'item' && ITEM_BY_ID[hit.obj.type].mount === 'floor') {
-    const newRot = ((hit.obj.rot || 0) + 90) % 360;
+    const currentRad = ((hit.obj.rot || 0) * Math.PI) / 180;
+    const rotated = interaction.rotateEntity({ rotation: currentRad }, currentRad + Math.PI / 2);
+    const newRot = Math.round((rotated.rotation * 180) / Math.PI) % 360;
     const r = apply((n) => { const it = M.findOwner(n, selection).obj; it.rot = newRot; });
     if (r.ok) toast(`Rotated ${ITEM_BY_ID[hit.obj.type].name} to ${newRot}°`, false, 1800);
   }
@@ -463,7 +584,13 @@ function setTool(t) {
 // ------------------------------------------------------------- pointer interaction
 function updatePreview() {
   preview = null; if (!hover || drag?.kind === 'pan') return;
-  if (tool.kind === 'item') { const pl = placeItem(tool.id, hover); if (pl) preview = tryPreview((n) => M.addItem(n, roomOf(n, pl.room.id), tool.id, { ...pl.props })); }
+  if (tool.kind === 'item') {
+    const pl = placeItem(tool.id, hover);
+    if (pl) {
+      preview = tryPreview((n) => M.addItem(n, roomOf(n, pl.room.id), tool.id, { ...pl.props }));
+      if (pl.feedback) preview.feedback = pl.feedback;
+    }
+  }
   else if (tool.kind === 'opening') { const nw = nearestWall(hover); if (nw) { const def = OPENING_BY_ID[tool.id]; preview = tryPreview((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, Math.max(0, snap(nw.t - def.w / 2, 3)))); } }
   else if (tool.kind === 'roomkit') { const kit = ROOM_KIT_BY_ID[tool.id]; const rc = snapRect({ x: snap(hover.x, 6) - kit.w / 2, y: snap(hover.y, 6) - kit.h / 2, w: kit.w, h: kit.h }); preview = tryPreview((n) => M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel)); }
 }
@@ -545,7 +672,14 @@ canvas.addEventListener('pointermove', (e) => {
       const x1 = snap(p.x, 6); const y1 = snap(p.y, 6);
       drag.rect = { x: Math.min(drag.x0, x1), y: Math.min(drag.y0, y1), w: Math.abs(x1 - drag.x0), h: Math.abs(y1 - drag.y0) };
       drag.rect = snapRect(drag.rect);
+
+      const candPoly = roomToPolygon(drag.rect);
+      const existingRooms = doc.rooms.filter((r) => (r.level || 0) === curLevel).map(roomToPolygon);
+      const validation = validatePlacement(candPoly, existingRooms);
+      const placementFeedback = createPlacementFeedback(candPoly, validation);
+
       preview = drag.rect.w >= 36 && drag.rect.h >= 36 ? tryPreview((n) => M.createRoom(n, tool.type, drag.rect.x, drag.rect.y, drag.rect.w, drag.rect.h, { level: curLevel })) : null;
+      if (preview) preview.feedback = placementFeedback;
     }
     redraw(); return;
   }
@@ -773,4 +907,4 @@ const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSele
 renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
 if (doc.rooms.length) fit();
 // test hook for automated browser checks
-window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements };
+window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements, interaction };
