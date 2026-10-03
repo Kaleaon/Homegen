@@ -4,8 +4,8 @@ import android.content.res.AssetManager
 import com.google.android.filament.Engine
 import com.google.android.filament.gltfio.AssetLoader
 import com.google.android.filament.gltfio.FilamentAsset
-import com.google.android.filament.gltfio.MaterialProvider
 import com.google.android.filament.gltfio.ResourceLoader
+import com.google.android.filament.gltfio.UbershaderProvider
 import java.nio.ByteBuffer
 
 /**
@@ -22,7 +22,7 @@ class ModelLoader(
 
     private fun ensureLoader() {
         if (assetLoader == null) {
-            val materialProvider = MaterialProvider(engine)
+            val materialProvider = UbershaderProvider(engine)
             assetLoader = AssetLoader(engine, materialProvider, engine.entityManager)
             resourceLoader = ResourceLoader(engine)
         }

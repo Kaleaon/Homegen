@@ -7,6 +7,7 @@ import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.Renderer
 import com.google.android.filament.Scene
+import com.google.android.filament.SwapChain
 import com.google.android.filament.View
 import com.google.android.filament.Viewport
 import com.google.android.filament.android.DisplayHelper
@@ -30,6 +31,7 @@ class FilamentSurfaceManager(context: Context) {
     private val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK)
     private val displayHelper = DisplayHelper(context)
 
+    private var swapChain: SwapChain? = null
     private var camera: Camera? = null
     private var viewportWidth = 0
     private var viewportHeight = 0
@@ -49,9 +51,11 @@ class FilamentSurfaceManager(context: Context) {
             camera?.let { cam ->
                 FilamentCameraSync.sync(sceneController.cameraController, cam)
             }
-            if (renderer.beginFrame(uiHelper.swapChain!!, frameTimeNanos)) {
-                renderer.render(filamentView)
-                renderer.endFrame()
+            swapChain?.let { sc ->
+                if (renderer.beginFrame(sc, frameTimeNanos)) {
+                    renderer.render(filamentView)
+                    renderer.endFrame()
+                }
             }
         }
     }
@@ -72,11 +76,12 @@ class FilamentSurfaceManager(context: Context) {
         val sv = SurfaceView(context)
         uiHelper.renderCallback = object : UiHelper.RendererCallback {
             override fun onNativeWindowChanged(surface: android.view.Surface) {
-                uiHelper.swapChain = engine.createSwapChain(surface)
+                swapChain = engine.createSwapChain(surface)
             }
 
             override fun onDetachedFromSurface() {
-                uiHelper.swapChain?.let { engine.destroySwapChain(it) }
+                swapChain?.let { engine.destroySwapChain(it) }
+                swapChain = null
             }
 
             override fun onResized(width: Int, height: Int) {
