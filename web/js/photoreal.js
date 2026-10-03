@@ -47,10 +47,59 @@ const CLIENT = 'homegen-web:0.2:github.com/Kaleaon/Homegen';
 export const rawBase64 = (dataUrl) => dataUrl.slice(dataUrl.indexOf(',') + 1);
 
 export async function toWebpDataUrl(pngDataUrl, width = 768) {
-  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = pngDataUrl; });
-  const c = document.createElement('canvas'); c.width = width; c.height = Math.round((img.height * width) / img.width);
-  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL('image/webp', 0.92);
+  let tempUrl = null;
+  try {
+    let src = pngDataUrl;
+    if (typeof Blob !== 'undefined' && pngDataUrl instanceof Blob) {
+      tempUrl = URL.createObjectURL(pngDataUrl);
+      src = tempUrl;
+    }
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = src;
+    });
+
+    const height = Math.round((img.height * width) / img.width);
+    let blob;
+
+    if (typeof OffscreenCanvas !== 'undefined') {
+      try {
+        const offscreen = new OffscreenCanvas(width, height);
+        const ctx = offscreen.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        blob = await offscreen.convertToBlob({ type: 'image/webp', quality: 0.92 });
+      } catch {
+        // Fallback to canvas.toBlob() if OffscreenCanvas fails
+      }
+    }
+
+    if (!blob) {
+      const c = document.createElement('canvas');
+      c.width = width;
+      c.height = height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      blob = await new Promise((res, rej) => {
+        c.toBlob((b) => {
+          if (b) res(b);
+          else rej(new Error('Canvas toBlob encoding failed'));
+        }, 'image/webp', 0.92);
+      });
+    }
+
+    return await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onloadend = () => res(reader.result);
+      reader.onerror = rej;
+      reader.readAsDataURL(blob);
+    });
+  } finally {
+    if (tempUrl && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+      URL.revokeObjectURL(tempUrl);
+    }
+  }
 }
 
 /** Anonymous Horde users are capped at 576x576 total work; registered keys can go larger (checked with the service's dry_run). */
