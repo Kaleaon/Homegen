@@ -23,6 +23,7 @@ export function draw(ctx, state, view, opts = {}) {
   for (const room of state.rooms) drawItems(ctx, room, bad, opts.selection, false);
   for (const room of state.rooms) drawLabel(ctx, room, view);
   if (opts.selection) drawSelection(ctx, state, opts.selection, view);
+  if (opts.autoFixDiffs && opts.autoFixDiffs.length) drawDiffHighlights(ctx, state, opts.autoFixDiffs, view, opts);
   if (opts.overlay) opts.overlay(ctx, view);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
@@ -200,3 +201,180 @@ function drawSelection(ctx, state, id, view) {
 }
 
 export const handles = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]];
+
+export function findDiffTarget(state, id) {
+  if (!id) return null;
+  for (const room of state.rooms) {
+    if (room.id === id) {
+      return { kind: 'room', room, x: room.x + room.w / 2, y: room.y + room.h / 2, bounds: { x: room.x, y: room.y, w: room.w, h: room.h } };
+    }
+    const it = room.items.find((x) => x.id === id);
+    if (it) {
+      const def = ITEM_BY_ID[it.type] || {};
+      if (def.mount === 'floor') {
+        const fp = footprint(it, def);
+        return { kind: 'item', room, item: it, def, x: it.x, y: it.y, bounds: fp };
+      } else if (def.mount === 'ceiling') {
+        return { kind: 'item', room, item: it, def, x: it.x, y: it.y, radius: (def.w || 16) / 2 };
+      } else {
+        const p = wallPoint(room, it.wall, it.offset, 0);
+        return { kind: 'item', room, item: it, def, x: p.x, y: p.y, radius: 8 };
+      }
+    }
+    const o = room.openings.find((x) => x.id === id);
+    if (o) {
+      const a = wallPoint(room, o.wall, o.offset, 0);
+      const b = wallPoint(room, o.wall, o.offset + o.width, 0);
+      return { kind: 'opening', room, opening: o, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, p1: a, p2: b };
+    }
+  }
+  if (typeof id === 'string' && id.includes(':')) {
+    const [roomId, wallName] = id.split(':');
+    const room = state.rooms.find((r) => r.id === roomId);
+    if (room && WALLS.includes(wallName)) {
+      const a = wallPoint(room, wallName, 0, 0);
+      const b = wallPoint(room, wallName, wallLength(room, wallName), 0);
+      return { kind: 'wall', room, wall: wallName, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, p1: a, p2: b };
+    }
+  }
+  return null;
+}
+
+export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
+  if (!diffs || !diffs.length) return;
+
+  const placedBadges = [];
+
+  for (let idx = 0; idx < diffs.length; idx++) {
+    const d = diffs[idx];
+    const badgeNum = idx + 1;
+    const isHovered = opts.hoveredDiffIndex === idx || (opts.hoveredDiffId && opts.hoveredDiffId === d.id);
+    const target = findDiffTarget(state, d.id);
+
+    if (!target) continue;
+
+    ctx.save();
+
+    // Render Green Halo around target geometry
+    const haloColor = isHovered ? 'rgba(16, 185, 129, 0.95)' : 'rgba(47, 143, 91, 0.85)';
+    const haloFill = isHovered ? 'rgba(16, 185, 129, 0.28)' : 'rgba(47, 143, 91, 0.18)';
+    ctx.strokeStyle = haloColor;
+    ctx.fillStyle = haloFill;
+    ctx.lineWidth = (isHovered ? 3.5 : 2.5) / view.scale;
+    ctx.setLineDash([4 / view.scale, 3 / view.scale]);
+
+    if (target.kind === 'room') {
+      const b = target.bounds;
+      ctx.fillRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+      ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+    } else if (target.kind === 'item') {
+      if (target.bounds) {
+        const b = target.bounds;
+        ctx.fillRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
+        ctx.strokeRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
+      } else if (target.radius) {
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, target.radius + 4, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.stroke();
+      }
+    } else if (target.kind === 'opening' || target.kind === 'wall') {
+      ctx.setLineDash([]);
+      ctx.lineWidth = (isHovered ? 6 : 4) / view.scale;
+      ctx.beginPath();
+      ctx.moveTo(target.p1.x, target.p1.y);
+      ctx.lineTo(target.p2.x, target.p2.y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Compute non-overlapping badge position
+    let bx = target.x;
+    let by = target.y;
+
+    const minDist = 22 / Math.max(0.5, view.scale);
+    let offsetStep = 0;
+
+    while (placedBadges.some((b) => Math.hypot(b.x - bx, b.y - by) < minDist)) {
+      offsetStep++;
+      const angle = offsetStep * 1.25;
+      const dist = 18 * offsetStep;
+      bx = target.x + Math.cos(angle) * dist;
+      by = target.y + Math.sin(angle) * dist;
+    }
+
+    placedBadges.push({ x: bx, y: by, num: badgeNum, diff: d, isHovered, origX: target.x, origY: target.y });
+  }
+
+  // Connector lines for shifted badges
+  for (const b of placedBadges) {
+    if (Math.hypot(b.x - b.origX, b.y - b.origY) > 5) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(47, 143, 91, 0.6)';
+      ctx.lineWidth = 1 / view.scale;
+      ctx.setLineDash([2 / view.scale, 2 / view.scale]);
+      ctx.beginPath();
+      ctx.moveTo(b.origX, b.origY);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // Render Callout Badges
+  for (const b of placedBadges) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+
+    const r = (b.isHovered ? 13 : 10) / view.scale;
+
+    if (b.isHovered) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 4 / view.scale, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.4)';
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.fillStyle = b.isHovered ? '#059669' : '#2f8f5b';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5 / view.scale;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.max(9, r * 1.1)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(b.num), 0, 0.5 / view.scale);
+
+    if (b.isHovered) {
+      const msg = b.diff.msg || String(b.diff);
+      ctx.font = `${10 / view.scale}px sans-serif`;
+      const tw = ctx.measureText(msg).width;
+      const pad = 6 / view.scale;
+      const boxW = tw + pad * 2;
+      const boxH = 18 / view.scale;
+      const boxX = r + 4 / view.scale;
+      const boxY = -boxH / 2;
+
+      ctx.fillStyle = 'rgba(24, 24, 27, 0.92)';
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 1 / view.scale;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(boxX, boxY, boxW, boxH, 4 / view.scale);
+      else ctx.rect(boxX, boxY, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(msg, boxX + pad, 0);
+    }
+
+    ctx.restore();
+  }
+}

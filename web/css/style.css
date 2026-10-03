@@ -64,3 +64,16 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .thumbs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.thumbs img,#p-result{width:100%;border-radius:8px;border:1px solid var(--line);background:#222;display:block}
 .thumbs figure{margin:0}.thumbs figcaption{font-size:11px;color:var(--muted)}
 ul.res{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}ul.res li small{display:block;color:var(--muted)}ul.res a{color:var(--accent)}
+
+.diff-drawer{position:absolute;right:14px;top:54px;z-index:10;width:300px;max-height:360px;background:var(--panel);border:1px solid var(--accent);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.18);display:flex;flex-direction:column;overflow:hidden;font-size:12.5px}
+.diff-drawer[hidden]{display:none}
+.diff-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--line)}
+.diff-title{display:flex;align-items:center;gap:6px;font-weight:600}
+.diff-badge-count{background:var(--ok);color:#fff;font-size:11px;padding:1px 7px;border-radius:99px;font-weight:700}
+.diff-close-btn{border:0;background:transparent;padding:2px 6px;border-radius:4px;font-size:14px;cursor:pointer;color:var(--muted)}
+.diff-close-btn:hover{background:rgba(0,0,0,.08);color:var(--ink)}
+.diff-items{list-style:none;margin:0;padding:6px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.diff-items li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--panel);border:1px solid transparent;cursor:pointer;transition:background .15s,border-color .15s}
+.diff-items li:hover,.diff-items li.hovered{background:var(--bg);border-color:var(--accent)}
+.diff-num{width:20px;height:20px;border-radius:50%;background:var(--ok);color:#fff;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.diff-msg{flex:1;line-height:1.25;color:var(--ink)}

@@ -197,3 +197,29 @@ test('AI Horde client sends a depth-ControlNet img2img request and polls to comp
   assert.ok(body.params.width * body.params.height <= 576 * 576, 'anonymous work budget');
   assert.equal(rawBase64('data:x/y;base64,ZZ'), 'ZZ');
 });
+
+test('autoComply returns structured change metadata with correct entity IDs and actions', () => {
+  const r = c.commit(m.newState(), (n) => {
+    const room = m.createRoom(n, 'bathroom', 0, 0, 72, 120, { floor: 'floor_carpet_gray', ceiling: 72 });
+    m.addItem(n, room, 'outlet', { wall: 'N', offset: 30 });
+  });
+  assert.ok(r.ok);
+  assert.ok(r.changes.length > 0);
+  for (const change of r.changes) {
+    assert.equal(typeof change, 'object');
+    assert.ok(change.id, 'change must have an id');
+    assert.ok(['add', 'modify', 'upgrade', 'remove'].includes(change.action), `valid action: ${change.action}`);
+    assert.ok(['room', 'item', 'opening', 'wall', 'ceiling', 'floor'].includes(change.type), `valid type: ${change.type}`);
+    assert.equal(typeof change.msg, 'string');
+    assert.equal(String(change), change.msg);
+  }
+
+  // Verify specific changes
+  const ceilingChange = r.changes.find((c) => c.type === 'ceiling');
+  assert.ok(ceilingChange);
+  assert.equal(ceilingChange.action, 'modify');
+
+  const gfciChange = r.changes.find((c) => c.action === 'upgrade' && c.type === 'item');
+  assert.ok(gfciChange);
+  assert.match(gfciChange.msg, /GFCI/);
+});
