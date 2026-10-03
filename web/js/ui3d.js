@@ -36,9 +36,44 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   $('#o-hd').addEventListener('change', (e) => { api.setOption('hd', e.target.checked); if (e.target.checked) toast('Streaming free CC0 textures from Poly Haven…', false, 2500); });
   $('#o-env').addEventListener('change', (e) => api.setEnv(e.target.value));
   $('#o-sun').addEventListener('input', (e) => api.setOption('sun', Number(e.target.value)));
-  $('#o-reset').addEventListener('click', () => api.resetCamera());
-  $('#o-eye').addEventListener('click', () => { if (!api.eyeLevel(getSelectedRoomId())) toast('Add a room first.', true); });
+  $('#o-reset').addEventListener('click', () => { api?.resetCamera(); toast('Reset 3D camera view', false, 2000); });
+  $('#o-eye').addEventListener('click', () => { if (api?.eyeLevel(getSelectedRoomId())) toast('Entered eye-level view', false, 2000); else toast('Add a room first.', true); });
   $('#o-photo').addEventListener('click', openPhoto);
+
+  v3.addEventListener('keydown', (e) => {
+    if (!api || mode !== '3d') return;
+    const k = e.key;
+    if (k === 'ArrowLeft') {
+      e.preventDefault();
+      if (e.shiftKey) { api.panBy(-1, 0); toast('Panned 3D camera left', false, 1500); }
+      else { api.orbitBy(-0.1, 0); toast('Orbited 3D camera left', false, 1500); }
+    } else if (k === 'ArrowRight') {
+      e.preventDefault();
+      if (e.shiftKey) { api.panBy(1, 0); toast('Panned 3D camera right', false, 1500); }
+      else { api.orbitBy(0.1, 0); toast('Orbited 3D camera right', false, 1500); }
+    } else if (k === 'ArrowUp') {
+      e.preventDefault();
+      if (e.shiftKey) { api.panBy(0, 1); toast('Panned 3D camera up', false, 1500); }
+      else { api.orbitBy(0, -0.08); toast('Orbited 3D camera up', false, 1500); }
+    } else if (k === 'ArrowDown') {
+      e.preventDefault();
+      if (e.shiftKey) { api.panBy(0, -1); toast('Panned 3D camera down', false, 1500); }
+      else { api.orbitBy(0, 0.08); toast('Orbited 3D camera down', false, 1500); }
+    } else if (k === '+' || k === '=' || k === 'NumpadAdd') {
+      e.preventDefault();
+      api.zoomBy(0.88); toast('Zoomed in 3D view', false, 1500);
+    } else if (k === '-' || k === '_' || k === 'NumpadSubtract') {
+      e.preventDefault();
+      api.zoomBy(1.14); toast('Zoomed out 3D view', false, 1500);
+    } else if (k.toLowerCase() === 'e' || k === 'Enter') {
+      e.preventDefault();
+      if (api.eyeLevel(getSelectedRoomId())) toast('Entered eye-level view', false, 2000);
+      else toast('Add a room first.', true, 2000);
+    } else if (k.toLowerCase() === 'r' || k === 'Home') {
+      e.preventDefault();
+      api.resetCamera(); toast('Reset 3D camera view', false, 2000);
+    }
+  });
 
   // ------------------------------------------------------------ photoreal dialog
   const dlg = $('#photo'); let guides = { beauty: '', depth: '' }; let triggerEl = null;
