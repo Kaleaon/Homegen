@@ -13,7 +13,7 @@ const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
 const SIDING = '#d9d3c5';
 
-export function createScene3D(canvas, getState, getLevel) {
+export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.85; renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -27,6 +27,18 @@ export function createScene3D(canvas, getState, getLevel) {
   const envCache = new Map();
   let sun; let ground; let active = false; let raf = 0; let timer = 0; let framed = false;
 
+  async function fetchWithTimeout(url, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP status ${res.status}`);
+      return res;
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
   // ---------------------------------------------------------------- environment & lighting
   scene.background = new THREE.Color('#cfe0ee');
   envCache.set('studio', pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
@@ -37,21 +49,31 @@ export function createScene3D(canvas, getState, getLevel) {
 
   async function setEnv(id) {
     opts.env = id;
-    if (id === 'studio') { scene.environment = envCache.get('studio'); scene.background = new THREE.Color('#cfe0ee'); scene.environmentIntensity = 0.9; render(); return; }
+    if (id === 'studio') {
+      scene.environment = envCache.get('studio');
+      scene.background = new THREE.Color('#cfe0ee');
+      scene.environmentIntensity = 0.9;
+      scene.backgroundBlurriness = 0;
+      render();
+      const notifyEnv = callbacks.onEnvChange || api?.onEnvChange;
+      notifyEnv?.('studio');
+      return;
+    }
     const def = HDRI_ENVS.find((e) => e.id === id); if (!def) return;
     try {
       if (!envCache.has(id)) {
         let tex;
         try {
-          tex = await new HDRLoader().loadAsync(polyHavenHdriUrl(def.id));
+          const directRes = await fetchWithTimeout(polyHavenHdriUrl(def.id), 8000);
+          tex = new HDRLoader().createDataTexture(await directRes.arrayBuffer());
         } catch (directErr) {
           console.warn(`Direct HDRI fetch failed for ${def.id}, falling back to metadata API`, directErr);
-          const metaRes = await fetch(`https://api.polyhaven.com/files/${def.id}`);
-          if (!metaRes.ok) throw new Error(`Metadata fetch failed: ${metaRes.status}`);
+          const metaRes = await fetchWithTimeout(`https://api.polyhaven.com/files/${def.id}`, 8000);
           const meta = await metaRes.json();
-          const fallbackUrl = meta?.hdri?.['1k']?.hdr?.url;
-          if (!fallbackUrl) throw new Error('HDR URL missing in Poly Haven metadata');
-          tex = await new HDRLoader().loadAsync(fallbackUrl);
+          const hdrUrl = meta?.hdri?.['1k']?.hdr?.url;
+          if (!hdrUrl) throw new Error('HDR URL missing in Poly Haven metadata');
+          const hdrRes = await fetchWithTimeout(hdrUrl, 8000);
+          tex = new HDRLoader().createDataTexture(await hdrRes.arrayBuffer());
         }
         tex.mapping = THREE.EquirectangularReflectionMapping;
         envCache.set(id, { env: pmrem.fromEquirectangular(tex).texture, bg: tex });
@@ -65,7 +87,12 @@ export function createScene3D(canvas, getState, getLevel) {
       scene.environment = envCache.get('studio');
       scene.background = new THREE.Color('#cfe0ee');
       scene.environmentIntensity = 0.9;
+      scene.backgroundBlurriness = 0;
       render();
+      const notifyErr = callbacks.onError || api?.onError;
+      notifyErr?.('HDRI environment failed to load. Falling back to local studio lighting.');
+      const notifyEnv = callbacks.onEnvChange || api?.onEnvChange;
+      notifyEnv?.('studio');
     }
   }
 
@@ -84,6 +111,18 @@ export function createScene3D(canvas, getState, getLevel) {
   }
 
   const hdBase = new Map(); // `${polyhavenId}:${map}` -> loaded base Texture (shared image)
+  let textureErrorTimer = null;
+  function handleTextureError(err) {
+    opts.hd = false;
+    const notifyHD = callbacks.onHDChange || api?.onHDChange;
+    notifyHD?.(false);
+    if (!textureErrorTimer) {
+      textureErrorTimer = setTimeout(() => { textureErrorTimer = null; }, 1000);
+      const notifyErr = callbacks.onError || api?.onError;
+      notifyErr?.('HD texture loading failed. Falling back to local procedural textures.');
+    }
+  }
+
   function applyHD(mat, finishId, wInches, hInches) {
     const hd = HD_MATERIALS[finishId]; if (!hd) return;
     const urls = polyHavenTextureUrls(hd.id);
@@ -95,9 +134,33 @@ export function createScene3D(canvas, getState, getLevel) {
         t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         mat[slot] = t; if (slot === 'map') mat.color.set('#ffffff'); if (slot === 'roughnessMap') mat.roughness = 1; mat.needsUpdate = true; render();
       };
-      if (hdBase.has(id)) { const b = hdBase.get(id); if (b.image) use(b); else b.userData.wait.push(use); continue; }
-      const base = new THREE.Texture(); base.userData.wait = [use]; hdBase.set(id, base);
-      loader.load(urls[key], (tex) => { base.image = tex.image; base.needsUpdate = true; for (const f of base.userData.wait) f(base); base.userData.wait = []; }, undefined, () => { /* offline: keep procedural */ });
+      if (hdBase.has(id)) {
+        const b = hdBase.get(id);
+        if (b.userData.status === 'loaded' && b.image) use(b);
+        else if (b.userData.status === 'loading') b.userData.wait.push(use);
+        continue;
+      }
+      const base = new THREE.Texture();
+      base.userData = { wait: [use], status: 'loading' };
+      hdBase.set(id, base);
+      loader.load(
+        urls[key],
+        (tex) => {
+          base.image = tex.image;
+          base.needsUpdate = true;
+          base.userData.status = 'loaded';
+          const waiters = base.userData.wait || [];
+          base.userData.wait = [];
+          for (const f of waiters) f(base);
+        },
+        undefined,
+        (err) => {
+          base.userData.status = 'error';
+          base.userData.wait = [];
+          hdBase.delete(id);
+          handleTextureError(err);
+        }
+      );
     }
   }
 
@@ -504,9 +567,15 @@ export function createScene3D(canvas, getState, getLevel) {
   controls.addEventListener('change', render);
   new ResizeObserver(resize).observe(canvas);
 
-  return {
+  const api = {
     opts,
     entityMap,
+    hdBase,
+    scene,
+    callbacks,
+    onError: callbacks.onError,
+    onEnvChange: callbacks.onEnvChange,
+    onHDChange: callbacks.onHDChange,
     show() { active = true; resize(); reconcile(); cancelAnimationFrame(raf); loop(); },
     hide() { active = false; cancelAnimationFrame(raf); },
     isActive: () => active,
@@ -579,4 +648,5 @@ export function createScene3D(canvas, getState, getLevel) {
       return url;
     },
   };
+  return api;
 }
