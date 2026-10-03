@@ -42,6 +42,7 @@ import {
   SNAP_TOGGLE_DEFINITIONS,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
+import { ComplianceOverlayScene } from './complianceOverlay.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -74,6 +75,7 @@ try {
 }
 let hist = new M.History(doc);
 let report = evaluate(doc);
+const complianceScene = new ComplianceOverlayScene();
 let view = { scale: 1.6, ox: 40, oy: 40 };
 let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | item{type} | wall{id} | floor{id} | roomkit{id} | furnkit{id}
 let tab = 'build';
@@ -410,8 +412,10 @@ function redraw() {
   const state = preview ? preview.next : doc;
   const rep = preview ? evaluate(preview.next) : report;
   const bad = new Set([...badIds(rep)]);
+  complianceScene.update(state, rep, { curLevel, selection, drag, hover, view });
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
     dpr,
+    complianceScene,
     bad,
     selection,
     under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
@@ -1561,6 +1565,45 @@ canvas?.addEventListener('pointerleave', () => {
   preview = null;
   redraw();
 });
+canvas?.addEventListener('dblclick', (e) => {
+  const p = toWorld(e);
+  const hitNode = complianceScene.hitTest(p, view);
+  if (hitNode && (hitNode.type === 'dimensionLabel' || hitNode.type === 'constraintHandle')) {
+    const r = roomOf(doc, hitNode.data.roomId);
+    if (r) {
+      const currentFtW = (r.w / 12).toFixed(1);
+      const currentFtH = (r.h / 12).toFixed(1);
+      const input = prompt(
+        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or width in inches "144"):`,
+        `${currentFtW} × ${currentFtH}`
+      );
+      if (input) {
+        const parts = input
+          .split(/[×x,]/)
+          .map((s) => parseFloat(s.trim()))
+          .filter((n) => !isNaN(n) && n > 0);
+        if (parts.length >= 1) {
+          const newWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
+          const newHInches =
+            parts.length >= 2
+              ? parts[1] < 30
+                ? Math.round(parts[1] * 12)
+                : Math.round(parts[1])
+              : r.h;
+          apply((n) =>
+            M.resizeRoom(
+              roomOf(n, r.id),
+              r.x,
+              r.y,
+              Math.max(36, newWInches),
+              Math.max(36, newHInches)
+            )
+          );
+        }
+      }
+    }
+  }
+});
 canvas?.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas?.addEventListener(
   'wheel',
@@ -2174,4 +2217,5 @@ if (typeof window !== 'undefined')
     handleBlueprintImport,
     renderCompliance,
     renderViolationItem,
+    complianceScene,
   };

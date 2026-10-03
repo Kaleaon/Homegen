@@ -74,8 +74,118 @@ export function draw(ctx, state, view, opts = {}) {
   if (opts.selection) drawSelection(ctx, state, opts.selection, view);
   if (opts.autoFixDiffs && opts.autoFixDiffs.length)
     drawDiffHighlights(ctx, state, opts.autoFixDiffs, view, opts);
+  if (opts.complianceScene) drawComplianceScene(ctx, opts.complianceScene, view);
   if (opts.overlay) opts.overlay(ctx, view);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+export function drawComplianceScene(ctx, complianceScene, view) {
+  if (!complianceScene) return;
+  const nodes = complianceScene.getNodes();
+
+  // Pass 1: Fixture clearance zones
+  for (const node of nodes) {
+    if (node.type !== 'fixtureClearance') continue;
+    const b = node.bounds;
+    const d = node.data;
+    ctx.save();
+    ctx.fillStyle =
+      d.fillColor || (d.isColliding ? 'rgba(232, 64, 64, 0.25)' : 'rgba(42, 127, 255, 0.12)');
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = d.borderColor || (d.isColliding ? '#e84040' : '#2a7fff');
+    ctx.lineWidth = 1.5 / view.scale;
+    if (d.isColliding) {
+      ctx.setLineDash([4 / view.scale, 2 / view.scale]);
+    }
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.restore();
+  }
+
+  // Pass 2: Violations
+  for (const node of nodes) {
+    if (node.type !== 'violation') continue;
+    const b = node.bounds;
+    const d = node.data;
+    ctx.save();
+    ctx.strokeStyle =
+      d.severity === 'error' ? 'rgba(211, 51, 51, 0.85)' : 'rgba(217, 119, 6, 0.85)';
+    ctx.lineWidth = 2 / view.scale;
+    ctx.setLineDash([5 / view.scale, 3 / view.scale]);
+    ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+    ctx.restore();
+  }
+
+  // Pass 3: Egress Reach Nodes & Badges
+  for (const node of nodes) {
+    if (node.type !== 'egressReach') continue;
+    const d = node.data;
+    const b = node.bounds;
+    ctx.save();
+    // Dotted reach line from window anchor to badge
+    if (b.anchorX !== undefined && b.anchorY !== undefined) {
+      ctx.strokeStyle = d.isEgressCompliant ? '#2f8f5b' : '#c43b3b';
+      ctx.lineWidth = 1 / view.scale;
+      ctx.setLineDash([2 / view.scale, 2 / view.scale]);
+      ctx.beginPath();
+      ctx.moveTo(b.anchorX, b.anchorY);
+      ctx.lineTo(b.x + b.w / 2, b.y + b.h / 2);
+      ctx.stroke();
+    }
+    // Badge pill
+    const fs = Math.max(7, Math.min(10, 10 / view.scale));
+    ctx.font = `600 ${fs}px sans-serif`;
+    const textWidth = ctx.measureText(d.badgeText).width + 8;
+    const badgeW = Math.max(b.w, textWidth);
+    const badgeH = fs * 1.8;
+    ctx.fillStyle = d.isEgressCompliant ? 'rgba(47, 143, 91, 0.9)' : 'rgba(196, 59, 59, 0.9)';
+    ctx.beginPath();
+    ctx.roundRect
+      ? ctx.roundRect(b.x + b.w / 2 - badgeW / 2, b.y + b.h / 2 - badgeH / 2, badgeW, badgeH, 4)
+      : ctx.rect(b.x + b.w / 2 - badgeW / 2, b.y + b.h / 2 - badgeH / 2, badgeW, badgeH);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(d.badgeText, b.x + b.w / 2, b.y + b.h / 2);
+    ctx.restore();
+  }
+
+  // Pass 4: Constraint Handles & Dimension Labels
+  for (const node of nodes) {
+    if (node.type === 'constraintHandle') {
+      const b = node.bounds;
+      const d = node.data;
+      ctx.save();
+      const sz = (d.isSelected ? 10 : 8) / view.scale;
+      ctx.fillStyle = d.color || (d.isValid ? '#ffffff' : '#f87171');
+      ctx.strokeStyle = d.isValid ? '#2a7fff' : '#d33';
+      ctx.lineWidth = 1.5 / view.scale;
+      ctx.beginPath();
+      ctx.rect(b.x - sz / 2, b.y - sz / 2, sz, sz);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else if (node.type === 'dimensionLabel') {
+      const b = node.bounds;
+      const d = node.data;
+      ctx.save();
+      const fs = Math.max(8, Math.min(11, 10 / view.scale));
+      ctx.font = `600 ${fs}px sans-serif`;
+      const label = d.dimensionText;
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = d.isValid ? 'rgba(30, 41, 59, 0.85)' : 'rgba(220, 38, 38, 0.9)';
+      ctx.beginPath();
+      ctx.roundRect
+        ? ctx.roundRect(b.x - tw / 2, b.y - fs, tw, fs * 1.8, 3)
+        : ctx.rect(b.x - tw / 2, b.y - fs, tw, fs * 1.8);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, b.x, b.y - fs * 0.1);
+      ctx.restore();
+    }
+  }
 }
 
 function drawGrid(ctx, view, cw, ch) {
