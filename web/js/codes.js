@@ -5,7 +5,7 @@
 import {
   WT, EPS, WALLS, OPPOSITE, wallSeg, wallLength, interior, floorAreaSqFt, wallPoint, wallNeighbors,
   neighborShift, roomsOverlap, rectsOverlap, rectInside, footprint, fixtureZone,
-  subtractInterval, intersectInterval, lv,
+  subtractInterval, intersectInterval, lv, rectsTouch, computeRoomBoundingBox,
 } from './geometry.js';
 import {
   ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics,
@@ -126,18 +126,161 @@ const stairRisers = (room) => Math.ceil((room.ceiling + 10) / 7.75); // floor-to
 
 // ---------------------------------------------------------------- evaluation
 
-export function evaluate(state) {
+export function computeAffectedBoundingBox(state, trial) {
+  if (!state || !trial || state.levels !== trial.levels) return null;
+
+  const sRooms = state.rooms || [];
+  const tRooms = trial.rooms || [];
+
+  if (Math.abs(sRooms.length - tRooms.length) > 1) return null;
+
+  const sMap = new Map(sRooms.map((r) => [r.id, r]));
+  const tMap = new Map(tRooms.map((r) => [r.id, r]));
+
+  const boxes = [];
+
+  for (const r of tRooms) {
+    if (!sMap.has(r.id)) {
+      boxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, level: lv(r) });
+    }
+  }
+  for (const r of sRooms) {
+    if (!tMap.has(r.id)) {
+      boxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, level: lv(r) });
+    }
+  }
+
+  for (const [id, sRoom] of sMap) {
+    const tRoom = tMap.get(id);
+    if (!tRoom) continue;
+
+    if (sRoom.x !== tRoom.x || sRoom.y !== tRoom.y || sRoom.w !== tRoom.w || sRoom.h !== tRoom.h) {
+      boxes.push({ x: sRoom.x, y: sRoom.y, w: sRoom.w, h: sRoom.h, level: lv(sRoom) });
+      boxes.push({ x: tRoom.x, y: tRoom.y, w: tRoom.w, h: tRoom.h, level: lv(tRoom) });
+    } else if (sRoom.ceiling !== tRoom.ceiling || sRoom.type !== tRoom.type) {
+      boxes.push({ x: tRoom.x, y: tRoom.y, w: tRoom.w, h: tRoom.h, level: lv(tRoom) });
+    }
+
+    const sItems = sRoom.items || [];
+    const tItems = tRoom.items || [];
+    if (JSON.stringify(sItems) !== JSON.stringify(tItems)) {
+      const sItemMap = new Map(sItems.map((i) => [i.id, i]));
+      const tItemMap = new Map(tItems.map((i) => [i.id, i]));
+
+      for (const item of tItems) {
+        const oldItem = sItemMap.get(item.id);
+        if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(item)) {
+          pushItemBox(boxes, tRoom, item);
+        }
+      }
+      for (const item of sItems) {
+        if (!tItemMap.has(item.id)) {
+          pushItemBox(boxes, sRoom, item);
+        }
+      }
+    }
+
+    const sOpenings = sRoom.openings || [];
+    const tOpenings = tRoom.openings || [];
+    if (JSON.stringify(sOpenings) !== JSON.stringify(tOpenings)) {
+      const sOpMap = new Map(sOpenings.map((o) => [o.id, o]));
+      const tOpMap = new Map(tOpenings.map((o) => [o.id, o]));
+
+      for (const op of tOpenings) {
+        const oldOp = sOpMap.get(op.id);
+        if (!oldOp || JSON.stringify(oldOp) !== JSON.stringify(op)) {
+          pushOpeningBox(boxes, tRoom, op);
+        }
+      }
+      for (const op of sOpenings) {
+        if (!tOpMap.has(op.id)) {
+          pushOpeningBox(boxes, sRoom, op);
+        }
+      }
+    }
+  }
+
+  if (boxes.length === 0) return null;
+
+  const level = boxes[0].level;
+  let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+  for (const b of boxes) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
+  }
+
+  const margin = 36;
+  return {
+    x: minX - margin,
+    y: minY - margin,
+    w: (maxX - minX) + margin * 2,
+    h: (maxY - minY) + margin * 2,
+    level,
+  };
+}
+
+function pushItemBox(boxes, room, item) {
+  const def = ITEM_BY_ID[item.type];
+  if (!def) return;
+  if (def.mount === 'floor') {
+    const fp = footprint(item, def);
+    if (def.clearance) {
+      const zone = fixtureZone(item, def, 15, 21);
+      boxes.push({ x: Math.min(fp.x, zone.x), y: Math.min(fp.y, zone.y), w: Math.max(fp.w, zone.w), h: Math.max(fp.h, zone.h), level: lv(room) });
+    } else {
+      boxes.push({ x: fp.x, y: fp.y, w: fp.w, h: fp.h, level: lv(room) });
+    }
+  } else if (def.mount === 'wall') {
+    const p = wallPoint(room, item.wall, item.offset || 0, 0);
+    boxes.push({ x: p.x - 12, y: p.y - 12, w: 24, h: 24, level: lv(room) });
+  } else {
+    boxes.push({ x: (item.x !== undefined ? item.x : room.x + room.w / 2) - 12, y: (item.y !== undefined ? item.y : room.y + room.h / 2) - 12, w: 24, h: 24, level: lv(room) });
+  }
+}
+
+function pushOpeningBox(boxes, room, op) {
+  const p1 = wallPoint(room, op.wall, op.offset, 0);
+  const p2 = wallPoint(room, op.wall, op.offset + op.width, 0);
+  const x = Math.min(p1.x, p2.x) - 18;
+  const y = Math.min(p1.y, p2.y) - 18;
+  const w = Math.abs(p1.x - p2.x) + 36;
+  const h = Math.abs(p1.y - p2.y) + 36;
+  boxes.push({ x, y, w, h, level: lv(room) });
+}
+
+export function evaluate(state, options = {}) {
+  const { affectedBox = null, baseReport = null } = options;
+  const rooms = state.rooms;
+
+  let affectedRoomIds = null;
+  if (affectedBox) {
+    affectedRoomIds = new Set();
+    for (const room of rooms) {
+      if (affectedBox.level !== undefined && lv(room) !== affectedBox.level) continue;
+      if (rectsTouch(room, affectedBox)) {
+        affectedRoomIds.add(room.id);
+      }
+    }
+  }
+
   const v = [];
   const add = (rule, ref, severity, blocking, target, msg, extra = {}) =>
     v.push({ id: `${rule}:${target}`, rule, ref, severity, blocking, msg, ...extra });
-  const rooms = state.rooms;
   const cx = connectivity(state);
 
   for (let a = 0; a < rooms.length; a++) for (let b = a + 1; b < rooms.length; b++) {
-    if (lv(rooms[a]) === lv(rooms[b]) && roomsOverlap(rooms[a], rooms[b])) add('overlap', 'Geometry', 'error', true, `${rooms[a].id}+${rooms[b].id}`, `${rooms[a].name} overlaps ${rooms[b].name}.`, { roomId: rooms[a].id });
+    if (lv(rooms[a]) === lv(rooms[b])) {
+      if (!affectedRoomIds || affectedRoomIds.has(rooms[a].id) || affectedRoomIds.has(rooms[b].id)) {
+        if (roomsOverlap(rooms[a], rooms[b])) add('overlap', 'Geometry', 'error', true, `${rooms[a].id}+${rooms[b].id}`, `${rooms[a].name} overlaps ${rooms[b].name}.`, { roomId: rooms[a].id });
+      }
+    }
   }
 
   for (const room of rooms) {
+    if (affectedRoomIds && !affectedRoomIds.has(room.id)) continue;
+
     const t = ROOM_TYPES[room.type]; const ir = interior(room); const area = floorAreaSqFt(room);
     const R = (rule, ref, sev, blocking, target, msg, extra) => add(rule, ref, sev, blocking, target, `${room.name}: ${msg}`, { roomId: room.id, ...extra });
     const minDim = Math.min(ir.w, ir.h);
@@ -177,7 +320,7 @@ export function evaluate(state) {
         if (!def.exterior && !def.closet && def.clear < 28) O('door-width', 'Practice', 'error', true, 'interior doors should have at least 28 in clear width.');
         for (const { roomId, rect } of doorSwingRects(state, room, o)) {
           const tr = rooms.find((x) => x.id === roomId);
-          const blocker = tr.items.find((i) => collidable(i) && rectsOverlap(rect, footprint(i, ITEM_BY_ID[i.type])));
+          const blocker = tr ? tr.items.find((i) => collidable(i) && rectsOverlap(rect, footprint(i, ITEM_BY_ID[i.type]))) : null;
           if (blocker) O('door-swing', 'Practice', 'error', true, `swing is blocked by ${ITEM_BY_ID[blocker.type].name}.`, { itemId: blocker.id });
         }
       }
@@ -266,6 +409,7 @@ export function evaluate(state) {
   const fuel = rooms.some((r) => r.items.some((i) => ITEM_BY_ID[i.type].fuel));
   for (const room of rooms) {
     if (!ROOM_TYPES[room.type].sleeping) continue;
+    if (affectedRoomIds && !affectedRoomIds.has(room.id)) continue;
     const outside = outsideAreas(state, room, cx);
     const need = fuel ? ['smoke', 'co'] : ['smoke'];
     for (const fn of need) {
@@ -276,7 +420,7 @@ export function evaluate(state) {
     }
   }
 
-  if (rooms.length) {
+  if (rooms.length && (!affectedRoomIds || rooms.some((r) => affectedRoomIds.has(r.id)))) {
     if (!cx.exits.size) add('no-exit', 'IRC R311.1', 'error', false, 'home', 'The home needs at least one exterior door (32 in clear).', { fixable: true });
     const kinds = new Set(rooms.flatMap((r) => r.items.map((i) => ITEM_BY_ID[i.type].fixture)).filter(Boolean));
     const inRoom = (type, fx) => rooms.some((r) => r.type === type && r.items.some((i) => ITEM_BY_ID[i.type].fixture === fx));
@@ -284,6 +428,15 @@ export function evaluate(state) {
     if (!kinds.has('toilet')) add('need-toilet', 'IRC R306.3', 'error', false, 'home', 'A toilet (water closet) is required.');
     if (!kinds.has('lavatory')) add('need-lav', 'IRC R306.2', 'error', false, 'home', 'A lavatory (bathroom sink) is required.');
     if (!kinds.has('tub') && !kinds.has('shower')) add('need-bath', 'IRC R306.3', 'error', false, 'home', 'A bathtub or shower is required.');
+  }
+
+  if (affectedRoomIds && baseReport && baseReport.violations) {
+    for (const prev of baseReport.violations) {
+      const targetRoomId = prev.roomId || (prev.id ? prev.id.split(':')[1] : null);
+      if (targetRoomId && !affectedRoomIds.has(targetRoomId) && !v.some((x) => x.id === prev.id)) {
+        v.push(prev);
+      }
+    }
   }
 
   const errors = v.filter((x) => x.severity === 'error').length;
@@ -302,7 +455,7 @@ function outsideAreas(state, room, cx) {
     .filter((r) => !['closet', 'bathroom'].includes(r.type) && !ROOM_TYPES[r.type].sleeping);
 }
 
-export const blockingIds = (state) => new Set(evaluate(state).violations.filter((x) => x.blocking).map((x) => x.id));
+export const blockingIds = (state, options = {}) => new Set(evaluate(state, options).violations.filter((x) => x.blocking).map((x) => x.id));
 
 // ---------------------------------------------------------------- auto-compliance
 
@@ -317,22 +470,27 @@ function freeSpans(state, room, wall, { exterior = false, neighbor = null, minLe
 }
 
 /** Try mutate(); keep it only if it introduces no new blocking violation. */
-function attempt(state, mutate) {
-  const base = blockingIds(state);
+function attempt(state, mutate, baseReport = null) {
+  const baseRep = baseReport || evaluate(state);
+  const base = new Set(baseRep.violations.filter((x) => x.blocking).map((x) => x.id));
   const trial = clone(state);
   mutate(trial);
-  for (const id of blockingIds(trial)) if (!base.has(id)) return false;
+  const affectedBox = computeAffectedBoundingBox(state, trial);
+  const trialRep = evaluate(trial, { affectedBox, baseReport: baseRep });
+  for (const v of trialRep.violations) {
+    if (v.blocking && !base.has(v.id)) return false;
+  }
   state.rooms = trial.rooms; state.nextId = trial.nextId;
   return true;
 }
 
-function tryOpening(state, roomId, type, wall, spans, width, extra = {}) {
+function tryOpening(state, roomId, type, wall, spans, width, extra = {}, baseReport = null) {
   const swings = ['in', 'out'];
   for (const [a, b] of spans) {
     for (const off of [a + (b - a - width) / 2, a, b - width]) {
       if (off < a - EPS || off + width > b + EPS) continue;
       for (const swing of swings) {
-        const ok = attempt(state, (s) => { const r = s.rooms.find((x) => x.id === roomId); const o = addOpening(s, r, type, wall, Math.round(off * 2) / 2); o.swing = swing; Object.assign(o, extra); });
+        const ok = attempt(state, (s) => { const r = s.rooms.find((x) => x.id === roomId); const o = addOpening(s, r, type, wall, Math.round(off * 2) / 2); o.swing = swing; Object.assign(o, extra); }, baseReport);
         if (ok) return true;
       }
     }
@@ -348,14 +506,14 @@ function doorPreference(room, other) {
   return score;
 }
 
-function addExteriorWindow(state, roomId, types) {
+function addExteriorWindow(state, roomId, types, baseReport = null) {
   const room = state.rooms.find((r) => r.id === roomId);
   const walls = [...WALLS].sort((a, b) => wallLength(room, b) - wallLength(room, a));
   for (const type of types) {
     const def = OPENING_BY_ID[type];
     for (const wall of walls) {
       const spans = freeSpans(state, room, wall, { exterior: true, minLen: def.w });
-      if (spans.length && tryOpening(state, roomId, type, wall, spans, def.w)) return def.name;
+      if (spans.length && tryOpening(state, roomId, type, wall, spans, def.w, {}, baseReport)) return def.name;
     }
   }
   return null;
@@ -363,13 +521,13 @@ function addExteriorWindow(state, roomId, types) {
 
 const center = (room) => { const ir = interior(room); return { x: ir.x + ir.w / 2, y: ir.y + ir.h / 2 }; };
 
-function addCeiling(state, roomId, type, dx = 0, dy = 0) {
+function addCeiling(state, roomId, type, dx = 0, dy = 0, baseReport = null) {
   const room = state.rooms.find((r) => r.id === roomId); const c = center(room);
-  return attempt(state, (s) => addItem(s, s.rooms.find((r) => r.id === roomId), type, { x: c.x + dx, y: c.y + dy, rot: 0 }));
+  return attempt(state, (s) => addItem(s, s.rooms.find((r) => r.id === roomId), type, { x: c.x + dx, y: c.y + dy, rot: 0 }), baseReport);
 }
 
-function addWallItem(state, roomId, type, wall, offset) {
-  return attempt(state, (s) => addItem(s, s.rooms.find((r) => r.id === roomId), type, { wall, offset: Math.round(offset * 2) / 2 }));
+function addWallItem(state, roomId, type, wall, offset, baseReport = null) {
+  return attempt(state, (s) => addItem(s, s.rooms.find((r) => r.id === roomId), type, { wall, offset: Math.round(offset * 2) / 2 }), baseReport);
 }
 
 /**
@@ -381,6 +539,9 @@ export function autoComply(state) {
   const name = (id) => state.rooms.find((r) => r.id === id).name;
   for (let pass = 0; pass < 3; pass++) {
     const before = JSON.stringify(state.rooms);
+    let curRep = evaluate(state);
+    const syncRep = () => { curRep = evaluate(state); };
+
     // 1. Ceilings & moisture finishes
     for (const r of state.rooms) {
       const need = ['bathroom', 'laundry', 'closet', 'stairs'].includes(r.type) ? 80 : 84;
@@ -390,18 +551,20 @@ export function autoComply(state) {
         for (const w of WALLS) if (!WALL_WET(r.walls[w])) { r.walls[w] = r.type === 'bathroom' ? 'wall_tile_white' : 'paint_white'; log.push(`${r.name}: ${w} wall made moisture-resistant`); }
       }
     }
+    syncRep();
+
     // 1b. Openings whose wall changed character (exterior <-> interior) after rooms moved/were added
     for (const r of state.rooms) for (const o of [...r.openings]) {
       const def = OPENING_BY_ID[o.type]; const kind = openingInfo(state, r, o).kind;
       if (kind === 'straddle') continue;
-      if (def.kind === 'window' && kind === 'interior') { r.openings = r.openings.filter((x) => x.id !== o.id); log.push(`${r.name}: removed ${def.name} (wall is no longer exterior)`); }
+      if (def.kind === 'window' && kind === 'interior') { r.openings = r.openings.filter((x) => x.id !== o.id); log.push(`${r.name}: removed ${def.name} (wall is no longer exterior)`); syncRep(); }
       else if (def.kind === 'door' && !def.exterior && kind === 'exterior') {
         const off = o.offset + (o.width - 36) / 2;
-        const ok = attempt(state, (s) => { const rr = s.rooms.find((x) => x.id === r.id); const oo = rr.openings.find((x) => x.id === o.id); Object.assign(oo, { type: 'door_entry_36', width: 36, offset: Math.max(6, off), swing: 'in' }); });
-        if (ok) log.push(`${r.name}: door on exterior wall upgraded to entry door`);
+        const ok = attempt(state, (s) => { const rr = s.rooms.find((x) => x.id === r.id); const oo = rr.openings.find((x) => x.id === o.id); Object.assign(oo, { type: 'door_entry_36', width: 36, offset: Math.max(6, off), swing: 'in' }); }, curRep);
+        if (ok) { log.push(`${r.name}: door on exterior wall upgraded to entry door`); syncRep(); }
       } else if (def.kind === 'door' && def.exterior && kind === 'interior') {
-        const ok = attempt(state, (s) => { const rr = s.rooms.find((x) => x.id === r.id); const oo = rr.openings.find((x) => x.id === o.id); Object.assign(oo, { type: 'door_interior_32', width: 32, offset: oo.offset + 2 }); });
-        if (ok) log.push(`${r.name}: entry door between rooms changed to interior door`);
+        const ok = attempt(state, (s) => { const rr = s.rooms.find((x) => x.id === r.id); const oo = rr.openings.find((x) => x.id === o.id); Object.assign(oo, { type: 'door_interior_32', width: 32, offset: oo.offset + 2 }); }, curRep);
+        if (ok) { log.push(`${r.name}: entry door between rooms changed to interior door`); syncRep(); }
       }
     }
     // 1c. Stairs need a matching stair on the next level
@@ -409,8 +572,8 @@ export function autoComply(state) {
       if (r.type !== 'stairs' || stairPartners(state, r).length) continue;
       for (const t of [lv(r) + 1, lv(r) - 1]) {
         if (t < 0 || t >= (state.levels || 1)) continue;
-        const ok = attempt(state, (s2) => { const p = createRoom(s2, 'stairs', r.x, r.y, r.w, r.h, { level: t, floor: r.floor, ceiling: r.ceiling }); p.walls = { ...r.walls }; });
-        if (ok) { log.push(`${r.name}: added matching stairs on floor ${t + 1}`); break; }
+        const ok = attempt(state, (s2) => { const p = createRoom(s2, 'stairs', r.x, r.y, r.w, r.h, { level: t, floor: r.floor, ceiling: r.ceiling }); p.walls = { ...r.walls }; }, curRep);
+        if (ok) { log.push(`${r.name}: added matching stairs on floor ${t + 1}`); syncRep(); break; }
       }
     }
     // 2. Exit and door connectivity
@@ -419,7 +582,7 @@ export function autoComply(state) {
       const cands = state.rooms.filter((r) => lv(r) === 0).sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type) || 0).filter((r) => order.includes(r.type) || true);
       outer: for (const r of cands) for (const wall of WALLS) {
         const spans = freeSpans(state, r, wall, { exterior: true, minLen: 36 });
-        if (spans.length && tryOpening(state, r.id, 'door_entry_36', wall, spans, 36)) { log.push(`${r.name}: added entry door (required exterior exit)`); break outer; }
+        if (spans.length && tryOpening(state, r.id, 'door_entry_36', wall, spans, 36, {}, curRep)) { log.push(`${r.name}: added entry door (required exterior exit)`); syncRep(); break outer; }
       }
     }
     for (let guard = 0; guard < state.rooms.length; guard++) {
@@ -431,7 +594,7 @@ export function autoComply(state) {
           .filter((n) => cx.reachable.has(n.room.id))
           .sort((a, b) => doorPreference(r, b.room) - doorPreference(r, a.room));
         for (const n of nbrs) {
-          if (tryOpening(state, r.id, type, n.wall, freeSpans(state, r, n.wall, { neighbor: n.room, minLen: w }), w)) { log.push(`${r.name}: added door to ${n.room.name}`); progressed = true; break; }
+          if (tryOpening(state, r.id, type, n.wall, freeSpans(state, r, n.wall, { neighbor: n.room, minLen: w }), w, {}, curRep)) { log.push(`${r.name}: added door to ${n.room.name}`); syncRep(); progressed = true; break; }
         }
         if (progressed) break;
       }
@@ -440,16 +603,16 @@ export function autoComply(state) {
     // 3. Windows: egress, light, ventilation, bath ventilation
     for (const r of state.rooms) {
       if (ROOM_TYPES[r.type].sleeping && !daylight(state, state.rooms.find((x) => x.id === r.id)).egress) {
-        const n = addExteriorWindow(state, r.id, ['win_casement_30x48', 'win_hung_36x60']);
-        if (n) log.push(`${r.name}: added ${n} for emergency egress`);
+        const n = addExteriorWindow(state, r.id, ['win_casement_30x48', 'win_hung_36x60'], curRep);
+        if (n) { log.push(`${r.name}: added ${n} for emergency egress`); syncRep(); }
       }
       if (ROOM_TYPES[r.type].habitable) {
         for (let k = 0; k < 4; k++) {
           const d = daylight(state, state.rooms.find((x) => x.id === r.id));
           if (d.glaze >= d.needGlaze && d.operable >= d.needVent) break;
-          const n = addExteriorWindow(state, r.id, ['win_hung_36x60', 'win_hung_30x48', 'win_casement_30x48']);
+          const n = addExteriorWindow(state, r.id, ['win_hung_36x60', 'win_hung_30x48', 'win_casement_30x48'], curRep);
           if (!n) break;
-          log.push(`${r.name}: added ${n} for light/ventilation`);
+          log.push(`${r.name}: added ${n} for light/ventilation`); syncRep();
         }
       }
     }
@@ -459,10 +622,10 @@ export function autoComply(state) {
       const t = ROOM_TYPES[r.type]; const ir = interior(r);
       if (r.type === 'bathroom') {
         const d = daylight(state, r);
-        if (!has(r, 'fan') && !(d.glaze >= 432 && d.operable >= 216) && addCeiling(state, id, 'fan_exhaust', 24, 0)) log.push(`${r.name}: added exhaust fan`);
+        if (!has(r, 'fan') && !(d.glaze >= 432 && d.operable >= 216) && addCeiling(state, id, 'fan_exhaust', 24, 0, curRep)) { log.push(`${r.name}: added exhaust fan`); syncRep(); }
       }
       const needsLight = t.habitable || ['bathroom', 'laundry', 'hallway', 'entry', 'stairs'].includes(r.type);
-      if (needsLight && !has(get(), 'light') && addCeiling(state, id, 'light_ceiling')) log.push(`${r.name}: added ceiling light`);
+      if (needsLight && !has(get(), 'light') && addCeiling(state, id, 'light_ceiling', 0, 0, curRep)) { log.push(`${r.name}: added ceiling light`); syncRep(); }
       if (needsLight && !get().items.some((i) => i.type === 'switch')) {
         const cands = [];
         for (const wall of WALLS) for (const { o, from, to } of wallOpenings(state, get(), wall)) {
@@ -474,10 +637,10 @@ export function autoComply(state) {
           }
         }
         cands.sort((a, b) => a.d - b.d);
-        for (const cd of cands.slice(0, 40)) if (addWallItem(state, id, 'switch', cd.w2, cd.t2)) { log.push(`${r.name}: added light switch at door`); break; }
+        for (const cd of cands.slice(0, 40)) if (addWallItem(state, id, 'switch', cd.w2, cd.t2, curRep)) { log.push(`${r.name}: added light switch at door`); syncRep(); break; }
       }
       // GFCI upgrades in wet rooms
-      if (t.wet) for (const i of get().items) if (ITEM_BY_ID[i.type].shape === 'outlet' && !ITEM_BY_ID[i.type].gfci) { i.type = 'outlet_gfci'; log.push(`${r.name}: outlet upgraded to GFCI`); }
+      if (t.wet) for (const i of get().items) if (ITEM_BY_ID[i.type].shape === 'outlet' && !ITEM_BY_ID[i.type].gfci) { i.type = 'outlet_gfci'; log.push(`${r.name}: outlet upgraded to GFCI`); syncRep(); }
       const outType = t.wet ? 'outlet_gfci' : 'outlet';
       if (t.habitable || r.type === 'laundry') {
         for (let k = 0; k < 20; k++) {
@@ -487,14 +650,14 @@ export function autoComply(state) {
           for (let p = 0; p < parts && !placed; p++) {
             const c = seg.from + ((p + 0.5) * (seg.to - seg.from)) / parts;
             if (get().items.some((i) => i.wall === seg.wall && Math.abs(i.offset - c) < 6 && ITEM_BY_ID[i.type].shape === 'outlet')) continue;
-            for (const off of [c, c - 12, c + 12, c - 24, c + 24]) if (off >= seg.from && off <= seg.to && addWallItem(state, id, outType, seg.wall, off)) { placed = true; log.push(`${r.name}: added outlet on ${seg.wall} wall`); break; }
+            for (const off of [c, c - 12, c + 12, c - 24, c + 24]) if (off >= seg.from && off <= seg.to && addWallItem(state, id, outType, seg.wall, off, curRep)) { placed = true; log.push(`${r.name}: added outlet on ${seg.wall} wall`); syncRep(); break; }
           }
           if (!placed) break;
         }
       }
       if (['hallway', 'entry'].includes(r.type) && Math.max(ir.w, ir.h) >= 120 && !get().items.some((i) => ITEM_BY_ID[i.type].shape === 'outlet')) {
         const wall = ir.w >= ir.h ? 'N' : 'W';
-        if (addWallItem(state, id, 'outlet', wall, wallLength(get(), wall) / 2)) log.push(`${r.name}: added hallway outlet`);
+        if (addWallItem(state, id, 'outlet', wall, wallLength(get(), wall) / 2, curRep)) { log.push(`${r.name}: added hallway outlet`); syncRep(); }
       }
       if (r.type === 'bathroom') {
         const lav = get().items.find((i) => ITEM_BY_ID[i.type].fixture === 'lavatory');
@@ -507,10 +670,10 @@ export function autoComply(state) {
               for (let t2 = 8; t2 <= len - 8; t2 += 4) {
                 const p = wallPoint(get(), wall, t2, 0);
                 const d = Math.hypot(p.x - lav.x, p.y - lav.y);
-                if (d > 14 && d <= 40 && addWallItem(state, id, 'outlet_gfci', wall, t2)) { log.push(`${r.name}: added GFCI outlet by lavatory`); break outer3; }
+                if (d > 14 && d <= 40 && addWallItem(state, id, 'outlet_gfci', wall, t2, curRep)) { log.push(`${r.name}: added GFCI outlet by lavatory`); syncRep(); break outer3; }
               }
             }
-          } else if (addWallItem(state, id, 'outlet_gfci', 'N', wallLength(get(), 'N') / 2)) log.push(`${r.name}: added GFCI outlet`);
+          } else if (addWallItem(state, id, 'outlet_gfci', 'N', wallLength(get(), 'N') / 2, curRep)) { log.push(`${r.name}: added GFCI outlet`); syncRep(); }
         }
       }
     }
@@ -522,15 +685,15 @@ export function autoComply(state) {
       const outside = outsideAreas(state, get(), cx).sort((a, b) => (b.type === 'hallway') - (a.type === 'hallway'));
       const want = (rm, fn) => has(state.rooms.find((x) => x.id === rm.id), fn);
       if (!has(get(), 'smoke')) {
-        if (fuel && !outside.length && !has(get(), 'co')) { if (addCeiling(state, r0.id, 'smoke_co_alarm', 24, 0)) log.push(`${r0.name}: added smoke + CO alarm`); }
-        else if (addCeiling(state, r0.id, 'smoke_alarm', 24, 0)) log.push(`${r0.name}: added smoke alarm`);
+        if (fuel && !outside.length && !has(get(), 'co')) { if (addCeiling(state, r0.id, 'smoke_co_alarm', 24, 0, curRep)) { log.push(`${r0.name}: added smoke + CO alarm`); syncRep(); } }
+        else if (addCeiling(state, r0.id, 'smoke_alarm', 24, 0, curRep)) { log.push(`${r0.name}: added smoke alarm`); syncRep(); }
       }
-      if (fuel && !outside.length && !has(get(), 'co') && addCeiling(state, r0.id, 'co_alarm', -24, 0)) log.push(`${r0.name}: added CO alarm`);
+      if (fuel && !outside.length && !has(get(), 'co') && addCeiling(state, r0.id, 'co_alarm', -24, 0, curRep)) { log.push(`${r0.name}: added CO alarm`); syncRep(); }
       for (const fn of fuel ? ['smoke', 'co'] : ['smoke']) {
         if (outside.length && !outside.some((rm) => want(rm, fn))) {
           const target = outside[0];
           const type = fuel ? 'smoke_co_alarm' : 'smoke_alarm';
-          if (addCeiling(state, target.id, type, 24, 0) || addCeiling(state, target.id, type, 0, 24)) log.push(`${target.name}: added ${fn === 'co' || fuel ? 'smoke + CO' : 'smoke'} alarm outside ${r0.name}`);
+          if (addCeiling(state, target.id, type, 24, 0, curRep) || addCeiling(state, target.id, type, 0, 24, curRep)) { log.push(`${target.name}: added ${fn === 'co' || fuel ? 'smoke + CO' : 'smoke'} alarm outside ${r0.name}`); syncRep(); }
         }
       }
     }

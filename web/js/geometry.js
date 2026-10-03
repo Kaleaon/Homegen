@@ -117,3 +117,18 @@ export function fixtureZone(item, def, half, front) {
   const h = alongFront ? lateral : depthTotal;
   return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
+
+export function rectsTouch(a, b, margin = 0) {
+  if (!a || !b) return false;
+  const ax0 = a.x - margin; const ax1 = a.x + a.w + margin;
+  const ay0 = a.y - margin; const ay1 = a.y + a.h + margin;
+  const bx0 = b.x; const bx1 = b.x + b.w;
+  const by0 = b.y; const by1 = b.y + b.h;
+  return Math.max(ax0, bx0) < Math.min(ax1, bx1) && Math.max(ay0, by0) < Math.min(ay1, by1);
+}
+
+export function computeRoomBoundingBox(room) {
+  if (!room) return null;
+  return { x: room.x, y: room.y, w: room.w, h: room.h, level: room.level || 0 };
+}
+
