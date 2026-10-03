@@ -7,7 +7,7 @@ import {
 } from './catalog.js';
 
 export function newState() {
-  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [] };
+  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [], background: null };
 }
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));
@@ -130,9 +130,36 @@ export function deserialize(text) {
   const s = JSON.parse(text);
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
+  s.background = s.background || null;
   for (const r of s.rooms) { r.openings ||= []; r.items ||= []; r.level ||= 0; }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
   return s;
+}
+
+export function parseDistanceInInches(str) {
+  if (!str) return null;
+  str = String(str).trim().toLowerCase();
+  if (!str) return null;
+  if (str.includes('m') && !str.includes('ft')) {
+    if (str.includes('cm')) return parseFloat(str) * 0.393701;
+    return parseFloat(str) * 39.3701;
+  }
+  const hasFt = /'|ft|feet/.test(str);
+  const hasIn = /"|in|inches/.test(str);
+  if (hasFt) {
+    const ftMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:'|ft|feet)/);
+    const inMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:"|in|inches)/) || str.match(/(?:'|ft|feet)\s*(\d+(?:\.\d+)?)/);
+    const feet = ftMatch ? parseFloat(ftMatch[1]) : 0;
+    const inches = inMatch ? parseFloat(inMatch[1]) : 0;
+    return feet * 12 + inches;
+  }
+  if (hasIn) {
+    const inMatch = str.match(/(\d+(?:\.\d+)?)/);
+    return inMatch ? parseFloat(inMatch[1]) : null;
+  }
+  const num = parseFloat(str);
+  if (isNaN(num) || num <= 0) return null;
+  return num <= 50 ? num * 12 : num;
 }
 
 export class History {

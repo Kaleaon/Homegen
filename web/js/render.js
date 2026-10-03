@@ -7,12 +7,39 @@ import { openingInfo } from './codes.js';
 const fmt = (inches) => `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
 export const fmtLen = fmt;
 
+let bgCache = { dataUrl: null, img: null };
+
+function getBgImage(bg, onLoaded) {
+  if (!bg || !bg.dataUrl) return null;
+  if (bgCache.dataUrl === bg.dataUrl && bgCache.img) {
+    return bgCache.img;
+  }
+  const img = new Image();
+  bgCache = { dataUrl: bg.dataUrl, img };
+  img.onload = () => { if (onLoaded) onLoaded(); };
+  img.src = bg.dataUrl;
+  return img;
+}
+
+function drawBackground(ctx, bg, onLoaded) {
+  if (!bg || !bg.visible || !bg.dataUrl) return;
+  const img = getBgImage(bg, onLoaded);
+  if (!img || !img.complete || !img.naturalWidth) return;
+  ctx.save();
+  ctx.globalAlpha = bg.opacity ?? 0.5;
+  const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
+  const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
+  ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
+  ctx.restore();
+}
+
 export function draw(ctx, state, view, opts = {}) {
   const { width: w, height: h } = ctx.canvas;
   const dpr = opts.dpr || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#f7f5f0'; ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
+  if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
   drawGrid(ctx, view, w / dpr, h / dpr);
 
   const bad = opts.bad || new Set(); // ids of violating rooms/items/openings
