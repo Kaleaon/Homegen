@@ -20,7 +20,6 @@ import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from 
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
-const SIDING = '#d9d3c5';
 
 export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const renderer = new THREE.WebGLRenderer({

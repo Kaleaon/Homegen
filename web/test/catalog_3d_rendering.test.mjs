@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OPENINGS, OPENING_BY_ID, WALL_FINISHES, WALL_BY_ID } from '../js/catalog.js';
+import { OPENINGS, WALL_FINISHES, WALL_BY_ID } from '../js/catalog.js';
 import * as m from '../js/model.js';
 import { createScene3D } from '../js/scene3d.js';
 
@@ -194,7 +194,10 @@ test('3D Scene addWindow procedurally constructs frame, mullion grid bars, and t
   const openingNode = api.entityMap.get(o.id);
   assert.ok(openingNode, 'Opening node created in 3D scene');
   // Glass pane + 4 outer frame bars + 1 meeting rail + 2 vertical mullion bars + 2 horizontal mullion bars + 1 sill + 1 head casing + 2 side casings = 15 child meshes
-  assert.ok(openingNode.children.length >= 10, 'Window group contains frame, mullions, and casing meshes');
+  assert.ok(
+    openingNode.children.length >= 10,
+    'Window group contains frame, mullions, and casing meshes'
+  );
 });
 
 test('Deserializing legacy plan without new fields falls back cleanly without error', () => {
@@ -216,7 +219,17 @@ test('Deserializing legacy plan without new fields falls back cleanly without er
         ceiling: 96,
         floor: 'floor_oak',
         walls: { N: 'paint_white', E: 'paint_white', S: 'paint_white', W: 'paint_white' },
-        openings: [{ id: 'o1', type: 'win_hung_36x60', kind: 'window', wall: 'N', offset: 24, width: 36, swing: 'in' }],
+        openings: [
+          {
+            id: 'o1',
+            type: 'win_hung_36x60',
+            kind: 'window',
+            wall: 'N',
+            offset: 24,
+            width: 36,
+            swing: 'in',
+          },
+        ],
         items: [],
       },
     ],

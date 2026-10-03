@@ -161,7 +161,7 @@ function draw(g, f) {
       g.strokeStyle = f.c2 || 'rgba(0,0,0,0.2)';
       g.lineWidth = 1.5;
       for (let y = 0; y < N; y += 16) {
-        for (let x = (y % 32 ? 8 : 0); x < N; x += 24) {
+        for (let x = y % 32 ? 8 : 0; x < N; x += 24) {
           g.strokeRect(x, y, 24, 16);
         }
       }
