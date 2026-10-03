@@ -126,6 +126,90 @@ const stairRisers = (room) => Math.ceil((room.ceiling + 10) / 7.75); // floor-to
 
 // ---------------------------------------------------------------- evaluation
 
+export const CODE_MAP = {
+  // Regulatory Citation References
+  'IRC R304.1': 'Minimum Room Area',
+  'IRC R304.2': 'Minimum Room Dimension',
+  'IRC R305.1': 'Ceiling Height',
+  'IRC R303.1': 'Natural Light & Ventilation',
+  'IRC R303.3': 'Bathroom Ventilation',
+  'IRC R303.8 / E3903': 'Room Lighting',
+  'IRC R303': 'Window Placement',
+  'IRC R306.1': 'Kitchen Facilities',
+  'IRC R306.2': 'Bathroom Sink',
+  'IRC R306.3': 'Sanitation Fixtures',
+  'IRC R307.1': 'Fixture Clearance',
+  'IRC R307 / practice': 'Moisture-Resistant Finishes',
+  'IRC R702.4 / practice': 'Moisture-Resistant Finishes',
+  'IRC R310.1': 'Emergency Egress',
+  'IRC R311.1': 'Exit Access',
+  'IRC R311.2': 'Egress Door Width',
+  'IRC R311.6': 'Hallway Width',
+  'IRC R311.7': 'Stair Connection',
+  'IRC R311.7.1': 'Stairway Width',
+  'IRC R311.7.5': 'Stair Dimensions',
+  'IRC R314.3': 'Smoke Alarms',
+  'IRC R315.3': 'Carbon Monoxide Alarms',
+  'IRC E3903.2': 'Wall Switches',
+  'NEC 210.52': 'Outlet Spacing',
+  'NEC 210.52(H)': 'Hallway Outlets',
+  'NEC 210.52(D)': 'Bathroom Outlets',
+  'NEC 210.8': 'GFCI Protection',
+  'Geometry': 'Spatial Layout',
+  'Practice': 'Design Guidance',
+
+  // Specific Rule Overrides
+  'overlap': 'Room Overlap',
+  'min-area': 'Minimum Room Area',
+  'min-dim': 'Minimum Room Dimension',
+  'min-width': 'Minimum Circulation Width',
+  'ceiling': 'Ceiling Height',
+  'stair-run': 'Stair Dimensions',
+  'stairs-link': 'Stair Connection',
+  'opening-bounds': 'Opening Clearance',
+  'opening-straddle': 'Opening Placement',
+  'window-interior': 'Window Placement',
+  'door-exterior': 'Exterior Door Placement',
+  'door-interior': 'Interior Door Placement',
+  'door-egress-width': 'Egress Door Width',
+  'door-width': 'Interior Door Width',
+  'door-swing': 'Door Swing Clearance',
+  'opening-overlap': 'Opening Clearance',
+  'item-bounds': 'Item Placement',
+  'item-overlap': 'Item Overlap',
+  'fixture-clearance': 'Fixture Clearance',
+  'wall-item-bounds': 'Wall Device Placement',
+  'wall-item-door': 'Wall Device Clearance',
+  'wall-item-overlap': 'Wall Device Overlap',
+  'light': 'Natural Lighting',
+  'vent': 'Natural Ventilation',
+  'egress': 'Emergency Egress',
+  'bath-vent': 'Bathroom Ventilation',
+  'wet-floor': 'Moisture-Resistant Flooring',
+  'wet-wall': 'Moisture-Resistant Wall Finish',
+  'light-fixture': 'Room Lighting',
+  'switch': 'Wall Switches',
+  'outlets': 'Outlet Spacing',
+  'gfci': 'GFCI Protection',
+  'bath-outlet': 'Bathroom Outlets',
+  'kitchen-range': 'Kitchen Cooking Range',
+  'kitchen-fridge': 'Refrigerator Placement',
+  'unreachable': 'Exit Access',
+  'smoke-in': 'Smoke Alarms',
+  'smoke-outside': 'Smoke Alarms',
+  'co-outside': 'Carbon Monoxide Alarms',
+  'co-in': 'Carbon Monoxide Alarms',
+  'no-exit': 'Exit Access',
+  'need-kitchen': 'Kitchen Facilities',
+  'need-toilet': 'Sanitation Fixtures',
+  'need-lav': 'Bathroom Sink',
+  'need-bath': 'Sanitation Fixtures',
+};
+
+export function getRuleCategory(ref, rule) {
+  return CODE_MAP[ref] || CODE_MAP[rule] || 'Design Guidance';
+}
+
 export function computeAffectedBoundingBox(state, trial) {
   if (!state || !trial || state.levels !== trial.levels) return null;
 
@@ -266,8 +350,10 @@ export function evaluate(state, options = {}) {
   }
 
   const v = [];
-  const add = (rule, ref, severity, blocking, target, msg, extra = {}) =>
-    v.push({ id: `${rule}:${target}`, rule, ref, severity, blocking, msg, ...extra });
+  const add = (rule, ref, severity, blocking, target, msg, extra = {}) => {
+    const title = getRuleCategory(ref, rule);
+    v.push({ id: `${rule}:${target}`, rule, ref, title, category: title, label: title, severity, blocking, msg, ...extra });
+  };
   const cx = connectivity(state);
 
   for (let a = 0; a < rooms.length; a++) for (let b = a + 1; b < rooms.length; b++) {

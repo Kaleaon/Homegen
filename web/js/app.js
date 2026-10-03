@@ -22,8 +22,9 @@ import {
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 
-const $ = (s) => document.querySelector(s);
-const canvas = $('#plan'); const ctx = canvas.getContext('2d');
+const $ = (s) => typeof document !== 'undefined' ? document.querySelector(s) : null;
+const canvas = typeof document !== 'undefined' ? $('#plan') : null;
+const ctx = canvas ? canvas.getContext('2d') : null;
 const STORE = 'homegen.plan.v1';
 
 const interaction = new InteractionLayer({
@@ -367,6 +368,11 @@ function drawOverlay(c, state) {
   }
 }
 
+export function renderViolationItem(v) {
+  const title = v.title || v.category || v.label || 'Design Guidance';
+  return `<li class="${v.severity}" data-id="${v.id}" tabindex="0"><b>${esc(title)}</b><div class="msg">${esc(v.msg)}</div><span class="ref" title="${esc(v.ref)}">${esc(v.ref)}${v.fixable ? ' · auto-fixable' : ''}</span></li>`;
+}
+
 // ------------------------------------------------------------- compliance + inspector panels
 function renderCompliance() {
   const el = $('#compliance'); const errs = report.violations.filter((v) => v.severity === 'error'); const warns = report.violations.filter((v) => v.severity !== 'error');
@@ -374,7 +380,7 @@ function renderCompliance() {
   const status = !doc.rooms.length ? '<span class="chip mid">Empty plan</span>' : report.compliant ? '<span class="chip ok">✔ Code compliant</span>' : `<span class="chip">${errs.length} issue${errs.length === 1 ? '' : 's'}</span>`;
   el.innerHTML = `<h3>Building code</h3><div class="score">${status}<span class="note" style="margin:0">${doc.rooms.length} rooms · ${sqft.toFixed(0)} sq ft</span></div>
     <div class="btns"><button id="fix" class="primary" ${errs.some((v) => v.fixable) ? '' : 'disabled'}>Fix automatically</button></div>
-    <ul class="v">${[...errs, ...warns].map((v) => `<li class="${v.severity}" data-id="${v.id}" tabindex="0"><b>${esc(v.msg)}</b><span class="ref">${esc(v.ref)}${v.fixable ? ' · auto-fixable' : ''}</span></li>`).join('') || (doc.rooms.length ? '<li style="border-color:var(--ok);cursor:default">No issues found.</li>' : '<li style="border-color:var(--muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
+    <ul class="v">${[...errs, ...warns].map(renderViolationItem).join('') || (doc.rooms.length ? '<li style="border-color:var(--ok);cursor:default">No issues found.</li>' : '<li style="border-color:var(--muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
     <p class="note">Rules follow the 2021 IRC and NEC residential provisions plus marked “Practice” items. Hard rules (overlaps, room sizes, blocked doors, fixture clearances) reject the edit; everything else is auto-fixed. This is a design aid — your local authority having jurisdiction has the final say.</p>`;
   $('#fix')?.addEventListener('click', () => {
     const r = apply(() => {}, { quiet: true });
@@ -624,8 +630,8 @@ function setTool(t) {
   tool = t; preview = null; drag = null;
   if (t.kind !== 'calibrate') calibPoints = [];
   document.querySelectorAll('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t.kind));
-  $('#tool-hint').textContent = HINTS[t.kind] || '';
-  canvas.style.cursor = t.kind === 'select' ? 'default' : 'crosshair';
+  if ($('#tool-hint')) $('#tool-hint').textContent = HINTS[t.kind] || '';
+  if (canvas) canvas.style.cursor = t.kind === 'select' ? 'default' : 'crosshair';
   renderPalette(); redraw();
 }
 
@@ -643,7 +649,7 @@ function updatePreview() {
   else if (tool.kind === 'roomkit') { const kit = ROOM_KIT_BY_ID[tool.id]; const rc = snapRect({ x: snap(hover.x, 6) - kit.w / 2, y: snap(hover.y, 6) - kit.h / 2, w: kit.w, h: kit.h }); preview = tryPreview((n) => M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel)); }
 }
 
-canvas.addEventListener('pointerdown', (e) => {
+canvas?.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   const p = toWorld(e); hover = p;
   if (e.button === 1 || e.button === 2 || e.shiftKey && tool.kind === 'select' && !pickAt(p) || e.altKey) { drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy }; return; }
@@ -717,7 +723,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 
-canvas.addEventListener('pointermove', (e) => {
+canvas?.addEventListener('pointermove', (e) => {
   const p = toWorld(e); hover = p;
   if (drag) {
     if (drag.kind === 'pan') { view.ox = drag.ox + e.clientX - drag.sx; view.oy = drag.oy + e.clientY - drag.sy; redraw(); return; }
@@ -762,7 +768,7 @@ canvas.addEventListener('pointermove', (e) => {
 
 function moveItemTo(id, pl) { return moveItemMutation(id, pl); }
 
-canvas.addEventListener('pointerup', () => {
+canvas?.addEventListener('pointerup', () => {
   const d = drag; drag = null;
   if (!d) return;
   if (d.kind === 'pan') return;
@@ -786,9 +792,9 @@ canvas.addEventListener('pointerup', () => {
   else if (d.kind === 'resize') apply((n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h));
 });
 
-canvas.addEventListener('pointerleave', () => { hover = null; preview = null; redraw(); });
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('wheel', (e) => {
+canvas?.addEventListener('pointerleave', () => { hover = null; preview = null; redraw(); });
+canvas?.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas?.addEventListener('wheel', (e) => {
   e.preventDefault();
   const r = canvas.getBoundingClientRect(); const mx = e.clientX - r.left; const my = e.clientY - r.top;
   zoomAt(mx, my, e.deltaY < 0 ? 1.12 : 1 / 1.12);
@@ -883,14 +889,14 @@ function reportText() {
   return lines.join('\n');
 }
 
-$('#undo').addEventListener('click', () => { const s = hist.undo(); if (s) { doc = s; persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); } });
-$('#redo').addEventListener('click', () => { const s = hist.redo(); if (s) { doc = s; persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); } });
-$('#new').addEventListener('click', () => { if (!doc.rooms.length || confirm('Start a new plan? (You can undo this.)')) setDoc(M.newState()); });
-$('#sample').addEventListener('click', sampleHome);
-$('#save').addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}.homegen.json`, M.serialize(doc), 'application/json'));
-$('#load').addEventListener('click', () => $('#file').click());
-$('#file').addEventListener('change', async (e) => { const f = e.target.files[0]; if (!f) return; try { setDoc(M.deserialize(await f.text())); fit(); } catch (err) { toast(`Could not open file: ${err.message}`, true); } e.target.value = ''; });
-$('#png').addEventListener('click', () => { redraw(); canvas.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${doc.name || 'plan'}.png`; a.click(); }); });
+$('#undo')?.addEventListener('click', () => { const s = hist.undo(); if (s) { doc = s; persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); } });
+$('#redo')?.addEventListener('click', () => { const s = hist.redo(); if (s) { doc = s; persist(); selection = null; autoFixDiffs = []; hoveredDiffIndex = null; refresh(); } });
+$('#new')?.addEventListener('click', () => { if (!doc.rooms.length || confirm('Start a new plan? (You can undo this.)')) setDoc(M.newState()); });
+$('#sample')?.addEventListener('click', sampleHome);
+$('#save')?.addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}.homegen.json`, M.serialize(doc), 'application/json'));
+$('#load')?.addEventListener('click', () => $('#file').click());
+$('#file')?.addEventListener('change', async (e) => { const f = e.target.files[0]; if (!f) return; try { setDoc(M.deserialize(await f.text())); fit(); } catch (err) { toast(`Could not open file: ${err.message}`, true); } e.target.value = ''; });
+$('#png')?.addEventListener('click', () => { redraw(); canvas?.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${doc.name || 'plan'}.png`; a.click(); }); });
 $('#export-pdf')?.addEventListener('click', () => {
   $('#pdf-title').value = doc.name || 'My home';
   $('#pdf-date').value = new Date().toISOString().slice(0, 10);
@@ -933,7 +939,7 @@ $('#pdf-generate')?.addEventListener('click', () => {
     toast(`Failed to export PDF: ${err.message}`, true);
   }
 });
-$('#report').addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`, reportText(), 'text/markdown'));
+$('#report')?.addEventListener('click', () => download(`${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`, reportText(), 'text/markdown'));
 
 let currentSvg = '';
 function updateExportPreview() {
@@ -980,52 +986,55 @@ $('#e-print')?.addEventListener('click', () => {
   if (printSheet) printSheet.innerHTML = currentSvg;
   window.print();
 });
-$('#plan-name').addEventListener('change', (e) => { doc.name = e.target.value; hist.push(doc); persist(); });
-$('#zoom-in').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.2); });
-$('#zoom-out').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1 / 1.2); });
-$('#fit').addEventListener('click', fit);
-$('#auto').addEventListener('change', (e) => { if (e.target.checked) apply(() => {}); else toast('Auto-comply is off: hard rules still block bad edits, but required items are no longer added for you.'); });
-document.querySelectorAll('#toolbar [data-tool]').forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
-document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b)); renderPalette(); }));
+$('#plan-name')?.addEventListener('change', (e) => { doc.name = e.target.value; hist.push(doc); persist(); });
+$('#zoom-in')?.addEventListener('click', () => { if (!canvas) return; const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.2); });
+$('#zoom-out')?.addEventListener('click', () => { if (!canvas) return; const r = canvas.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1 / 1.2); });
+$('#fit')?.addEventListener('click', fit);
+$('#auto')?.addEventListener('change', (e) => { if (e.target.checked) apply(() => {}); else toast('Auto-comply is off: hard rules still block bad edits, but required items are no longer added for you.'); });
+if (typeof document !== 'undefined') document.querySelectorAll('#toolbar [data-tool]').forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
+if (typeof document !== 'undefined') document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b)); renderPalette(); }));
 
-window.addEventListener('keydown', (e) => {
-  if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-  const k = e.key;
-  const lk = k.toLowerCase();
+let view3d = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => {
+    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+    const k = e.key;
+    const lk = k.toLowerCase();
 
-  if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
-    e.preventDefault();
-    const map = { ArrowUp: [0, -1, 'up'], ArrowDown: [0, 1, 'down'], ArrowLeft: [-1, 0, 'left'], ArrowRight: [1, 0, 'right'] };
-    const [dx, dy, dir] = map[k];
-    if (e.shiftKey) moveSelectedSpatial(dx, dy);
-    else navigateSpatial(dir);
-    return;
-  }
-
-  if ((e.ctrlKey || e.metaKey) && lk === 'z') { e.preventDefault(); $(e.shiftKey ? '#redo' : '#undo').click(); }
-  else if ((e.ctrlKey || e.metaKey) && lk === 'y') { e.preventDefault(); $('#redo').click(); }
-  else if (lk === 'r') rotateSelected();
-  else if (lk === 'escape') { setTool({ kind: 'select' }); select(null); toast('Selection cleared', false, 1800); }
-  else if (lk === 'delete' || lk === 'backspace') {
-    if (selection) {
-      const label = getSelectionLabel();
-      const id = selection;
-      apply((n) => M.removeById(n, id));
-      select(null);
-      toast(`Deleted ${label || 'selected element'}`, false, 2000);
+    if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
+      e.preventDefault();
+      const map = { ArrowUp: [0, -1, 'up'], ArrowDown: [0, 1, 'down'], ArrowLeft: [-1, 0, 'left'], ArrowRight: [1, 0, 'right'] };
+      const [dx, dy, dir] = map[k];
+      if (e.shiftKey) moveSelectedSpatial(dx, dy);
+      else navigateSpatial(dir);
+      return;
     }
-  }
-  else if (lk === 'v') setTool({ kind: 'select' });
-  else if (lk === 'x') setTool({ kind: 'erase' });
-  else if (k === '+' || k === '=') $('#zoom-in').click();
-  else if (k === '-') $('#zoom-out').click();
-});
 
-window.addEventListener('resize', resize);
-new ResizeObserver(resize).observe(canvas);
-const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSelectedRoomId: () => { const h = selection && M.findOwner(doc, selection); return h ? h.room.id : null; }, toast, setLevel });
-renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
-if (doc.rooms.length) fit();
+    if ((e.ctrlKey || e.metaKey) && lk === 'z') { e.preventDefault(); $(e.shiftKey ? '#redo' : '#undo').click(); }
+    else if ((e.ctrlKey || e.metaKey) && lk === 'y') { e.preventDefault(); $('#redo').click(); }
+    else if (lk === 'r') rotateSelected();
+    else if (lk === 'escape') { setTool({ kind: 'select' }); select(null); toast('Selection cleared', false, 1800); }
+    else if (lk === 'delete' || lk === 'backspace') {
+      if (selection) {
+        const label = getSelectionLabel();
+        const id = selection;
+        apply((n) => M.removeById(n, id));
+        select(null);
+        toast(`Deleted ${label || 'selected element'}`, false, 2000);
+      }
+    }
+    else if (lk === 'v') setTool({ kind: 'select' });
+    else if (lk === 'x') setTool({ kind: 'erase' });
+    else if (k === '+' || k === '=') $('#zoom-in').click();
+    else if (k === '-') $('#zoom-out').click();
+  });
+
+  window.addEventListener('resize', resize);
+  if (typeof ResizeObserver !== 'undefined' && canvas) new ResizeObserver(resize).observe(canvas);
+  view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSelectedRoomId: () => { const h = selection && M.findOwner(doc, selection); return h ? h.room.id : null; }, toast, setLevel });
+  renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
+  if (doc.rooms.length) fit();
+}
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (distPx <= 0) { calibPoints = []; toast('Invalid calibration points.', true); redraw(); return; }
@@ -1129,4 +1138,4 @@ $('#calib-cancel')?.addEventListener('click', () => { $('#calib-dlg')?.close(); 
 $('#calib-close')?.addEventListener('click', () => { $('#calib-dlg')?.close(); calibPoints = []; setTool({ kind: 'select' }); refresh(); });
 
 // test hook for automated browser checks
-window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements, interaction, generatePDF, applyCalibration, handleBlueprintImport };
+if (typeof window !== 'undefined') window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements, interaction, generatePDF, applyCalibration, handleBlueprintImport, renderCompliance, renderViolationItem };
