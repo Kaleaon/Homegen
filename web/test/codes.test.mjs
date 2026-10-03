@@ -157,6 +157,82 @@ test('multi-floor: upper room without a stair path is unreachable and flagged', 
   assert.ok(c.evaluate(s).violations.some((v) => v.rule === 'unreachable'));
 });
 
+test('spatial bounding produces identical compliance violation reports as full-scene scans', () => {
+  const s = house();
+  const baseRep = c.evaluate(s);
+
+  // Trial mutation 1: Add item in bath
+  const trial1 = m.clone(s);
+  const bath = trial1.rooms.find((r) => r.type === 'bathroom');
+  m.addItem(trial1, bath, 'plant', { x: bath.x + 20, y: bath.y + 20 });
+  const box1 = c.computeAffectedBoundingBox(s, trial1);
+  assert.ok(box1, 'affected bounding box computed for item mutation');
+  const inc1 = c.evaluate(trial1, { affectedBox: box1, baseReport: baseRep });
+  const full1 = c.evaluate(trial1);
+  assert.deepEqual(inc1.violations.map((v) => v.id).sort(), full1.violations.map((v) => v.id).sort());
+
+  // Trial mutation 2: Add opening in bedroom
+  const trial2 = m.clone(s);
+  const bed = trial2.rooms.find((r) => r.type === 'bedroom');
+  m.addOpening(trial2, bed, 'win_hung_30x48', 'E', 40);
+  const box2 = c.computeAffectedBoundingBox(s, trial2);
+  assert.ok(box2, 'affected bounding box computed for opening mutation');
+  const inc2 = c.evaluate(trial2, { affectedBox: box2, baseReport: baseRep });
+  const full2 = c.evaluate(trial2);
+  assert.deepEqual(inc2.violations.map((v) => v.id).sort(), full2.violations.map((v) => v.id).sort());
+});
+
+test('room overlap and item clearance checks evaluate only entities touching affected bounding box during trial attempts', () => {
+  let s = m.newState();
+  // Room A at 0, Room B at 200, Room C at 500
+  s = c.commit(s, (n) => m.createRoom(n, 'bedroom', 0, 0, 120, 120)).state;
+  s = c.commit(s, (n) => m.createRoom(n, 'living', 200, 0, 120, 120)).state;
+  s = c.commit(s, (n) => m.createRoom(n, 'office', 500, 0, 120, 120)).state;
+
+  const trial = m.clone(s);
+  const bed = trial.rooms.find((r) => r.type === 'bedroom');
+  m.addItem(trial, bed, 'armchair', { x: 30, y: 30, rot: 0 });
+
+  const box = c.computeAffectedBoundingBox(s, trial);
+  assert.ok(box, 'bounding box computed');
+  // Box touches Room A (0,0 to 120,120) but not Room C at x=500
+  assert.ok(box.x < 120 && box.x + box.w > 0);
+  assert.ok(box.x + box.w < 500);
+
+  const baseRep = c.evaluate(s);
+  const rep = c.evaluate(trial, { affectedBox: box, baseReport: baseRep });
+  assert.equal(rep.errors, c.evaluate(trial).errors);
+});
+
+test('auto-comply trial loops execute within 16ms for typical multi-room edits', () => {
+  const s = house();
+  // Move furniture in living room on a multi-room floor plan
+  const trial = m.clone(s);
+  const living = trial.rooms.find((r) => r.type === 'living');
+  m.addItem(trial, living, 'coffee_table', { x: living.x + 40, y: living.y + 40 });
+
+  const start = performance.now();
+  c.autoComply(trial);
+  const elapsed = performance.now() - start;
+  assert.ok(elapsed < 16, `auto-comply trial loop took ${elapsed.toFixed(2)}ms (expected < 16ms)`);
+});
+
+test('fallback to full state evaluation when global plan structural changes occur', () => {
+  let s = m.newState();
+  s = c.commit(s, (n) => m.createRoom(n, 'bedroom', 0, 0, 120, 120)).state;
+  const trial = m.clone(s);
+  // Mass structural change: multiple rooms added at once
+  m.createRoom(trial, 'living', 200, 0, 120, 120);
+  m.createRoom(trial, 'kitchen', 400, 0, 120, 120);
+  m.createRoom(trial, 'bathroom', 600, 0, 120, 120);
+
+  const box = c.computeAffectedBoundingBox(s, trial);
+  assert.equal(box, null, 'falls back to null affectedBox on mass structural changes');
+
+  const rep = c.evaluate(trial, { affectedBox: box });
+  assert.equal(rep.violations.length, c.evaluate(trial).violations.length);
+});
+
 import { buildPrompt, hordeRender, rawBase64 } from '../js/photoreal.js';
 import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from '../js/resources.js';
 import { FLOOR_BY_ID, WALL_BY_ID } from '../js/catalog.js';
