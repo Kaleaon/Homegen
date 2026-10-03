@@ -35,14 +35,15 @@ android {
 
 dependencies {
     // Filament 3D rendering
-    implementation("com.google.android.filament:filament-android:1.56.0")
-    implementation("com.google.android.filament:gltfio-android:1.56.0")
-    implementation("com.google.android.filament:filament-utils-android:1.56.0")
+    implementation("com.google.android.filament:filament-android:1.30.0")
+    implementation("com.google.android.filament:gltfio-android:1.30.0")
+    implementation("com.google.android.filament:filament-utils-android:1.30.0")
 
     // Kotlin serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
 
     // AndroidX
+    implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
     implementation("androidx.core:core-ktx:1.13.1")
