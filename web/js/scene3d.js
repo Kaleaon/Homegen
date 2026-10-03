@@ -7,7 +7,7 @@ import { WT, WALLS, wallSeg, wallLength, wallNeighbors, interior, subtractInterv
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
-import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls } from './resources.js';
+import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from './resources.js';
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
@@ -41,15 +41,32 @@ export function createScene3D(canvas, getState, getLevel) {
     const def = HDRI_ENVS.find((e) => e.id === id); if (!def) return;
     try {
       if (!envCache.has(id)) {
-        const meta = await (await fetch(`https://api.polyhaven.com/files/${def.id}`)).json();
-        const tex = await new HDRLoader().loadAsync(meta.hdri['1k'].hdr.url);
+        let tex;
+        try {
+          tex = await new HDRLoader().loadAsync(polyHavenHdriUrl(def.id));
+        } catch (directErr) {
+          console.warn(`Direct HDRI fetch failed for ${def.id}, falling back to metadata API`, directErr);
+          const metaRes = await fetch(`https://api.polyhaven.com/files/${def.id}`);
+          if (!metaRes.ok) throw new Error(`Metadata fetch failed: ${metaRes.status}`);
+          const meta = await metaRes.json();
+          const fallbackUrl = meta?.hdri?.['1k']?.hdr?.url;
+          if (!fallbackUrl) throw new Error('HDR URL missing in Poly Haven metadata');
+          tex = await new HDRLoader().loadAsync(fallbackUrl);
+        }
         tex.mapping = THREE.EquirectangularReflectionMapping;
         envCache.set(id, { env: pmrem.fromEquirectangular(tex).texture, bg: tex });
       }
       if (opts.env !== id) return;
       const e = envCache.get(id); scene.environment = e.env; scene.background = e.bg; scene.backgroundBlurriness = 0.05; scene.environmentIntensity = 1.1;
       render();
-    } catch (err) { console.warn('HDRI unavailable, using built-in studio lighting', err); opts.env = 'studio'; scene.environment = envCache.get('studio'); }
+    } catch (err) {
+      console.warn('HDRI unavailable, using built-in studio lighting', err);
+      opts.env = 'studio';
+      scene.environment = envCache.get('studio');
+      scene.background = new THREE.Color('#cfe0ee');
+      scene.environmentIntensity = 0.9;
+      render();
+    }
   }
 
   // ---------------------------------------------------------------- materials

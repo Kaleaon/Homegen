@@ -158,7 +158,7 @@ test('multi-floor: upper room without a stair path is unreachable and flagged', 
 });
 
 import { buildPrompt, hordeRender, rawBase64 } from '../js/photoreal.js';
-import { HD_MATERIALS, polyHavenTextureUrls } from '../js/resources.js';
+import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from '../js/resources.js';
 import { FLOOR_BY_ID, WALL_BY_ID } from '../js/catalog.js';
 
 test('photoreal prompt describes the room as built', () => {
@@ -175,6 +175,13 @@ test('HD material map only references real finishes and well-formed texture urls
   for (const [id, hd] of Object.entries(HD_MATERIALS)) {
     assert.ok(FLOOR_BY_ID[id] || WALL_BY_ID[id], id);
     assert.match(polyHavenTextureUrls(hd.id).diff, /^https:\/\/dl\.polyhaven\.org\/file\/ph-assets\/Textures\/jpg\/1k\/.+_diff_1k\.jpg$/);
+  }
+});
+
+test('HDRI environment list references well-formed Poly Haven HDRI urls', () => {
+  for (const env of HDRI_ENVS) {
+    if (env.id === 'studio') continue;
+    assert.match(polyHavenHdriUrl(env.id), /^https:\/\/dl\.polyhaven\.org\/file\/ph-assets\/HDRIs\/hdr\/1k\/.+_1k\.hdr$/);
   }
 });
 
