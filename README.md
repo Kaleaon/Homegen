@@ -38,3 +38,37 @@ This follows the 2021 IRC and NEC residential provisions plus a few items marked
 - Room drawing tool (`roomDrawingTool.js`) for snapped corners and closed-room validation.
 - Collision + overlap validation (`collision.js`) and feedback payloads for ghost/invalid highlights.
 - UI snap mode toggle view models (`uiSnapToggles.js`) for grid/edge/midpoint/perpendicular snap modes.
+
+## Releases & Continuous Deployment
+
+Release publishing is automated via GitHub Actions on semantic version git tags matching `v*.*.*` (for example, `v1.0.0`).
+
+### Automated Workflow Pipeline
+
+Pushing a version tag triggers `.github/workflows/release.yml`, which:
+
+1. **Enforces Token Guardrails**: The workflow specifies `permissions: read-all` globally, restricting `contents: write` strictly to the release publishing job.
+2. **Builds & Packages All Modules**:
+   - Web application zipped into `homegen-web.zip`.
+   - `designer3d/tools` library packaged via `npm pack` into `homegen-designer3d-tools-<version>.tgz`.
+   - Android application compiled with Gradle (`:app:assembleRelease` and `:app:bundleRelease`) into APK and AAB packages.
+3. **Generates SHA-256 Checksums**: Calculates SHA-256 checksums for all release binaries and saves them to `checksums.txt`.
+4. **Publishes GitHub Release**: Publishes a release on GitHub containing all compiled packages and `checksums.txt` using `softprops/action-gh-release`.
+
+### Creating a Release (Maintainers)
+
+1. Create and push a release tag matching `v*.*.*`:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+2. Store any required signing keys securely in GitHub Repository Secrets (for example, `KEYSTORE_BASE64`, `KEY_ALIAS`, `KEY_PASSWORD`, `STORE_PASSWORD`). Never commit keys or secrets to workflow files or build configuration.
+
+### Verifying Release Artifacts (Users)
+
+Downstream users can verify package integrity after downloading release files alongside `checksums.txt`:
+
+```bash
+sha256sum -c checksums.txt
+```
+

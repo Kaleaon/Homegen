@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions: read-all
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Build and Test Web Module
+        run: |
+          cd web
+          npm test
+          zip -r ../homegen-web.zip . -x "node_modules/*" ".git/*"
+
+      - name: Package designer3d tools
+        run: |
+          cd designer3d/tools
+          npm test
+          npm pack
+          mv homegen-designer3d-tools-*.tgz ../../
+
+      - name: Build Android Binaries
+        run: |
+          gradle :app:assembleRelease :app:bundleRelease
+
+      - name: Prepare Release Artifacts and Calculate Checksums
+        run: |
+          mkdir -p release-artifacts
+          cp homegen-web.zip release-artifacts/
+          cp homegen-designer3d-tools-*.tgz release-artifacts/
+          
+          find app/build/outputs/apk/release -name "*.apk" -exec cp {} release-artifacts/ \;
+          find app/build/outputs/bundle/release -name "*.aab" -exec cp {} release-artifacts/ \;
+          
+          cd release-artifacts
+          for file in *; do
+            if [ -f "$file" ]; then
+              sha256sum "$file" >> checksums.txt
+            fi
+          done
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true
