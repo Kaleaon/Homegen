@@ -261,10 +261,118 @@ function renderInspector() {
   }
 }
 
-function rotateSelected() {
-  if (!selection) { ghostRot = (ghostRot + 90) % 360; redraw(); return; }
+function getSelectionLabel(id = selection) {
+  if (!id) return '';
+  const hit = M.findOwner(doc, id);
+  if (!hit) return '';
+  const { room, kind, obj } = hit;
+  if (kind === 'room') return `${room.name} (${ROOM_TYPES[room.type].name})`;
+  if (kind === 'item') return `${ITEM_BY_ID[obj.type].name} in ${room.name}`;
+  if (kind === 'opening') return `${OPENING_BY_ID[obj.type].name} in ${room.name}`;
+  return '';
+}
+
+function getSpatialElements() {
+  const list = [];
+  for (const r of levelRooms()) {
+    list.push({ id: r.id, kind: 'room', label: `${r.name} (${ROOM_TYPES[r.type].name})`, center: { x: r.x + r.w / 2, y: r.y + r.h / 2 } });
+    for (const it of r.items) {
+      const def = ITEM_BY_ID[it.type];
+      let center;
+      if (def.mount === 'wall') center = wallPoint(r, it.wall, it.offset, 0);
+      else if (def.mount === 'ceiling') center = { x: it.x, y: it.y };
+      else { const fp = footprint(it, def); center = { x: fp.x + fp.w / 2, y: fp.y + fp.h / 2 }; }
+      list.push({ id: it.id, kind: 'item', label: `${def.name} in ${r.name}`, center });
+    }
+    for (const o of r.openings) {
+      const def = OPENING_BY_ID[o.type];
+      const p = wallPoint(r, o.wall, o.offset + o.width / 2, 0);
+      list.push({ id: o.id, kind: 'opening', label: `${def.name} in ${r.name}`, center: p });
+    }
+  }
+  return list;
+}
+
+function navigateSpatial(dir) {
+  const elements = getSpatialElements();
+  if (!elements.length) { toast('Plan is empty. Select a tool or kit to add items.', false, 2000); return; }
+  const current = elements.find((e) => e.id === selection);
+  if (!current) {
+    const first = elements[0];
+    select(first.id); focus(first.id); toast(`Selected ${first.label}`, false, 2000);
+    return;
+  }
+  const candidates = elements.filter((e) => e.id !== current.id).map((e) => {
+    const dx = e.center.x - current.center.x; const dy = e.center.y - current.center.y;
+    return { elem: e, dx, dy };
+  }).filter(({ dx, dy }) => {
+    if (dir === 'up') return dy < -2;
+    if (dir === 'down') return dy > 2;
+    if (dir === 'left') return dx < -2;
+    if (dir === 'right') return dx > 2;
+    return false;
+  }).map((item) => {
+    const { dx, dy } = item;
+    const primary = (dir === 'up' || dir === 'down') ? Math.abs(dy) : Math.abs(dx);
+    const secondary = (dir === 'up' || dir === 'down') ? Math.abs(dx) : Math.abs(dy);
+    const score = primary + 1.8 * secondary;
+    return { ...item, score };
+  }).sort((a, b) => a.score - b.score);
+
+  if (candidates.length) {
+    const next = candidates[0].elem;
+    select(next.id); focus(next.id); toast(`Selected ${next.label}`, false, 2000);
+  } else {
+    toast(`No spatial element ${dir} of current selection`, false, 1800);
+  }
+}
+
+function moveSelectedSpatial(dx, dy) {
+  if (!selection) { toast('Select an element to move using Shift+Arrow keys', true, 2000); return; }
   const hit = M.findOwner(doc, selection);
-  if (hit?.kind === 'item' && ITEM_BY_ID[hit.obj.type].mount === 'floor') apply((n) => { const it = M.findOwner(n, selection).obj; it.rot = (it.rot + 90) % 360; });
+  if (!hit) return;
+  const { room, kind, obj } = hit;
+
+  if (kind === 'item') {
+    const def = ITEM_BY_ID[obj.type];
+    if (def.mount === 'floor' || def.mount === 'ceiling') {
+      const step = 6;
+      const targetP = { x: obj.x + dx * step, y: obj.y + dy * step };
+      const pl = placeItem(obj.type, targetP, obj.rot || 0);
+      if (pl) {
+        const r = apply(moveItemMutation(selection, pl));
+        if (r.ok) toast(`Moved ${def.name} in ${pl.room.name}`, false, 1800);
+      }
+    } else if (def.mount === 'wall') {
+      const step = 6;
+      const deltaOffset = (dx !== 0 ? dx : dy) * step;
+      const newOffset = Math.max(8, obj.offset + deltaOffset);
+      const r = apply((n) => { const it = M.findOwner(n, selection).obj; it.offset = newOffset; });
+      if (r.ok) toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+    }
+  } else if (kind === 'opening') {
+    const def = OPENING_BY_ID[obj.type];
+    const step = 6;
+    const deltaOffset = (dx !== 0 ? dx : dy) * step;
+    const newOffset = Math.max(0, obj.offset + deltaOffset);
+    const r = apply((n) => { const o = M.findOwner(n, selection).obj; o.offset = newOffset; });
+    if (r.ok) toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+  } else if (kind === 'room') {
+    const step = 12;
+    const newX = room.x + dx * step; const newY = room.y + dy * step;
+    const r = apply((n) => M.moveRoom(roomOf(n, room.id), newX, newY));
+    if (r.ok) toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
+  }
+}
+
+function rotateSelected() {
+  if (!selection) { ghostRot = (ghostRot + 90) % 360; redraw(); toast(`Placement rotation set to ${ghostRot}°`, false, 1500); return; }
+  const hit = M.findOwner(doc, selection);
+  if (hit?.kind === 'item' && ITEM_BY_ID[hit.obj.type].mount === 'floor') {
+    const newRot = ((hit.obj.rot || 0) + 90) % 360;
+    const r = apply((n) => { const it = M.findOwner(n, selection).obj; it.rot = newRot; });
+    if (r.ok) toast(`Rotated ${ITEM_BY_ID[hit.obj.type].name} to ${newRot}°`, false, 1800);
+  }
 }
 
 // ------------------------------------------------------------- levels
@@ -516,14 +624,33 @@ document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('cli
 
 window.addEventListener('keydown', (e) => {
   if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-  const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); $(e.shiftKey ? '#redo' : '#undo').click(); }
-  else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); $('#redo').click(); }
-  else if (k === 'r') rotateSelected();
-  else if (k === 'escape') { setTool({ kind: 'select' }); select(null); }
-  else if (k === 'delete' || k === 'backspace') { if (selection) { const id = selection; apply((n) => M.removeById(n, id)); select(null); } }
-  else if (k === 'v') setTool({ kind: 'select' });
-  else if (k === 'x') setTool({ kind: 'erase' });
+  const k = e.key;
+  const lk = k.toLowerCase();
+
+  if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
+    e.preventDefault();
+    const map = { ArrowUp: [0, -1, 'up'], ArrowDown: [0, 1, 'down'], ArrowLeft: [-1, 0, 'left'], ArrowRight: [1, 0, 'right'] };
+    const [dx, dy, dir] = map[k];
+    if (e.shiftKey) moveSelectedSpatial(dx, dy);
+    else navigateSpatial(dir);
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && lk === 'z') { e.preventDefault(); $(e.shiftKey ? '#redo' : '#undo').click(); }
+  else if ((e.ctrlKey || e.metaKey) && lk === 'y') { e.preventDefault(); $('#redo').click(); }
+  else if (lk === 'r') rotateSelected();
+  else if (lk === 'escape') { setTool({ kind: 'select' }); select(null); toast('Selection cleared', false, 1800); }
+  else if (lk === 'delete' || lk === 'backspace') {
+    if (selection) {
+      const label = getSelectionLabel();
+      const id = selection;
+      apply((n) => M.removeById(n, id));
+      select(null);
+      toast(`Deleted ${label || 'selected element'}`, false, 2000);
+    }
+  }
+  else if (lk === 'v') setTool({ kind: 'select' });
+  else if (lk === 'x') setTool({ kind: 'erase' });
   else if (k === '+' || k === '=') $('#zoom-in').click();
   else if (k === '-') $('#zoom-out').click();
 });
@@ -534,4 +661,4 @@ const view3d = initView3D({ getDoc: () => doc, getLevel: () => curLevel, getSele
 renderPalette(); setTool({ kind: 'select' }); resize(); refresh();
 if (doc.rooms.length) fit();
 // test hook for automated browser checks
-window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool };
+window.__homegen = { view3d, setLevel, get doc() { return doc; }, get report() { return report; }, apply, sampleHome, setTool, select, navigateSpatial, moveSelectedSpatial, getSpatialElements };

@@ -336,6 +336,30 @@ export function createScene3D(canvas, getState, getLevel) {
     frame,
     setEnv,
     setOption(k, v) { opts[k] = v; if (k === 'sun') { sun.intensity = 4 * v; render(); } else build(); },
+    orbitBy(deltaAzimuth, deltaPolar) {
+      const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      const spherical = new THREE.Spherical().setFromVector3(offset);
+      spherical.theta += deltaAzimuth;
+      spherical.phi = Math.max(0.01, Math.min(Math.PI * 0.499, spherical.phi + deltaPolar));
+      offset.setFromSpherical(spherical);
+      camera.position.addVectors(controls.target, offset);
+      controls.update(); render();
+    },
+    panBy(deltaX, deltaY) {
+      const vX = new THREE.Vector3(); const vY = new THREE.Vector3();
+      camera.matrix.extractBasis(vX, vY, new THREE.Vector3());
+      const dist = Math.max(1, camera.position.distanceTo(controls.target));
+      const factor = dist * 0.04;
+      const pan = vX.multiplyScalar(deltaX * factor).add(vY.multiplyScalar(deltaY * factor));
+      camera.position.add(pan); controls.target.add(pan);
+      controls.update(); render();
+    },
+    zoomBy(factor) {
+      const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      offset.multiplyScalar(factor);
+      camera.position.addVectors(controls.target, offset);
+      controls.update(); render();
+    },
     /** Stand inside a room at eye height looking along its longest axis. */
     eyeLevel(roomId) {
       const state = getState(); const room = state.rooms.find((r) => r.id === roomId) || state.rooms.find((r) => lv(r) === getLevel()); if (!room) return false;

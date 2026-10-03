@@ -183,18 +183,37 @@ function drawLabel(ctx, room, view) {
 
 function drawSelection(ctx, state, id, view) {
   for (const room of state.rooms) {
-    ctx.save(); ctx.strokeStyle = '#2a7fff'; ctx.lineWidth = 2 / view.scale; ctx.setLineDash([5 / view.scale, 3 / view.scale]);
+    ctx.save();
+    const drawRing = (pathFn) => {
+      ctx.save(); ctx.lineWidth = 4.5 / view.scale; ctx.strokeStyle = '#000000'; ctx.setLineDash([]); pathFn(); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.lineWidth = 2.5 / view.scale; ctx.strokeStyle = '#2a7fff'; ctx.setLineDash([5 / view.scale, 3 / view.scale]); pathFn(); ctx.stroke(); ctx.restore();
+    };
+
     if (room.id === id) {
-      ctx.strokeRect(room.x, room.y, room.w, room.h); ctx.setLineDash([]); ctx.fillStyle = '#fff';
-      for (const [hx, hy] of handles(room)) { ctx.beginPath(); ctx.rect(hx - 4 / view.scale, hy - 4 / view.scale, 8 / view.scale, 8 / view.scale); ctx.fill(); ctx.stroke(); }
+      drawRing(() => { ctx.beginPath(); ctx.rect(room.x, room.y, room.w, room.h); });
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#000000'; ctx.lineWidth = 1.5 / view.scale; ctx.setLineDash([]);
+      for (const [hx, hy] of handles(room)) {
+        ctx.beginPath(); ctx.rect(hx - 4 / view.scale, hy - 4 / view.scale, 8 / view.scale, 8 / view.scale); ctx.fill(); ctx.stroke();
+      }
     }
     const it = room.items.find((x) => x.id === id);
     if (it) {
       const def = ITEM_BY_ID[it.type];
-      if (def.mount === 'floor') { const fp = footprint(it, def); ctx.strokeRect(fp.x - 1, fp.y - 1, fp.w + 2, fp.h + 2); } else if (def.mount === 'ceiling') { ctx.beginPath(); ctx.arc(it.x, it.y, def.w / 2 + 2, 0, 7); ctx.stroke(); } else { const p = wallPoint(room, it.wall, it.offset, 0); ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, 7); ctx.stroke(); }
+      if (def.mount === 'floor') {
+        const fp = footprint(it, def);
+        drawRing(() => { ctx.beginPath(); ctx.rect(fp.x - 1, fp.y - 1, fp.w + 2, fp.h + 2); });
+      } else if (def.mount === 'ceiling') {
+        drawRing(() => { ctx.beginPath(); ctx.arc(it.x, it.y, def.w / 2 + 2, 0, Math.PI * 2); });
+      } else {
+        const p = wallPoint(room, it.wall, it.offset, 0);
+        drawRing(() => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); });
+      }
     }
     const o = room.openings.find((x) => x.id === id);
-    if (o) { const a = wallPoint(room, o.wall, o.offset, 0); const b = wallPoint(room, o.wall, o.offset + o.width, 0); ctx.lineWidth = 3 / view.scale; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    if (o) {
+      const a = wallPoint(room, o.wall, o.offset, 0); const b = wallPoint(room, o.wall, o.offset + o.width, 0);
+      drawRing(() => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); });
+    }
     ctx.restore();
   }
 }
