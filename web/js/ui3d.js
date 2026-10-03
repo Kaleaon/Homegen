@@ -41,7 +41,7 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   $('#o-photo').addEventListener('click', openPhoto);
 
   // ------------------------------------------------------------ photoreal dialog
-  const dlg = $('#photo'); let guides = { beauty: '', depth: '' };
+  const dlg = $('#photo'); let guides = { beauty: '', depth: '' }; let triggerEl = null;
   $('#p-style').innerHTML = Object.entries(STYLES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#p-key').value = (() => { try { return localStorage.getItem(KEY) || ''; } catch { return ''; } })();
   $('#p-resources').innerHTML = FREE_RESOURCES.map((r) => `<li><a href="${r.url}" target="_blank" rel="noopener">${r.name}</a>${r.license ? ` · <b>${r.license}</b>` : ''}<small>${r.group} — ${r.note}</small></li>`).join('');
@@ -55,8 +55,9 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     $('#p-beauty').src = guides.beauty; $('#p-depth').src = guides.depth;
   }
 
-  function openPhoto() {
+  function openPhoto(e) {
     if (!rooms().length) return toast('Add a room first.', true);
+    triggerEl = (e && e.currentTarget) || $('#o-photo');
     const sel = getSelectedRoomId();
     $('#p-room').innerHTML = rooms().map((r) => `<option value="${r.id}">${r.name} (floor ${(r.level || 0) + 1})</option>`).join('');
     const pick = rooms().find((r) => r.id === sel) || rooms().find((r) => (r.level || 0) === getLevel()) || rooms()[0];
@@ -64,7 +65,18 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     if (!api.eyeLevelUsed) { /* keep the user's current camera; they can press Eye level first */ }
     capture(); $('#p-status').textContent = 'Tip: press “Eye level” in the room you want, then re-capture, for a photo-like angle.';
     $('#p-result').hidden = true; dlg.showModal();
+    const pRoom = $('#p-room');
+    if (pRoom && typeof pRoom.focus === 'function') {
+      pRoom.focus();
+    }
   }
+
+  dlg.addEventListener('close', () => {
+    const trigger = triggerEl || $('#o-photo');
+    if (trigger && typeof trigger.focus === 'function' && !trigger.disabled) {
+      trigger.focus();
+    }
+  });
   $('#p-room').addEventListener('change', () => { const r = selectedRoom(); setLevel(r.level || 0); refreshPrompt(); });
   $('#p-style').addEventListener('change', refreshPrompt);
   $('#p-capture').addEventListener('click', capture);
