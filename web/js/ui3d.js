@@ -12,7 +12,11 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   async function ensure() {
     if (api) return api;
     const { createScene3D } = await import('./scene3d.js');
-    api = createScene3D(v3, getDoc, getLevel); window.__scene3d = api;
+    api = createScene3D(v3, getDoc, getLevel, {
+      onError: (msg) => toast(msg, true),
+      onEnvChange: (env) => { const el = $('#o-env'); if (el) el.value = env; },
+      onHDChange: (hd) => { const el = $('#o-hd'); if (el) el.checked = hd; },
+    }); window.__scene3d = api;
     return api;
   }
 
