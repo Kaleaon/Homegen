@@ -81,6 +81,7 @@ button:hover {
   border-color: var(--accent);
 }
 button.on,
+button[aria-selected='true'],
 button.primary {
   background: var(--accent);
   color: var(--accent-ink);

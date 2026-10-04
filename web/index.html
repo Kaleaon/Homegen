@@ -30,13 +30,13 @@
 </header>
 <main>
   <aside id="left">
-    <nav id="tabs">
-      <button data-tab="build" class="on">Build</button>
-      <button data-tab="buy">Buy</button>
-      <button data-tab="paint">Paint</button>
-      <button data-tab="kits">Kits</button>
+    <nav id="tabs" role="tablist" aria-label="Palette categories">
+      <button id="tab-build" data-tab="build" class="on" role="tab" aria-selected="true" aria-controls="palette" tabindex="0">Build</button>
+      <button id="tab-buy" data-tab="buy" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Buy</button>
+      <button id="tab-paint" data-tab="paint" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Paint</button>
+      <button id="tab-kits" data-tab="kits" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Kits</button>
     </nav>
-    <div id="palette"></div>
+    <div id="palette" role="tabpanel" tabindex="0" aria-labelledby="tab-build"></div>
   </aside>
   <section id="stage">
     <div id="toolbar">

@@ -1174,6 +1174,7 @@ function card(label, sub, on, attrs, swatch) {
 
 function renderPalette() {
   const p = $('#palette');
+  if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   let h = '';
   if (tab === 'build') {
     h +=
@@ -2199,19 +2200,68 @@ if (typeof document !== 'undefined')
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
-if (typeof document !== 'undefined')
-  document.querySelectorAll('#tabs button').forEach((b) =>
-    b.addEventListener('click', () => {
-      tab = b.dataset.tab;
-      document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b));
-      renderPalette();
-    })
-  );
+function switchTab(targetBtn, shouldFocus = false) {
+  if (!targetBtn) return;
+  tab = targetBtn.dataset.tab;
+  const buttons = document.querySelectorAll('#tabs button');
+  buttons.forEach((x) => {
+    const isSelected = x === targetBtn;
+    x.classList.toggle('on', isSelected);
+    x.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    x.setAttribute('tabindex', isSelected ? '0' : '-1');
+  });
+  const palette = document.getElementById('palette');
+  if (palette && targetBtn.id) {
+    palette.setAttribute('aria-labelledby', targetBtn.id);
+  }
+  renderPalette();
+  if (shouldFocus) {
+    targetBtn.focus();
+  }
+}
+
+if (typeof document !== 'undefined') {
+  const tabsNav = document.getElementById('tabs');
+  if (tabsNav) {
+    const buttons = Array.from(tabsNav.querySelectorAll('button'));
+    buttons.forEach((b) => {
+      b.addEventListener('click', () => switchTab(b, false));
+    });
+
+    tabsNav.addEventListener('keydown', (e) => {
+      const activeElement = document.activeElement;
+      const currentButtons = Array.from(tabsNav.querySelectorAll('button'));
+      const currentIndex = currentButtons.indexOf(activeElement);
+      if (currentIndex === -1) return;
+
+      let newIndex = -1;
+      if (e.key === 'ArrowRight') {
+        newIndex = (currentIndex + 1) % currentButtons.length;
+      } else if (e.key === 'ArrowLeft') {
+        newIndex = (currentIndex - 1 + currentButtons.length) % currentButtons.length;
+      } else if (e.key === 'Home') {
+        newIndex = 0;
+      } else if (e.key === 'End') {
+        newIndex = currentButtons.length - 1;
+      }
+
+      if (newIndex !== -1) {
+        e.preventDefault();
+        e.stopPropagation();
+        switchTab(currentButtons[newIndex], true);
+      }
+    });
+  }
+}
 
 let view3d = null;
 if (typeof window !== 'undefined') {
   window.addEventListener('keydown', (e) => {
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+    if (
+      /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) ||
+      document.activeElement?.closest('#tabs')
+    )
+      return;
     const k = e.key;
     const lk = k.toLowerCase();
 
