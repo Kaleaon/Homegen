@@ -22,6 +22,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            web/package-lock.json
+            designer3d/tools/package-lock.json
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
@@ -32,12 +36,14 @@ jobs:
       - name: Build and Test Web Module
         run: |
           cd web
+          npm ci
           npm test
           zip -r ../homegen-web.zip . -x "node_modules/*" ".git/*"
 
       - name: Package designer3d tools
         run: |
           cd designer3d/tools
+          npm ci
           npm test
           npm pack
           mv homegen-designer3d-tools-*.tgz ../../
