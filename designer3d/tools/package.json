@@ -2,8 +2,9 @@
   "name": "homegen-designer3d-tools",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

@@ -1,10 +1,6 @@
-const { getSnappedPoint, snapAngle } = require('../snapping');
-const { SnapModeState, SNAP_MODES } = require('../snapModes');
-const { createGridSettings } = require('../gridSettings');
-
-function makeContext(edges = []) {
-  return { edges };
-}
+import { getSnappedPoint, snapAngle } from '../snapping.mjs';
+import { SnapModeState, SNAP_MODES } from '../snapModes.mjs';
+import { createGridSettings } from '../gridSettings.mjs';
 
 describe('snapAngle', () => {
   const settings = createGridSettings({ angleSnapDegrees: 15 });

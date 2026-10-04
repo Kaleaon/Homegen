@@ -1,4 +1,4 @@
-const { validatePlacement, createPlacementFeedback } = require('../collision');
+import { validatePlacement, createPlacementFeedback } from '../collision.mjs';
 
 describe('validatePlacement', () => {
   test('non-overlapping rectangles are valid', () => {
