@@ -580,74 +580,127 @@ function drawLabel(ctx, room, view) {
   ctx.restore();
 }
 
-function drawSelection(ctx, state, id, view) {
-  for (const room of state.rooms) {
-    ctx.save();
-    const drawRing = (pathFn) => {
-      ctx.save();
-      ctx.lineWidth = 4.5 / view.scale;
-      ctx.strokeStyle = '#000000';
-      ctx.setLineDash([]);
-      pathFn();
-      ctx.stroke();
-      ctx.restore();
-      ctx.save();
-      ctx.lineWidth = 2.5 / view.scale;
-      ctx.strokeStyle = '#2a7fff';
-      ctx.setLineDash([5 / view.scale, 3 / view.scale]);
-      pathFn();
-      ctx.stroke();
-      ctx.restore();
-    };
+function drawSelection(ctx, state, selection, view) {
+  if (!selection) return;
+  const selectedIds =
+    selection instanceof Set
+      ? selection
+      : Array.isArray(selection)
+        ? new Set(selection)
+        : typeof selection === 'string'
+          ? new Set([selection])
+          : new Set();
 
-    if (room.id === id) {
-      drawRing(() => {
-        ctx.beginPath();
-        ctx.rect(room.x, room.y, room.w, room.h);
-      });
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 1.5 / view.scale;
-      ctx.setLineDash([]);
-      for (const [hx, hy] of handles(room)) {
-        ctx.beginPath();
-        ctx.rect(hx - 4 / view.scale, hy - 4 / view.scale, 8 / view.scale, 8 / view.scale);
-        ctx.fill();
-        ctx.stroke();
+  if (selectedIds.size === 0) return;
+
+  let groupMinX = Infinity;
+  let groupMinY = Infinity;
+  let groupMaxX = -Infinity;
+  let groupMaxY = -Infinity;
+
+  const updateGroupBounds = (x, y, w, h) => {
+    if (x < groupMinX) groupMinX = x;
+    if (y < groupMinY) groupMinY = y;
+    if (x + w > groupMaxX) groupMaxX = x + w;
+    if (y + h > groupMaxY) groupMaxY = y + h;
+  };
+
+  const drawRing = (pathFn) => {
+    ctx.save();
+    ctx.lineWidth = 4.5 / view.scale;
+    ctx.strokeStyle = '#000000';
+    ctx.setLineDash([]);
+    pathFn();
+    ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.lineWidth = 2.5 / view.scale;
+    ctx.strokeStyle = '#2a7fff';
+    ctx.setLineDash([5 / view.scale, 3 / view.scale]);
+    pathFn();
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  for (const id of selectedIds) {
+    for (const room of state.rooms) {
+      ctx.save();
+
+      if (room.id === id) {
+        drawRing(() => {
+          ctx.beginPath();
+          ctx.rect(room.x, room.y, room.w, room.h);
+        });
+        updateGroupBounds(room.x, room.y, room.w, room.h);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1.5 / view.scale;
+        ctx.setLineDash([]);
+        for (const [hx, hy] of handles(room)) {
+          ctx.beginPath();
+          ctx.rect(hx - 4 / view.scale, hy - 4 / view.scale, 8 / view.scale, 8 / view.scale);
+          ctx.fill();
+          ctx.stroke();
+        }
       }
-    }
-    const it = room.items.find((x) => x.id === id);
-    if (it) {
-      const def = ITEM_BY_ID[it.type];
-      if (def.mount === 'floor') {
-        const fp = footprint(it, def);
-        drawRing(() => {
-          ctx.beginPath();
-          ctx.rect(fp.x - 1, fp.y - 1, fp.w + 2, fp.h + 2);
-        });
-      } else if (def.mount === 'ceiling') {
-        drawRing(() => {
-          ctx.beginPath();
-          ctx.arc(it.x, it.y, def.w / 2 + 2, 0, Math.PI * 2);
-        });
-      } else {
-        const p = wallPoint(room, it.wall, it.offset, 0);
-        drawRing(() => {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-        });
+      const it = room.items.find((x) => x.id === id);
+      if (it) {
+        const def = ITEM_BY_ID[it.type];
+        if (def.mount === 'floor') {
+          const fp = footprint(it, def);
+          drawRing(() => {
+            ctx.beginPath();
+            ctx.rect(fp.x - 1, fp.y - 1, fp.w + 2, fp.h + 2);
+          });
+          updateGroupBounds(fp.x, fp.y, fp.w, fp.h);
+        } else if (def.mount === 'ceiling') {
+          const r = (def.w || 12) / 2;
+          drawRing(() => {
+            ctx.beginPath();
+            ctx.arc(it.x, it.y, r + 2, 0, Math.PI * 2);
+          });
+          updateGroupBounds(it.x - r, it.y - r, r * 2, r * 2);
+        } else {
+          const p = wallPoint(room, it.wall, it.offset, 0);
+          drawRing(() => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+          });
+          updateGroupBounds(p.x - 6, p.y - 6, 12, 12);
+        }
       }
+      const o = room.openings.find((x) => x.id === id);
+      if (o) {
+        const a = wallPoint(room, o.wall, o.offset, 0);
+        const b = wallPoint(room, o.wall, o.offset + o.width, 0);
+        drawRing(() => {
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+        });
+        const minX = Math.min(a.x, b.x);
+        const minY = Math.min(a.y, b.y);
+        const maxX = Math.max(a.x, b.x);
+        const maxY = Math.max(a.y, b.y);
+        updateGroupBounds(minX, minY, Math.max(4, maxX - minX), Math.max(4, maxY - minY));
+      }
+      ctx.restore();
     }
-    const o = room.openings.find((x) => x.id === id);
-    if (o) {
-      const a = wallPoint(room, o.wall, o.offset, 0);
-      const b = wallPoint(room, o.wall, o.offset + o.width, 0);
-      drawRing(() => {
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-      });
-    }
+  }
+
+  if (selectedIds.size > 1 && isFinite(groupMinX)) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(42, 127, 255, 0.85)';
+    ctx.lineWidth = 1.5 / view.scale;
+    ctx.setLineDash([6 / view.scale, 4 / view.scale]);
+    const pad = 4 / view.scale;
+    ctx.strokeRect(
+      groupMinX - pad,
+      groupMinY - pad,
+      groupMaxX - groupMinX + 2 * pad,
+      groupMaxY - groupMinY + 2 * pad
+    );
     ctx.restore();
   }
 }

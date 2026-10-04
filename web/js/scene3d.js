@@ -52,6 +52,168 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   controls.maxPolarAngle = Math.PI * 0.499;
   const world = new THREE.Group();
   scene.add(world);
+
+  let cameraMode = 'orbit'; // 'orbit' | 'walk'
+  let yaw = 0;
+  let pitch = 0;
+  const walkKeys = { forward: false, backward: false, left: false, right: false, sprint: false };
+  let lastLoopTime = performance.now();
+
+  function initWalkAnglesFromCamera() {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    pitch = Math.asin(Math.max(-0.99, Math.min(0.99, dir.y)));
+    const cosPitch = Math.cos(pitch);
+    if (Math.abs(cosPitch) > 0.001) {
+      yaw = Math.atan2(dir.x, dir.z);
+    } else {
+      yaw = 0;
+    }
+    const maxPitch = (70 * Math.PI) / 180;
+    pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+  }
+
+  function updateCameraRotation() {
+    const maxPitch = (70 * Math.PI) / 180;
+    pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+    const dir = new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch)
+    );
+    controls.target.copy(camera.position).add(dir);
+    camera.lookAt(controls.target);
+  }
+
+  function getActiveFloorElevation() {
+    const state = getState();
+    const cur = getLevel();
+    const elev = levelElevations(state);
+    return elev[cur] !== undefined ? elev[cur] : 0;
+  }
+
+  function clampWalkPosition(pos) {
+    const state = getState();
+    const cur = getLevel();
+    const curRooms = state.rooms.filter((r) => lv(r) === cur);
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    if (curRooms.length > 0) {
+      for (const r of curRooms) {
+        minX = Math.min(minX, r.x);
+        maxX = Math.max(maxX, r.x + r.w);
+        minZ = Math.min(minZ, r.y);
+        maxZ = Math.max(maxZ, r.y + r.h);
+      }
+      const margin = 120; // 10 feet margin around active level rooms
+      minX = (minX - margin) * S;
+      maxX = (maxX + margin) * S;
+      minZ = (minZ - margin) * S;
+      maxZ = (maxZ + margin) * S;
+    } else {
+      minX = -100;
+      maxX = 100;
+      minZ = -100;
+      maxZ = 100;
+    }
+    pos.x = Math.max(minX, Math.min(maxX, pos.x));
+    pos.z = Math.max(minZ, Math.min(maxZ, pos.z));
+  }
+
+  function updateWalkMovement(dt, keys = walkKeys) {
+    if (cameraMode !== 'walk') return;
+
+    const fwdX = Math.sin(yaw);
+    const fwdZ = Math.cos(yaw);
+    const rightX = Math.cos(yaw);
+    const rightZ = -Math.sin(yaw);
+
+    let dx = 0;
+    let dz = 0;
+
+    if (keys.forward) {
+      dx += fwdX;
+      dz += fwdZ;
+    }
+    if (keys.backward) {
+      dx -= fwdX;
+      dz -= fwdZ;
+    }
+    if (keys.left) {
+      dx -= rightX;
+      dz -= rightZ;
+    }
+    if (keys.right) {
+      dx += rightX;
+      dz += rightZ;
+    }
+
+    const len = Math.hypot(dx, dz);
+    if (len > 0) {
+      const baseSpeed = keys.sprint ? 15.0 : 7.5;
+      const speed = baseSpeed * dt;
+      camera.position.x += (dx / len) * speed;
+      camera.position.z += (dz / len) * speed;
+      clampWalkPosition(camera.position);
+    }
+
+    // Height lock at (E + 64) * S relative to active floor
+    const E = getActiveFloorElevation();
+    camera.position.y = (E + 64) * S;
+
+    updateCameraRotation();
+  }
+
+  function lookWalkBy(dx, dy) {
+    if (cameraMode !== 'walk') return;
+    const sensitivity = 0.003;
+    yaw += dx * sensitivity;
+    pitch -= dy * sensitivity;
+    const maxPitch = (70 * Math.PI) / 180;
+    pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+    updateCameraRotation();
+    render();
+  }
+
+  function setCameraMode(mode, options = {}) {
+    if (mode !== 'orbit' && mode !== 'walk') return;
+    cameraMode = mode;
+    if (cameraMode === 'walk') {
+      controls.enabled = false;
+      camera.fov = 70;
+      camera.updateProjectionMatrix();
+
+      const E = getActiveFloorElevation();
+      const eyeHeight = (E + 64) * S;
+
+      if (options.roomId) {
+        eyeLevel(options.roomId);
+      } else if (options.initPos) {
+        camera.position.copy(options.initPos);
+        camera.position.y = eyeHeight;
+        initWalkAnglesFromCamera();
+        updateCameraRotation();
+      } else {
+        camera.position.y = eyeHeight;
+        initWalkAnglesFromCamera();
+        updateCameraRotation();
+      }
+    } else {
+      controls.enabled = true;
+      camera.fov = 50;
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+    const notifyMode = callbacks.onCameraModeChange || api?.onCameraModeChange;
+    notifyMode?.(cameraMode);
+    render();
+  }
+
+  function toggleCameraMode() {
+    setCameraMode(cameraMode === 'orbit' ? 'walk' : 'orbit');
+  }
   const opts = {
     walls: 'full',
     levels: 'all',
@@ -1074,7 +1236,15 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   }
   function loop() {
     if (!active) return;
-    controls.update();
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - lastLoopTime) / 1000);
+    lastLoopTime = now;
+
+    if (cameraMode === 'walk') {
+      updateWalkMovement(dt, walkKeys);
+    } else {
+      controls.update();
+    }
     render();
     raf = requestAnimationFrame(loop);
   }
@@ -1091,14 +1261,22 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     },
     scene,
     callbacks,
+    walkKeys,
+    getCameraMode: () => cameraMode,
+    setCameraMode,
+    toggleCameraMode,
+    lookWalkBy,
+    updateWalkMovement,
     onError: callbacks.onError,
     onEnvChange: callbacks.onEnvChange,
     onHDChange: callbacks.onHDChange,
+    onCameraModeChange: callbacks.onCameraModeChange,
     show() {
       active = true;
       resize();
       reconcile();
       cancelAnimationFrame(raf);
+      lastLoopTime = performance.now();
       loop();
     },
     hide() {
@@ -1167,19 +1345,37 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const cy = ir.y + ir.h / 2;
       const px = long ? ir.x + 14 : cx;
       const pz = long ? cy : ir.y + 14;
+
+      cameraMode = 'walk';
+      controls.enabled = false;
       camera.fov = 70;
       camera.updateProjectionMatrix();
       camera.position.set(px * S, (e + 64) * S, pz * S);
-      controls.target.set((long ? cx + 40 : cx) * S, (e + 56) * S, (long ? cy : cy + 40) * S);
-      controls.minDistance = 0.05;
-      controls.update();
+
+      const targetX = (long ? cx + 40 : cx) * S;
+      const targetY = (e + 56) * S;
+      const targetZ = (long ? cy : cy + 40) * S;
+
+      const dirX = targetX - camera.position.x;
+      const dirZ = targetZ - camera.position.z;
+      yaw = Math.atan2(dirX, dirZ);
+      pitch = 0;
+      updateCameraRotation();
+
+      const notifyMode = callbacks.onCameraModeChange || api?.onCameraModeChange;
+      notifyMode?.(cameraMode);
+
       render();
       return true;
     },
     resetCamera() {
+      cameraMode = 'orbit';
+      controls.enabled = true;
       camera.fov = 50;
       camera.updateProjectionMatrix();
       frame();
+      const notifyMode = callbacks.onCameraModeChange || api?.onCameraModeChange;
+      notifyMode?.(cameraMode);
     },
     /** Capture 'beauty' (what you see) or 'depth' (near = white, a ControlNet depth guide) as a PNG data URL. */
     capture(mode = 'beauty', width = 1024) {
