@@ -22,7 +22,13 @@ import {
 } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
-import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl, MaterialPreloader } from './resources.js';
+import {
+  HD_MATERIALS,
+  HDRI_ENVS,
+  polyHavenTextureUrls,
+  polyHavenHdriUrl,
+  MaterialPreloader,
+} from './resources.js';
 import { getCladdingMaterial, resolveWindowStyle } from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
 
@@ -184,7 +190,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const eyeHeight = (E + 64) * S;
 
       if (options.roomId) {
-        eyeLevel(options.roomId);
+        api.eyeLevel(options.roomId);
       } else if (options.initPos) {
         camera.position.copy(options.initPos);
         camera.position.y = eyeHeight;
