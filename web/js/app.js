@@ -708,6 +708,10 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );
 
+export function formRow(id, labelText, controlHtml) {
+  return `<div class="row"><label for="${id}">${esc(labelText)}</label>${controlHtml}</div>`;
+}
+
 function focus(id) {
   const hit = M.findOwner(doc, id);
   if (!hit) return;
@@ -736,15 +740,20 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     el.innerHTML = `<h3>${esc(room.name)}</h3>
-      <div class="row"><label>Name</label><input id="i-name" value="${esc(room.name)}"></div>
-      <div class="row"><label>Type</label><select id="i-type">${Object.entries(ROOM_TYPES)
-        .map(
-          ([k, v]) => `<option value="${k}" ${k === room.type ? 'selected' : ''}>${v.name}</option>`
-        )
-        .join('')}</select></div>
-      <div class="row"><label>Width (ft)</label><input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}"></div>
-      <div class="row"><label>Depth (ft)</label><input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}"></div>
-      <div class="row"><label>Ceiling (in)</label><input id="i-ceil" type="number" step="2" value="${room.ceiling}"></div>
+      ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
+      ${formRow(
+        'i-type',
+        'Type',
+        `<select id="i-type">${Object.entries(ROOM_TYPES)
+          .map(
+            ([k, v]) =>
+              `<option value="${k}" ${k === room.type ? 'selected' : ''}>${v.name}</option>`
+          )
+          .join('')}</select>`
+      )}
+      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}">`)}
+      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}">`)}
+      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
       <div class="btns"><button id="i-del">Delete room</button></div>`;
     $('#i-name').addEventListener('change', (e) =>
       apply(
@@ -790,14 +799,16 @@ function renderInspector() {
       <button id="i-del">Delete</button></div>
       ${
         kind === 'opening'
-          ? `<div class="row"><label>Style</label><select id="i-otype">${OPENINGS.filter(
-              (o) => o.kind === def.kind
+          ? formRow(
+              'i-otype',
+              'Style',
+              `<select id="i-otype">${OPENINGS.filter((o) => o.kind === def.kind)
+                .map(
+                  (o) =>
+                    `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
+                )
+                .join('')}</select>`
             )
-              .map(
-                (o) =>
-                  `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
-              )
-              .join('')}</select></div>`
           : ''
       }`;
     $('#i-rot')?.addEventListener('click', rotateSelected);
@@ -1108,7 +1119,7 @@ function renderPalette() {
           .join('') +
         '</div>';
   } else if (tab === 'paint') {
-    h += `<div class="row" style="margin:8px 0 12px"><label style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
+    h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
       '<h4>Sampler</h4><div class="grid">' +
       card(
@@ -2222,6 +2233,7 @@ if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
     setLevel,
+    formRow,
     get doc() {
       return doc;
     },
