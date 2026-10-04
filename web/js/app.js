@@ -2238,6 +2238,10 @@ $('#png')?.addEventListener('click', () => {
   });
 });
 $('#export-pdf')?.addEventListener('click', () => {
+  if (!doc.rooms || doc.rooms.length === 0) {
+    toast('Cannot export PDF: add at least one room first.', true);
+    return;
+  }
   $('#pdf-title').value = doc.name || 'My home';
   $('#pdf-date').value = new Date().toISOString().slice(0, 10);
   const levelSelect = $('#pdf-level');
