@@ -84,6 +84,7 @@ function createMockElement(id = '', tagName = 'DIV') {
       if (element.items) return element.items;
       return [];
     },
+    closest: () => null,
   };
   return element;
 }
@@ -127,6 +128,7 @@ test('command palette query filtering and execution unit test', async () => {
   const documentListeners = {};
   global.document = {
     activeElement: createMockElement('body', 'BODY'),
+    getElementById: (id) => getEl(id),
     querySelector: (s) => {
       const id = s.replace(/^#/, '');
       return getEl(id);
@@ -217,6 +219,7 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
   };
   global.document = {
     activeElement: createMockElement('body', 'BODY'),
+    getElementById: (id) => getEl(id),
     querySelector: (s) => getEl(s.replace(/^#/, '')),
     querySelectorAll: () => [],
     addEventListener: () => {},

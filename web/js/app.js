@@ -2427,13 +2427,8 @@ if (typeof window !== 'undefined') {
   initCommandPaletteUI();
 
   window.addEventListener('keydown', (e) => {
-    if (
-      /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) ||
-      document.activeElement?.closest('#tabs')
-    )
-      return;
     const k = e.key;
-    const lk = k.toLowerCase();
+    const lk = k ? k.toLowerCase() : '';
 
     // Cmd+K or Ctrl+K triggers Command Palette (works globally)
     if ((e.ctrlKey || e.metaKey) && lk === 'k') {
@@ -2447,7 +2442,11 @@ if (typeof window !== 'undefined') {
       return;
     }
 
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+    if (
+      /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) ||
+      document.activeElement?.closest('#tabs')
+    )
+      return;
 
     if (k === '?') {
       e.preventDefault();
