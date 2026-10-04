@@ -11,7 +11,7 @@ test('web/index.html includes required ARIA attributes on photoreal dialog and c
   const html = fs.readFileSync(htmlPath, 'utf8');
 
   // Verify <dialog id="photo"> has aria-labelledby="photo-title"
-  assert.match(html, /<dialog\s+id="photo"\s+aria-labelledby="photo-title">/);
+  assert.match(html, /<dialog\s+id="photo"\s+aria-labelledby="photo-title"(\s+class="[^"]*")?>/);
 
   // Verify <h2 id="photo-title">Photoreal render</h2> exists inside dialog
   assert.match(html, /<h2\s+id="photo-title">Photoreal render<\/h2>/);
