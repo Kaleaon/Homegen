@@ -2444,7 +2444,11 @@ if (typeof window !== 'undefined') {
       return;
     }
 
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+    if (
+      /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) ||
+      document.activeElement?.closest('#tabs')
+    )
+      return;
 
     if (k === '?') {
       e.preventDefault();
