@@ -40,17 +40,28 @@ test('Token Transformation: Replaces legacy variables with Ktheme token referenc
 
 test('CSS Linter: npm run lint:css passes on token-compliant CSS', () => {
   const stdout = execSync('npm run lint:css', { cwd: webDir, encoding: 'utf8' });
-  assert.ok(stdout.includes('All CSS rules comply with Ktheme design tokens!'), 'Linter reports compliance');
+  assert.ok(
+    stdout.includes('All CSS rules comply with Ktheme design tokens!'),
+    'Linter reports compliance'
+  );
 });
 
 test('CSS Linter: npm run lint:css fails and suggests tokens on non-compliant CSS', () => {
   const tempCssPath = path.join(webDir, 'css/src/temp_non_compliant.css');
-  fs.writeFileSync(tempCssPath, 'button { border-radius: 19px; color: #e91e63; font-family: Arial; }', 'utf8');
+  fs.writeFileSync(
+    tempCssPath,
+    'button { border-radius: 19px; color: #e91e63; font-family: Arial; }',
+    'utf8'
+  );
 
   let failed = false;
   let output = '';
   try {
-    execSync(`node scripts/lint-css.mjs ${tempCssPath}`, { cwd: webDir, encoding: 'utf8', stdio: 'pipe' });
+    execSync(`node scripts/lint-css.mjs ${tempCssPath}`, {
+      cwd: webDir,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
   } catch (err) {
     failed = true;
     output = err.stderr || err.stdout;
@@ -61,7 +72,10 @@ test('CSS Linter: npm run lint:css fails and suggests tokens on non-compliant CS
   }
 
   assert.ok(failed, 'Linter must fail on non-compliant CSS');
-  assert.ok(output.includes('Hardcoded pixel border-radius'), 'Linter flags hardcoded border radius');
+  assert.ok(
+    output.includes('Hardcoded pixel border-radius'),
+    'Linter flags hardcoded border radius'
+  );
   assert.ok(output.includes('Hardcoded hex color'), 'Linter flags hardcoded hex color');
   assert.ok(output.includes('Non-standard font-family'), 'Linter flags non-standard font family');
   assert.ok(output.includes('Suggestion:'), 'Linter outputs token suggestions');
@@ -76,7 +90,10 @@ test('Serve MJS: Serves compiled distribution stylesheet cleanly', async () => {
   const types = { '.css': 'text/css' };
 
   const server = createServer(async (req, res) => {
-    const reqPath = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
+    const reqPath = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)).replace(
+      /^(\.\.[/\\])+/,
+      ''
+    );
     const file = join(root, reqPath);
     try {
       const data = await readFile(file);
