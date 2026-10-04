@@ -26,6 +26,7 @@ import {
   ROOM_KITS,
   ROOM_KIT_BY_ID,
   FURNITURE_KITS,
+  filterItems,
 } from './catalog.js';
 import * as M from './model.js';
 import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
@@ -44,6 +45,7 @@ import {
 import { generatePDF } from './pdfEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
+import { TEMPLATES, TEMPLATE_BY_ID, renderTemplatePreviewSVG } from './templates.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -104,6 +106,9 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+let catalogSearchQuery = '';
+let catalogMaxWidth = '';
+let catalogMaxDepth = '';
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -734,6 +739,10 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );
 
+export function formRow(id, labelText, controlHtml) {
+  return `<div class="row"><label for="${id}">${esc(labelText)}</label>${controlHtml}</div>`;
+}
+
 function focus(id) {
   const hit = M.findOwner(doc, id);
   if (!hit) return;
@@ -861,15 +870,20 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     el.innerHTML = `<h3>${esc(room.name)}</h3>
-      <div class="row"><label>Name</label><input id="i-name" value="${esc(room.name)}"></div>
-      <div class="row"><label>Type</label><select id="i-type">${Object.entries(ROOM_TYPES)
-        .map(
-          ([k, v]) => `<option value="${k}" ${k === room.type ? 'selected' : ''}>${v.name}</option>`
-        )
-        .join('')}</select></div>
-      <div class="row"><label>Width (ft)</label><input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}"></div>
-      <div class="row"><label>Depth (ft)</label><input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}"></div>
-      <div class="row"><label>Ceiling (in)</label><input id="i-ceil" type="number" step="2" value="${room.ceiling}"></div>
+      ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
+      ${formRow(
+        'i-type',
+        'Type',
+        `<select id="i-type">${Object.entries(ROOM_TYPES)
+          .map(
+            ([k, v]) =>
+              `<option value="${k}" ${k === room.type ? 'selected' : ''}>${v.name}</option>`
+          )
+          .join('')}</select>`
+      )}
+      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}">`)}
+      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}">`)}
+      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
       <div class="btns"><button id="i-del">Delete room</button></div>`;
     $('#i-name').addEventListener('change', (e) =>
       apply(
@@ -915,14 +929,16 @@ function renderInspector() {
       <button id="i-del">Delete</button></div>
       ${
         kind === 'opening'
-          ? `<div class="row"><label>Style</label><select id="i-otype">${OPENINGS.filter(
-              (o) => o.kind === def.kind
+          ? formRow(
+              'i-otype',
+              'Style',
+              `<select id="i-otype">${OPENINGS.filter((o) => o.kind === def.kind)
+                .map(
+                  (o) =>
+                    `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
+                )
+                .join('')}</select>`
             )
-              .map(
-                (o) =>
-                  `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
-              )
-              .join('')}</select></div>`
           : ''
       }`;
     $('#i-rot')?.addEventListener('click', rotateSelected);
@@ -1174,6 +1190,21 @@ function card(label, sub, on, attrs, swatch) {
 
 function renderPalette() {
   const p = $('#palette');
+  if (!p) return;
+
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const activeId = activeEl ? activeEl.id : null;
+  let selectionStart = null;
+  let selectionEnd = null;
+  if (activeEl && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
+    try {
+      selectionStart = activeEl.selectionStart;
+      selectionEnd = activeEl.selectionEnd;
+    } catch {
+      /* ignore if not supported by input type */
+    }
+  }
+
   let h = '';
   if (tab === 'build') {
     h +=
@@ -1217,23 +1248,50 @@ function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    for (const [cat, label] of ITEM_CATEGORIES)
-      h +=
-        `<h4>${label}</h4><div class="grid">` +
-        ITEMS.filter((i) => i.cat === cat)
-          .map((i) =>
-            card(
-              i.name,
-              i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
-              tool.kind === 'item' && tool.id === i.id,
-              `data-tool="item" data-id="${i.id}"`,
-              `background:${i.color}`
+    h += `<div class="catalog-search-container">
+      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
+    </div>
+    <div class="catalog-filters">
+      <div class="catalog-dim-group">
+        <label for="catalog-max-w">Max W (in)</label>
+        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
+      </div>
+      <div class="catalog-dim-group">
+        <label for="catalog-max-d">Max D (in)</label>
+        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
+      </div>
+    </div>`;
+
+    const filtered = filterItems(ITEMS, {
+      query: catalogSearchQuery,
+      maxW: catalogMaxWidth,
+      maxD: catalogMaxDepth,
+    });
+
+    if (filtered.length === 0) {
+      h += `<div class="catalog-empty">No matching items found</div>`;
+    } else {
+      for (const [cat, label] of ITEM_CATEGORIES) {
+        const catItems = filtered.filter((i) => i.cat === cat);
+        if (catItems.length === 0) continue;
+        h +=
+          `<h4>${label}</h4><div class="grid">` +
+          catItems
+            .map((i) =>
+              card(
+                i.name,
+                i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
+                tool.kind === 'item' && tool.id === i.id,
+                `data-tool="item" data-id="${i.id}"`,
+                `background:${i.color}`
+              )
             )
-          )
-          .join('') +
-        '</div>';
+            .join('') +
+          '</div>';
+      }
+    }
   } else if (tab === 'paint') {
-    h += `<div class="row" style="margin:8px 0 12px"><label style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
+    h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
       '<h4>Sampler</h4><div class="grid">' +
       card(
@@ -1304,6 +1362,44 @@ function renderPalette() {
     paintScope = e.target.value;
     redraw();
   });
+
+  const bindCatalogInput = (id, setter) => {
+    const el = $(`#${id}`);
+    if (el) {
+      el.addEventListener('input', (e) => {
+        setter(e.target.value);
+        renderPalette();
+      });
+    }
+  };
+
+  bindCatalogInput('catalog-search', (v) => {
+    catalogSearchQuery = v;
+  });
+  bindCatalogInput('catalog-max-w', (v) => {
+    catalogMaxWidth = v;
+  });
+  bindCatalogInput('catalog-max-d', (v) => {
+    catalogMaxDepth = v;
+  });
+
+  if (activeId && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
+    const restoredEl = $(`#${activeId}`);
+    if (restoredEl) {
+      restoredEl.focus();
+      if (
+        selectionStart !== null &&
+        selectionEnd !== null &&
+        typeof restoredEl.setSelectionRange === 'function'
+      ) {
+        try {
+          restoredEl.setSelectionRange(selectionStart, selectionEnd);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
 }
 
 const HINTS = {
@@ -1889,6 +1985,7 @@ function setDoc(next, label) {
   doc = next;
   hist.push(doc);
   persist();
+  curLevel = 0;
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
@@ -2014,6 +2111,77 @@ function reportText() {
   return lines.join('\n');
 }
 
+let templateTriggerEl = null;
+
+function openTemplatePicker(triggerEl = null) {
+  templateTriggerEl = triggerEl || $('#new');
+  const dlg = $('#dlg-templates');
+  const gallery = $('#template-gallery');
+  if (!dlg || !gallery) return;
+
+  gallery.innerHTML = TEMPLATES.map((t) => {
+    const previewState = t.createState();
+    const previewSvg = renderTemplatePreviewSVG(previewState);
+    return `<div class="template-card" tabindex="0" role="radio" aria-checked="false" data-template-id="${t.id}">
+      <div class="template-preview">${previewSvg}</div>
+      <div class="template-header">
+        <span class="template-title">${esc(t.title)}</span>
+        <span class="template-dim">${esc(t.dimensions)}</span>
+      </div>
+      <p class="template-summary">${esc(t.summary)}</p>
+      <button type="button" class="template-action primary">Use Template</button>
+    </div>`;
+  }).join('');
+
+  gallery.querySelectorAll('.template-card').forEach((card) => {
+    const templateId = card.dataset.templateId;
+    const handleSelect = (e) => {
+      e.preventDefault();
+      selectTemplate(templateId);
+    };
+    card.addEventListener('click', handleSelect);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        handleSelect(e);
+      }
+    });
+  });
+
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+    const firstCard = gallery.querySelector('.template-card');
+    if (firstCard) firstCard.focus();
+  }
+}
+
+function selectTemplate(templateId) {
+  const template = TEMPLATE_BY_ID(templateId);
+  if (!template) return;
+
+  if (doc.rooms.length > 0) {
+    if (!confirm('Start a new project? Unsaved changes in your active plan will be replaced.')) {
+      return;
+    }
+  }
+
+  const nextState = template.createState();
+  setDoc(nextState);
+  fit();
+  $('#dlg-templates')?.close();
+  toast(`Loaded ${template.title} starter template.`);
+}
+
+if (typeof document !== 'undefined') {
+  const dlgTemplates = $('#dlg-templates');
+  if (dlgTemplates) {
+    dlgTemplates.addEventListener('close', () => {
+      if (templateTriggerEl && typeof templateTriggerEl.focus === 'function') {
+        templateTriggerEl.focus();
+      }
+    });
+  }
+}
+
 $('#undo')?.addEventListener('click', () => {
   const s = hist.undo();
   if (s) {
@@ -2036,8 +2204,8 @@ $('#redo')?.addEventListener('click', () => {
     refresh();
   }
 });
-$('#new')?.addEventListener('click', () => {
-  if (!doc.rooms.length || confirm('Start a new plan? (You can undo this.)')) setDoc(M.newState());
+$('#new')?.addEventListener('click', (e) => {
+  openTemplatePicker(e.currentTarget);
 });
 $('#sample')?.addEventListener('click', sampleHome);
 $('#save')?.addEventListener('click', () =>
@@ -2210,10 +2378,36 @@ if (typeof document !== 'undefined')
 
 let view3d = null;
 if (typeof window !== 'undefined') {
+  initCommandPaletteUI();
+
   window.addEventListener('keydown', (e) => {
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
     const k = e.key;
     const lk = k.toLowerCase();
+
+    // Cmd+K or Ctrl+K triggers Command Palette (works globally)
+    if ((e.ctrlKey || e.metaKey) && lk === 'k') {
+      e.preventDefault();
+      const cmdDlg = $('#command-palette');
+      if (cmdDlg && (cmdDlg.open || cmdDlg.hasAttribute('open'))) {
+        closeCommandPalette();
+      } else {
+        openCommandPalette();
+      }
+      return;
+    }
+
+    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+
+    if (k === '?') {
+      e.preventDefault();
+      const shortcutDlg = $('#shortcut-overlay');
+      if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
+        closeShortcutOverlay();
+      } else {
+        openShortcutOverlay();
+      }
+      return;
+    }
 
     if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
       e.preventDefault();
@@ -2432,11 +2626,196 @@ $('#calib-close')?.addEventListener('click', () => {
   refresh();
 });
 
+// ------------------------------------------------------------- Command Palette & Shortcut Overlay
+let selectedCmdIndex = 0;
+let filteredCommands = [];
+
+const COMMAND_REGISTRY = [
+  // Tools
+  { id: 'tool-select', name: 'Select Tool', category: 'Tools', shortcut: 'V', action: () => setTool({ kind: 'select' }) },
+  { id: 'tool-eyedropper', name: 'Eyedropper Tool', category: 'Tools', shortcut: 'I', action: () => setTool({ kind: 'eyedropper' }) },
+  { id: 'tool-erase', name: 'Erase Tool', category: 'Tools', shortcut: 'X', action: () => setTool({ kind: 'erase' }) },
+
+  // Views
+  { id: 'view-2d', name: '2D Plan View', category: 'Views', shortcut: '', action: () => $('#toolbar [data-view="2d"]')?.click() },
+  { id: 'view-3d', name: '3D View', category: 'Views', shortcut: '', action: () => $('#toolbar [data-view="3d"]')?.click() },
+  { id: 'view-eye', name: 'Eye Level View', category: 'Views', shortcut: '', action: () => $('#o-eye')?.click() },
+  { id: 'view-reset', name: 'Reset 3D View', category: 'Views', shortcut: '', action: () => $('#o-reset')?.click() },
+  { id: 'view-photo', name: 'Photoreal Render', category: 'Views', shortcut: '', action: () => $('#o-photo')?.click() },
+  { id: 'view-zoom-in', name: 'Zoom In', category: 'Views', shortcut: '+', action: () => $('#zoom-in')?.click() },
+  { id: 'view-zoom-out', name: 'Zoom Out', category: 'Views', shortcut: '-', action: () => $('#zoom-out')?.click() },
+  { id: 'view-fit', name: 'Fit View to Screen', category: 'Views', shortcut: '', action: () => $('#fit')?.click() },
+
+  // Sidebar Tabs
+  { id: 'tab-build', name: 'Build Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="build"]')?.click() },
+  { id: 'tab-buy', name: 'Buy Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="buy"]')?.click() },
+  { id: 'tab-paint', name: 'Paint Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="paint"]')?.click() },
+  { id: 'tab-kits', name: 'Kits Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="kits"]')?.click() },
+
+  // File Operations
+  { id: 'file-new', name: 'New Plan', category: 'File Operations', shortcut: '', action: () => $('#new')?.click() },
+  { id: 'file-sample', name: 'Sample Home', category: 'File Operations', shortcut: '', action: () => $('#sample')?.click() },
+  { id: 'file-save', name: 'Save Plan', category: 'File Operations', shortcut: '', action: () => $('#save')?.click() },
+  { id: 'file-load', name: 'Open Plan', category: 'File Operations', shortcut: '', action: () => $('#load')?.click() },
+  { id: 'file-import-bp', name: 'Import Blueprint Image', category: 'File Operations', shortcut: '', action: () => $('#import-blueprint')?.click() },
+  { id: 'file-undo', name: 'Undo Action', category: 'File Operations', shortcut: 'Ctrl+Z', action: () => $('#undo')?.click() },
+  { id: 'file-redo', name: 'Redo Action', category: 'File Operations', shortcut: 'Ctrl+Y', action: () => $('#redo')?.click() },
+
+  // Export
+  { id: 'export-png', name: 'Export PNG Image', category: 'Export', shortcut: '', action: () => $('#png')?.click() },
+  { id: 'export-svg', name: 'Export SVG Vector Sheet', category: 'Export', shortcut: '', action: () => $('#svg-btn')?.click() },
+  { id: 'print-sheet', name: 'Print Sheet', category: 'Export', shortcut: '', action: () => $('#print-btn')?.click() },
+  { id: 'export-pdf', name: 'Export Scaled Vector PDF', category: 'Export', shortcut: '', action: () => $('#export-pdf')?.click() },
+  { id: 'export-report', name: 'Code Compliance Report', category: 'Export', shortcut: '', action: () => $('#report')?.click() },
+
+  // Help & Settings
+  { id: 'help-shortcuts', name: 'Keyboard Shortcuts Cheat Sheet', category: 'Help', shortcut: '?', action: () => openShortcutOverlay() },
+  { id: 'setting-autocomply', name: 'Toggle Auto-Comply', category: 'Settings', shortcut: '', action: () => $('#auto')?.click() },
+];
+
+function openCommandPalette() {
+  const dlg = $('#command-palette');
+  if (!dlg) return;
+  const input = $('#cmd-search');
+  selectedCmdIndex = 0;
+  if (input) input.value = '';
+  renderCommandList('');
+  if (typeof dlg.showModal === 'function') {
+    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+  dlg.open = true;
+  if (input) input.focus();
+}
+
+function closeCommandPalette() {
+  const dlg = $('#command-palette');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try { dlg.close(); } catch { dlg.removeAttribute('open'); }
+  } else {
+    dlg.removeAttribute('open');
+  }
+  dlg.open = false;
+}
+
+function openShortcutOverlay() {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+  dlg.open = true;
+}
+
+function closeShortcutOverlay() {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try { dlg.close(); } catch { dlg.removeAttribute('open'); }
+  } else {
+    dlg.removeAttribute('open');
+  }
+  dlg.open = false;
+}
+
+function renderCommandList(query = '') {
+  const listEl = $('#cmd-list');
+  if (!listEl) return;
+  const q = query.trim().toLowerCase();
+  filteredCommands = COMMAND_REGISTRY.filter((cmd) => {
+    if (!q) return true;
+    return (
+      cmd.name.toLowerCase().includes(q) ||
+      cmd.category.toLowerCase().includes(q) ||
+      (cmd.shortcut && cmd.shortcut.toLowerCase().includes(q))
+    );
+  });
+
+  if (selectedCmdIndex >= filteredCommands.length) {
+    selectedCmdIndex = Math.max(0, filteredCommands.length - 1);
+  }
+
+  if (filteredCommands.length === 0) {
+    listEl.innerHTML = `<li class="cmd-no-results">No matching commands found</li>`;
+    return;
+  }
+
+  listEl.innerHTML = filteredCommands
+    .map((cmd, idx) => {
+      const isSelected = idx === selectedCmdIndex;
+      const kbdHtml = cmd.shortcut
+        ? `<span class="keys"><kbd>${esc(cmd.shortcut)}</kbd></span>`
+        : '';
+      return `<li data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
+        <div class="cmd-item-main">
+          <span class="cmd-name">${esc(cmd.name)}</span>
+          <span class="cmd-category">${esc(cmd.category)}</span>
+        </div>
+        ${kbdHtml}
+      </li>`;
+    })
+    .join('');
+
+  listEl.querySelectorAll('li[data-cmd-idx]').forEach((li) => {
+    li.addEventListener('click', () => {
+      const idx = parseInt(li.dataset.cmdIdx, 10);
+      if (filteredCommands[idx]) {
+        closeCommandPalette();
+        filteredCommands[idx].action();
+      }
+    });
+  });
+
+  const activeLi = listEl.querySelector('li.selected');
+  if (activeLi && typeof activeLi.scrollIntoView === 'function') {
+    activeLi.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function initCommandPaletteUI() {
+  const searchInput = $('#cmd-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      selectedCmdIndex = 0;
+      renderCommandList(e.target.value);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (filteredCommands.length > 0) {
+          selectedCmdIndex = (selectedCmdIndex + 1) % filteredCommands.length;
+          renderCommandList(searchInput.value);
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (filteredCommands.length > 0) {
+          selectedCmdIndex =
+            (selectedCmdIndex - 1 + filteredCommands.length) % filteredCommands.length;
+          renderCommandList(searchInput.value);
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filteredCommands.length > 0 && filteredCommands[selectedCmdIndex]) {
+          const cmd = filteredCommands[selectedCmdIndex];
+          closeCommandPalette();
+          cmd.action();
+        }
+      }
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
     setLevel,
+    formRow,
     get doc() {
       return doc;
     },
@@ -2445,6 +2824,9 @@ if (typeof window !== 'undefined')
     },
     apply,
     sampleHome,
+    openTemplatePicker,
+    selectTemplate,
+    TEMPLATES,
     setTool,
     select,
     isSelected,
@@ -2459,4 +2841,10 @@ if (typeof window !== 'undefined')
     renderCompliance,
     renderViolationItem,
     complianceScene,
+    COMMAND_REGISTRY,
+    openCommandPalette,
+    closeCommandPalette,
+    openShortcutOverlay,
+    closeShortcutOverlay,
+    renderCommandList,
   };

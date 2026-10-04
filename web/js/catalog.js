@@ -264,9 +264,33 @@ export const WALL_FINISHES = [
     exterior: true,
     cladding: true,
   },
-  { id: 'wall_stucco', name: 'Stucco cladding', pattern: 'solid', c1: '#e8e2d5', wet: true, exterior: true, cladding: true },
-  { id: 'wall_stone', name: 'Stone cladding', pattern: 'tile', c1: '#8c857b', c2: '#68625a', exterior: true, cladding: true },
-  { id: 'wall_siding', name: 'Wood siding', pattern: 'stripes', c1: '#d9d3c5', c2: '#b8b2a4', exterior: true, cladding: true },
+  {
+    id: 'wall_stucco',
+    name: 'Stucco cladding',
+    pattern: 'solid',
+    c1: '#e8e2d5',
+    wet: true,
+    exterior: true,
+    cladding: true,
+  },
+  {
+    id: 'wall_stone',
+    name: 'Stone cladding',
+    pattern: 'tile',
+    c1: '#8c857b',
+    c2: '#68625a',
+    exterior: true,
+    cladding: true,
+  },
+  {
+    id: 'wall_siding',
+    name: 'Wood siding',
+    pattern: 'stripes',
+    c1: '#d9d3c5',
+    c2: '#b8b2a4',
+    exterior: true,
+    cladding: true,
+  },
   { id: 'wall_wainscot', name: 'Wainscot', pattern: 'wainscot', c1: '#eee8dc', c2: '#cfc4ae' },
   {
     id: 'wall_tile_white',
@@ -582,3 +606,46 @@ export const FURNITURE_KITS = [
     ],
   },
 ];
+
+/**
+ * Filter items by query string, category, maximum width, and maximum depth.
+ * @param {Array} items Array of item objects.
+ * @param {Object} options Filter criteria { query, q, search, cat, category, maxW, maxWidth, w, maxD, maxDepth, d }.
+ * @returns {Array} Filtered items.
+ */
+export function filterItems(items = [], options = {}) {
+  if (!Array.isArray(items)) return [];
+  const query = (options.query ?? options.q ?? options.search ?? '')
+    .toString()
+    .trim()
+    .toLowerCase();
+  const cat = options.cat ?? options.category ?? null;
+  const rawMaxW = options.maxW ?? options.maxWidth ?? options.w;
+  const rawMaxD = options.maxD ?? options.maxDepth ?? options.d;
+
+  const parseDim = (val) => {
+    if (val === null || val === undefined || val === '') return null;
+    const num = Number(val);
+    if (isNaN(num) || num <= 0) return null;
+    return num;
+  };
+
+  const maxW = parseDim(rawMaxW);
+  const maxD = parseDim(rawMaxD);
+
+  return items.filter((item) => {
+    if (query && (!item.name || !item.name.toLowerCase().includes(query))) {
+      return false;
+    }
+    if (cat && cat !== 'all' && item.cat !== cat) {
+      return false;
+    }
+    if (maxW !== null && typeof item.w === 'number' && item.w > maxW) {
+      return false;
+    }
+    if (maxD !== null && typeof item.d === 'number' && item.d > maxD) {
+      return false;
+    }
+    return true;
+  });
+}
