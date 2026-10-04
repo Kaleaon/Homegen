@@ -44,6 +44,7 @@ import {
 import { generatePDF } from './pdfEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
+import { TEMPLATES, TEMPLATE_BY_ID, renderTemplatePreviewSVG } from './templates.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -1900,6 +1901,7 @@ function setDoc(next, label) {
   doc = next;
   hist.push(doc);
   persist();
+  curLevel = 0;
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
@@ -2025,6 +2027,77 @@ function reportText() {
   return lines.join('\n');
 }
 
+let templateTriggerEl = null;
+
+function openTemplatePicker(triggerEl = null) {
+  templateTriggerEl = triggerEl || $('#new');
+  const dlg = $('#dlg-templates');
+  const gallery = $('#template-gallery');
+  if (!dlg || !gallery) return;
+
+  gallery.innerHTML = TEMPLATES.map((t) => {
+    const previewState = t.createState();
+    const previewSvg = renderTemplatePreviewSVG(previewState);
+    return `<div class="template-card" tabindex="0" role="radio" aria-checked="false" data-template-id="${t.id}">
+      <div class="template-preview">${previewSvg}</div>
+      <div class="template-header">
+        <span class="template-title">${esc(t.title)}</span>
+        <span class="template-dim">${esc(t.dimensions)}</span>
+      </div>
+      <p class="template-summary">${esc(t.summary)}</p>
+      <button type="button" class="template-action primary">Use Template</button>
+    </div>`;
+  }).join('');
+
+  gallery.querySelectorAll('.template-card').forEach((card) => {
+    const templateId = card.dataset.templateId;
+    const handleSelect = (e) => {
+      e.preventDefault();
+      selectTemplate(templateId);
+    };
+    card.addEventListener('click', handleSelect);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        handleSelect(e);
+      }
+    });
+  });
+
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+    const firstCard = gallery.querySelector('.template-card');
+    if (firstCard) firstCard.focus();
+  }
+}
+
+function selectTemplate(templateId) {
+  const template = TEMPLATE_BY_ID(templateId);
+  if (!template) return;
+
+  if (doc.rooms.length > 0) {
+    if (!confirm('Start a new project? Unsaved changes in your active plan will be replaced.')) {
+      return;
+    }
+  }
+
+  const nextState = template.createState();
+  setDoc(nextState);
+  fit();
+  $('#dlg-templates')?.close();
+  toast(`Loaded ${template.title} starter template.`);
+}
+
+if (typeof document !== 'undefined') {
+  const dlgTemplates = $('#dlg-templates');
+  if (dlgTemplates) {
+    dlgTemplates.addEventListener('close', () => {
+      if (templateTriggerEl && typeof templateTriggerEl.focus === 'function') {
+        templateTriggerEl.focus();
+      }
+    });
+  }
+}
+
 $('#undo')?.addEventListener('click', () => {
   const s = hist.undo();
   if (s) {
@@ -2047,8 +2120,8 @@ $('#redo')?.addEventListener('click', () => {
     refresh();
   }
 });
-$('#new')?.addEventListener('click', () => {
-  if (!doc.rooms.length || confirm('Start a new plan? (You can undo this.)')) setDoc(M.newState());
+$('#new')?.addEventListener('click', (e) => {
+  openTemplatePicker(e.currentTarget);
 });
 $('#sample')?.addEventListener('click', sampleHome);
 $('#save')?.addEventListener('click', () =>
@@ -2457,6 +2530,9 @@ if (typeof window !== 'undefined')
     },
     apply,
     sampleHome,
+    openTemplatePicker,
+    selectTemplate,
+    TEMPLATES,
     setTool,
     select,
     isSelected,
