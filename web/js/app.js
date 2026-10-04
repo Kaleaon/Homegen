@@ -1,3 +1,4 @@
+import './k-components.js';
 import {
   WT,
   WALLS,
@@ -1185,7 +1186,7 @@ function swatchStyle(f) {
 }
 
 function card(label, sub, on, attrs, swatch) {
-  return `<button class="card ${on ? 'on' : ''}" ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
+  return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
 function renderPalette() {
@@ -2371,10 +2372,13 @@ if (typeof document !== 'undefined')
 function switchTab(targetBtn, shouldFocus = false) {
   if (!targetBtn) return;
   tab = targetBtn.dataset.tab;
-  const buttons = document.querySelectorAll('#tabs button');
+  const buttons = document.querySelectorAll('#tabs button, #tabs k-tab');
   buttons.forEach((x) => {
     const isSelected = x === targetBtn;
     x.classList.toggle('on', isSelected);
+    if (typeof x.active !== 'undefined') x.active = isSelected;
+    else if (isSelected) x.setAttribute('active', '');
+    else x.removeAttribute('active');
     x.setAttribute('aria-selected', isSelected ? 'true' : 'false');
     x.setAttribute('tabindex', isSelected ? '0' : '-1');
   });
@@ -2391,14 +2395,14 @@ function switchTab(targetBtn, shouldFocus = false) {
 if (typeof document !== 'undefined') {
   const tabsNav = document.getElementById('tabs');
   if (tabsNav) {
-    const buttons = Array.from(tabsNav.querySelectorAll('button'));
+    const buttons = Array.from(tabsNav.querySelectorAll('button, k-tab'));
     buttons.forEach((b) => {
       b.addEventListener('click', () => switchTab(b, false));
     });
 
     tabsNav.addEventListener('keydown', (e) => {
       const activeElement = document.activeElement;
-      const currentButtons = Array.from(tabsNav.querySelectorAll('button'));
+      const currentButtons = Array.from(tabsNav.querySelectorAll('button, k-tab'));
       const currentIndex = currentButtons.indexOf(activeElement);
       if (currentIndex === -1) return;
 
