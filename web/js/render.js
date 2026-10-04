@@ -75,6 +75,9 @@ export function draw(ctx, state, view, opts = {}) {
   if (opts.autoFixDiffs && opts.autoFixDiffs.length)
     drawDiffHighlights(ctx, state, opts.autoFixDiffs, view, opts);
   if (opts.complianceScene) drawComplianceScene(ctx, opts.complianceScene, view);
+  if (opts.snapResult) drawSnapGuides(ctx, opts.snapResult, view);
+  else if (opts.snappingBridge?.getActiveSnap())
+    drawSnapGuides(ctx, opts.snappingBridge.getActiveSnap(), view);
   if (opts.overlay) opts.overlay(ctx, view);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
@@ -862,4 +865,52 @@ export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
 
     ctx.restore();
   }
+}
+
+export function drawSnapGuides(ctx, snapResult, view) {
+  if (!snapResult || !snapResult.snap) return;
+  const { snap, guideLines, indicator } = snapResult;
+  ctx.save();
+
+  // Draw guide lines
+  if (guideLines && guideLines.length) {
+    ctx.lineWidth = 1.5 / view.scale;
+    ctx.setLineDash([4 / view.scale, 4 / view.scale]);
+
+    for (const g of guideLines) {
+      if (g.type === 'midpoint') ctx.strokeStyle = '#a855f7';
+      else if (g.type === 'perpendicular') ctx.strokeStyle = '#f59e0b';
+      else ctx.strokeStyle = '#3b82f6';
+
+      ctx.beginPath();
+      ctx.moveTo(g.start.x, g.start.y);
+      ctx.lineTo(g.end.x, g.end.y);
+      ctx.stroke();
+    }
+  }
+
+  // Draw magnetic indicator points
+  if (indicator) {
+    ctx.setLineDash([]);
+    const rOuter = 8 / view.scale;
+    const rInner = 3.5 / view.scale;
+
+    let color = '#3b82f6';
+    if (snap.type === 'midpoint') color = '#a855f7';
+    if (snap.type === 'perpendicular') color = '#f59e0b';
+    if (snap.type === 'grid') color = '#10b981';
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2 / view.scale;
+    ctx.beginPath();
+    ctx.arc(indicator.x, indicator.y, rOuter, 0, 2 * Math.PI);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(indicator.x, indicator.y, rInner, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  ctx.restore();
 }

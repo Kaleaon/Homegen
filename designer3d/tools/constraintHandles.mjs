@@ -1,9 +1,9 @@
-const { validatePlacement, createPlacementFeedback } = require('./collision');
+import { validatePlacement } from './collision.mjs';
 
 /**
  * Format length in inches to feet/inches string (e.g. 144 -> 12' 0").
  */
-function fmtLenInches(inches) {
+export function fmtLenInches(inches) {
   const ft = Math.floor(inches / 12);
   const inch = Math.round(inches % 12);
   return `${ft}'${inch ? ` ${inch}"` : ' 0"'}`;
@@ -12,14 +12,14 @@ function fmtLenInches(inches) {
 /**
  * Format dimensions (w, h in inches) to "12' 0" × 10' 0"".
  */
-function fmtDimensionText(w, h) {
+export function fmtDimensionText(w, h) {
   return `${fmtLenInches(w)} × ${fmtLenInches(h)}`;
 }
 
 /**
  * Get 4 corner constraint handles for a room rectangle.
  */
-function getConstraintHandles(room, options = {}) {
+export function getConstraintHandles(room, _options = {}) {
   const x = room.x || 0;
   const y = room.y || 0;
   const w = room.w || 0;
@@ -36,7 +36,7 @@ function getConstraintHandles(room, options = {}) {
 /**
  * Validates room dimensions against IRC building code rules & constraints.
  */
-function validateRoomDimensions(roomType, w, h) {
+export function validateRoomDimensions(roomType, w, h) {
   const violations = [];
   const minDim = Math.min(w, h);
   const areaSqFt = (w * h) / 144;
@@ -75,7 +75,7 @@ function validateRoomDimensions(roomType, w, h) {
 /**
  * Resize a room using constraint handles given pointer position.
  */
-function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options = {}) {
+export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options = {}) {
   const snapStep = options.snapStep || 6; // default 6 inch snapping
   const snap = (v) => Math.round(v / snapStep) * snapStep;
 
@@ -143,11 +143,3 @@ function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options 
     },
   };
 }
-
-module.exports = {
-  fmtLenInches,
-  fmtDimensionText,
-  getConstraintHandles,
-  validateRoomDimensions,
-  resizeRoomWithConstraints,
-};

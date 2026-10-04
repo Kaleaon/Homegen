@@ -6,6 +6,13 @@ import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback } from './collision.mjs';
 import { buildToggleViewModel, SNAP_TOGGLE_DEFINITIONS } from './uiSnapToggles.mjs';
 import { getSnappedPoint, snapAngle } from './snapping.mjs';
+import {
+  getConstraintHandles,
+  resizeRoomWithConstraints,
+  validateRoomDimensions,
+  fmtDimensionText,
+  fmtLenInches,
+} from './constraintHandles.mjs';
 
 export {
   InteractionLayer,
@@ -22,4 +29,9 @@ export {
   SNAP_TOGGLE_DEFINITIONS,
   getSnappedPoint,
   snapAngle,
+  getConstraintHandles,
+  resizeRoomWithConstraints,
+  validateRoomDimensions,
+  fmtDimensionText,
+  fmtLenInches,
 };
