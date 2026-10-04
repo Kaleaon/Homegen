@@ -66,6 +66,7 @@ export function addOpening(state, room, type, wall, offset, props = {}) {
     swing: 'in',
     ...props,
   };
+  if (def.presetKey && !o.presetKey) o.presetKey = def.presetKey;
   if (def.frameMaterial && !o.frameMaterial) o.frameMaterial = def.frameMaterial;
   if (def.frameColor && !o.frameColor) o.frameColor = def.frameColor;
   if (def.mullions && !o.mullions)
