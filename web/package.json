@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "test": "npm run build && npm run lint:css && node --test",
     "start": "node serve.mjs",
+    "build": "node scripts/build-css.mjs",
+    "build:css": "node scripts/build-css.mjs",
     "lint": "eslint .",
+    "lint:css": "node scripts/lint-css.mjs",
+    "watch:css": "node scripts/watch-css.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -18,8 +22,12 @@
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.13.0",
+    "postcss": "^8.5.28",
+    "postcss-cli": "^12.0.0",
     "prettier": "^3.9.9",
     "puppeteer-core": "^25.12.0",
+    "stylelint": "^17.16.0",
+    "stylelint-config-standard": "^40.0.0",
     "three": "0.186.0"
   },
   "imports": {
