@@ -44,6 +44,7 @@ import {
 import { generatePDF } from './pdfEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
+import { TEMPLATES, TEMPLATE_BY_ID, renderTemplatePreviewSVG } from './templates.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -734,6 +735,10 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );
 
+export function formRow(id, labelText, controlHtml) {
+  return `<div class="row"><label for="${id}">${esc(labelText)}</label>${controlHtml}</div>`;
+}
+
 function focus(id) {
   const hit = M.findOwner(doc, id);
   if (!hit) return;
@@ -861,15 +866,20 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     el.innerHTML = `<h3>${esc(room.name)}</h3>
-      <div class="row"><label>Name</label><input id="i-name" value="${esc(room.name)}"></div>
-      <div class="row"><label>Type</label><select id="i-type">${Object.entries(ROOM_TYPES)
-        .map(
-          ([k, v]) => `<option value="${k}" ${k === room.type ? 'selected' : ''}>${v.name}</option>`
-        )
-        .join('')}</select></div>
-      <div class="row"><label>Width (ft)</label><input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}"></div>
-      <div class="row"><label>Depth (ft)</label><input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}"></div>
-      <div class="row"><label>Ceiling (in)</label><input id="i-ceil" type="number" step="2" value="${room.ceiling}"></div>
+      ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
+      ${formRow(
+        'i-type',
+        'Type',
+        `<select id="i-type">${Object.entries(ROOM_TYPES)
+          .map(
+            ([k, v]) =>
+              `<option value="${k}" ${k === room.type ? 'selected' : ''}>${v.name}</option>`
+          )
+          .join('')}</select>`
+      )}
+      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}">`)}
+      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}">`)}
+      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
       <div class="btns"><button id="i-del">Delete room</button></div>`;
     $('#i-name').addEventListener('change', (e) =>
       apply(
@@ -915,14 +925,16 @@ function renderInspector() {
       <button id="i-del">Delete</button></div>
       ${
         kind === 'opening'
-          ? `<div class="row"><label>Style</label><select id="i-otype">${OPENINGS.filter(
-              (o) => o.kind === def.kind
+          ? formRow(
+              'i-otype',
+              'Style',
+              `<select id="i-otype">${OPENINGS.filter((o) => o.kind === def.kind)
+                .map(
+                  (o) =>
+                    `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
+                )
+                .join('')}</select>`
             )
-              .map(
-                (o) =>
-                  `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
-              )
-              .join('')}</select></div>`
           : ''
       }`;
     $('#i-rot')?.addEventListener('click', rotateSelected);
@@ -1233,7 +1245,7 @@ function renderPalette() {
           .join('') +
         '</div>';
   } else if (tab === 'paint') {
-    h += `<div class="row" style="margin:8px 0 12px"><label style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
+    h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
       '<h4>Sampler</h4><div class="grid">' +
       card(
@@ -1889,6 +1901,7 @@ function setDoc(next, label) {
   doc = next;
   hist.push(doc);
   persist();
+  curLevel = 0;
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
@@ -2014,6 +2027,77 @@ function reportText() {
   return lines.join('\n');
 }
 
+let templateTriggerEl = null;
+
+function openTemplatePicker(triggerEl = null) {
+  templateTriggerEl = triggerEl || $('#new');
+  const dlg = $('#dlg-templates');
+  const gallery = $('#template-gallery');
+  if (!dlg || !gallery) return;
+
+  gallery.innerHTML = TEMPLATES.map((t) => {
+    const previewState = t.createState();
+    const previewSvg = renderTemplatePreviewSVG(previewState);
+    return `<div class="template-card" tabindex="0" role="radio" aria-checked="false" data-template-id="${t.id}">
+      <div class="template-preview">${previewSvg}</div>
+      <div class="template-header">
+        <span class="template-title">${esc(t.title)}</span>
+        <span class="template-dim">${esc(t.dimensions)}</span>
+      </div>
+      <p class="template-summary">${esc(t.summary)}</p>
+      <button type="button" class="template-action primary">Use Template</button>
+    </div>`;
+  }).join('');
+
+  gallery.querySelectorAll('.template-card').forEach((card) => {
+    const templateId = card.dataset.templateId;
+    const handleSelect = (e) => {
+      e.preventDefault();
+      selectTemplate(templateId);
+    };
+    card.addEventListener('click', handleSelect);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        handleSelect(e);
+      }
+    });
+  });
+
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+    const firstCard = gallery.querySelector('.template-card');
+    if (firstCard) firstCard.focus();
+  }
+}
+
+function selectTemplate(templateId) {
+  const template = TEMPLATE_BY_ID(templateId);
+  if (!template) return;
+
+  if (doc.rooms.length > 0) {
+    if (!confirm('Start a new project? Unsaved changes in your active plan will be replaced.')) {
+      return;
+    }
+  }
+
+  const nextState = template.createState();
+  setDoc(nextState);
+  fit();
+  $('#dlg-templates')?.close();
+  toast(`Loaded ${template.title} starter template.`);
+}
+
+if (typeof document !== 'undefined') {
+  const dlgTemplates = $('#dlg-templates');
+  if (dlgTemplates) {
+    dlgTemplates.addEventListener('close', () => {
+      if (templateTriggerEl && typeof templateTriggerEl.focus === 'function') {
+        templateTriggerEl.focus();
+      }
+    });
+  }
+}
+
 $('#undo')?.addEventListener('click', () => {
   const s = hist.undo();
   if (s) {
@@ -2036,8 +2120,8 @@ $('#redo')?.addEventListener('click', () => {
     refresh();
   }
 });
-$('#new')?.addEventListener('click', () => {
-  if (!doc.rooms.length || confirm('Start a new plan? (You can undo this.)')) setDoc(M.newState());
+$('#new')?.addEventListener('click', (e) => {
+  openTemplatePicker(e.currentTarget);
 });
 $('#sample')?.addEventListener('click', sampleHome);
 $('#save')?.addEventListener('click', () =>
@@ -2647,6 +2731,7 @@ if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
     setLevel,
+    formRow,
     get doc() {
       return doc;
     },
@@ -2655,6 +2740,9 @@ if (typeof window !== 'undefined')
     },
     apply,
     sampleHome,
+    openTemplatePicker,
+    selectTemplate,
+    TEMPLATES,
     setTool,
     select,
     isSelected,

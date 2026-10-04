@@ -93,12 +93,22 @@
     <section id="compliance"></section>
   </aside>
 </main>
+<dialog id="dlg-templates" aria-labelledby="dlg-templates-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-templates-title">Choose a Starter Template</h2>
+    <button value="close" aria-label="Close template picker"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Select a starter layout preset to kickstart your floor plan, or begin with a blank canvas.</p>
+    <div id="template-gallery" class="template-gallery" role="radiogroup" aria-label="Starter templates gallery"></div>
+  </div>
+</dialog>
 <dialog id="photo" aria-labelledby="photo-title">
   <form method="dialog" class="dlg-head"><h2 id="photo-title">Photoreal render</h2><button value="close" aria-label="Close photoreal render"><span aria-hidden="true">✕</span></button></form>
   <div class="dlg-body">
-    <div class="row"><label>Room</label><select id="p-room"></select></div>
-    <div class="row"><label>Style</label><select id="p-style"></select></div>
-    <div class="row"><label>Prompt</label><textarea id="p-prompt" rows="5"></textarea></div>
+    <div class="row"><label for="p-room">Room</label><select id="p-room"></select></div>
+    <div class="row"><label for="p-style">Style</label><select id="p-style"></select></div>
+    <div class="row"><label for="p-prompt">Prompt</label><textarea id="p-prompt" rows="5"></textarea></div>
     <div class="thumbs"><figure><img id="p-beauty" alt="Beauty capture"><figcaption>3D capture</figcaption></figure><figure><img id="p-depth" alt="Depth guide"><figcaption>Depth guide (near = white)</figcaption></figure></div>
     <div class="btns">
       <button id="p-capture">Re-capture current camera</button>
@@ -110,7 +120,7 @@
       <button id="p-poll" class="primary">Pollinations (instant, prompt only)</button>
       <button id="p-horde" class="primary">AI Horde (follows your 3D layout, queued)</button>
     </div>
-    <div class="row"><label>Horde key</label><input id="p-key" placeholder="0000000000 (anonymous) — free key at aihorde.net"></div>
+    <div class="row"><label for="p-key">Horde key</label><input id="p-key" placeholder="0000000000 (anonymous) — free key at aihorde.net"></div>
     <p id="p-status" class="note"></p>
     <div id="p-error" class="p-error-box" hidden>
       <div id="p-error-msg" class="p-error-msg"></div>
@@ -129,10 +139,10 @@
 <dialog id="dlg-export">
   <form method="dialog" class="dlg-head"><h2>SVG Vector Export &amp; Print Sheet</h2><button value="close">✕</button></form>
   <div class="dlg-body">
-    <div class="row"><label>Sheet Size</label><select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></select></div>
-    <div class="row"><label>Orientation</label><select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></select></div>
-    <div class="row"><label>Scale</label><select id="e-scale"><option value="fit" selected>Fit to Page</option><option value="1/4">1/4" = 1'-0" (1:48)</option><option value="1/8">1/8" = 1'-0" (1:96)</option><option value="1/2">1/2" = 1'-0" (1:24)</option></select></div>
-    <div class="row"><label>Floor Level</label><select id="e-level"></select></div>
+    <div class="row"><label for="e-sheet">Sheet Size</label><select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></select></div>
+    <div class="row"><label for="e-orient">Orientation</label><select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></select></div>
+    <div class="row"><label for="e-scale">Scale</label><select id="e-scale"><option value="fit" selected>Fit to Page</option><option value="1/4">1/4" = 1'-0" (1:48)</option><option value="1/8">1/8" = 1'-0" (1:96)</option><option value="1/2">1/2" = 1'-0" (1:24)</option></select></div>
+    <div class="row"><label for="e-level">Floor Level</label><select id="e-level"></select></div>
     <div id="svg-preview" style="border:1px solid var(--line);border-radius:6px;padding:10px;background:#fff;margin:12px 0;max-height:300px;overflow:auto;text-align:center"></div>
     <div class="btns">
       <button id="e-download" class="primary">Download Vector SVG</button>
