@@ -20,8 +20,14 @@ test('overlays.css module defines component custom properties mapped to Ktheme t
   assert.ok(css.includes('--overlay-shadow:'), 'overlays.css must define --overlay-shadow');
 
   // Verify mapping to canonical Ktheme tokens
-  assert.ok(css.includes('--ktheme-bg-surface'), 'overlays.css must map --overlay-bg to --ktheme-bg-surface');
-  assert.ok(css.includes('--ktheme-border'), 'overlays.css must map --overlay-border to --ktheme-border');
+  assert.ok(
+    css.includes('--ktheme-bg-surface'),
+    'overlays.css must map --overlay-bg to --ktheme-bg-surface'
+  );
+  assert.ok(
+    css.includes('--ktheme-border'),
+    'overlays.css must map --overlay-border to --ktheme-border'
+  );
   assert.ok(css.includes('--radius-lg'), 'overlays.css must map --overlay-radius to --radius-lg');
   assert.ok(css.includes('--shadow-lg'), 'overlays.css must map --overlay-shadow to --shadow-lg');
 });
@@ -57,14 +63,27 @@ test('index.html applies BEM overlay classes to floating elements and replaces i
   const html = fs.readFileSync(htmlPath, 'utf8');
 
   // Check dialogs have k-overlay-dialog class
-  assert.ok(html.includes('class="k-overlay-dialog"') || html.includes('k-overlay-dialog'), 'dialogs in index.html must use k-overlay-dialog class');
+  assert.ok(
+    html.includes('class="k-overlay-dialog"') || html.includes('k-overlay-dialog'),
+    'dialogs in index.html must use k-overlay-dialog class'
+  );
 
   // Check diff-drawer has k-overlay-drawer
-  assert.ok(html.includes('k-overlay-drawer'), '#diff-drawer in index.html must use k-overlay-drawer class');
+  assert.ok(
+    html.includes('k-overlay-drawer'),
+    '#diff-drawer in index.html must use k-overlay-drawer class'
+  );
 
   // Check walkthrough-hud has k-overlay-hud
-  assert.ok(html.includes('k-overlay-hud'), '#walkthrough-hud in index.html must use k-overlay-hud class');
+  assert.ok(
+    html.includes('k-overlay-hud'),
+    '#walkthrough-hud in index.html must use k-overlay-hud class'
+  );
 
   // Check svg-preview uses k-overlay-card and lacks inline style
-  assert.match(html, /<div\s+id="svg-preview"\s+class="k-overlay-card"><\/div>/, '#svg-preview must use k-overlay-card class without inline style');
+  assert.match(
+    html,
+    /<div\s+id="svg-preview"\s+class="k-overlay-card"><\/div>/,
+    '#svg-preview must use k-overlay-card class without inline style'
+  );
 });

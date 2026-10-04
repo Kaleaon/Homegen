@@ -154,9 +154,27 @@ class ObjLoader(
                         }
 
                         // Resolve relative/negative indices
-                        val vi = if (rawVi > 0) rawVi - 1 else if (rawVi < 0) totalPositions + rawVi else -1
-                        val vti = if (rawVti > 0) rawVti - 1 else if (rawVti < 0) totalUvs + rawVti else -1
-                        val vni = if (rawVni > 0) rawVni - 1 else if (rawVni < 0) totalNormals + rawVni else -1
+                        val vi = if (rawVi > 0) {
+                            rawVi - 1
+                        } else if (rawVi < 0) {
+                            totalPositions + rawVi
+                        } else {
+                            -1
+                        }
+                        val vti = if (rawVti > 0) {
+                            rawVti - 1
+                        } else if (rawVti < 0) {
+                            totalUvs + rawVti
+                        } else {
+                            -1
+                        }
+                        val vni = if (rawVni > 0) {
+                            rawVni - 1
+                        } else if (rawVni < 0) {
+                            totalNormals + rawVni
+                        } else {
+                            -1
+                        }
 
                         val packedKey = packKey(vi, vti, vni)
                         val cached = vertexMap.get(packedKey)
@@ -349,7 +367,9 @@ class ObjLoader(
                 if (c in '0'..'9') {
                     value = value * 10 + (c - '0')
                     i++
-                } else break
+                } else {
+                    break
+                }
             }
             return value * sign
         }

@@ -9,7 +9,8 @@ const webRoot = path.resolve(__dirname, '..');
 
 const HEX_COLOR_REGEX = /#(?:[0-9a-fA-F]{3,4}){1,2}\b/g;
 const PX_RADIUS_REGEX = /^\d+px$/;
-const UNAPPROVED_FONT_REGEX = /\b(Arial|Helvetica|Times New Roman|Courier New|Verdana|Georgia|Tahoma|Comic Sans MS)\b/i;
+const UNAPPROVED_FONT_REGEX =
+  /\b(Arial|Helvetica|Times New Roman|Courier New|Verdana|Georgia|Tahoma|Comic Sans MS)\b/i;
 
 function lintCssPlugin(options = {}) {
   const errors = [];
@@ -61,7 +62,10 @@ function lintCssPlugin(options = {}) {
 
       // 3. Check for unapproved font families
       if (decl.prop === 'font-family') {
-        if (UNAPPROVED_FONT_REGEX.test(value) || (!value.includes('var(--font-family') && !value.includes('inherit'))) {
+        if (
+          UNAPPROVED_FONT_REGEX.test(value) ||
+          (!value.includes('var(--font-family') && !value.includes('inherit'))
+        ) {
           errors.push({
             line,
             selector,
@@ -108,9 +112,7 @@ async function runLinter() {
   if (lintErrors.length > 0) {
     console.error(`\n❌ Token Compliance Linting Failed with ${lintErrors.length} error(s):\n`);
     for (const err of lintErrors) {
-      console.error(
-        `  [Line ${err.line}] ${err.selector} { ${err.prop}: ${err.value} }`
-      );
+      console.error(`  [Line ${err.line}] ${err.selector} { ${err.prop}: ${err.value} }`);
       console.error(`    ↳ Error: ${err.message}`);
       console.error(`    ↳ Suggestion: ${err.suggestion}\n`);
     }
