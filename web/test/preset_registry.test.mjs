@@ -239,7 +239,11 @@ test('2D plan renderer reads preset keys to draw matching frame colors and mulli
     drawWindow2D(testCtx, room, o, OPENINGS[7], false);
   }, '2D plan rendering helper executes cleanly with window style preset');
 
-  assert.strictEqual(strokeStyleSet, '#4a3728', '2D plan renderer applied craftsman wood frame color');
+  assert.strictEqual(
+    strokeStyleSet,
+    '#4a3728',
+    '2D plan renderer applied craftsman wood frame color'
+  );
 });
 
 test('Clear preset caches executes cleanly without errors', () => {
