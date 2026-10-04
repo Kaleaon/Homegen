@@ -162,6 +162,57 @@ aside {
 #palette {
   padding: 0 8px 12px;
 }
+.catalog-search-container {
+  margin: 8px 0;
+}
+.catalog-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
+.catalog-search-input:focus {
+  border-color: var(--accent);
+}
+.catalog-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.catalog-dim-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.catalog-dim-group label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.catalog-dim-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  outline: none;
+}
+.catalog-dim-input:focus {
+  border-color: var(--accent);
+}
+.catalog-empty {
+  padding: 20px 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
 #palette h4 {
   margin: 14px 0 6px;
   font-size: 12px;
@@ -708,27 +759,6 @@ input.error {
   flex-wrap: wrap;
 }
 
-.align-section {
-  margin-top: 8px;
-}
-.align-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-.align-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-}
-.align-btn {
-  padding: 5px 4px;
-  font-size: 11.5px;
-  text-align: center;
-  white-space: nowrap;
 #stage {
   position: relative;
 }
@@ -813,4 +843,125 @@ input.error {
   font-size: 11.5px;
   text-align: center;
   white-space: nowrap;
+}
+
+/* Command Palette & Shortcut Overlay */
+#command-palette {
+  width: min(560px, 92vw);
+}
+.cmd-body {
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#cmd-search {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+  box-sizing: border-box;
+}
+#cmd-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.2);
+}
+#cmd-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#cmd-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13.5px;
+  transition: background 0.1s ease;
+}
+#cmd-list li:hover,
+#cmd-list li.selected,
+#cmd-list li[aria-selected="true"] {
+  background: var(--bg);
+  color: var(--accent);
+}
+.cmd-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cmd-category {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--muted);
+}
+.cmd-no-results {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Shortcut Badges (<kbd>) */
+kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--ink);
+  background-color: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* Shortcut Overlay */
+#shortcut-overlay {
+  width: min(640px, 92vw);
+}
+.shortcut-body {
+  padding: 16px;
+}
+.shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+.shortcut-group h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+.shortcut-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.shortcut-row .keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }

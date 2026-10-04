@@ -13,19 +13,43 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import java.util.concurrent.ConcurrentHashMap
 
 class CatalogRepository(
     private val context: Context,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    private val catalogCache = ConcurrentHashMap<String, Catalog>()
+
     private val thumbnailCache = object : LruCache<String, Bitmap>((8 * 1024 * 1024)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
-    suspend fun loadCatalog(assetPath: String = "catalog.json"): Catalog = withContext(ioDispatcher) {
-        val payload = context.assets.open(assetPath).bufferedReader().use { it.readText() }
-        json.decodeFromString(payload)
+    suspend fun loadCatalog(
+        assetPath: String = "catalog.json",
+        forceReload: Boolean = false,
+    ): Catalog {
+        if (!forceReload) {
+            catalogCache[assetPath]?.let { return it }
+        }
+        return withContext(ioDispatcher) {
+            if (!forceReload) {
+                catalogCache[assetPath]?.let { return@withContext it }
+            }
+            val payload = context.assets.open(assetPath).bufferedReader().use { it.readText() }
+            val parsedCatalog = json.decodeFromString<Catalog>(payload)
+            catalogCache[assetPath] = parsedCatalog
+            parsedCatalog
+        }
+    }
+
+    fun clearCache(assetPath: String? = null) {
+        if (assetPath != null) {
+            catalogCache.remove(assetPath)
+        } else {
+            catalogCache.clear()
+        }
     }
 
     fun filterEntries(catalog: Catalog, query: String, category: CatalogCategory): List<CatalogEntry> {
