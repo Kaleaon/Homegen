@@ -15,7 +15,7 @@ export const ROOM_TYPES = {
   stairs: { name: 'Stairs', stairs: true, color: '#e9e4dd' },
 };
 
-const win = (id, name, w, h, sill, style, extra = {}) => ({
+const win = (id, name, w, h, sill, style, presetKey, extra = {}) => ({
   id,
   kind: 'window',
   name,
@@ -23,6 +23,7 @@ const win = (id, name, w, h, sill, style, extra = {}) => ({
   h,
   sill,
   style,
+  presetKey,
   frameMaterial: 'vinyl',
   frameColor: '#ffffff',
   mullions: { cols: 2, rows: 2 },
@@ -48,37 +49,37 @@ export const OPENINGS = [
   door('door_entry_36', 'Entry door 36"', 36, 32.5, { exterior: true }),
   door('door_entry_double', 'Double entry 60"', 60, 56, { exterior: true }),
   door('door_patio_slider', 'Patio slider 72"', 72, 34, { exterior: true, glass: true }),
-  win('win_hung_36x60', 'Double-hung 36×60', 36, 60, 24, 'hung', {
+  win('win_hung_36x60', 'Double-hung 36×60', 36, 60, 24, 'hung', 'colonial_white', {
     frameMaterial: 'vinyl',
     frameColor: '#ffffff',
     mullions: { cols: 2, rows: 3 },
     casing: { width: 2.5, depth: 1.0 },
   }),
-  win('win_hung_30x48', 'Double-hung 30×48', 30, 48, 30, 'hung', {
+  win('win_hung_30x48', 'Double-hung 30×48', 30, 48, 30, 'hung', 'craftsman_wood', {
     frameMaterial: 'wood',
     frameColor: '#4a3728',
     mullions: { cols: 2, rows: 2 },
     casing: { width: 2.5, depth: 1.0 },
   }),
-  win('win_casement_30x48', 'Casement 30×48', 30, 48, 30, 'casement', {
+  win('win_casement_30x48', 'Casement 30×48', 30, 48, 30, 'casement', 'modern_black', {
     frameMaterial: 'aluminum',
     frameColor: '#2f3338',
     mullions: { cols: 2, rows: 2 },
     casing: { width: 2.0, depth: 0.75 },
   }),
-  win('win_slider_60x36', 'Slider 60×36', 60, 36, 36, 'slider', {
+  win('win_slider_60x36', 'Slider 60×36', 60, 36, 36, 'slider', 'colonial_white', {
     frameMaterial: 'vinyl',
     frameColor: '#ffffff',
     mullions: { cols: 3, rows: 2 },
     casing: { width: 2.0, depth: 0.75 },
   }),
-  win('win_picture_48x48', 'Picture (fixed) 48×48', 48, 48, 30, 'fixed', {
+  win('win_picture_48x48', 'Picture (fixed) 48×48', 48, 48, 30, 'fixed', 'industrial_bronze', {
     frameMaterial: 'bronze',
     frameColor: '#1a1a1a',
     mullions: { cols: 1, rows: 1 },
     casing: { width: 3.0, depth: 1.2 },
   }),
-  win('win_bath_slider_36x24', 'Bath slider 36×24', 36, 24, 60, 'slider', {
+  win('win_bath_slider_36x24', 'Bath slider 36×24', 36, 24, 60, 'slider', 'modern_black', {
     frameMaterial: 'vinyl',
     frameColor: '#f3f1ea',
     mullions: { cols: 2, rows: 1 },
@@ -263,6 +264,9 @@ export const WALL_FINISHES = [
     exterior: true,
     cladding: true,
   },
+  { id: 'wall_stucco', name: 'Stucco cladding', pattern: 'solid', c1: '#e8e2d5', wet: true, exterior: true, cladding: true },
+  { id: 'wall_stone', name: 'Stone cladding', pattern: 'tile', c1: '#8c857b', c2: '#68625a', exterior: true, cladding: true },
+  { id: 'wall_siding', name: 'Wood siding', pattern: 'stripes', c1: '#d9d3c5', c2: '#b8b2a4', exterior: true, cladding: true },
   { id: 'wall_wainscot', name: 'Wainscot', pattern: 'wainscot', c1: '#eee8dc', c2: '#cfc4ae' },
   {
     id: 'wall_tile_white',
@@ -279,6 +283,15 @@ export const WALL_FINISHES = [
     c1: '#6fb0b0',
     c2: '#4f8c8c',
     wet: true,
+  },
+  {
+    id: 'cladding_board_batten',
+    name: 'Board & batten (white)',
+    pattern: 'siding',
+    c1: '#f0ece1',
+    c2: '#d8d2c3',
+    exterior: true,
+    cladding: true,
   },
   {
     id: 'cladding_siding_white',
@@ -326,6 +339,18 @@ export const WALL_FINISHES = [
   },
 ];
 export const WALL_BY_ID = Object.fromEntries(WALL_FINISHES.map((w) => [w.id, w]));
+
+export const WINDOW_FRAMES = [
+  {
+    id: 'frame_aluminum',
+    name: 'Anodized aluminum',
+    c1: '#4a5056',
+    metalness: 0.85,
+    roughness: 0.25,
+  },
+  { id: 'frame_wood', name: 'Natural wood', c1: '#5c4028', metalness: 0.05, roughness: 0.6 },
+];
+export const WINDOW_FRAME_BY_ID = Object.fromEntries(WINDOW_FRAMES.map((f) => [f.id, f]));
 
 export const FLOOR_FINISHES = [
   { id: 'floor_oak', name: 'Oak plank', pattern: 'planks', c1: '#c79a62', c2: '#a97d49' },

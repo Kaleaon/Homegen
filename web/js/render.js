@@ -12,6 +12,7 @@ import {
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
 import { openingInfo } from './codes.js';
+import { resolveWindowStyle } from './presetRegistry.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
@@ -268,6 +269,83 @@ function drawWalls(ctx, state, room, bad, opts) {
     for (const o of room2.openings) drawOpening(ctx, state, room2, o, bad);
 }
 
+export function drawWindow2D(ctx, room, o, def, isBad) {
+  const s = wallSeg(room, o.wall);
+  const horizontal = s.dx === 1;
+  const th = WT + 0.6;
+  const style = resolveWindowStyle(o) || resolveWindowStyle(def);
+  const frameColor = isBad ? '#d33' : style.frameColor || '#2d2a26';
+
+  ctx.fillStyle = 'rgba(120,180,230,.55)';
+  if (horizontal) {
+    ctx.fillRect(0, -1.2, o.width, 2.4);
+  } else {
+    ctx.fillRect(-1.2, 0, 2.4, o.width);
+  }
+
+  ctx.strokeStyle = frameColor;
+  ctx.lineWidth = 1.5;
+  if (horizontal) {
+    ctx.strokeRect(0, -th / 2, o.width, th);
+  } else {
+    ctx.strokeRect(-th / 2, 0, th, o.width);
+  }
+
+  // Casing trim indicator lines in 2D
+  if (style.casing?.width) {
+    const cw = Math.min(style.casing.width, 3);
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    if (horizontal) {
+      ctx.moveTo(-cw, -th / 2);
+      ctx.lineTo(o.width + cw, -th / 2);
+      ctx.moveTo(-cw, th / 2);
+      ctx.lineTo(o.width + cw, th / 2);
+    } else {
+      ctx.moveTo(-th / 2, -cw);
+      ctx.lineTo(-th / 2, o.width + cw);
+      ctx.moveTo(th / 2, -cw);
+      ctx.lineTo(th / 2, o.width + cw);
+    }
+    ctx.stroke();
+  }
+
+  // Mullion grid lines in 2D
+  const cols = style.mullions?.cols || 1;
+  const rows = style.mullions?.rows || 1;
+
+  ctx.strokeStyle = frameColor;
+  ctx.lineWidth = 1.0;
+  ctx.beginPath();
+
+  if (cols > 1) {
+    const colStep = o.width / cols;
+    for (let i = 1; i < cols; i++) {
+      const pos = i * colStep;
+      if (horizontal) {
+        ctx.moveTo(pos, -th / 2);
+        ctx.lineTo(pos, th / 2);
+      } else {
+        ctx.moveTo(-th / 2, pos);
+        ctx.lineTo(th / 2, pos);
+      }
+    }
+  }
+
+  if (rows > 1 || def?.style === 'hung') {
+    if (horizontal) {
+      ctx.moveTo(0, 0);
+      ctx.lineTo(o.width, 0);
+    } else {
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, o.width);
+    }
+  }
+
+  ctx.stroke();
+}
+
 function drawOpening(ctx, state, room, o, bad) {
   const def = OPENING_BY_ID[o.type];
   const a = wallPoint(room, o.wall, o.offset, 0);
@@ -286,13 +364,7 @@ function drawOpening(ctx, state, room, o, bad) {
   ctx.lineWidth = 1.2;
   ctx.fillStyle = 'rgba(120,180,230,.55)';
   if (def.kind === 'window') {
-    if (horizontal) {
-      ctx.fillRect(0, -1.2, o.width, 2.4);
-      ctx.strokeRect(0, -th / 2, o.width, th);
-    } else {
-      ctx.fillRect(-1.2, 0, 2.4, o.width);
-      ctx.strokeRect(-th / 2, 0, th, o.width);
-    }
+    drawWindow2D(ctx, room, o, def, isBad);
   } else {
     const dir = o.swing === 'out' ? -1 : 1;
     const nx = s.nx * dir;
