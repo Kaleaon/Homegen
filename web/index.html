@@ -214,6 +214,54 @@
     </div>
   </form>
 </dialog>
+<dialog id="command-palette" aria-labelledby="cmd-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="cmd-title">Command Palette</h2>
+    <button value="close" aria-label="Close command palette"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body cmd-body">
+    <input id="cmd-search" type="text" placeholder="Type a command or search..." aria-label="Search commands" autocomplete="off">
+    <ul id="cmd-list" role="listbox" aria-label="Commands"></ul>
+  </div>
+</dialog>
+<dialog id="shortcut-overlay" aria-labelledby="shortcut-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="shortcut-title">Keyboard Shortcuts</h2>
+    <button value="close" aria-label="Close keyboard shortcuts"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body shortcut-body">
+    <div class="shortcut-grid">
+      <div class="shortcut-group">
+        <h3>General &amp; Search</h3>
+        <div class="shortcut-row"><span>Command Palette</span><span class="keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></span></div>
+        <div class="shortcut-row"><span>Keyboard Shortcuts</span><span class="keys"><kbd>?</kbd></span></div>
+        <div class="shortcut-row"><span>Undo</span><span class="keys"><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></div>
+        <div class="shortcut-row"><span>Redo</span><span class="keys"><kbd>Ctrl</kbd>+<kbd>Y</kbd></span></div>
+        <div class="shortcut-row"><span>Clear Selection / Cancel</span><span class="keys"><kbd>Esc</kbd></span></div>
+      </div>
+      <div class="shortcut-group">
+        <h3>Tools</h3>
+        <div class="shortcut-row"><span>Select Tool</span><span class="keys"><kbd>V</kbd></span></div>
+        <div class="shortcut-row"><span>Eyedropper Tool</span><span class="keys"><kbd>I</kbd></span></div>
+        <div class="shortcut-row"><span>Erase Tool</span><span class="keys"><kbd>X</kbd></span></div>
+        <div class="shortcut-row"><span>Rotate Selected Item</span><span class="keys"><kbd>R</kbd></span></div>
+        <div class="shortcut-row"><span>Delete Selected</span><span class="keys"><kbd>Del</kbd> / <kbd>Backspace</kbd></span></div>
+      </div>
+      <div class="shortcut-group">
+        <h3>Navigation &amp; Views</h3>
+        <div class="shortcut-row"><span>Move Selected / Pan</span><span class="keys"><kbd>Arrow Keys</kbd></span></div>
+        <div class="shortcut-row"><span>Zoom In</span><span class="keys"><kbd>+</kbd></span></div>
+        <div class="shortcut-row"><span>Zoom Out</span><span class="keys"><kbd>-</kbd></span></div>
+      </div>
+      <div class="shortcut-group">
+        <h3>File &amp; Export</h3>
+        <div class="shortcut-row"><span>Save Plan</span><span class="keys">Top Bar</span></div>
+        <div class="shortcut-row"><span>Open Plan</span><span class="keys">Top Bar</span></div>
+        <div class="shortcut-row"><span>Export PDF / SVG</span><span class="keys">Top Bar</span></div>
+      </div>
+    </div>
+  </div>
+</dialog>
 <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","jspdf":"./vendor/jspdf/jspdf.es.min.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>

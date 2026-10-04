@@ -2210,10 +2210,36 @@ if (typeof document !== 'undefined')
 
 let view3d = null;
 if (typeof window !== 'undefined') {
+  initCommandPaletteUI();
+
   window.addEventListener('keydown', (e) => {
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
     const k = e.key;
     const lk = k.toLowerCase();
+
+    // Cmd+K or Ctrl+K triggers Command Palette (works globally)
+    if ((e.ctrlKey || e.metaKey) && lk === 'k') {
+      e.preventDefault();
+      const cmdDlg = $('#command-palette');
+      if (cmdDlg && (cmdDlg.open || cmdDlg.hasAttribute('open'))) {
+        closeCommandPalette();
+      } else {
+        openCommandPalette();
+      }
+      return;
+    }
+
+    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+
+    if (k === '?') {
+      e.preventDefault();
+      const shortcutDlg = $('#shortcut-overlay');
+      if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
+        closeShortcutOverlay();
+      } else {
+        openShortcutOverlay();
+      }
+      return;
+    }
 
     if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
       e.preventDefault();
@@ -2432,6 +2458,190 @@ $('#calib-close')?.addEventListener('click', () => {
   refresh();
 });
 
+// ------------------------------------------------------------- Command Palette & Shortcut Overlay
+let selectedCmdIndex = 0;
+let filteredCommands = [];
+
+const COMMAND_REGISTRY = [
+  // Tools
+  { id: 'tool-select', name: 'Select Tool', category: 'Tools', shortcut: 'V', action: () => setTool({ kind: 'select' }) },
+  { id: 'tool-eyedropper', name: 'Eyedropper Tool', category: 'Tools', shortcut: 'I', action: () => setTool({ kind: 'eyedropper' }) },
+  { id: 'tool-erase', name: 'Erase Tool', category: 'Tools', shortcut: 'X', action: () => setTool({ kind: 'erase' }) },
+
+  // Views
+  { id: 'view-2d', name: '2D Plan View', category: 'Views', shortcut: '', action: () => $('#toolbar [data-view="2d"]')?.click() },
+  { id: 'view-3d', name: '3D View', category: 'Views', shortcut: '', action: () => $('#toolbar [data-view="3d"]')?.click() },
+  { id: 'view-eye', name: 'Eye Level View', category: 'Views', shortcut: '', action: () => $('#o-eye')?.click() },
+  { id: 'view-reset', name: 'Reset 3D View', category: 'Views', shortcut: '', action: () => $('#o-reset')?.click() },
+  { id: 'view-photo', name: 'Photoreal Render', category: 'Views', shortcut: '', action: () => $('#o-photo')?.click() },
+  { id: 'view-zoom-in', name: 'Zoom In', category: 'Views', shortcut: '+', action: () => $('#zoom-in')?.click() },
+  { id: 'view-zoom-out', name: 'Zoom Out', category: 'Views', shortcut: '-', action: () => $('#zoom-out')?.click() },
+  { id: 'view-fit', name: 'Fit View to Screen', category: 'Views', shortcut: '', action: () => $('#fit')?.click() },
+
+  // Sidebar Tabs
+  { id: 'tab-build', name: 'Build Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="build"]')?.click() },
+  { id: 'tab-buy', name: 'Buy Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="buy"]')?.click() },
+  { id: 'tab-paint', name: 'Paint Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="paint"]')?.click() },
+  { id: 'tab-kits', name: 'Kits Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="kits"]')?.click() },
+
+  // File Operations
+  { id: 'file-new', name: 'New Plan', category: 'File Operations', shortcut: '', action: () => $('#new')?.click() },
+  { id: 'file-sample', name: 'Sample Home', category: 'File Operations', shortcut: '', action: () => $('#sample')?.click() },
+  { id: 'file-save', name: 'Save Plan', category: 'File Operations', shortcut: '', action: () => $('#save')?.click() },
+  { id: 'file-load', name: 'Open Plan', category: 'File Operations', shortcut: '', action: () => $('#load')?.click() },
+  { id: 'file-import-bp', name: 'Import Blueprint Image', category: 'File Operations', shortcut: '', action: () => $('#import-blueprint')?.click() },
+  { id: 'file-undo', name: 'Undo Action', category: 'File Operations', shortcut: 'Ctrl+Z', action: () => $('#undo')?.click() },
+  { id: 'file-redo', name: 'Redo Action', category: 'File Operations', shortcut: 'Ctrl+Y', action: () => $('#redo')?.click() },
+
+  // Export
+  { id: 'export-png', name: 'Export PNG Image', category: 'Export', shortcut: '', action: () => $('#png')?.click() },
+  { id: 'export-svg', name: 'Export SVG Vector Sheet', category: 'Export', shortcut: '', action: () => $('#svg-btn')?.click() },
+  { id: 'print-sheet', name: 'Print Sheet', category: 'Export', shortcut: '', action: () => $('#print-btn')?.click() },
+  { id: 'export-pdf', name: 'Export Scaled Vector PDF', category: 'Export', shortcut: '', action: () => $('#export-pdf')?.click() },
+  { id: 'export-report', name: 'Code Compliance Report', category: 'Export', shortcut: '', action: () => $('#report')?.click() },
+
+  // Help & Settings
+  { id: 'help-shortcuts', name: 'Keyboard Shortcuts Cheat Sheet', category: 'Help', shortcut: '?', action: () => openShortcutOverlay() },
+  { id: 'setting-autocomply', name: 'Toggle Auto-Comply', category: 'Settings', shortcut: '', action: () => $('#auto')?.click() },
+];
+
+function openCommandPalette() {
+  const dlg = $('#command-palette');
+  if (!dlg) return;
+  const input = $('#cmd-search');
+  selectedCmdIndex = 0;
+  if (input) input.value = '';
+  renderCommandList('');
+  if (typeof dlg.showModal === 'function') {
+    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+  dlg.open = true;
+  if (input) input.focus();
+}
+
+function closeCommandPalette() {
+  const dlg = $('#command-palette');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try { dlg.close(); } catch { dlg.removeAttribute('open'); }
+  } else {
+    dlg.removeAttribute('open');
+  }
+  dlg.open = false;
+}
+
+function openShortcutOverlay() {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+  dlg.open = true;
+}
+
+function closeShortcutOverlay() {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try { dlg.close(); } catch { dlg.removeAttribute('open'); }
+  } else {
+    dlg.removeAttribute('open');
+  }
+  dlg.open = false;
+}
+
+function renderCommandList(query = '') {
+  const listEl = $('#cmd-list');
+  if (!listEl) return;
+  const q = query.trim().toLowerCase();
+  filteredCommands = COMMAND_REGISTRY.filter((cmd) => {
+    if (!q) return true;
+    return (
+      cmd.name.toLowerCase().includes(q) ||
+      cmd.category.toLowerCase().includes(q) ||
+      (cmd.shortcut && cmd.shortcut.toLowerCase().includes(q))
+    );
+  });
+
+  if (selectedCmdIndex >= filteredCommands.length) {
+    selectedCmdIndex = Math.max(0, filteredCommands.length - 1);
+  }
+
+  if (filteredCommands.length === 0) {
+    listEl.innerHTML = `<li class="cmd-no-results">No matching commands found</li>`;
+    return;
+  }
+
+  listEl.innerHTML = filteredCommands
+    .map((cmd, idx) => {
+      const isSelected = idx === selectedCmdIndex;
+      const kbdHtml = cmd.shortcut
+        ? `<span class="keys"><kbd>${esc(cmd.shortcut)}</kbd></span>`
+        : '';
+      return `<li data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
+        <div class="cmd-item-main">
+          <span class="cmd-name">${esc(cmd.name)}</span>
+          <span class="cmd-category">${esc(cmd.category)}</span>
+        </div>
+        ${kbdHtml}
+      </li>`;
+    })
+    .join('');
+
+  listEl.querySelectorAll('li[data-cmd-idx]').forEach((li) => {
+    li.addEventListener('click', () => {
+      const idx = parseInt(li.dataset.cmdIdx, 10);
+      if (filteredCommands[idx]) {
+        closeCommandPalette();
+        filteredCommands[idx].action();
+      }
+    });
+  });
+
+  const activeLi = listEl.querySelector('li.selected');
+  if (activeLi && typeof activeLi.scrollIntoView === 'function') {
+    activeLi.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function initCommandPaletteUI() {
+  const searchInput = $('#cmd-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      selectedCmdIndex = 0;
+      renderCommandList(e.target.value);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (filteredCommands.length > 0) {
+          selectedCmdIndex = (selectedCmdIndex + 1) % filteredCommands.length;
+          renderCommandList(searchInput.value);
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (filteredCommands.length > 0) {
+          selectedCmdIndex =
+            (selectedCmdIndex - 1 + filteredCommands.length) % filteredCommands.length;
+          renderCommandList(searchInput.value);
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filteredCommands.length > 0 && filteredCommands[selectedCmdIndex]) {
+          const cmd = filteredCommands[selectedCmdIndex];
+          closeCommandPalette();
+          cmd.action();
+        }
+      }
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
@@ -2459,4 +2669,10 @@ if (typeof window !== 'undefined')
     renderCompliance,
     renderViolationItem,
     complianceScene,
+    COMMAND_REGISTRY,
+    openCommandPalette,
+    closeCommandPalette,
+    openShortcutOverlay,
+    closeShortcutOverlay,
+    renderCommandList,
   };
