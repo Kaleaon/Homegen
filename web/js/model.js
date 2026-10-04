@@ -10,6 +10,7 @@ import {
   wallLength,
   interior,
   wallPoint,
+  footprint,
 } from './geometry.js';
 import {
   ITEM_BY_ID,
@@ -336,6 +337,253 @@ export class History {
   redo() {
     return this.canRedo() ? clone(this.stack[++this.i]) : null;
   }
+}
+
+export function getBounds(state, id) {
+  const hit = findOwner(state, id);
+  if (!hit) return null;
+  const { room, kind, obj } = hit;
+  if (kind === 'room') {
+    return {
+      id,
+      kind,
+      room,
+      obj,
+      x: obj.x,
+      y: obj.y,
+      w: obj.w,
+      h: obj.h,
+      cx: obj.x + obj.w / 2,
+      cy: obj.y + obj.h / 2,
+    };
+  }
+  if (kind === 'item') {
+    const def = ITEM_BY_ID[obj.type] || {};
+    if (def.mount === 'floor') {
+      const fp = footprint(obj, def);
+      return {
+        id,
+        kind,
+        room,
+        obj,
+        def,
+        x: fp.x,
+        y: fp.y,
+        w: fp.w,
+        h: fp.h,
+        cx: obj.x !== undefined ? obj.x : fp.x + fp.w / 2,
+        cy: obj.y !== undefined ? obj.y : fp.y + fp.h / 2,
+      };
+    }
+    if (def.mount === 'ceiling') {
+      const w = def.w || 12;
+      const h = def.w || 12;
+      return {
+        id,
+        kind,
+        room,
+        obj,
+        def,
+        x: obj.x - w / 2,
+        y: obj.y - h / 2,
+        w,
+        h,
+        cx: obj.x,
+        cy: obj.y,
+      };
+    }
+    if (def.mount === 'wall') {
+      const p = wallPoint(room, obj.wall, obj.offset, 0);
+      return {
+        id,
+        kind,
+        room,
+        obj,
+        def,
+        x: p.x - 4,
+        y: p.y - 4,
+        w: 8,
+        h: 8,
+        cx: p.x,
+        cy: p.y,
+      };
+    }
+  }
+  if (kind === 'opening') {
+    const p1 = wallPoint(room, obj.wall, obj.offset, 0);
+    const p2 = wallPoint(room, obj.wall, obj.offset + obj.width, 0);
+    const minX = Math.min(p1.x, p2.x);
+    const maxX = Math.max(p1.x, p2.x);
+    const minY = Math.min(p1.y, p2.y);
+    const maxY = Math.max(p1.y, p2.y);
+    const w = Math.max(4, maxX - minX);
+    const h = Math.max(4, maxY - minY);
+    return {
+      id,
+      kind,
+      room,
+      obj,
+      x: minX,
+      y: minY,
+      w,
+      h,
+      cx: (p1.x + p2.x) / 2,
+      cy: (p1.y + p2.y) / 2,
+    };
+  }
+  return null;
+}
+
+export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
+  const { room, kind, obj } = hit;
+  if (kind === 'room') {
+    const newX = targetCenterX - obj.w / 2;
+    const newY = targetCenterY - obj.h / 2;
+    moveRoom(obj, newX, newY);
+    return;
+  }
+  if (kind === 'item') {
+    const def = ITEM_BY_ID[obj.type] || {};
+    if (def.mount === 'floor' || def.mount === 'ceiling') {
+      obj.x = targetCenterX;
+      obj.y = targetCenterY;
+      const targetRoom = roomAtOnLevel(
+        state,
+        { x: targetCenterX, y: targetCenterY },
+        room.level || 0
+      );
+      if (targetRoom && targetRoom.id !== room.id) {
+        room.items = room.items.filter((i) => i.id !== obj.id);
+        targetRoom.items.push(obj);
+      }
+    } else if (def.mount === 'wall') {
+      const len = wallLength(room, obj.wall);
+      if (obj.wall === 'N' || obj.wall === 'S') {
+        const localX = targetCenterX - room.x;
+        obj.offset = Math.max(8, Math.min(len - 8, localX));
+      } else {
+        const localY = targetCenterY - room.y;
+        obj.offset = Math.max(8, Math.min(len - 8, localY));
+      }
+    }
+  }
+  if (kind === 'opening') {
+    const len = wallLength(room, obj.wall);
+    if (obj.wall === 'N' || obj.wall === 'S') {
+      const localX = targetCenterX - room.x - obj.width / 2;
+      obj.offset = Math.max(0, Math.min(len - obj.width, localX));
+    } else {
+      const localY = targetCenterY - room.y - obj.width / 2;
+      obj.offset = Math.max(0, Math.min(len - obj.width, localY));
+    }
+  }
+}
+
+export function setItemsPosition(state, hit, targetX, targetY) {
+  const b = getBounds(state, hit.obj.id);
+  if (!b) return;
+  const cx = targetX + b.w / 2;
+  const cy = targetY + b.h / 2;
+  setItemPosition(state, hit, cx, cy);
+}
+
+export function alignItems(state, ids, alignment) {
+  const idArray = Array.from(ids || []);
+  const boundsList = idArray.map((id) => getBounds(state, id)).filter((b) => b !== null);
+
+  if (boundsList.length < 2) return false;
+
+  const minX = Math.min(...boundsList.map((b) => b.x));
+  const maxX = Math.max(...boundsList.map((b) => b.x + b.w));
+  const centerX = (minX + maxX) / 2;
+  const minY = Math.min(...boundsList.map((b) => b.y));
+  const maxY = Math.max(...boundsList.map((b) => b.y + b.h));
+  const centerY = (minY + maxY) / 2;
+
+  for (const b of boundsList) {
+    const hit = findOwner(state, b.id);
+    if (!hit) continue;
+
+    let targetCX = b.cx;
+    let targetCY = b.cy;
+
+    switch (alignment) {
+      case 'left':
+        targetCX = minX + b.w / 2;
+        break;
+      case 'center':
+        targetCX = centerX;
+        break;
+      case 'right':
+        targetCX = maxX - b.w / 2;
+        break;
+      case 'top':
+        targetCY = minY + b.h / 2;
+        break;
+      case 'middle':
+        targetCY = centerY;
+        break;
+      case 'bottom':
+        targetCY = maxY - b.h / 2;
+        break;
+      default:
+        break;
+    }
+
+    setItemPosition(state, hit, targetCX, targetCY);
+  }
+
+  return true;
+}
+
+export function distributeItems(state, ids, direction) {
+  const idArray = Array.from(ids || []);
+  const boundsList = idArray.map((id) => getBounds(state, id)).filter((b) => b !== null);
+
+  if (boundsList.length < 3) return false;
+
+  if (direction === 'horizontal') {
+    boundsList.sort((a, b) => a.cx - b.cx);
+    const first = boundsList[0];
+    const last = boundsList[boundsList.length - 1];
+    const span = last.cx - first.cx;
+    const step = span / (boundsList.length - 1);
+
+    for (let i = 1; i < boundsList.length - 1; i++) {
+      const b = boundsList[i];
+      const hit = findOwner(state, b.id);
+      if (hit) {
+        setItemPosition(state, hit, first.cx + i * step, b.cy);
+      }
+    }
+  } else if (direction === 'vertical') {
+    boundsList.sort((a, b) => a.cy - b.cy);
+    const first = boundsList[0];
+    const last = boundsList[boundsList.length - 1];
+    const span = last.cy - first.cy;
+    const step = span / (boundsList.length - 1);
+
+    for (let i = 1; i < boundsList.length - 1; i++) {
+      const b = boundsList[i];
+      const hit = findOwner(state, b.id);
+      if (hit) {
+        setItemPosition(state, hit, b.cx, first.cy + i * step);
+      }
+    }
+  }
+
+  return true;
+}
+
+export function removeSet(state, ids) {
+  const idArray = Array.from(ids || []);
+  let removedCount = 0;
+  for (const id of idArray) {
+    if (removeById(state, id)) {
+      removedCount++;
+    }
+  }
+  return removedCount > 0;
 }
 
 export { WT, GRID, EPS, wallPoint, wallSeg };

@@ -33,9 +33,27 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
         const el = $('#o-hd');
         if (el) el.checked = hd;
       },
+      onCameraModeChange: (camMode) => {
+        updateModeUI(camMode);
+      },
     });
     window.__scene3d = api;
     return api;
+  }
+
+  function updateModeUI(camMode) {
+    const walkBtn = $('#o-walk');
+    const hud = $('#walkthrough-hud');
+    if (walkBtn) {
+      walkBtn.classList.toggle('on', camMode === 'walk');
+      walkBtn.innerHTML =
+        camMode === 'walk'
+          ? '<span aria-hidden="true">🌐</span> Orbit mode'
+          : '<span aria-hidden="true">🚶</span> Walkthrough';
+    }
+    if (hud) {
+      hud.hidden = camMode !== 'walk' || mode !== '3d';
+    }
   }
 
   async function setView(next) {
@@ -56,6 +74,9 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     plan.hidden = next === '3d';
     v3.hidden = next !== '3d';
     $('#bar3d').hidden = next !== '3d';
+    const hud = $('#walkthrough-hud');
+    if (hud) hud.hidden = next !== '3d' || api?.getCameraMode() !== 'walk';
+
     document.querySelectorAll('#toolbar [data-tool]').forEach((b) => {
       b.disabled = next === '3d';
     });
@@ -86,11 +107,87 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
     if (api?.eyeLevel(getSelectedRoomId())) toast('Entered eye-level view', false, 2000);
     else toast('Add a room first.', true);
   });
+  const oWalk = $('#o-walk');
+  if (oWalk) {
+    oWalk.addEventListener('click', () => {
+      if (!api) return;
+      api.toggleCameraMode();
+      const current = api.getCameraMode();
+      if (current === 'walk') {
+        toast('Entered Walkthrough mode (WASD / Arrows to walk, drag mouse to look)', false, 2500);
+      } else {
+        toast('Switched to Orbit mode', false, 2000);
+      }
+    });
+  }
+  const walkExitBtn = $('#walk-exit-btn');
+  if (walkExitBtn) {
+    walkExitBtn.addEventListener('click', () => {
+      if (!api) return;
+      api.setCameraMode('orbit');
+      toast('Switched to Orbit mode', false, 2000);
+    });
+  }
   $('#o-photo').addEventListener('click', openPhoto);
+
+  let isDraggingMouse = false;
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+
+  v3.addEventListener('mousedown', (e) => {
+    if (!api || mode !== '3d' || api.getCameraMode() !== 'walk') return;
+    if (e.button !== 0) return;
+    isDraggingMouse = true;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDraggingMouse || !api || mode !== '3d' || api.getCameraMode() !== 'walk') return;
+    const dx = e.clientX - lastMouseX;
+    const dy = e.clientY - lastMouseY;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    api.lookWalkBy(dx, dy);
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDraggingMouse = false;
+  });
 
   v3.addEventListener('keydown', (e) => {
     if (!api || mode !== '3d') return;
+    const camMode = api.getCameraMode();
     const k = e.key;
+
+    if (camMode === 'walk') {
+      const lower = k.toLowerCase();
+      if (lower === 'w' || k === 'ArrowUp') {
+        e.preventDefault();
+        api.walkKeys.forward = true;
+      } else if (lower === 's' || k === 'ArrowDown') {
+        e.preventDefault();
+        api.walkKeys.backward = true;
+      } else if (lower === 'a' || k === 'ArrowLeft') {
+        e.preventDefault();
+        api.walkKeys.left = true;
+      } else if (lower === 'd' || k === 'ArrowRight') {
+        e.preventDefault();
+        api.walkKeys.right = true;
+      } else if (k === 'Shift') {
+        api.walkKeys.sprint = true;
+      } else if (k === 'Escape' || lower === 'r') {
+        e.preventDefault();
+        api.setCameraMode('orbit');
+        toast('Switched to Orbit mode', false, 2000);
+      } else if (lower === 'e') {
+        e.preventDefault();
+        if (api.eyeLevel(getSelectedRoomId())) toast('Entered eye-level view', false, 2000);
+        else toast('Add a room first.', true);
+      }
+      return;
+    }
+
     if (k === 'ArrowLeft') {
       e.preventDefault();
       if (e.shiftKey) {
@@ -144,6 +241,17 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
       api.resetCamera();
       toast('Reset 3D camera view', false, 2000);
     }
+  });
+
+  v3.addEventListener('keyup', (e) => {
+    if (!api || mode !== '3d') return;
+    const k = e.key;
+    const lower = k.toLowerCase();
+    if (lower === 'w' || k === 'ArrowUp') api.walkKeys.forward = false;
+    if (lower === 's' || k === 'ArrowDown') api.walkKeys.backward = false;
+    if (lower === 'a' || k === 'ArrowLeft') api.walkKeys.left = false;
+    if (lower === 'd' || k === 'ArrowRight') api.walkKeys.right = false;
+    if (k === 'Shift') api.walkKeys.sprint = false;
   });
 
   // ------------------------------------------------------------ photoreal dialog
