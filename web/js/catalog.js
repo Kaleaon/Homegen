@@ -263,6 +263,9 @@ export const WALL_FINISHES = [
     exterior: true,
     cladding: true,
   },
+  { id: 'wall_stucco', name: 'Stucco cladding', pattern: 'solid', c1: '#e8e2d5', wet: true, exterior: true, cladding: true },
+  { id: 'wall_stone', name: 'Stone cladding', pattern: 'tile', c1: '#8c857b', c2: '#68625a', exterior: true, cladding: true },
+  { id: 'wall_siding', name: 'Wood siding', pattern: 'stripes', c1: '#d9d3c5', c2: '#b8b2a4', exterior: true, cladding: true },
   { id: 'wall_wainscot', name: 'Wainscot', pattern: 'wainscot', c1: '#eee8dc', c2: '#cfc4ae' },
   {
     id: 'wall_tile_white',
@@ -326,6 +329,18 @@ export const WALL_FINISHES = [
   },
 ];
 export const WALL_BY_ID = Object.fromEntries(WALL_FINISHES.map((w) => [w.id, w]));
+
+export const WINDOW_FRAMES = [
+  {
+    id: 'frame_aluminum',
+    name: 'Anodized aluminum',
+    c1: '#4a5056',
+    metalness: 0.85,
+    roughness: 0.25,
+  },
+  { id: 'frame_wood', name: 'Natural wood', c1: '#5c4028', metalness: 0.05, roughness: 0.6 },
+];
+export const WINDOW_FRAME_BY_ID = Object.fromEntries(WINDOW_FRAMES.map((f) => [f.id, f]));
 
 export const FLOOR_FINISHES = [
   { id: 'floor_oak', name: 'Oak plank', pattern: 'planks', c1: '#c79a62', c2: '#a97d49' },
