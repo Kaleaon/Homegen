@@ -1,0 +1,90 @@
+/**
+ * Standardized Overlay Component Stylesheet Module
+ * Encapsulates floating dialogs, drawers, HUDs, and card overlays with Ktheme token mapping.
+ */
+
+:root {
+  /* Internal Overlay Component Variables mapped to canonical Ktheme tokens */
+  --overlay-bg: var(--ktheme-bg-surface, var(--panel, #1a1c25));
+  --overlay-bg-hud: rgba(18, 24, 38, 0.88);
+  --overlay-border: var(--ktheme-border, var(--line, #2e3140));
+  --overlay-radius: var(--radius-lg, 12px);
+  --overlay-blur: 12px;
+  --overlay-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.4));
+  --overlay-color: var(--ktheme-text, var(--ink, #f3f4f6));
+}
+
+/* 1. Modal Dialog Overlay Component */
+.k-overlay-dialog {
+  background: var(--overlay-bg);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--overlay-radius);
+  box-shadow: var(--overlay-shadow);
+  color: var(--overlay-color);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  width: min(760px, 96vw);
+  max-height: 92vh;
+  padding: 0;
+}
+
+.k-overlay-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* 2. Side / Floating Drawer Component */
+.k-overlay-drawer {
+  background: var(--overlay-bg);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--overlay-shadow);
+  color: var(--overlay-color);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  position: absolute;
+  right: 14px;
+  top: 54px;
+  z-index: 10;
+  width: 300px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 3. Floating Heads-Up Display (HUD) Component */
+.k-overlay-hud {
+  background: var(--overlay-bg-hud);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-full, 9999px);
+  box-shadow: var(--overlay-shadow);
+  color: #ffffff;
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 13px;
+  pointer-events: auto;
+}
+
+/* 4. Embedded / Floating Preview Card Component */
+.k-overlay-card {
+  background: var(--overlay-bg);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.1));
+  padding: 10px;
+  margin: 12px 0;
+  max-height: 300px;
+  overflow: auto;
+  text-align: center;
+}
