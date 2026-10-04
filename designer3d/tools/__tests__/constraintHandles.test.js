@@ -1,10 +1,10 @@
-const { InteractionLayer } = require('../interactionLayer');
-const {
+import { InteractionLayer } from '../interactionLayer.mjs';
+import {
   getConstraintHandles,
   resizeRoomWithConstraints,
   validateRoomDimensions,
   fmtDimensionText,
-} = require('../constraintHandles');
+} from '../constraintHandles.mjs';
 
 describe('Constraint Handles & Dynamic Dimension Resizing', () => {
   const room = {
