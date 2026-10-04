@@ -17,6 +17,8 @@ import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from './resources.js';
+import { getCladdingMaterial, resolveWindowStyle } from './presetRegistry.js';
+import { buildWindow3DMesh } from './windowBuilder.js';
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
@@ -735,27 +737,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       ext = subtractInterval(ext, [n.from, n.to]);
 
     let extFinId = room.cladding || room.exteriorCladding;
-    let extFin;
-    if (extFinId && WALL_BY_ID[extFinId]) {
-      extFin = WALL_BY_ID[extFinId];
-    } else if (
-      room.walls[wall] &&
-      WALL_BY_ID[room.walls[wall]] &&
-      (WALL_BY_ID[room.walls[wall]].exterior || WALL_BY_ID[room.walls[wall]].cladding)
-    ) {
+    if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
       extFinId = room.walls[wall];
-      extFin = WALL_BY_ID[extFinId];
-    } else {
-      extFinId = 'cladding_siding_white';
-      extFin = WALL_BY_ID[extFinId] || {
-        id: 'cladding_siding_white',
-        name: 'Vinyl siding',
-        pattern: 'siding',
-        c1: '#d9d3c5',
-        c2: '#c5bfb1',
-        exterior: true,
-      };
     }
+    const extFin = getCladdingMaterial(extFinId);
+    extFinId = extFin.id || extFinId || 'cladding_siding_white';
 
     const sidingMat = finishMaterial(extFin, len, room.ceiling, extFinId, 0.85);
 
@@ -839,102 +825,19 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return boxMesh(horizontal ? along : thick, h, horizontal ? thick : along, mat);
   }
   function addWindow(group, room, wall, o, d, e) {
-    const og = new THREE.Group();
-    og.userData = { id: o.id, entityType: 'opening' };
-    const mid = o.offset + o.width / 2;
-    const yMid = d.sill + d.h / 2;
-
-    const matType = o.frameMaterial || d.frameMaterial || 'vinyl';
-    const colorHex = o.frameColor || d.frameColor || '#ffffff';
-    const fMat = getFrameMaterial(matType, colorHex);
-
-    const pane = wallAlignedBox(room, wall, o.width, d.h, 0.3, glassMat);
-    pane.castShadow = false;
-    og.add(placeInWall(room, wall, mid, yMid, 0, e, pane));
-
-    const fw = 1.6;
-    for (const [along, h, yy, tt] of [
-      [o.width, fw, d.sill + fw / 2, mid],
-      [o.width, fw, d.sill + d.h - fw / 2, mid],
-      [fw, d.h, yMid, o.offset + fw / 2],
-      [fw, d.h, yMid, o.offset + o.width - fw / 2],
-    ]) {
-      const bar = wallAlignedBox(room, wall, along, h, 2.2, fMat);
-      og.add(placeInWall(room, wall, tt, yy, 0, e, bar));
-    }
-
-    if (d.style === 'hung') {
-      const bar = wallAlignedBox(room, wall, o.width, fw, 2.6, fMat);
-      og.add(placeInWall(room, wall, mid, d.sill + d.h / 2, 0, e, bar));
-    } else if (d.style === 'slider') {
-      const bar = wallAlignedBox(room, wall, fw, d.h, 2.6, fMat);
-      og.add(placeInWall(room, wall, mid, yMid, 0, e, bar));
-    }
-
-    // Mullions
-    const rawMullions = o.mullions ?? d.mullions ?? { cols: 2, rows: 2 };
-    let cols = 1;
-    let rows = 1;
-    if (typeof rawMullions === 'object' && rawMullions !== null) {
-      cols = rawMullions.cols ?? o.mullionCols ?? d.mullionCols ?? 1;
-      rows = rawMullions.rows ?? o.mullionRows ?? d.mullionRows ?? 1;
-    } else if (typeof rawMullions === 'number') {
-      cols = rawMullions;
-      rows = rawMullions;
-    } else if (typeof rawMullions === 'string') {
-      const parts = rawMullions.split('x').map(Number);
-      cols = parts[0] || 1;
-      rows = parts[1] || parts[0] || 1;
-    }
-
-    const innerW = o.width - 2 * fw;
-    const innerH = d.h - 2 * fw;
-    const mw = 0.75;
-    const md = 0.8;
-
-    if (cols > 1 && innerW > 0) {
-      const colStep = innerW / cols;
-      for (let i = 1; i < cols; i++) {
-        const xPos = o.offset + fw + i * colStep;
-        const vBar = wallAlignedBox(room, wall, mw, innerH, md, fMat);
-        og.add(placeInWall(room, wall, xPos, yMid, 0, e, vBar));
-      }
-    }
-
-    if (rows > 1 && innerH > 0) {
-      const rowStep = innerH / rows;
-      for (let j = 1; j < rows; j++) {
-        const yPos = d.sill + fw + j * rowStep;
-        const hBar = wallAlignedBox(room, wall, innerW, mw, md, fMat);
-        og.add(placeInWall(room, wall, mid, yPos, 0, e, hBar));
-      }
-    }
-
-    // Trim Casing
-    const casingSpec = o.casing ?? d.casing ?? { width: 2, depth: 0.75 };
-    const casingW = casingSpec.width ?? 2;
-    const casingD = casingSpec.depth ?? 0.75;
-
-    const sill = wallAlignedBox(room, wall, o.width + casingW * 2, 1.2, WT + casingD * 2, fMat);
-    og.add(placeInWall(room, wall, mid, d.sill - 0.6, 0, e, sill));
-
-    if (casingW > 0) {
-      const headTrim = wallAlignedBox(
-        room,
-        wall,
-        o.width + casingW * 2,
-        casingW,
-        WT + casingD * 2,
-        fMat
-      );
-      og.add(placeInWall(room, wall, mid, d.sill + d.h + casingW / 2, 0, e, headTrim));
-
-      for (const tt of [o.offset - casingW / 2, o.offset + o.width + casingW / 2]) {
-        const sideTrim = wallAlignedBox(room, wall, casingW, d.h, WT + casingD * 2, fMat);
-        og.add(placeInWall(room, wall, tt, yMid, 0, e, sideTrim));
-      }
-    }
-
+    const og = buildWindow3DMesh({
+      room,
+      wall,
+      opening: o,
+      definition: d,
+      elevation: e,
+      scale: S,
+      wallThickness: WT,
+      getFrameMaterial,
+      glassMaterial: glassMat,
+      wallAlignedBox,
+      placeInWall,
+    });
     group.add(og);
     return og;
   }
