@@ -1,9 +1,5 @@
 // Spatial compliance adapter converting document state & rule reports into an overlay scene graph.
 import {
-  WT,
-  WALLS,
-  wallSeg,
-  wallLength,
   wallPoint,
   interior,
   footprint,
@@ -13,10 +9,43 @@ import {
   floorAreaSqFt,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
-import { openingInfo, daylight } from './codes.js';
+import { openingInfo } from './codes.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ' 0"'}`;
+
+const SPATIAL_GRID_CELL_SIZE = 64;
+
+function fnv1aHash(str) {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function computeStateHash(state) {
+  if (!state) return '';
+  if (state._hash) return String(state._hash);
+  if (state.hash) return String(state.hash);
+
+  let str = `${state.version || 0}:${state.levels || 1}:${state.rooms?.length || 0};`;
+  for (const r of state.rooms || []) {
+    str += `${r.id}:${r.type}:${r.level || 0}:${r.x}:${r.y}:${r.w}:${r.h}:${r.ceiling}:${r.floor}:${r.cladding};`;
+    if (r.items) {
+      for (const i of r.items) {
+        str += `${i.id}:${i.type}:${i.x}:${i.y}:${i.rot}:${i.wall}:${i.offset};`;
+      }
+    }
+    if (r.openings) {
+      for (const o of r.openings) {
+        str += `${o.id}:${o.type}:${o.wall}:${o.offset}:${o.width}:${o.swing};`;
+      }
+    }
+  }
+  return fnv1aHash(str);
+}
 
 export class SpatialOverlayNode {
   constructor(id, type, bounds, data = {}) {
@@ -32,8 +61,128 @@ export class ComplianceOverlayScene {
   constructor(options = {}) {
     this.nodes = [];
     this.nodesById = new Map();
+    this.roomIndex = new Map();
+    this.itemIndex = new Map();
+    this.openingIndex = new Map();
+    this.spatialGrid = new Map();
+    this.lastState = null;
     this.lastStateHash = null;
     this.options = options;
+  }
+
+  /**
+   * Rebuilds index Maps (roomIndex, itemIndex, openingIndex) and 2D spatialGrid.
+   */
+  rebuildIndexes(state) {
+    this.roomIndex.clear();
+    this.itemIndex.clear();
+    this.openingIndex.clear();
+    this.spatialGrid.clear();
+
+    if (!state || !Array.isArray(state.rooms)) return;
+
+    for (const room of state.rooms) {
+      const roomInterior = interior(room);
+      const roomEntry = {
+        room,
+        interior: roomInterior,
+        isSleeping: !!ROOM_TYPES[room.type]?.sleeping,
+        isHabitable: !!ROOM_TYPES[room.type]?.habitable && room.type !== 'kitchen',
+        minDim: Math.min(room.w, room.h),
+        areaSqFt: floorAreaSqFt(room),
+      };
+      this.roomIndex.set(room.id, roomEntry);
+
+      if (Array.isArray(room.items)) {
+        for (const item of room.items) {
+          const def = ITEM_BY_ID[item.type];
+          let fp = null;
+          if (def && def.mount === 'floor') {
+            fp = footprint(item, def);
+          }
+          const itemEntry = {
+            item,
+            room,
+            def,
+            footprint: fp,
+          };
+          this.itemIndex.set(item.id, itemEntry);
+
+          if (def && def.mount === 'floor' && !def.flat && fp) {
+            const minCol = Math.floor(fp.x / SPATIAL_GRID_CELL_SIZE);
+            const maxCol = Math.floor((fp.x + fp.w) / SPATIAL_GRID_CELL_SIZE);
+            const minRow = Math.floor(fp.y / SPATIAL_GRID_CELL_SIZE);
+            const maxRow = Math.floor((fp.y + fp.h) / SPATIAL_GRID_CELL_SIZE);
+
+            for (let col = minCol; col <= maxCol; col++) {
+              for (let row = minRow; row <= maxRow; row++) {
+                const cellKey = `${col},${row}`;
+                let bin = this.spatialGrid.get(cellKey);
+                if (!bin) {
+                  bin = [];
+                  this.spatialGrid.set(cellKey, bin);
+                }
+                bin.push(itemEntry);
+              }
+            }
+          }
+        }
+      }
+
+      if (Array.isArray(room.openings)) {
+        for (const opening of room.openings) {
+          const def = OPENING_BY_ID[opening.type];
+          const info = openingInfo(state, room, opening);
+          const p0 = wallPoint(room, opening.wall, opening.offset, 0);
+          const p1 = wallPoint(room, opening.wall, opening.offset + opening.width, 0);
+          const midX = (p0.x + p1.x) / 2;
+          const midY = (p0.y + p1.y) / 2;
+          const metrics = def ? openingMetrics(def) : null;
+
+          const openingEntry = {
+            opening,
+            room,
+            def,
+            info,
+            p0,
+            p1,
+            midX,
+            midY,
+            metrics,
+          };
+          this.openingIndex.set(opening.id, openingEntry);
+        }
+      }
+    }
+  }
+
+  /**
+   * Queries spatial grid for candidate floor items in grid bins overlapping `zone`.
+   */
+  querySpatialGrid(zone, roomId) {
+    const minCol = Math.floor(zone.x / SPATIAL_GRID_CELL_SIZE);
+    const maxCol = Math.floor((zone.x + zone.w) / SPATIAL_GRID_CELL_SIZE);
+    const minRow = Math.floor(zone.y / SPATIAL_GRID_CELL_SIZE);
+    const maxRow = Math.floor((zone.y + zone.h) / SPATIAL_GRID_CELL_SIZE);
+
+    const seenItemIds = new Set();
+    const candidates = [];
+
+    for (let col = minCol; col <= maxCol; col++) {
+      for (let row = minRow; row <= maxRow; row++) {
+        const bin = this.spatialGrid.get(`${col},${row}`);
+        if (bin) {
+          for (const itemEntry of bin) {
+            if (itemEntry.room.id === roomId && !seenItemIds.has(itemEntry.item.id)) {
+              seenItemIds.add(itemEntry.item.id);
+              candidates.push(itemEntry);
+            }
+          }
+        }
+      }
+    }
+
+    return candidates;
   }
 
   /**
@@ -45,7 +194,13 @@ export class ComplianceOverlayScene {
     const curLevel = options.curLevel ?? 0;
     const selection = options.selection || null;
     const drag = options.drag || null;
-    const hover = options.hover || null;
+
+    const stateHash = options.stateHash ?? computeStateHash(state);
+    if (state !== this.lastState || stateHash !== this.lastStateHash) {
+      this.rebuildIndexes(state);
+      this.lastState = state;
+      this.lastStateHash = stateHash;
+    }
 
     // Filter rooms for current level
     const levelRooms = (state.rooms || []).filter((r) => (r.level || 0) === curLevel);
@@ -58,29 +213,29 @@ export class ComplianceOverlayScene {
         let bounds = null;
         let targetId = v.itemId || v.openingId || v.roomId;
         if (v.itemId) {
-          for (const room of levelRooms) {
-            const it = room.items.find((i) => i.id === v.itemId);
-            if (it) {
-              const def = ITEM_BY_ID[it.type];
-              if (def) {
-                if (def.mount === 'floor') bounds = footprint(it, def);
-                else bounds = { x: it.x - 12, y: it.y - 12, w: 24, h: 24 };
+          const itemEntry = this.itemIndex.get(v.itemId);
+          if (itemEntry && (itemEntry.room.level || 0) === curLevel) {
+            const it = itemEntry.item;
+            const def = itemEntry.def;
+            if (def) {
+              if (def.mount === 'floor') {
+                bounds = itemEntry.footprint || footprint(it, def);
+              } else {
+                bounds = { x: it.x - 12, y: it.y - 12, w: 24, h: 24 };
               }
-              break;
             }
           }
         } else if (v.openingId) {
-          for (const room of levelRooms) {
-            const o = room.openings.find((op) => op.id === v.openingId);
-            if (o) {
-              const p = wallPoint(room, o.wall, o.offset, 0);
-              bounds = { x: p.x - 12, y: p.y - 12, w: o.width + 24, h: 24 };
-              break;
-            }
+          const openingEntry = this.openingIndex.get(v.openingId);
+          if (openingEntry && (openingEntry.room.level || 0) === curLevel) {
+            const o = openingEntry.opening;
+            const p = openingEntry.p0;
+            bounds = { x: p.x - 12, y: p.y - 12, w: o.width + 24, h: 24 };
           }
         } else if (v.roomId) {
-          const room = levelRooms.find((r) => r.id === v.roomId);
-          if (room) {
+          const roomEntry = this.roomIndex.get(v.roomId);
+          if (roomEntry && (roomEntry.room.level || 0) === curLevel) {
+            const room = roomEntry.room;
             bounds = { x: room.x, y: room.y, w: room.w, h: room.h };
           }
         }
@@ -101,11 +256,12 @@ export class ComplianceOverlayScene {
 
     // 2. Compile fixture clearance zone nodes
     for (const room of levelRooms) {
-      const ir = interior(room);
-      const floorItems = room.items.filter((i) => ITEM_BY_ID[i.type]?.mount === 'floor');
+      const roomEntry = this.roomIndex.get(room.id);
+      const ir = roomEntry ? roomEntry.interior : interior(room);
 
       for (const it of room.items) {
-        const def = ITEM_BY_ID[it.type];
+        const itemEntry = this.itemIndex.get(it.id);
+        const def = itemEntry?.def || ITEM_BY_ID[it.type];
         if (!def) continue;
 
         if (
@@ -114,15 +270,21 @@ export class ComplianceOverlayScene {
           def.fixture
         ) {
           const zone = fixtureZone(it, def, 15, 21);
-          // Collision check: zone outside room interior OR overlapping other collidable floor items
           const insideRoom = rectInside(zone, ir);
-          const overlapsOther = floorItems.some((other) => {
-            if (other.id === it.id) return false;
-            const od = ITEM_BY_ID[other.type];
-            return (
-              od && od.mount === 'floor' && !od.flat && rectsOverlap(zone, footprint(other, od))
-            );
-          });
+
+          const candidates = this.querySpatialGrid(zone, room.id);
+          let overlapsOther = false;
+          for (const candidate of candidates) {
+            if (candidate.item.id === it.id) continue;
+            const od = candidate.def;
+            if (od && od.mount === 'floor' && !od.flat) {
+              const candidateFp = candidate.footprint || footprint(candidate.item, od);
+              if (rectsOverlap(zone, candidateFp)) {
+                overlapsOther = true;
+                break;
+              }
+            }
+          }
 
           const isColliding = !insideRoom || overlapsOther;
 
@@ -143,22 +305,23 @@ export class ComplianceOverlayScene {
 
     // 3. Compile egress reach nodes for sleeping room windows & exterior openings
     for (const room of levelRooms) {
-      const isSleeping = !!ROOM_TYPES[room.type]?.sleeping;
-      const dl = daylight(state, room);
+      const roomEntry = this.roomIndex.get(room.id);
+      const isSleeping = roomEntry ? roomEntry.isSleeping : !!ROOM_TYPES[room.type]?.sleeping;
 
       for (const o of room.openings) {
-        const def = OPENING_BY_ID[o.type];
+        const openingEntry = this.openingIndex.get(o.id);
+        if (!openingEntry) continue;
+
+        const def = openingEntry.def;
         if (!def) continue;
 
-        const info = openingInfo(state, room, o);
+        const info = openingEntry.info;
         const isExterior = info.kind === 'exterior';
 
         if (def.kind === 'window' && (isSleeping || isExterior)) {
-          const m = openingMetrics(def);
-          const p0 = wallPoint(room, o.wall, o.offset, 0);
-          const p1 = wallPoint(room, o.wall, o.offset + o.width, 0);
-          const midX = (p0.x + p1.x) / 2;
-          const midY = (p0.y + p1.y) / 2;
+          const m = openingEntry.metrics;
+          const midX = openingEntry.midX;
+          const midY = openingEntry.midY;
 
           const satisfiesWidth = m.clearW >= 20;
           const satisfiesHeight = m.clearH >= 24;
@@ -215,10 +378,13 @@ export class ComplianceOverlayScene {
     const activeRooms = activeRoomId ? levelRooms.filter((r) => r.id === activeRoomId) : levelRooms;
 
     for (const room of activeRooms) {
+      const roomEntry = this.roomIndex.get(room.id);
       const isSelected = room.id === selection || (drag && drag.id === room.id);
-      const minDim = Math.min(room.w, room.h);
-      const areaSqFt = floorAreaSqFt(room);
-      const isHabitable = !!ROOM_TYPES[room.type]?.habitable && room.type !== 'kitchen';
+      const minDim = roomEntry ? roomEntry.minDim : Math.min(room.w, room.h);
+      const areaSqFt = roomEntry ? roomEntry.areaSqFt : floorAreaSqFt(room);
+      const isHabitable = roomEntry
+        ? roomEntry.isHabitable
+        : !!ROOM_TYPES[room.type]?.habitable && room.type !== 'kitchen';
 
       let isValid = true;
       const dimViolations = [];
@@ -291,8 +457,8 @@ export class ComplianceOverlayScene {
     }
 
     // Replace current nodes map and list cleanly
-    this.dispose();
     this.nodes = nextNodes;
+    this.nodesById.clear();
     for (const node of nextNodes) {
       this.nodesById.set(node.id, node);
     }
@@ -353,10 +519,23 @@ export class ComplianceOverlayScene {
   }
 
   /**
+   * Manually invalidate index cache.
+   */
+  invalidateCache() {
+    this.lastState = null;
+    this.lastStateHash = null;
+    this.roomIndex.clear();
+    this.itemIndex.clear();
+    this.openingIndex.clear();
+    this.spatialGrid.clear();
+  }
+
+  /**
    * Clean up resources / cached nodes.
    */
   dispose() {
     this.nodes = [];
     this.nodesById.clear();
+    this.invalidateCache();
   }
 }
