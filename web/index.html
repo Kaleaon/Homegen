@@ -93,6 +93,16 @@
     <section id="compliance"></section>
   </aside>
 </main>
+<dialog id="dlg-templates" aria-labelledby="dlg-templates-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-templates-title">Choose a Starter Template</h2>
+    <button value="close" aria-label="Close template picker"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Select a starter layout preset to kickstart your floor plan, or begin with a blank canvas.</p>
+    <div id="template-gallery" class="template-gallery" role="radiogroup" aria-label="Starter templates gallery"></div>
+  </div>
+</dialog>
 <dialog id="photo" aria-labelledby="photo-title">
   <form method="dialog" class="dlg-head"><h2 id="photo-title">Photoreal render</h2><button value="close" aria-label="Close photoreal render"><span aria-hidden="true">✕</span></button></form>
   <div class="dlg-body">
