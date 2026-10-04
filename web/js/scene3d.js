@@ -13,7 +13,13 @@ import {
   subtractInterval,
   lv,
 } from './geometry.js';
-import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import {
+  OPENING_BY_ID,
+  ITEM_BY_ID,
+  WALL_BY_ID,
+  FLOOR_BY_ID,
+  WINDOW_FRAME_BY_ID,
+} from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from './resources.js';
@@ -324,6 +330,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return t;
   }
 
+  const preloader = new MaterialPreloader(loader);
   const hdBase = new Map(); // `${polyhavenId}:${map}` -> loaded base Texture (shared image)
   let textureErrorTimer = null;
   function handleTextureError(err) {
@@ -340,6 +347,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   }
 
   function applyHD(mat, finishId, wInches, hInches) {
+    if (!mat) return;
+    if (Array.isArray(mat)) {
+      for (const m of mat) {
+        if (m) applyHD(m, finishId, wInches, hInches);
+      }
+      return;
+    }
     const hd = HD_MATERIALS[finishId];
     if (!hd) return;
     const urls = polyHavenTextureUrls(hd.id);
@@ -735,7 +749,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     let ext = [[-WT / 2, len + WT / 2]];
     for (const n of wallNeighbors(state.rooms, room, wall))
       ext = subtractInterval(ext, [n.from, n.to]);
-
     let extFinId = room.cladding || room.exteriorCladding;
     if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
       extFinId = room.walls[wall];
@@ -744,7 +757,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     extFinId = extFin.id || extFinId || 'cladding_siding_white';
 
     const sidingMat = finishMaterial(extFin, len, room.ceiling, extFinId, 0.85);
-
     for (const [a, b] of ext)
       cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
         addWallBox(
@@ -763,7 +775,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
         )
       );
     // fill the thin cut-through strip for openings between rooms is intentionally left open
-    for (const { o, from, to, d } of cuts) {
+    for (const { o, d } of cuts) {
       if (!room.openings.includes(o)) continue; // draw each opening once, from its owner
       const info = openingInfo(state, room, o);
       const og =
@@ -777,9 +789,14 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: '#cfe7f3',
     roughness: 0.05,
-    metalness: 0,
+    metalness: 0.1,
+    transmission: 0.85,
     transparent: true,
-    opacity: 0.28,
+    opacity: 0.35,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.1,
+    ior: 1.52,
+    reflectivity: 0.9,
     side: THREE.DoubleSide,
   });
   const defaultFrameMat = plain('#f3f1ea', 0.6);
@@ -1097,6 +1114,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     opts,
     entityMap,
     hdBase,
+    preloader,
+    async preloadMaterials(finishIds) {
+      return preloader.preload(finishIds || Object.keys(HD_MATERIALS));
+    },
     scene,
     callbacks,
     walkKeys,
@@ -1134,7 +1155,12 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (k === 'sun') {
         sun.intensity = 4 * v;
         render();
-      } else reconcile();
+      } else {
+        if (k === 'hd' && v) {
+          preloader.preload(Object.keys(HD_MATERIALS));
+        }
+        reconcile();
+      }
     },
     orbitBy(deltaAzimuth, deltaPolar) {
       const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
