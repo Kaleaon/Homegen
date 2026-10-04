@@ -22,7 +22,7 @@ import {
 } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
-import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl } from './resources.js';
+import { HD_MATERIALS, HDRI_ENVS, polyHavenTextureUrls, polyHavenHdriUrl, MaterialPreloader } from './resources.js';
 import { getCladdingMaterial, resolveWindowStyle } from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
 
