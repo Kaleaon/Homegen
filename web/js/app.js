@@ -80,7 +80,21 @@ const complianceScene = new ComplianceOverlayScene();
 let view = { scale: 1.6, ox: 40, oy: 40 };
 let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | item{type} | wall{id} | floor{id} | roomkit{id} | furnkit{id}
 let tab = 'build';
+let selectionSet = new Set();
 let selection = null;
+
+function isSelected(id) {
+  return selectionSet.has(id);
+}
+
+function getSelectionList() {
+  return Array.from(selectionSet);
+}
+
+function rectsIntersect(r1, r2) {
+  return r1.x < r2.x + r2.w && r1.x + r1.w > r2.x && r1.y < r2.y + r2.h && r1.y + r1.h > r2.y;
+}
+
 let ghostRot = 0;
 let hover = null; // world point
 let drag = null;
@@ -490,6 +504,18 @@ function drawOverlay(c, state) {
     }
   }
 
+  if (drag && drag.kind === 'marquee' && drag.rect) {
+    const rc = drag.rect;
+    c.save();
+    c.fillStyle = 'rgba(42, 127, 255, 0.12)';
+    c.strokeStyle = '#2a7fff';
+    c.lineWidth = 1 / view.scale;
+    c.setLineDash([4 / view.scale, 4 / view.scale]);
+    c.fillRect(rc.x, rc.y, rc.w, rc.h);
+    c.strokeRect(rc.x, rc.y, rc.w, rc.h);
+    c.restore();
+  }
+
   if (!hover && !drag) return;
   const okColor = 'rgba(47,143,91,.5)';
   const badColor = 'rgba(196,59,59,.55)';
@@ -723,15 +749,114 @@ function focus(id) {
   redraw();
 }
 
-function select(id) {
-  selection = id;
+function select(target, { toggle = false, append = false } = {}) {
+  if (!target) {
+    if (!toggle && !append) selectionSet.clear();
+  } else if (typeof target === 'string') {
+    if (toggle) {
+      if (selectionSet.has(target)) selectionSet.delete(target);
+      else selectionSet.add(target);
+    } else if (append) {
+      selectionSet.add(target);
+    } else {
+      selectionSet.clear();
+      selectionSet.add(target);
+    }
+  } else if (target instanceof Set || Array.isArray(target)) {
+    const items = Array.from(target);
+    if (!toggle && !append) selectionSet.clear();
+    for (const id of items) {
+      if (toggle) {
+        if (selectionSet.has(id)) selectionSet.delete(id);
+        else selectionSet.add(id);
+      } else {
+        selectionSet.add(id);
+      }
+    }
+  }
+
+  selection =
+    selectionSet.size === 0
+      ? null
+      : selectionSet.size === 1
+        ? Array.from(selectionSet)[0]
+        : new Set(selectionSet);
+
   renderInspector();
   redraw();
 }
 
 function renderInspector() {
   const el = $('#inspector');
-  const hit = selection && M.findOwner(doc, selection);
+  if (!el) return;
+  const selectedList = getSelectionList();
+
+  if (selectedList.length === 0) {
+    el.innerHTML =
+      '<h3>Inspector</h3><p class="note" style="margin:0">Select a room, door, window or item to edit it. Shift-click or drag marquee to select multiple. Drag to move; drag room corners to resize; <b>R</b> rotates, <b>Del</b> removes.</p>';
+    return;
+  }
+
+  if (selectedList.length > 1) {
+    el.innerHTML = `<h3>${selectedList.length} elements selected</h3>
+      <p class="note" style="margin:0 0 10px">Multi-selection toolbar</p>
+      <div class="align-section">
+        <div class="align-label">Align</div>
+        <div class="align-grid">
+          <button id="align-left" class="align-btn" title="Align Left">⇥ Left</button>
+          <button id="align-center" class="align-btn" title="Align Horizontal Center">↔ Center</button>
+          <button id="align-right" class="align-btn" title="Align Right">⇤ Right</button>
+          <button id="align-top" class="align-btn" title="Align Top">⤒ Top</button>
+          <button id="align-middle" class="align-btn" title="Align Vertical Middle">↕ Middle</button>
+          <button id="align-bottom" class="align-btn" title="Align Bottom">⤓ Bottom</button>
+        </div>
+      </div>
+      <div class="align-section" style="margin-top:10px">
+        <div class="align-label">Distribute</div>
+        <div class="align-grid">
+          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 ? 'disabled' : ''}>Horizontal</button>
+          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 ? 'disabled' : ''}>Vertical</button>
+        </div>
+      </div>
+      <div class="btns" style="margin-top:14px">
+        <button id="i-del-all">Delete all selected</button>
+      </div>`;
+
+    $('#align-left')?.addEventListener('click', () =>
+      apply((n) => M.alignItems(n, selectedList, 'left'))
+    );
+    $('#align-center')?.addEventListener('click', () =>
+      apply((n) => M.alignItems(n, selectedList, 'center'))
+    );
+    $('#align-right')?.addEventListener('click', () =>
+      apply((n) => M.alignItems(n, selectedList, 'right'))
+    );
+    $('#align-top')?.addEventListener('click', () =>
+      apply((n) => M.alignItems(n, selectedList, 'top'))
+    );
+    $('#align-middle')?.addEventListener('click', () =>
+      apply((n) => M.alignItems(n, selectedList, 'middle'))
+    );
+    $('#align-bottom')?.addEventListener('click', () =>
+      apply((n) => M.alignItems(n, selectedList, 'bottom'))
+    );
+
+    $('#dist-h')?.addEventListener('click', () =>
+      apply((n) => M.distributeItems(n, selectedList, 'horizontal'))
+    );
+    $('#dist-v')?.addEventListener('click', () =>
+      apply((n) => M.distributeItems(n, selectedList, 'vertical'))
+    );
+
+    $('#i-del-all')?.addEventListener('click', () => {
+      apply((n) => M.removeSet(n, selectedList));
+      select(null);
+    });
+    return;
+  }
+
+  const singleId = selectedList[0];
+  const hit = singleId && M.findOwner(doc, singleId);
   if (!hit) {
     el.innerHTML =
       '<h3>Inspector</h3><p class="note" style="margin:0">Select a room, door, window or item to edit it. Drag to move; drag room corners to resize; <b>R</b> rotates, <b>Del</b> removes.</p>';
@@ -1260,19 +1385,27 @@ canvas?.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   const p = toWorld(e);
   hover = p;
-  if (
-    e.button === 1 ||
-    e.button === 2 ||
-    (e.shiftKey && tool.kind === 'select' && !pickAt(p)) ||
-    e.altKey
-  ) {
+  if (e.button === 1 || e.button === 2 || e.altKey) {
     drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
     return;
   }
   switch (tool.kind) {
     case 'select': {
       const id = pickAt(p);
-      select(id);
+      if (e.shiftKey) {
+        if (id) {
+          select(id, { toggle: true });
+        } else {
+          drag = {
+            kind: 'marquee',
+            x0: p.x,
+            y0: p.y,
+            rect: { x: p.x, y: p.y, w: 0, h: 0 },
+            isShift: true,
+          };
+        }
+        break;
+      }
       if (!id) {
         if (
           doc.background &&
@@ -1289,14 +1422,34 @@ canvas?.addEventListener('pointerdown', (e) => {
             moved: false,
           };
         } else {
-          drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
+          drag = {
+            kind: 'marquee',
+            x0: p.x,
+            y0: p.y,
+            rect: { x: p.x, y: p.y, w: 0, h: 0 },
+            isShift: false,
+          };
         }
         break;
       }
+      if (!isSelected(id)) {
+        select(id);
+      }
       const hit = M.findOwner(doc, id);
-      if (hit.kind === 'item') drag = { kind: 'item', id, moved: false };
-      else if (hit.kind === 'opening') drag = { kind: 'opening', id, moved: false };
-      else {
+      if (hit.kind === 'item') {
+        const selectedList = getSelectionList();
+        const itemsInitial = new Map();
+        for (const sId of selectedList) {
+          const h = M.findOwner(doc, sId);
+          if (h && (h.kind === 'item' || h.kind === 'room')) {
+            const b = M.getBounds(doc, sId);
+            if (b) itemsInitial.set(sId, b);
+          }
+        }
+        drag = { kind: 'item', id, moved: false, sx: p.x, sy: p.y, itemsInitial };
+      } else if (hit.kind === 'opening') {
+        drag = { kind: 'opening', id, moved: false };
+      } else {
         const r = hit.room;
         const hs = handles(r).findIndex(
           ([hx, hy]) => Math.hypot(hx - p.x, hy - p.y) < 8 / view.scale + 2
@@ -1473,13 +1626,35 @@ canvas?.addEventListener('pointermove', (e) => {
       redraw();
       return;
     }
+    if (drag.kind === 'marquee') {
+      const x0 = Math.min(drag.x0, p.x);
+      const y0 = Math.min(drag.y0, p.y);
+      const w = Math.abs(p.x - drag.x0);
+      const h = Math.abs(p.y - drag.y0);
+      drag.rect = { x: x0, y: y0, w, h };
+      redraw();
+      return;
+    }
     drag.moved = true;
     if (drag.kind === 'item') {
-      const it = M.findOwner(doc, drag.id).obj;
-      const pl = placeItem(it.type, p, it.rot || 0);
-      if (pl) {
-        drag.target = pl;
-        preview = tryPreview(moveItemTo(drag.id, pl));
+      if (drag.itemsInitial && drag.itemsInitial.size > 1) {
+        const dx = p.x - drag.sx;
+        const dy = p.y - drag.sy;
+        preview = tryPreview((n) => {
+          for (const [sId, initial] of drag.itemsInitial.entries()) {
+            const h = M.findOwner(n, sId);
+            if (h) {
+              M.setItemPosition(n, h, initial.cx + dx, initial.cy + dy);
+            }
+          }
+        });
+      } else {
+        const it = M.findOwner(doc, drag.id).obj;
+        const pl = placeItem(it.type, p, it.rot || 0);
+        if (pl) {
+          drag.target = pl;
+          preview = tryPreview(moveItemTo(drag.id, pl));
+        }
       }
     } else if (drag.kind === 'opening') {
       const { room, obj } = M.findOwner(doc, drag.id);
@@ -1561,6 +1736,32 @@ canvas?.addEventListener('pointerup', () => {
     }
     return;
   }
+  if (d.kind === 'marquee') {
+    if (d.rect && (d.rect.w > 2 || d.rect.h > 2)) {
+      const intersected = [];
+      for (const room of levelRooms()) {
+        const roomBounds = M.getBounds(doc, room.id);
+        if (roomBounds && rectsIntersect(roomBounds, d.rect)) intersected.push(room.id);
+        for (const it of room.items) {
+          const itBounds = M.getBounds(doc, it.id);
+          if (itBounds && rectsIntersect(itBounds, d.rect)) intersected.push(it.id);
+        }
+        for (const o of room.openings) {
+          const oBounds = M.getBounds(doc, o.id);
+          if (oBounds && rectsIntersect(oBounds, d.rect)) intersected.push(o.id);
+        }
+      }
+      if (d.isShift) {
+        select(intersected, { append: true });
+      } else {
+        select(intersected);
+      }
+    } else {
+      if (!d.isShift) select(null);
+    }
+    refresh();
+    return;
+  }
   const pv = preview;
   preview = null;
   if (d.kind === 'room-new') {
@@ -1569,14 +1770,14 @@ canvas?.addEventListener('pointerup', () => {
         const room = M.createRoom(n, tool.type, d.rect.x, d.rect.y, d.rect.w, d.rect.h, {
           level: curLevel,
         });
-        selection = room.id;
+        select(room.id);
       });
-      if (!r.ok) selection = null;
+      if (!r.ok) select(null);
     } else toast('Drag to size the room.', true, 1800);
     refresh();
     return;
   }
-  if (!d.moved || !d.target) {
+  if (!d.moved) {
     refresh();
     return;
   }
@@ -1588,8 +1789,22 @@ canvas?.addEventListener('pointerup', () => {
     refresh();
     return;
   }
-  if (d.kind === 'item') apply(moveItemTo(d.id, d.target));
-  else if (d.kind === 'opening') apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target));
+  if (d.kind === 'item') {
+    if (d.itemsInitial && d.itemsInitial.size > 1) {
+      const dx = hover ? hover.x - d.sx : 0;
+      const dy = hover ? hover.y - d.sy : 0;
+      apply((n) => {
+        for (const [sId, initial] of d.itemsInitial.entries()) {
+          const h = M.findOwner(n, sId);
+          if (h) {
+            M.setItemPosition(n, h, initial.cx + dx, initial.cy + dy);
+          }
+        }
+      });
+    } else if (d.target) {
+      apply(moveItemTo(d.id, d.target));
+    }
+  } else if (d.kind === 'opening') apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target));
   else if (d.kind === 'room') apply((n) => M.moveRoom(roomOf(n, d.id), d.target.x, d.target.y));
   else if (d.kind === 'resize')
     apply((n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h));
@@ -2037,12 +2252,12 @@ if (typeof window !== 'undefined') {
       select(null);
       toast('Selection cleared', false, 1800);
     } else if (lk === 'delete' || lk === 'backspace') {
-      if (selection) {
+      const selectedList = getSelectionList();
+      if (selectedList.length > 0) {
         const label = getSelectionLabel();
-        const id = selection;
-        apply((n) => M.removeById(n, id));
+        apply((n) => M.removeSet(n, selectedList));
         select(null);
-        toast(`Deleted ${label || 'selected element'}`, false, 2000);
+        toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
       }
     } else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
@@ -2244,6 +2459,8 @@ if (typeof window !== 'undefined')
     sampleHome,
     setTool,
     select,
+    isSelected,
+    getSelectionList,
     navigateSpatial,
     moveSelectedSpatial,
     getSpatialElements,

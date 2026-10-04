@@ -65,11 +65,17 @@
       <label class="toggle"><input type="checkbox" id="o-ceil"> Ceilings</label>
       <label class="toggle" title="Streams free CC0 PBR textures from Poly Haven"><input type="checkbox" id="o-hd"> HD textures</label>
       <button id="o-eye" title="Stand in the selected room at eye height"><span aria-hidden="true">👁</span> Eye level</button>
+      <button id="o-walk" title="Toggle First-Person Walkthrough mode"><span aria-hidden="true">🚶</span> Walkthrough</button>
       <button id="o-reset">Reset view</button>
       <button id="o-photo" class="primary"><span aria-hidden="true">📷</span> Photoreal…</button>
     </div>
     <canvas id="plan" tabindex="0" role="region" aria-label="2D floor plan"></canvas>
     <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" hidden></canvas>
+    <div id="walkthrough-hud" class="walkthrough-hud" hidden>
+      <span class="hud-title"><span aria-hidden="true">🚶</span> Walkthrough Mode</span>
+      <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
+      <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
+    </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="diff-drawer" class="diff-drawer" hidden>
       <div class="diff-header">
