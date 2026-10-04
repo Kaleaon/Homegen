@@ -26,6 +26,7 @@ import {
   ROOM_KITS,
   ROOM_KIT_BY_ID,
   FURNITURE_KITS,
+  filterItems,
 } from './catalog.js';
 import * as M from './model.js';
 import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
@@ -105,6 +106,9 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+let catalogSearchQuery = '';
+let catalogMaxWidth = '';
+let catalogMaxDepth = '';
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -1186,6 +1190,21 @@ function card(label, sub, on, attrs, swatch) {
 
 function renderPalette() {
   const p = $('#palette');
+  if (!p) return;
+
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const activeId = activeEl ? activeEl.id : null;
+  let selectionStart = null;
+  let selectionEnd = null;
+  if (activeEl && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
+    try {
+      selectionStart = activeEl.selectionStart;
+      selectionEnd = activeEl.selectionEnd;
+    } catch {
+      /* ignore if not supported by input type */
+    }
+  }
+
   let h = '';
   if (tab === 'build') {
     h +=
@@ -1229,21 +1248,48 @@ function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    for (const [cat, label] of ITEM_CATEGORIES)
-      h +=
-        `<h4>${label}</h4><div class="grid">` +
-        ITEMS.filter((i) => i.cat === cat)
-          .map((i) =>
-            card(
-              i.name,
-              i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
-              tool.kind === 'item' && tool.id === i.id,
-              `data-tool="item" data-id="${i.id}"`,
-              `background:${i.color}`
+    h += `<div class="catalog-search-container">
+      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
+    </div>
+    <div class="catalog-filters">
+      <div class="catalog-dim-group">
+        <label for="catalog-max-w">Max W (in)</label>
+        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
+      </div>
+      <div class="catalog-dim-group">
+        <label for="catalog-max-d">Max D (in)</label>
+        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
+      </div>
+    </div>`;
+
+    const filtered = filterItems(ITEMS, {
+      query: catalogSearchQuery,
+      maxW: catalogMaxWidth,
+      maxD: catalogMaxDepth,
+    });
+
+    if (filtered.length === 0) {
+      h += `<div class="catalog-empty">No matching items found</div>`;
+    } else {
+      for (const [cat, label] of ITEM_CATEGORIES) {
+        const catItems = filtered.filter((i) => i.cat === cat);
+        if (catItems.length === 0) continue;
+        h +=
+          `<h4>${label}</h4><div class="grid">` +
+          catItems
+            .map((i) =>
+              card(
+                i.name,
+                i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
+                tool.kind === 'item' && tool.id === i.id,
+                `data-tool="item" data-id="${i.id}"`,
+                `background:${i.color}`
+              )
             )
-          )
-          .join('') +
-        '</div>';
+            .join('') +
+          '</div>';
+      }
+    }
   } else if (tab === 'paint') {
     h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
@@ -1316,6 +1362,44 @@ function renderPalette() {
     paintScope = e.target.value;
     redraw();
   });
+
+  const bindCatalogInput = (id, setter) => {
+    const el = $(`#${id}`);
+    if (el) {
+      el.addEventListener('input', (e) => {
+        setter(e.target.value);
+        renderPalette();
+      });
+    }
+  };
+
+  bindCatalogInput('catalog-search', (v) => {
+    catalogSearchQuery = v;
+  });
+  bindCatalogInput('catalog-max-w', (v) => {
+    catalogMaxWidth = v;
+  });
+  bindCatalogInput('catalog-max-d', (v) => {
+    catalogMaxDepth = v;
+  });
+
+  if (activeId && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
+    const restoredEl = $(`#${activeId}`);
+    if (restoredEl) {
+      restoredEl.focus();
+      if (
+        selectionStart !== null &&
+        selectionEnd !== null &&
+        typeof restoredEl.setSelectionRange === 'function'
+      ) {
+        try {
+          restoredEl.setSelectionRange(selectionStart, selectionEnd);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
 }
 
 const HINTS = {

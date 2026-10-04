@@ -161,6 +161,57 @@ aside {
 #palette {
   padding: 0 8px 12px;
 }
+.catalog-search-container {
+  margin: 8px 0;
+}
+.catalog-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
+.catalog-search-input:focus {
+  border-color: var(--accent);
+}
+.catalog-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.catalog-dim-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.catalog-dim-group label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.catalog-dim-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  outline: none;
+}
+.catalog-dim-input:focus {
+  border-color: var(--accent);
+}
+.catalog-empty {
+  padding: 20px 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
 #palette h4 {
   margin: 14px 0 6px;
   font-size: 12px;

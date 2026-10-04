@@ -606,3 +606,46 @@ export const FURNITURE_KITS = [
     ],
   },
 ];
+
+/**
+ * Filter items by query string, category, maximum width, and maximum depth.
+ * @param {Array} items Array of item objects.
+ * @param {Object} options Filter criteria { query, q, search, cat, category, maxW, maxWidth, w, maxD, maxDepth, d }.
+ * @returns {Array} Filtered items.
+ */
+export function filterItems(items = [], options = {}) {
+  if (!Array.isArray(items)) return [];
+  const query = (options.query ?? options.q ?? options.search ?? '')
+    .toString()
+    .trim()
+    .toLowerCase();
+  const cat = options.cat ?? options.category ?? null;
+  const rawMaxW = options.maxW ?? options.maxWidth ?? options.w;
+  const rawMaxD = options.maxD ?? options.maxDepth ?? options.d;
+
+  const parseDim = (val) => {
+    if (val === null || val === undefined || val === '') return null;
+    const num = Number(val);
+    if (isNaN(num) || num <= 0) return null;
+    return num;
+  };
+
+  const maxW = parseDim(rawMaxW);
+  const maxD = parseDim(rawMaxD);
+
+  return items.filter((item) => {
+    if (query && (!item.name || !item.name.toLowerCase().includes(query))) {
+      return false;
+    }
+    if (cat && cat !== 'all' && item.cat !== cat) {
+      return false;
+    }
+    if (maxW !== null && typeof item.w === 'number' && item.w > maxW) {
+      return false;
+    }
+    if (maxD !== null && typeof item.d === 'number' && item.d > maxD) {
+      return false;
+    }
+    return true;
+  });
+}
