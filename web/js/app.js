@@ -2378,7 +2378,7 @@ function switchTab(targetBtn, shouldFocus = false) {
     x.setAttribute('aria-selected', isSelected ? 'true' : 'false');
     x.setAttribute('tabindex', isSelected ? '0' : '-1');
   });
-  const palette = document.getElementById('palette');
+  const palette = typeof document.getElementById === 'function' ? document.getElementById('palette') : document.querySelector?.('#palette');
   if (palette && targetBtn.id) {
     palette.setAttribute('aria-labelledby', targetBtn.id);
   }
@@ -2388,7 +2388,7 @@ function switchTab(targetBtn, shouldFocus = false) {
   }
 }
 
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
   const tabsNav = document.getElementById('tabs');
   if (tabsNav) {
     const buttons = Array.from(tabsNav.querySelectorAll('button'));
@@ -2427,6 +2427,8 @@ if (typeof window !== 'undefined') {
   initCommandPaletteUI();
 
   window.addEventListener('keydown', (e) => {
+    if (document.activeElement?.closest('#tabs')) return;
+
     const k = e.key;
     const lk = k ? k.toLowerCase() : '';
 

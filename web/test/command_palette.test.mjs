@@ -74,6 +74,7 @@ function createMockElement(id = '', tagName = 'DIV') {
         }
       ),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    closest: () => null,
     querySelector: (selector) => {
       if (selector === 'li.selected') {
         return element.selectedLi || null;
