@@ -14,7 +14,7 @@ repos:
         entry: npx --prefix web prettier --check
         language: system
         files: ^web/.*\.(js|mjs|json|css|html)$
-        exclude: ^web/vendor/
+        exclude: ^web/(vendor/|index\.html|dist/|css/style\.css)
         pass_filenames: true
 
       - id: eslint-designer3d
