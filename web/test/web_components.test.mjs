@@ -37,16 +37,8 @@ test('index.html uses <k-input> and <k-button> for header controls and <k-tab> f
   );
 
   // Header buttons
-  assert.match(
-    html,
-    /<k-button id="undo" [^>]*aria-label="Undo">/,
-    'Header #undo uses <k-button>'
-  );
-  assert.match(
-    html,
-    /<k-button id="redo" [^>]*aria-label="Redo">/,
-    'Header #redo uses <k-button>'
-  );
+  assert.match(html, /<k-button id="undo" [^>]*aria-label="Undo">/, 'Header #undo uses <k-button>');
+  assert.match(html, /<k-button id="redo" [^>]*aria-label="Redo">/, 'Header #redo uses <k-button>');
   assert.match(html, /<k-button id="sample">/, 'Header #sample uses <k-button>');
   assert.match(html, /<k-button id="new">/, 'Header #new uses <k-button>');
   assert.match(html, /<k-button id="save">/, 'Header #save uses <k-button>');

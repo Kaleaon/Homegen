@@ -2686,45 +2686,219 @@ let filteredCommands = [];
 
 const COMMAND_REGISTRY = [
   // Tools
-  { id: 'tool-select', name: 'Select Tool', category: 'Tools', shortcut: 'V', action: () => setTool({ kind: 'select' }) },
-  { id: 'tool-eyedropper', name: 'Eyedropper Tool', category: 'Tools', shortcut: 'I', action: () => setTool({ kind: 'eyedropper' }) },
-  { id: 'tool-erase', name: 'Erase Tool', category: 'Tools', shortcut: 'X', action: () => setTool({ kind: 'erase' }) },
+  {
+    id: 'tool-select',
+    name: 'Select Tool',
+    category: 'Tools',
+    shortcut: 'V',
+    action: () => setTool({ kind: 'select' }),
+  },
+  {
+    id: 'tool-eyedropper',
+    name: 'Eyedropper Tool',
+    category: 'Tools',
+    shortcut: 'I',
+    action: () => setTool({ kind: 'eyedropper' }),
+  },
+  {
+    id: 'tool-erase',
+    name: 'Erase Tool',
+    category: 'Tools',
+    shortcut: 'X',
+    action: () => setTool({ kind: 'erase' }),
+  },
 
   // Views
-  { id: 'view-2d', name: '2D Plan View', category: 'Views', shortcut: '', action: () => $('#toolbar [data-view="2d"]')?.click() },
-  { id: 'view-3d', name: '3D View', category: 'Views', shortcut: '', action: () => $('#toolbar [data-view="3d"]')?.click() },
-  { id: 'view-eye', name: 'Eye Level View', category: 'Views', shortcut: '', action: () => $('#o-eye')?.click() },
-  { id: 'view-reset', name: 'Reset 3D View', category: 'Views', shortcut: '', action: () => $('#o-reset')?.click() },
-  { id: 'view-photo', name: 'Photoreal Render', category: 'Views', shortcut: '', action: () => $('#o-photo')?.click() },
-  { id: 'view-zoom-in', name: 'Zoom In', category: 'Views', shortcut: '+', action: () => $('#zoom-in')?.click() },
-  { id: 'view-zoom-out', name: 'Zoom Out', category: 'Views', shortcut: '-', action: () => $('#zoom-out')?.click() },
-  { id: 'view-fit', name: 'Fit View to Screen', category: 'Views', shortcut: '', action: () => $('#fit')?.click() },
+  {
+    id: 'view-2d',
+    name: '2D Plan View',
+    category: 'Views',
+    shortcut: '',
+    action: () => $('#toolbar [data-view="2d"]')?.click(),
+  },
+  {
+    id: 'view-3d',
+    name: '3D View',
+    category: 'Views',
+    shortcut: '',
+    action: () => $('#toolbar [data-view="3d"]')?.click(),
+  },
+  {
+    id: 'view-eye',
+    name: 'Eye Level View',
+    category: 'Views',
+    shortcut: '',
+    action: () => $('#o-eye')?.click(),
+  },
+  {
+    id: 'view-reset',
+    name: 'Reset 3D View',
+    category: 'Views',
+    shortcut: '',
+    action: () => $('#o-reset')?.click(),
+  },
+  {
+    id: 'view-photo',
+    name: 'Photoreal Render',
+    category: 'Views',
+    shortcut: '',
+    action: () => $('#o-photo')?.click(),
+  },
+  {
+    id: 'view-zoom-in',
+    name: 'Zoom In',
+    category: 'Views',
+    shortcut: '+',
+    action: () => $('#zoom-in')?.click(),
+  },
+  {
+    id: 'view-zoom-out',
+    name: 'Zoom Out',
+    category: 'Views',
+    shortcut: '-',
+    action: () => $('#zoom-out')?.click(),
+  },
+  {
+    id: 'view-fit',
+    name: 'Fit View to Screen',
+    category: 'Views',
+    shortcut: '',
+    action: () => $('#fit')?.click(),
+  },
 
   // Sidebar Tabs
-  { id: 'tab-build', name: 'Build Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="build"]')?.click() },
-  { id: 'tab-buy', name: 'Buy Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="buy"]')?.click() },
-  { id: 'tab-paint', name: 'Paint Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="paint"]')?.click() },
-  { id: 'tab-kits', name: 'Kits Tab', category: 'Sidebar Tabs', shortcut: '', action: () => $('#tabs [data-tab="kits"]')?.click() },
+  {
+    id: 'tab-build',
+    name: 'Build Tab',
+    category: 'Sidebar Tabs',
+    shortcut: '',
+    action: () => $('#tabs [data-tab="build"]')?.click(),
+  },
+  {
+    id: 'tab-buy',
+    name: 'Buy Tab',
+    category: 'Sidebar Tabs',
+    shortcut: '',
+    action: () => $('#tabs [data-tab="buy"]')?.click(),
+  },
+  {
+    id: 'tab-paint',
+    name: 'Paint Tab',
+    category: 'Sidebar Tabs',
+    shortcut: '',
+    action: () => $('#tabs [data-tab="paint"]')?.click(),
+  },
+  {
+    id: 'tab-kits',
+    name: 'Kits Tab',
+    category: 'Sidebar Tabs',
+    shortcut: '',
+    action: () => $('#tabs [data-tab="kits"]')?.click(),
+  },
 
   // File Operations
-  { id: 'file-new', name: 'New Plan', category: 'File Operations', shortcut: '', action: () => $('#new')?.click() },
-  { id: 'file-sample', name: 'Sample Home', category: 'File Operations', shortcut: '', action: () => $('#sample')?.click() },
-  { id: 'file-save', name: 'Save Plan', category: 'File Operations', shortcut: '', action: () => $('#save')?.click() },
-  { id: 'file-load', name: 'Open Plan', category: 'File Operations', shortcut: '', action: () => $('#load')?.click() },
-  { id: 'file-import-bp', name: 'Import Blueprint Image', category: 'File Operations', shortcut: '', action: () => $('#import-blueprint')?.click() },
-  { id: 'file-undo', name: 'Undo Action', category: 'File Operations', shortcut: 'Ctrl+Z', action: () => $('#undo')?.click() },
-  { id: 'file-redo', name: 'Redo Action', category: 'File Operations', shortcut: 'Ctrl+Y', action: () => $('#redo')?.click() },
+  {
+    id: 'file-new',
+    name: 'New Plan',
+    category: 'File Operations',
+    shortcut: '',
+    action: () => $('#new')?.click(),
+  },
+  {
+    id: 'file-sample',
+    name: 'Sample Home',
+    category: 'File Operations',
+    shortcut: '',
+    action: () => $('#sample')?.click(),
+  },
+  {
+    id: 'file-save',
+    name: 'Save Plan',
+    category: 'File Operations',
+    shortcut: '',
+    action: () => $('#save')?.click(),
+  },
+  {
+    id: 'file-load',
+    name: 'Open Plan',
+    category: 'File Operations',
+    shortcut: '',
+    action: () => $('#load')?.click(),
+  },
+  {
+    id: 'file-import-bp',
+    name: 'Import Blueprint Image',
+    category: 'File Operations',
+    shortcut: '',
+    action: () => $('#import-blueprint')?.click(),
+  },
+  {
+    id: 'file-undo',
+    name: 'Undo Action',
+    category: 'File Operations',
+    shortcut: 'Ctrl+Z',
+    action: () => $('#undo')?.click(),
+  },
+  {
+    id: 'file-redo',
+    name: 'Redo Action',
+    category: 'File Operations',
+    shortcut: 'Ctrl+Y',
+    action: () => $('#redo')?.click(),
+  },
 
   // Export
-  { id: 'export-png', name: 'Export PNG Image', category: 'Export', shortcut: '', action: () => $('#png')?.click() },
-  { id: 'export-svg', name: 'Export SVG Vector Sheet', category: 'Export', shortcut: '', action: () => $('#svg-btn')?.click() },
-  { id: 'print-sheet', name: 'Print Sheet', category: 'Export', shortcut: '', action: () => $('#print-btn')?.click() },
-  { id: 'export-pdf', name: 'Export Scaled Vector PDF', category: 'Export', shortcut: '', action: () => $('#export-pdf')?.click() },
-  { id: 'export-report', name: 'Code Compliance Report', category: 'Export', shortcut: '', action: () => $('#report')?.click() },
+  {
+    id: 'export-png',
+    name: 'Export PNG Image',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#png')?.click(),
+  },
+  {
+    id: 'export-svg',
+    name: 'Export SVG Vector Sheet',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#svg-btn')?.click(),
+  },
+  {
+    id: 'print-sheet',
+    name: 'Print Sheet',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#print-btn')?.click(),
+  },
+  {
+    id: 'export-pdf',
+    name: 'Export Scaled Vector PDF',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#export-pdf')?.click(),
+  },
+  {
+    id: 'export-report',
+    name: 'Code Compliance Report',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#report')?.click(),
+  },
 
   // Help & Settings
-  { id: 'help-shortcuts', name: 'Keyboard Shortcuts Cheat Sheet', category: 'Help', shortcut: '?', action: () => openShortcutOverlay() },
-  { id: 'setting-autocomply', name: 'Toggle Auto-Comply', category: 'Settings', shortcut: '', action: () => $('#auto')?.click() },
+  {
+    id: 'help-shortcuts',
+    name: 'Keyboard Shortcuts Cheat Sheet',
+    category: 'Help',
+    shortcut: '?',
+    action: () => openShortcutOverlay(),
+  },
+  {
+    id: 'setting-autocomply',
+    name: 'Toggle Auto-Comply',
+    category: 'Settings',
+    shortcut: '',
+    action: () => $('#auto')?.click(),
+  },
 ];
 
 function openCommandPalette() {
@@ -2735,7 +2909,11 @@ function openCommandPalette() {
   if (input) input.value = '';
   renderCommandList('');
   if (typeof dlg.showModal === 'function') {
-    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+    try {
+      dlg.showModal();
+    } catch {
+      dlg.setAttribute('open', '');
+    }
   } else {
     dlg.setAttribute('open', '');
   }
@@ -2747,7 +2925,11 @@ function closeCommandPalette() {
   const dlg = $('#command-palette');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
-    try { dlg.close(); } catch { dlg.removeAttribute('open'); }
+    try {
+      dlg.close();
+    } catch {
+      dlg.removeAttribute('open');
+    }
   } else {
     dlg.removeAttribute('open');
   }
@@ -2758,7 +2940,11 @@ function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.showModal === 'function') {
-    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+    try {
+      dlg.showModal();
+    } catch {
+      dlg.setAttribute('open', '');
+    }
   } else {
     dlg.setAttribute('open', '');
   }
@@ -2769,7 +2955,11 @@ function closeShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
-    try { dlg.close(); } catch { dlg.removeAttribute('open'); }
+    try {
+      dlg.close();
+    } catch {
+      dlg.removeAttribute('open');
+    }
   } else {
     dlg.removeAttribute('open');
   }

@@ -991,7 +991,7 @@ input.error {
 }
 #cmd-list li:hover,
 #cmd-list li.selected,
-#cmd-list li[aria-selected="true"] {
+#cmd-list li[aria-selected='true'] {
   background: var(--ktheme-bg);
   color: var(--ktheme-accent);
 }

@@ -50,7 +50,10 @@ test('index.html contains dlg-templates with correct ARIA accessibility attribut
   const htmlPath = path.join(__dirname, '../index.html');
   const html = fs.readFileSync(htmlPath, 'utf8');
 
-  assert.match(html, /<dialog\s+id="dlg-templates"\s+aria-labelledby="dlg-templates-title"(\s+class="[^"]*")?>/);
+  assert.match(
+    html,
+    /<dialog\s+id="dlg-templates"\s+aria-labelledby="dlg-templates-title"(\s+class="[^"]*")?>/
+  );
   assert.match(html, /<h2\s+id="dlg-templates-title">Choose a Starter Template<\/h2>/);
   assert.match(
     html,

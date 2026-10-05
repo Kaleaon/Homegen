@@ -422,9 +422,7 @@ export class KTab extends BaseElement {
   _syncAttributes() {
     if (!this._btn) return;
     const isActive =
-      this.hasAttribute('active') ||
-      this.hasAttribute('selected') ||
-      this.classList.contains('on');
+      this.hasAttribute('active') || this.hasAttribute('selected') || this.classList.contains('on');
     this._btn.classList.toggle('on', isActive);
     this._btn.disabled = this.hasAttribute('disabled');
   }
