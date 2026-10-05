@@ -117,3 +117,15 @@ test('Serve MJS: Serves compiled distribution stylesheet cleanly', async () => {
     server.close();
   }
 });
+
+test('Build Pipeline: resolves web/css/tokens.css when KTHEME_TOKENS_PATH is unassigned', () => {
+  const stdout = execSync('node scripts/build-css.mjs', {
+    cwd: webDir,
+    encoding: 'utf8',
+    env: { ...process.env, KTHEME_TOKENS_PATH: '' },
+  });
+  assert.ok(
+    stdout.includes('CSS compiled successfully!'),
+    'build-css compiles successfully standalone'
+  );
+});

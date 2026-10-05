@@ -34,6 +34,10 @@
   outline: none;
 }
 button:focus-visible,
+k-button:focus-visible,
+k-tab:focus-visible,
+k-card:focus-visible,
+k-input:focus-visible,
 select:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -44,6 +48,12 @@ a:focus-visible {
   outline-offset: var(--focus-ring-offset);
   position: relative;
   z-index: 1;
+}
+k-button,
+k-tab,
+k-card,
+k-input {
+  display: inline-block;
 }
 * {
   box-sizing: border-box;
