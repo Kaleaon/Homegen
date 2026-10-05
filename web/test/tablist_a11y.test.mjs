@@ -24,22 +24,22 @@ test('index.html tablist markup contains required WAI-ARIA roles, labels, and ta
   // Tab buttons check
   assert.match(
     htmlContent,
-    /<button\s+id="tab-build"\s+data-tab="build"\s+class="on"\s+role="tab"\s+aria-selected="true"\s+aria-controls="palette"\s+tabindex="0">Build<\/button>/,
+    /<(button|k-tab)\s+id="tab-build"\s+data-tab="build"\s+(active\s+)?class="on"\s+role="tab"\s+aria-selected="true"\s+aria-controls="palette"\s+tabindex="0">Build<\/(button|k-tab)>/,
     'tab-build must have role="tab", aria-selected="true", aria-controls="palette", tabindex="0"'
   );
   assert.match(
     htmlContent,
-    /<button\s+id="tab-buy"\s+data-tab="buy"\s+role="tab"\s+aria-selected="false"\s+aria-controls="palette"\s+tabindex="-1">Buy<\/button>/,
+    /<(button|k-tab)\s+id="tab-buy"\s+data-tab="buy"\s+role="tab"\s+aria-selected="false"\s+aria-controls="palette"\s+tabindex="-1">Buy<\/(button|k-tab)>/,
     'tab-buy must have role="tab", aria-selected="false", aria-controls="palette", tabindex="-1"'
   );
   assert.match(
     htmlContent,
-    /<button\s+id="tab-paint"\s+data-tab="paint"\s+role="tab"\s+aria-selected="false"\s+aria-controls="palette"\s+tabindex="-1">Paint<\/button>/,
+    /<(button|k-tab)\s+id="tab-paint"\s+data-tab="paint"\s+role="tab"\s+aria-selected="false"\s+aria-controls="palette"\s+tabindex="-1">Paint<\/(button|k-tab)>/,
     'tab-paint must have role="tab", aria-selected="false", aria-controls="palette", tabindex="-1"'
   );
   assert.match(
     htmlContent,
-    /<button\s+id="tab-kits"\s+data-tab="kits"\s+role="tab"\s+aria-selected="false"\s+aria-controls="palette"\s+tabindex="-1">Kits<\/button>/,
+    /<(button|k-tab)\s+id="tab-kits"\s+data-tab="kits"\s+role="tab"\s+aria-selected="false"\s+aria-controls="palette"\s+tabindex="-1">Kits<\/(button|k-tab)>/,
     'tab-kits must have role="tab", aria-selected="false", aria-controls="palette", tabindex="-1"'
   );
 
