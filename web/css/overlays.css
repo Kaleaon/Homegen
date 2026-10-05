@@ -88,3 +88,61 @@
   overflow: auto;
   text-align: center;
 }
+
+/* 5. Branding & Stamp Builder Overlay Styles */
+.branding-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--overlay-border);
+  padding-bottom: 10px;
+  margin-bottom: 16px;
+}
+
+.branding-tabs .tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 12px;
+  color: var(--overlay-color);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.branding-tabs .tab-btn.on,
+.branding-tabs .tab-btn[aria-selected='true'] {
+  background: var(--ktheme-accent-muted, rgba(79, 70, 229, 0.15));
+  border-color: var(--ktheme-accent, #6366f1);
+  color: #ffffff;
+}
+
+.stamp-builder-grid {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 16px;
+  align-items: start;
+}
+
+.stamp-canvas-wrap {
+  background: #ffffff;
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-sm, 6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  margin-top: 6px;
+}
+
+.logo-preview-box {
+  background: var(--ktheme-bg-muted, rgba(255, 255, 255, 0.05));
+  border: 1px dashed var(--overlay-border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 16px;
+  text-align: center;
+  margin: 12px 0;
+  min-height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

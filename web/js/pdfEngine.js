@@ -2,6 +2,7 @@
 import { jsPDF } from 'jspdf';
 import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
 
 // Standard sheet sizes in points (1 in = 72 pt)
 export const SHEET_SIZES = {
@@ -90,6 +91,22 @@ export function generatePDF(docState, options = {}) {
   const includeTitleBlock = options.includeTitleBlock !== false;
   const includeScaleBar = options.includeScaleBar !== false;
   const includeRoomSchedule = options.includeRoomSchedule !== false;
+
+  // Resolve branding configuration
+  let branding = { logoDataUrl: null, stamp: { enabled: false }, watermark: { enabled: false } };
+  const brandingMode = options.brandingMode || 'project';
+
+  if (brandingMode === 'project') {
+    branding = docState?.settings?.branding || branding;
+  } else if (brandingMode === 'session') {
+    branding = options.sessionBranding || options.branding || branding;
+  } else if (brandingMode === 'none') {
+    branding = { logoDataUrl: null, stamp: { enabled: false }, watermark: { enabled: false } };
+  }
+
+  const incLogo = options.includeLogo !== undefined ? options.includeLogo : true;
+  const incStamp = options.includeStamp !== undefined ? options.includeStamp : true;
+  const incWatermark = options.includeWatermark !== undefined ? options.includeWatermark : true;
 
   let totalPages = 0;
 
@@ -182,6 +199,11 @@ export function generatePDF(docState, options = {}) {
     // Draw Floorplan Vector Geometry
     drawFloorplanVector(pdf, docState, levelRooms, { toPdfX, toPdfY, toPdfDim, scalePt });
 
+    // Draw Diagonal Watermark
+    if (incWatermark && branding.watermark?.enabled !== false && branding.watermark?.text) {
+      drawWatermarkPDF(pdf, branding.watermark, drawingArea);
+    }
+
     // Draw Title Block
     if (includeTitleBlock && titleBlockBox) {
       drawTitleBlock(pdf, titleBlockBox, {
@@ -193,6 +215,21 @@ export function generatePDF(docState, options = {}) {
         scaleLabel: actualRatioStr,
         notes: options.notes || '',
       });
+    }
+
+    // Draw Embedded or Session Logo
+    if (incLogo && branding.logoDataUrl) {
+      drawLogoPDF(pdf, branding.logoDataUrl, borderRect.x + 10, borderRect.y + 10, 75, 28);
+    }
+
+    // Draw Approval Stamp Stencil
+    if (incStamp && branding.stamp?.enabled !== false && branding.stamp) {
+      const stampW = 85;
+      const stampH = 65;
+      const stampX =
+        borderRect.x + borderRect.w - (titleBlockBox ? titleBlockBox.w + stampW + 10 : stampW + 15);
+      const stampY = borderRect.y + borderRect.h - (titleBlockBox ? stampH + 5 : stampH + 15);
+      drawStampPDF(pdf, branding.stamp, stampX, stampY, stampW, stampH);
     }
 
     // Draw Graphic Scale Bar
@@ -813,4 +850,19 @@ function drawRoomSchedulePages(pdf, docState, opts) {
 
   const areaStr = `${totalArea.toFixed(0)} sq ft`;
   pdf.text(areaStr, borderRect.x + 15 + tableWidth - 10, currentY + 12, { align: 'right' });
+}
+
+function drawLogoPDF(pdf, logoDataUrl, x, y, maxW = 75, maxH = 28) {
+  if (!pdf || !logoDataUrl) return;
+  try {
+    let format = 'PNG';
+    if (logoDataUrl.startsWith('data:image/jpeg') || logoDataUrl.startsWith('data:image/jpg')) {
+      format = 'JPEG';
+    } else if (logoDataUrl.startsWith('data:image/webp')) {
+      format = 'WEBP';
+    }
+    pdf.addImage(logoDataUrl, format, x, y, maxW, maxH);
+  } catch (err) {
+    console.warn('Failed to draw logo in PDF:', err);
+  }
 }
