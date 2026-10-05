@@ -17,7 +17,6 @@ import {
   OPENING_BY_ID,
   ROOM_TYPES,
   ROOM_KIT_BY_ID,
-  FURNITURE_KITS,
 } from './catalog.js';
 
 export function newState() {
@@ -26,7 +25,6 @@ export function newState() {
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));
 export const nid = (state, p) => `${p}${state.nextId++}`;
-export const roomById = (state, id) => state.rooms.find((r) => r.id === id);
 
 export function createRoom(state, type, x, y, w, h, opts = {}) {
   const room = {
@@ -179,19 +177,6 @@ export function placeRoomKit(state, kitId, x, y, level = 0) {
   return room;
 }
 
-/** Furnish an existing room from a furniture kit; items that would not fit are skipped by the caller's validation. */
-export function placeFurnitureKit(state, kitId, room) {
-  const kit = FURNITURE_KITS.find((k) => k.id === kitId);
-  const walls = [...WALLS].sort((a, b) => wallLength(room, b) - wallLength(room, a));
-  const longest = walls[0];
-  const resolve = (w) =>
-    w === 'longest' ? longest : w === 'opposite-longest' ? OPPOSITE[longest] : w;
-  const added = [];
-  for (const spec of kit.items)
-    added.push(placeFromSpec(state, room, { ...spec, wall: resolve(spec.wall) }));
-  return added;
-}
-
 // ---- persistence ----
 export function applyWallFinish(state, finishId, { scope = 'single', room, wall, level = 0 } = {}) {
   if (scope === 'plan') {
@@ -203,16 +188,6 @@ export function applyWallFinish(state, finishId, { scope = 'single', room, wall,
     if (room) for (const w of WALLS) room.walls[w] = finishId;
   } else {
     if (room && wall) room.walls[wall] = finishId;
-  }
-}
-
-export function applyCladding(state, finishId, { scope = 'single', room, level = 0 } = {}) {
-  if (scope === 'plan') {
-    for (const r of state.rooms) r.cladding = finishId;
-  } else if (scope === 'level') {
-    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) r.cladding = finishId;
-  } else {
-    if (room) room.cladding = finishId;
   }
 }
 
@@ -478,14 +453,6 @@ export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
       obj.offset = Math.max(0, Math.min(len - obj.width, localY));
     }
   }
-}
-
-export function setItemsPosition(state, hit, targetX, targetY) {
-  const b = getBounds(state, hit.obj.id);
-  if (!b) return;
-  const cx = targetX + b.w / 2;
-  const cy = targetY + b.h / 2;
-  setItemPosition(state, hit, cx, cy);
 }
 
 export function alignItems(state, ids, alignment) {
