@@ -233,7 +233,16 @@
     <button value="close" aria-label="Close command palette"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body cmd-body">
-    <input id="cmd-search" type="text" placeholder="Type a command or search..." aria-label="Search commands" autocomplete="off">
+    <input id="cmd-search"
+           type="text"
+           placeholder="Type a command or search..."
+           aria-label="Search commands"
+           role="combobox"
+           aria-autocomplete="list"
+           aria-expanded="false"
+           aria-controls="cmd-list"
+           aria-haspopup="listbox"
+           autocomplete="off">
     <ul id="cmd-list" role="listbox" aria-label="Commands"></ul>
   </div>
 </dialog>

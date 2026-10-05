@@ -2915,7 +2915,10 @@ function openCommandPalette() {
   if (!dlg) return;
   const input = $('#cmd-search');
   selectedCmdIndex = 0;
-  if (input) input.value = '';
+  if (input) {
+    input.value = '';
+    input.setAttribute('aria-expanded', 'true');
+  }
   renderCommandList('');
   if (typeof dlg.showModal === 'function') {
     try {
@@ -2933,6 +2936,11 @@ function openCommandPalette() {
 function closeCommandPalette() {
   const dlg = $('#command-palette');
   if (!dlg) return;
+  const input = $('#cmd-search');
+  if (input) {
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
   if (typeof dlg.close === 'function') {
     try {
       dlg.close();
@@ -2992,18 +3000,24 @@ function renderCommandList(query = '') {
     selectedCmdIndex = Math.max(0, filteredCommands.length - 1);
   }
 
+  const searchInput = $('#cmd-search');
+
   if (filteredCommands.length === 0) {
     listEl.innerHTML = `<li class="cmd-no-results">No matching commands found</li>`;
+    if (searchInput) {
+      searchInput.removeAttribute('aria-activedescendant');
+    }
     return;
   }
 
   listEl.innerHTML = filteredCommands
     .map((cmd, idx) => {
       const isSelected = idx === selectedCmdIndex;
+      const optionId = `cmd-option-${idx}`;
       const kbdHtml = cmd.shortcut
         ? `<span class="keys"><kbd>${esc(cmd.shortcut)}</kbd></span>`
         : '';
-      return `<li data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
+      return `<li id="${optionId}" data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
         <div class="cmd-item-main">
           <span class="cmd-name">${esc(cmd.name)}</span>
           <span class="cmd-category">${esc(cmd.category)}</span>
@@ -3012,6 +3026,18 @@ function renderCommandList(query = '') {
       </li>`;
     })
     .join('');
+
+  if (searchInput) {
+    if (
+      filteredCommands.length > 0 &&
+      selectedCmdIndex >= 0 &&
+      selectedCmdIndex < filteredCommands.length
+    ) {
+      searchInput.setAttribute('aria-activedescendant', `cmd-option-${selectedCmdIndex}`);
+    } else {
+      searchInput.removeAttribute('aria-activedescendant');
+    }
+  }
 
   listEl.querySelectorAll('li[data-cmd-idx]').forEach((li) => {
     li.addEventListener('click', () => {
@@ -3030,6 +3056,12 @@ function renderCommandList(query = '') {
 }
 
 function initCommandPaletteUI() {
+  const dlg = $('#command-palette');
+  if (dlg) {
+    dlg.addEventListener('close', () => {
+      closeCommandPalette();
+    });
+  }
   const searchInput = $('#cmd-search');
   if (searchInput) {
     searchInput.addEventListener('input', (e) => {
