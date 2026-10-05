@@ -330,3 +330,71 @@ export function clearPresetCaches() {
   presetMaterialCache.clear();
 }
 
+const ALLOWED_TILE_PRESETS = [12, 24, 48, 96];
+
+/**
+ * Register a custom wall finish image definition into WALL_FINISHES and WALL_BY_ID.
+ * Restricts tileInches to preset values (12, 24, 48, 96), defaulting to 24.
+ * Optionally synchronizes state.customFinishes for plan file serialization.
+ */
+export function registerCustomWallFinish(specOrId, maybeSpec, maybeState) {
+  let id, spec, state;
+  if (typeof specOrId === 'string') {
+    id = specOrId;
+    spec = maybeSpec || {};
+    state = maybeState;
+  } else {
+    spec = specOrId || {};
+    id = spec.id;
+    state = maybeSpec;
+  }
+
+  if (!id) {
+    id = 'custom_mat_' + Math.random().toString(36).substring(2, 9);
+  }
+
+  let tileInches = Number(spec.tileInches);
+  if (!ALLOWED_TILE_PRESETS.includes(tileInches)) {
+    tileInches = 24;
+  }
+
+  const finishDef = {
+    id,
+    name: spec.name || 'Custom Material',
+    dataUrl: spec.dataUrl || '',
+    tileInches,
+    pattern: 'custom',
+    c1: spec.c1 || '#d0d0d0',
+    wet: spec.wet ?? true,
+    isCustom: true,
+  };
+
+  const existingIndex = WALL_FINISHES.findIndex((f) => f.id === id);
+  if (existingIndex >= 0) {
+    Object.assign(WALL_FINISHES[existingIndex], finishDef);
+    WALL_BY_ID[id] = WALL_FINISHES[existingIndex];
+  } else {
+    WALL_FINISHES.push(finishDef);
+    WALL_BY_ID[id] = finishDef;
+  }
+
+  if (state && Array.isArray(state.customFinishes)) {
+    const stateIdx = state.customFinishes.findIndex((f) => f.id === id);
+    if (stateIdx >= 0) {
+      state.customFinishes[stateIdx] = { ...finishDef };
+    } else {
+      state.customFinishes.push({ ...finishDef });
+    }
+  }
+
+  return WALL_BY_ID[id];
+}
+
+export function getCachedPresetMaterial(key, createFn) {
+  if (presetMaterialCache.has(key)) {
+    return presetMaterialCache.get(key);
+  }
+  const mat = createFn();
+  presetMaterialCache.set(key, mat);
+  return mat;
+}

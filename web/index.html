@@ -96,6 +96,36 @@
     <section id="compliance"></section>
   </aside>
 </main>
+<dialog id="dlg-custom-material" aria-labelledby="dlg-custom-mat-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-custom-mat-title">Add Custom Material</h2>
+    <button value="close" aria-label="Close custom material modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Upload a custom wallpaper or texture image and choose a tile density preset.</p>
+    <div class="row">
+      <label for="custom-mat-name">Material Name</label>
+      <input id="custom-mat-name" type="text" placeholder="e.g. Custom Wallpaper" />
+    </div>
+    <div class="row">
+      <label for="custom-mat-file">Texture Image</label>
+      <input id="custom-mat-file" type="file" accept="image/*" />
+    </div>
+    <div class="row">
+      <label for="custom-mat-density">Tile Density Preset</label>
+      <select id="custom-mat-density">
+        <option value="12">Small Tile (12 inches)</option>
+        <option value="24" selected>Medium Tile (24 inches)</option>
+        <option value="48">Large Tile (48 inches)</option>
+        <option value="96">Extra Large Tile (96 inches)</option>
+      </select>
+    </div>
+    <div class="btns" style="margin-top:16px">
+      <button id="btn-save-custom-material" class="primary" type="button">Save Material</button>
+      <button id="btn-cancel-custom-material" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="dlg-templates" aria-labelledby="dlg-templates-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
     <h2 id="dlg-templates-title">Choose a Starter Template</h2>

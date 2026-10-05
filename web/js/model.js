@@ -18,9 +18,10 @@ import {
   ROOM_TYPES,
   ROOM_KIT_BY_ID,
 } from './catalog.js';
+import { registerCustomWallFinish } from './presetRegistry.js';
 
 export function newState() {
-  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [], background: null };
+  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [], background: null, customFinishes: [] };
 }
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));
@@ -250,12 +251,16 @@ export function deserialize(text) {
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
   s.background = s.background || null;
+  s.customFinishes = s.customFinishes || [];
   for (const r of s.rooms) {
     r.openings ||= [];
     r.items ||= [];
     r.level ||= 0;
   }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
+  for (const finish of s.customFinishes) {
+    registerCustomWallFinish(finish, s);
+  }
   return s;
 }
 
