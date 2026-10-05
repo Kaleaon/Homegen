@@ -490,3 +490,31 @@ test('bulk applying dry finishes triggers code compliance auto-fixes when auto-c
   // Dry wallpaper in bathroom should be auto-fixed to moisture-rated wall tile/paint
   assert.ok(Object.values(bathAfter.walls).every((w) => w !== 'wp_floral'));
 });
+
+test('autoComply with targetId remediates only the targeted violation', () => {
+  const s = m.newState();
+  // Room 1 has low ceiling (72 in)
+  const room1 = m.createRoom(s, 'living', 0, 0, 144, 144, { ceiling: 72 });
+  // Room 2 (bathroom) has non-wet floor finish
+  const room2 = m.createRoom(s, 'bathroom', 200, 0, 144, 144, { floor: 'wood_oak' });
+
+  // Initial evaluation shows violations in both rooms
+  const rep0 = c.evaluate(s);
+  assert.ok(rep0.violations.some((v) => v.rule === 'ceiling' && v.roomId === room1.id));
+  assert.ok(rep0.violations.some((v) => v.rule === 'wet-floor' && v.roomId === room2.id));
+
+  // Auto-comply targeting room1 ceiling only
+  const log = c.autoComply(s, { targetId: `ceiling:${room1.id}` });
+  assert.ok(log.length > 0);
+  assert.ok(log.some((d) => d.id === room1.id && d.type === 'ceiling'));
+
+  // Room 1 ceiling is raised to 96
+  assert.equal(s.rooms.find((r) => r.id === room1.id).ceiling, 96);
+  // Room 2 floor finish was NOT remediated yet
+  assert.equal(s.rooms.find((r) => r.id === room2.id).floor, 'wood_oak');
+
+  // Now target room2 floor
+  const log2 = c.autoComply(s, { targetId: room2.id });
+  assert.ok(log2.some((d) => d.id === room2.id && d.type === 'floor'));
+  assert.equal(s.rooms.find((r) => r.id === room2.id).floor, 'floor_tile_gray');
+});

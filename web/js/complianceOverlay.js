@@ -206,6 +206,7 @@ export class ComplianceOverlayScene {
     const levelRooms = (state.rooms || []).filter((r) => (r.level || 0) === curLevel);
 
     const nextNodes = [];
+    const fixBadgeCounts = new Map();
 
     // 1. Compile violation nodes
     if (report && report.violations) {
@@ -241,6 +242,25 @@ export class ComplianceOverlayScene {
         }
 
         if (bounds) {
+          const isFixable = !!v.fixable;
+          let fixButtonBounds = null;
+          if (isFixable) {
+            const btnW = 36;
+            const btnH = 16;
+            const key = `${Math.round(bounds.x)},${Math.round(bounds.y)},${Math.round(bounds.w)},${Math.round(bounds.h)}`;
+            const idx = fixBadgeCounts.get(key) || 0;
+            fixBadgeCounts.set(key, idx + 1);
+
+            const fx =
+              bounds.w >= btnW + 8
+                ? bounds.x + bounds.w - btnW - 4
+                : bounds.x + (bounds.w - btnW) / 2;
+            const fy =
+              bounds.w >= btnW + 8
+                ? bounds.y + 4 + idx * (btnH + 4)
+                : bounds.y - btnH - 2 - idx * (btnH + 4);
+            fixButtonBounds = { x: fx, y: fy, w: btnW, h: btnH };
+          }
           nextNodes.push(
             new SpatialOverlayNode(`node:violation:${v.id}`, 'violation', bounds, {
               violation: v,
@@ -248,6 +268,8 @@ export class ComplianceOverlayScene {
               message: v.msg,
               ref: v.ref,
               targetId,
+              fixable: isFixable,
+              fixButtonBounds,
             })
           );
         }
@@ -499,6 +521,22 @@ export class ComplianceOverlayScene {
       const dx = point.x - n.bounds.x;
       const dy = point.y - n.bounds.y;
       if (Math.hypot(dx, dy) <= tol + 4) return n;
+    }
+
+    // Test violation fix buttons (topmost first)
+    const violationNodes = this.getNodesByType('violation');
+    for (let i = violationNodes.length - 1; i >= 0; i--) {
+      const n = violationNodes[i];
+      const fb = n.data?.fixButtonBounds;
+      if (
+        fb &&
+        point.x >= fb.x &&
+        point.x <= fb.x + fb.w &&
+        point.y >= fb.y &&
+        point.y <= fb.y + fb.h
+      ) {
+        return n;
+      }
     }
 
     // Test egress badges
