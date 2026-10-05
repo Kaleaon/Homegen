@@ -98,6 +98,23 @@ test('index.html contains required markup for command palette and shortcut overl
     'index.html must contain dialog id="command-palette"'
   );
   assert.ok(html.includes('id="cmd-search"'), 'index.html must contain input id="cmd-search"');
+  assert.ok(html.includes('role="combobox"'), 'index.html #cmd-search must have role="combobox"');
+  assert.ok(
+    html.includes('aria-autocomplete="list"'),
+    'index.html #cmd-search must have aria-autocomplete="list"'
+  );
+  assert.ok(
+    html.includes('aria-expanded="false"'),
+    'index.html #cmd-search must have aria-expanded="false"'
+  );
+  assert.ok(
+    html.includes('aria-controls="cmd-list"'),
+    'index.html #cmd-search must have aria-controls="cmd-list"'
+  );
+  assert.ok(
+    html.includes('aria-haspopup="listbox"'),
+    'index.html #cmd-search must have aria-haspopup="listbox"'
+  );
   assert.ok(html.includes('id="cmd-list"'), 'index.html must contain list id="cmd-list"');
   assert.ok(
     html.includes('id="shortcut-overlay"'),
@@ -264,5 +281,90 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
     cmdPalette.open,
     true,
     'Cmd+K should open command palette even when focus is in INPUT'
+  );
+});
+
+test('command palette manages aria-expanded and aria-activedescendant dynamically', async () => {
+  const elements = {};
+  const getEl = (id) => {
+    if (!elements[id]) elements[id] = createMockElement(id);
+    return elements[id];
+  };
+
+  const cmdPalette = getEl('command-palette');
+  const cmdSearch = getEl('cmd-search');
+  const cmdList = getEl('cmd-list');
+
+  global.window = {
+    addEventListener: () => {},
+    navigator: { userAgent: 'node' },
+    atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
+  };
+  global.document = {
+    activeElement: createMockElement('body', 'BODY'),
+    getElementById: (id) => getEl(id),
+    querySelector: (s) => getEl(s.replace(/^#/, '')),
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+  };
+
+  await import(`../js/app.js?t=${Date.now() + 2}`);
+
+  const homegen = global.window.__homegen;
+
+  // Initially aria-expanded shouldn't be 'true'
+  assert.notEqual(cmdSearch.getAttribute('aria-expanded'), 'true');
+
+  // Open command palette
+  homegen.openCommandPalette();
+  assert.equal(
+    cmdSearch.getAttribute('aria-expanded'),
+    'true',
+    'openCommandPalette must set aria-expanded="true" on #cmd-search'
+  );
+  assert.equal(
+    cmdSearch.getAttribute('aria-activedescendant'),
+    'cmd-option-0',
+    'openCommandPalette must set aria-activedescendant="cmd-option-0" when rendering default list'
+  );
+  assert.ok(
+    cmdList.innerHTML.includes('id="cmd-option-0"'),
+    'Rendered option <li> must have id="cmd-option-0"'
+  );
+
+  // Search for zero results
+  cmdSearch.value = 'nonexistentcommand12345';
+  homegen.renderCommandList(cmdSearch.value);
+  assert.equal(
+    cmdSearch.getAttribute('aria-activedescendant'),
+    undefined,
+    'Zero results must remove aria-activedescendant attribute'
+  );
+
+  // Search for matching result
+  cmdSearch.value = 'save';
+  homegen.renderCommandList(cmdSearch.value);
+  assert.equal(
+    cmdSearch.getAttribute('aria-activedescendant'),
+    'cmd-option-0',
+    'Matching search must set aria-activedescendant="cmd-option-0"'
+  );
+  assert.ok(
+    cmdList.innerHTML.includes('id="cmd-option-0"'),
+    'Option must have unique id attribute matching option index'
+  );
+
+  // Close command palette
+  homegen.closeCommandPalette();
+  assert.equal(
+    cmdSearch.getAttribute('aria-expanded'),
+    'false',
+    'closeCommandPalette must set aria-expanded="false" on #cmd-search'
+  );
+  assert.equal(
+    cmdSearch.getAttribute('aria-activedescendant'),
+    undefined,
+    'closeCommandPalette must remove aria-activedescendant'
   );
 });
