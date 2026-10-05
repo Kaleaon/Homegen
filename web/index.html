@@ -21,6 +21,7 @@
   <k-button id="sample">Sample home</k-button>
   <k-button id="new">New</k-button>
   <k-button id="save">Save</k-button>
+  <k-button id="save-zip" title="Export composite ZIP archive with embedded textures">Save ZIP</k-button>
   <k-button id="load">Open</k-button>
   <k-button id="import-blueprint">Import Blueprint</k-button>
   <k-button id="png">PNG</k-button>
@@ -29,7 +30,7 @@
   <k-button id="export-pdf">Export PDF</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="report">Code report</k-button>
-  <input type="file" id="file" accept="application/json" hidden>
+  <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden>
   <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
 </header>
 <main>
@@ -451,7 +452,7 @@
     </div>
   </div>
 </dialog>
-<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","jspdf":"./vendor/jspdf/jspdf.es.min.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
