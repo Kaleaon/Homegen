@@ -54,6 +54,15 @@ import {
   TEMPLATE_BY_ID,
   renderTemplatePreviewSVG,
 } from './templates.js';
+import {
+  getOnboardingStatus,
+  setOnboardingStatus,
+  resetOnboardingStatus,
+  OnboardingTour,
+  checkOnboardingOnStartup,
+} from './onboardingTour.js';
+
+const onboardingTour = new OnboardingTour();
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -2798,6 +2807,10 @@ if (typeof window !== 'undefined') {
   resize();
   refresh();
   if (doc.rooms.length) fit();
+
+  checkOnboardingOnStartup(() => {
+    openWelcomeWizard();
+  });
 }
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -2957,6 +2970,68 @@ $('#calib-close')?.addEventListener('click', () => {
   setTool({ kind: 'select' });
   refresh();
 });
+
+function openWelcomeWizard() {
+  const dlg = $('#dlg-welcome');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    try {
+      dlg.showModal();
+    } catch {
+      dlg.setAttribute('open', '');
+    }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+function closeWelcomeWizard() {
+  const dlg = $('#dlg-welcome');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try {
+      dlg.close();
+    } catch {
+      dlg.removeAttribute('open');
+    }
+  } else {
+    dlg.removeAttribute('open');
+  }
+}
+
+if (typeof document !== 'undefined') {
+  const welcomeDlg = $('#dlg-welcome');
+  if (welcomeDlg) {
+    $('#welcome-btn-tour')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      onboardingTour.start();
+    });
+
+    $('#welcome-btn-templates')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      setOnboardingStatus('completed');
+      openTemplatePicker();
+    });
+
+    $('#welcome-btn-blank')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      setOnboardingStatus('skipped');
+    });
+
+    $('#welcome-close')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      if (!getOnboardingStatus()) {
+        setOnboardingStatus('skipped');
+      }
+    });
+
+    welcomeDlg.addEventListener('close', () => {
+      if (!getOnboardingStatus()) {
+        setOnboardingStatus('skipped');
+      }
+    });
+  }
+}
 
 // ------------------------------------------------------------- Command Palette & Shortcut Overlay
 let selectedCmdIndex = 0;
@@ -3169,6 +3244,30 @@ const COMMAND_REGISTRY = [
     category: 'Help',
     shortcut: '?',
     action: () => openShortcutOverlay(),
+  },
+  {
+    id: 'help-tour',
+    name: 'Start Guided Onboarding Tour',
+    category: 'Help',
+    shortcut: '',
+    action: () => onboardingTour.start(),
+  },
+  {
+    id: 'help-welcome',
+    name: 'Show Welcome Wizard',
+    category: 'Help',
+    shortcut: '',
+    action: () => openWelcomeWizard(),
+  },
+  {
+    id: 'help-reset-onboarding',
+    name: 'Reset Onboarding Status',
+    category: 'Help',
+    shortcut: '',
+    action: () => {
+      resetOnboardingStatus();
+      toast('Onboarding status reset.');
+    },
   },
   {
     id: 'setting-autocomply',
@@ -3401,4 +3500,10 @@ if (typeof window !== 'undefined')
     openShortcutOverlay,
     closeShortcutOverlay,
     renderCommandList,
+    onboardingTour,
+    openWelcomeWizard,
+    closeWelcomeWizard,
+    getOnboardingStatus,
+    setOnboardingStatus,
+    resetOnboardingStatus,
   };

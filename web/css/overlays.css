@@ -146,3 +146,224 @@
   align-items: center;
   justify-content: center;
 }
+
+/* 6. Welcome Wizard Modal & Choice Cards */
+.welcome-wizard-dialog {
+  width: min(820px, 94vw);
+}
+
+.welcome-body {
+  padding: 20px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.welcome-tagline {
+  margin: 0;
+  font-size: var(--font-size-md, 14px);
+  color: var(--ktheme-text-muted, #a09a8e);
+  line-height: 1.5;
+}
+
+.welcome-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.welcome-card {
+  background: var(--ktheme-bg-elevated, var(--ktheme-bg-surface, rgba(255, 255, 255, 0.04)));
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-md, 10px);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.welcome-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--ktheme-accent, #2f6f5e);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.welcome-card-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.welcome-card h3 {
+  margin: 0;
+  font-size: var(--font-size-lg, 16px);
+  font-weight: 600;
+  color: var(--ktheme-text, #f3f4f6);
+}
+
+.welcome-card p {
+  margin: 0;
+  font-size: var(--font-size-sm, 12px);
+  color: var(--ktheme-text-muted, #a09a8e);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.welcome-card button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+/* 7. Spotlight Onboarding Overlay & SVG Mask */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.onboarding-svg {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: auto;
+}
+
+.onboarding-mask-path {
+  fill: rgba(12, 14, 20, 0.72);
+  transition: d 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.onboarding-focus-ring {
+  fill: none;
+  stroke: var(--ktheme-accent, #2f6f5e);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 8px var(--ktheme-accent, #2f6f5e));
+  transition:
+    x 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+    y 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 8. Onboarding Spotlight Popover Card */
+.onboarding-popover {
+  position: absolute;
+  z-index: 10001;
+  pointer-events: auto;
+  width: min(360px, 90vw);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--shadow-xl, 0 12px 32px rgba(0, 0, 0, 0.5));
+  transition:
+    left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.spotlight-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.spotlight-badge {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  color: var(--ktheme-accent, #2f6f5e);
+  background: var(--ktheme-accent-container, rgba(47, 111, 94, 0.15));
+  padding: 3px 8px;
+  border-radius: var(--radius-full, 9999px);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.spotlight-close {
+  background: transparent;
+  border: none;
+  color: var(--ktheme-text-muted, #a09a8e);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs, 4px);
+  line-height: 1;
+}
+
+.spotlight-close:hover {
+  color: var(--ktheme-text, #ffffff);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.spotlight-title {
+  margin: 0;
+  font-size: var(--font-size-lg, 16px);
+  font-weight: 600;
+  color: var(--ktheme-text, #ffffff);
+}
+
+.spotlight-desc {
+  margin: 0;
+  font-size: var(--font-size-sm, 13px);
+  color: var(--ktheme-text-muted, #d1d5db);
+  line-height: 1.45;
+}
+
+.spotlight-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.spotlight-nav-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.spotlight-btn {
+  font-size: var(--font-size-sm, 12px);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.spotlight-btn-skip {
+  background: transparent;
+  border: none;
+  color: var(--ktheme-text-muted, #a09a8e);
+  padding-left: 0;
+}
+
+.spotlight-btn-skip:hover {
+  color: var(--ktheme-text, #ffffff);
+  text-decoration: underline;
+}
+
+.spotlight-btn-back {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--overlay-border);
+  color: var(--ktheme-text, #ffffff);
+}
+
+.spotlight-btn-back:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.spotlight-btn-next {
+  background: var(--ktheme-accent, #2f6f5e);
+  border: 1px solid var(--ktheme-accent, #2f6f5e);
+  color: var(--ktheme-on-primary, #ffffff);
+  font-weight: 600;
+}
+
+.spotlight-btn-next:hover {
+  opacity: 0.9;
+}
