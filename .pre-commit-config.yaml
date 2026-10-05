@@ -1,0 +1,39 @@
+repos:
+  - repo: local
+    hooks:
+      - id: eslint-web
+        name: ESLint (web)
+        entry: npx --prefix web eslint
+        language: system
+        files: ^web/.*\.(js|mjs)$
+        exclude: ^web/vendor/
+        pass_filenames: true
+
+      - id: prettier-web
+        name: Prettier (web)
+        entry: npx --prefix web prettier --check
+        language: system
+        files: ^web/.*\.(js|mjs|json|css|html)$
+        exclude: ^web/vendor/
+        pass_filenames: true
+
+      - id: eslint-designer3d
+        name: ESLint (designer3d/tools)
+        entry: npx --prefix designer3d/tools eslint
+        language: system
+        files: ^designer3d/tools/.*\.(js|mjs)$
+        pass_filenames: true
+
+      - id: prettier-designer3d
+        name: Prettier (designer3d/tools)
+        entry: npx --prefix designer3d/tools prettier --check
+        language: system
+        files: ^designer3d/tools/.*\.(js|mjs|json)$
+        pass_filenames: true
+
+      - id: spotless-kotlin
+        name: Spotless Kotlin (app)
+        entry: ./gradlew :app:spotlessCheck
+        language: system
+        files: ^(app/.*\.kt|app/.*\.kts|.*\.gradle\.kts)$
+        pass_filenames: false
