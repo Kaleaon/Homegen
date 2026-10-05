@@ -12,11 +12,92 @@ import com.homegen.styles.model.DesignStyleCategory
  */
 object DesignStyleRepository {
 
-    fun loadCatalog(): DesignStyleCatalog = DesignStyleCatalog(
-        version = 1,
-        styles = allStyles,
-        palettes = allPalettes,
-    )
+    private val _catalogWarnings = mutableListOf<String>()
+
+    val catalogWarnings: List<String>
+        get() = _catalogWarnings.toList()
+
+    /**
+     * Prepends missing `#` characters to 6-digit or 8-digit hex strings and trims whitespace.
+     */
+    fun normalizeHexColor(hex: String): String {
+        val trimmed = hex.trim()
+        if (trimmed.isEmpty()) return trimmed
+        val cleanHex = if (trimmed.startsWith("#")) trimmed.substring(1) else trimmed
+        return if (cleanHex.length == 6 || cleanHex.length == 8) {
+            if (cleanHex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                "#$cleanHex"
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        }
+    }
+
+    /**
+     * Checks if a string is a valid 6-digit or 8-digit hex color.
+     */
+    fun isValidHexColor(hex: String): Boolean {
+        val normalized = normalizeHexColor(hex)
+        if (!normalized.startsWith("#")) return false
+        val raw = normalized.substring(1)
+        return (raw.length == 6 || raw.length == 8) && raw.all {
+            it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F'
+        }
+    }
+
+    /**
+     * Validates and normalizes hex colors for a palette, logging warnings for malformed entries.
+     */
+    fun normalizeAndValidatePalette(palette: ColorPalette): ColorPalette {
+        val normalizedColors = palette.colors.map { color ->
+            val normalized = normalizeHexColor(color)
+            if (!isValidHexColor(normalized)) {
+                val warning = "Malformed hex color '$color' in palette '${palette.id}' (${palette.name})"
+                _catalogWarnings.add(warning)
+                System.err.println("WARNING [DesignStyleRepository]: $warning")
+            }
+            normalized
+        }
+
+        val normalizedAccent = if (palette.accent.isNotBlank()) {
+            val normalized = normalizeHexColor(palette.accent)
+            if (!isValidHexColor(normalized)) {
+                val warning = "Malformed accent color '${palette.accent}' in palette '${palette.id}' (${palette.name})"
+                _catalogWarnings.add(warning)
+                System.err.println("WARNING [DesignStyleRepository]: $warning")
+            }
+            normalized
+        } else {
+            palette.accent
+        }
+
+        return palette.copy(
+            colors = normalizedColors,
+            accent = normalizedAccent,
+        )
+    }
+
+    fun loadCatalog(): DesignStyleCatalog {
+        _catalogWarnings.clear()
+
+        val normalizedPalettesMap = palettes.mapValues { (_, palette) ->
+            normalizeAndValidatePalette(palette)
+        }
+        val normalizedPalettesList = normalizedPalettesMap.values.toList()
+
+        val normalizedStyles = allStyles.map { style ->
+            val normPalette = normalizedPalettesMap[style.id] ?: normalizeAndValidatePalette(style.palette)
+            style.copy(palette = normPalette)
+        }
+
+        return DesignStyleCatalog(
+            version = 1,
+            styles = normalizedStyles,
+            palettes = normalizedPalettesList,
+        )
+    }
 
     fun filterStyles(
         catalog: DesignStyleCatalog,

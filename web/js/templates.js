@@ -82,7 +82,8 @@ export const TEMPLATES = [
     id: 'studio',
     title: 'Studio Apartment',
     dimensions: "25' × 26'",
-    summary: 'Compact open-concept studio with living area, galley kitchen, hallway, and full bath.',
+    summary:
+      'Compact open-concept studio with living area, galley kitchen, hallway, and full bath.',
     createState: buildStudio,
   },
   {
@@ -96,7 +97,8 @@ export const TEMPLATES = [
     id: 'multilevel',
     title: 'Multi-Level Home',
     dimensions: "36' × 28' (2 Floors)",
-    summary: 'Two-story layout with connected stairs, main floor living areas, and upstairs bedrooms.',
+    summary:
+      'Two-story layout with connected stairs, main floor living areas, and upstairs bedrooms.',
     createState: buildMultiLevel,
   },
 ];

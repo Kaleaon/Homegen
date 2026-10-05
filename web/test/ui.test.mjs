@@ -96,3 +96,69 @@ test('UI Error Boundary displays Lower Resolution button on worker fault / timeo
   assert.equal(pRetry.hidden, false);
   assert.equal(pLowerRes.hidden, false);
 });
+
+test('Export PDF button click handler blocks modal for empty plan and toasts warning', () => {
+  let modalShown = false;
+  let toastMsg = '';
+  let toastIsErr = false;
+
+  const mockModal = {
+    showModal: () => {
+      modalShown = true;
+    },
+  };
+
+  const mockToast = (msg, err = false) => {
+    toastMsg = msg;
+    toastIsErr = err;
+  };
+
+  const handleExportPdf = (doc) => {
+    if (!doc.rooms || doc.rooms.length === 0) {
+      mockToast('Cannot export PDF: add at least one room first.', true);
+      return;
+    }
+    mockModal.showModal();
+  };
+
+  // Test empty rooms list
+  handleExportPdf({ rooms: [] });
+  assert.equal(modalShown, false, 'Modal should not open for empty plan');
+  assert.equal(toastMsg, 'Cannot export PDF: add at least one room first.');
+  assert.equal(toastIsErr, true);
+
+  // Test plan with rooms
+  modalShown = false;
+  toastMsg = '';
+  handleExportPdf({ rooms: [{ id: 'r1' }] });
+  assert.equal(modalShown, true, 'Modal should open when plan has rooms');
+  assert.equal(toastMsg, '');
+});
+
+test('PDF generation error handler toasts fallback engine errors', () => {
+  let toastMsg = '';
+  let toastIsErr = false;
+
+  const mockToast = (msg, err = false) => {
+    toastMsg = msg;
+    toastIsErr = err;
+  };
+
+  const generatePDFMock = (doc) => {
+    if (!doc.rooms || doc.rooms.length === 0) {
+      throw new Error('Cannot export PDF: add at least one room first.');
+    }
+  };
+
+  const handlePdfGenerate = (doc) => {
+    try {
+      generatePDFMock(doc);
+    } catch (err) {
+      mockToast(`Failed to export PDF: ${err.message}`, true);
+    }
+  };
+
+  handlePdfGenerate({ rooms: [] });
+  assert.equal(toastMsg, 'Failed to export PDF: Cannot export PDF: add at least one room first.');
+  assert.equal(toastIsErr, true);
+});

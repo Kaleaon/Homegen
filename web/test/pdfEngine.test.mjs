@@ -115,3 +115,20 @@ test('generatePDF automatically paginates room schedule if many rooms present', 
     `PDF with 30 rooms must paginate across at least 3 pages (got ${pageCount})`
   );
 });
+
+test('generatePDF throws error when document has no rooms', () => {
+  assert.throws(() => generatePDF({ rooms: [] }), {
+    name: 'Error',
+    message: 'Cannot export PDF: add at least one room first.',
+  });
+
+  assert.throws(() => generatePDF({ rooms: null }), {
+    name: 'Error',
+    message: 'Cannot export PDF: add at least one room first.',
+  });
+
+  assert.throws(() => generatePDF({}), {
+    name: 'Error',
+    message: 'Cannot export PDF: add at least one room first.',
+  });
+});

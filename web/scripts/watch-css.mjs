@@ -10,9 +10,13 @@ const webRoot = path.resolve(__dirname, '..');
 function resolveTokensPath() {
   const candidates = [
     process.env.KTHEME_TOKENS_PATH,
+    path.resolve(webRoot, 'css/tokens.css'),
+    path.resolve(webRoot, 'tokens.css'),
     '/context/Ktheme/tokens.css',
     path.resolve(webRoot, '../../Ktheme/tokens.css'),
     path.resolve(webRoot, '../Ktheme/tokens.css'),
+    path.resolve(webRoot, 'css/tokens.css'),
+    path.resolve(webRoot, 'tokens.css'),
   ].filter(Boolean);
 
   for (const candidate of candidates) {

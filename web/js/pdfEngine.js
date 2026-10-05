@@ -55,6 +55,10 @@ const fmtLen = (inches) => {
  * Returns a jsPDF document instance.
  */
 export function generatePDF(docState, options = {}) {
+  if (!docState || !docState.rooms || docState.rooms.length === 0) {
+    throw new Error('Cannot export PDF: add at least one room first.');
+  }
+
   const sheetKey = options.pageSize || 'Letter';
   const sheetDef = SHEET_SIZES[sheetKey] || SHEET_SIZES.Letter;
   const orientation = options.orientation === 'portrait' ? 'portrait' : 'landscape';
