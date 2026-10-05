@@ -12,16 +12,19 @@ import {
   wallPoint,
   footprint,
 } from './geometry.js';
-import {
-  ITEM_BY_ID,
-  OPENING_BY_ID,
-  ROOM_TYPES,
-  ROOM_KIT_BY_ID,
-} from './catalog.js';
+import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 
 export function newState() {
-  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [], background: null, customFinishes: [] };
+  return {
+    version: 2,
+    name: 'My home',
+    nextId: 1,
+    levels: 1,
+    rooms: [],
+    background: null,
+    customFinishes: [],
+  };
 }
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));

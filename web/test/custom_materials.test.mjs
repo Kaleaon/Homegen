@@ -10,7 +10,8 @@ test('registerCustomWallFinish appends to WALL_FINISHES and WALL_BY_ID', () => {
   const spec = {
     id: 'test_custom_wallpaper_1',
     name: 'Vintage Damask Wallpaper',
-    dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    dataUrl:
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
     tileInches: 48,
   };
 
@@ -37,7 +38,11 @@ test('registerCustomWallFinish restricts tile density to valid presets (12, 24, 
   const valid96 = registerCustomWallFinish({ id: 'test_tile_96', name: 'Tile 96', tileInches: 96 });
   assert.equal(valid96.tileInches, 96);
 
-  const invalid30 = registerCustomWallFinish({ id: 'test_tile_invalid', name: 'Tile 30', tileInches: 30 });
+  const invalid30 = registerCustomWallFinish({
+    id: 'test_tile_invalid',
+    name: 'Tile 30',
+    tileInches: 30,
+  });
   assert.equal(invalid30.tileInches, 24, 'Invalid tile density must fallback to 24 inches');
 
   const invalidNull = registerCustomWallFinish({ id: 'test_tile_null', name: 'Tile Null' });
@@ -52,7 +57,8 @@ test('Modifying tile density preset updates finish in WALL_BY_ID and syncs acros
     {
       id: 'shared_custom_finish',
       name: 'Custom Oak Panel',
-      dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      dataUrl:
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
       tileInches: 24,
     },
     state
@@ -87,7 +93,8 @@ test('Catalog memory lifecycle: customFinishes serialize in plan and re-register
     {
       id: 'persisted_wallpaper',
       name: 'Persisted Floral Wallpaper',
-      dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      dataUrl:
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
       tileInches: 12,
     },
     state
