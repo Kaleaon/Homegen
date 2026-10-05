@@ -79,7 +79,7 @@
       <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
-    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" hidden>
+    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="status" aria-live="polite" aria-atomic="true" hidden>
       <div class="diff-header">
         <div class="diff-title">
           <span>✨ Auto-Fix Summary</span>
@@ -123,8 +123,8 @@
       <button id="p-horde" class="primary">AI Horde (follows your 3D layout, queued)</button>
     </div>
     <div class="row"><label for="p-key">Horde key</label><input id="p-key" placeholder="0000000000 (anonymous) — free key at aihorde.net"></div>
-    <p id="p-status" class="note"></p>
-    <div id="p-error" class="p-error-box" hidden>
+    <p id="p-status" class="note" role="status" aria-live="polite"></p>
+    <div id="p-error" class="p-error-box" role="alert" aria-live="assertive" hidden>
       <div id="p-error-msg" class="p-error-msg"></div>
       <div id="p-recovery-btns" class="p-recovery-btns">
         <button id="p-retry" class="secondary" type="button" hidden>Retry Render</button>
