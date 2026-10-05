@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postcss from 'postcss';
+import prettier from 'prettier';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +11,8 @@ const webRoot = path.resolve(__dirname, '..');
 function resolveTokensPath() {
   const candidates = [
     process.env.KTHEME_TOKENS_PATH,
+    path.resolve(webRoot, 'css/tokens.css'),
+    path.resolve(webRoot, 'tokens.css'),
     '/context/Ktheme/tokens.css',
     path.resolve(webRoot, '../../Ktheme/tokens.css'),
     path.resolve(webRoot, '../Ktheme/tokens.css'),
@@ -192,7 +195,12 @@ async function build() {
   });
 
   // Combine tokens CSS and transformed application CSS
-  const compiledOutput = `${tokensContent}\n\n/* Application Stylesheet (Compiled) */\n${result.css}`;
+  const rawCompiledOutput = `${tokensContent.trimEnd()}\n\n/* Application Stylesheet (Compiled) */\n${result.css}`;
+  const prettierConfig = (await prettier.resolveConfig(srcCssPath)) || {};
+  const compiledOutput = await prettier.format(rawCompiledOutput, {
+    ...prettierConfig,
+    parser: 'css',
+  });
 
   const distCssPath = path.resolve(webRoot, 'dist/css/style.css');
   const appCssPath = path.resolve(webRoot, 'css/style.css');
