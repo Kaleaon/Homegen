@@ -46,7 +46,12 @@ import {
 import { generatePDF } from './pdfEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
-import { buildMultiLevel, TEMPLATES, TEMPLATE_BY_ID, renderTemplatePreviewSVG } from './templates.js';
+import {
+  buildMultiLevel,
+  TEMPLATES,
+  TEMPLATE_BY_ID,
+  renderTemplatePreviewSVG,
+} from './templates.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
