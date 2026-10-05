@@ -74,6 +74,7 @@ function createMockElement(id = '', tagName = 'DIV') {
         }
       ),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    closest: () => null,
     querySelector: (selector) => {
       if (selector === 'li.selected') {
         return element.selectedLi || null;
@@ -84,7 +85,6 @@ function createMockElement(id = '', tagName = 'DIV') {
       if (element.items) return element.items;
       return [];
     },
-    closest: () => null,
   };
   return element;
 }
@@ -93,10 +93,16 @@ test('index.html contains required markup for command palette and shortcut overl
   const htmlPath = path.join(__dirname, '../index.html');
   const html = fs.readFileSync(htmlPath, 'utf8');
 
-  assert.ok(html.includes('id="command-palette"'), 'index.html must contain dialog id="command-palette"');
+  assert.ok(
+    html.includes('id="command-palette"'),
+    'index.html must contain dialog id="command-palette"'
+  );
   assert.ok(html.includes('id="cmd-search"'), 'index.html must contain input id="cmd-search"');
   assert.ok(html.includes('id="cmd-list"'), 'index.html must contain list id="cmd-list"');
-  assert.ok(html.includes('id="shortcut-overlay"'), 'index.html must contain dialog id="shortcut-overlay"');
+  assert.ok(
+    html.includes('id="shortcut-overlay"'),
+    'index.html must contain dialog id="shortcut-overlay"'
+  );
   assert.ok(html.includes('<kbd>'), 'index.html must contain shortcut kbd badges');
 });
 
@@ -176,7 +182,10 @@ test('command palette query filtering and execution unit test', async () => {
   cmdSearch.value = 'pdf';
   cmdSearch.dispatchEvent({ type: 'input', target: cmdSearch });
 
-  assert.ok(cmdList.innerHTML.includes('Export Scaled Vector PDF'), 'Command list should contain PDF export command when searching "pdf"');
+  assert.ok(
+    cmdList.innerHTML.includes('Export Scaled Vector PDF'),
+    'Command list should contain PDF export command when searching "pdf"'
+  );
 
   // Test ArrowDown and Enter key navigation
   let executed = false;
@@ -234,7 +243,11 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
   assert.ok(keydownFn, 'keydown listener should be attached to window');
 
   keydownFn({ key: '?', preventDefault: () => {} });
-  assert.equal(shortcutOverlay.open, true, '? key should open shortcut overlay modal when outside inputs');
+  assert.equal(
+    shortcutOverlay.open,
+    true,
+    '? key should open shortcut overlay modal when outside inputs'
+  );
 
   // Close shortcut overlay
   homegen.closeShortcutOverlay();
@@ -247,5 +260,9 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
 
   // Press Cmd+K when activeElement is INPUT
   keydownFn({ key: 'k', metaKey: true, preventDefault: () => {} });
-  assert.equal(cmdPalette.open, true, 'Cmd+K should open command palette even when focus is in INPUT');
+  assert.equal(
+    cmdPalette.open,
+    true,
+    'Cmd+K should open command palette even when focus is in INPUT'
+  );
 });

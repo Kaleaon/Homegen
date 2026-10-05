@@ -143,7 +143,7 @@ class ObjLoaderTest {
         assertArrayEquals(
             floatArrayOf(2f, 2f, 2f, 1f, 1f, 1f, 0f, 0f, 0f),
             parsed.positions,
-            0.001f
+            0.001f,
         )
     }
 

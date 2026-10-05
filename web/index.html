@@ -8,35 +8,36 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="dist/css/style.css">
 <link rel="stylesheet" href="css/overlays.css">
+<script type="module" src="js/k-components.js"></script>
 </head>
 <body>
 <header id="top">
   <div class="brand">🏠 Homegen <span>Designer</span></div>
-  <input id="plan-name" aria-label="Plan name" value="My home">
+  <k-input id="plan-name" aria-label="Plan name" value="My home"></k-input>
   <div class="spacer"></div>
-  <button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></button>
-  <button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></button>
+  <k-button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></k-button>
+  <k-button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></k-button>
   <label class="toggle" title="Automatically add the windows, outlets, alarms, doors and finishes the code requires after every edit"><input type="checkbox" id="auto" checked> Auto-comply</label>
-  <button id="sample">Sample home</button>
-  <button id="new">New</button>
-  <button id="save">Save</button>
-  <button id="load">Open</button>
-  <button id="import-blueprint">Import Blueprint</button>
-  <button id="png">PNG</button>
-  <button id="svg-btn">Export SVG</button>
-  <button id="print-btn">Print Sheet</button>
-  <button id="export-pdf">Export PDF</button>
-  <button id="report">Code report</button>
+  <k-button id="sample">Sample home</k-button>
+  <k-button id="new">New</k-button>
+  <k-button id="save">Save</k-button>
+  <k-button id="load">Open</k-button>
+  <k-button id="import-blueprint">Import Blueprint</k-button>
+  <k-button id="png">PNG</k-button>
+  <k-button id="svg-btn">Export SVG</k-button>
+  <k-button id="print-btn">Print Sheet</k-button>
+  <k-button id="export-pdf">Export PDF</k-button>
+  <k-button id="report">Code report</k-button>
   <input type="file" id="file" accept="application/json" hidden>
   <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
 </header>
 <main>
   <aside id="left">
     <nav id="tabs" role="tablist" aria-label="Palette categories">
-      <button id="tab-build" data-tab="build" class="on" role="tab" aria-selected="true" aria-controls="palette" tabindex="0">Build</button>
-      <button id="tab-buy" data-tab="buy" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Buy</button>
-      <button id="tab-paint" data-tab="paint" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Paint</button>
-      <button id="tab-kits" data-tab="kits" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Kits</button>
+      <k-tab id="tab-build" data-tab="build" active class="on" role="tab" aria-selected="true" aria-controls="palette" tabindex="0">Build</k-tab>
+      <k-tab id="tab-buy" data-tab="buy" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Buy</k-tab>
+      <k-tab id="tab-paint" data-tab="paint" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Paint</k-tab>
+      <k-tab id="tab-kits" data-tab="kits" role="tab" aria-selected="false" aria-controls="palette" tabindex="-1">Kits</k-tab>
     </nav>
     <div id="palette" role="tabpanel" tabindex="0" aria-labelledby="tab-build"></div>
   </aside>

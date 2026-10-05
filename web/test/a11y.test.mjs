@@ -11,11 +11,11 @@ const appJsContent = readFileSync(appJsPath, 'utf8');
 test('index.html buttons have accessible names and aria-label / aria-hidden where appropriate', () => {
   assert.match(
     htmlContent,
-    /<button id="undo" [^>]*aria-label="Undo"[^>]*><span aria-hidden="true">↶<\/span><\/button>/
+    /<(button|k-button) id="undo" [^>]*aria-label="Undo"[^>]*><span aria-hidden="true">↶<\/span><\/(button|k-button)>/
   );
   assert.match(
     htmlContent,
-    /<button id="redo" [^>]*aria-label="Redo"[^>]*><span aria-hidden="true">↷<\/span><\/button>/
+    /<(button|k-button) id="redo" [^>]*aria-label="Redo"[^>]*><span aria-hidden="true">↷<\/span><\/(button|k-button)>/
   );
   assert.match(
     htmlContent,
