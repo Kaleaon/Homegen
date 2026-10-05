@@ -22,58 +22,58 @@
   --ktheme-accent-muted: rgba(129, 140, 248, 0.15);
 
   /* Metallic Palette Tokens */
-  --metallic-gold-base: #D4AF37;
-  --metallic-gold-highlight: #FFD700;
-  --metallic-gold-shadow: #856D34;
-  --metallic-gold-shimmer: #FFF8DC;
+  --metallic-gold-base: #d4af37;
+  --metallic-gold-highlight: #ffd700;
+  --metallic-gold-shadow: #856d34;
+  --metallic-gold-shimmer: #fff8dc;
 
-  --metallic-silver-base: #C0C0C0;
-  --metallic-silver-highlight: #F5F5F5;
+  --metallic-silver-base: #c0c0c0;
+  --metallic-silver-highlight: #f5f5f5;
   --metallic-silver-shadow: #505050;
-  --metallic-silver-shimmer: #E5E4E2;
+  --metallic-silver-shimmer: #e5e4e2;
 
-  --metallic-rose-gold-base: #B76E79;
-  --metallic-rose-gold-highlight: #E5BE8A;
-  --metallic-rose-gold-shadow: #7D4A52;
-  --metallic-rose-gold-shimmer: #F5D5D8;
+  --metallic-rose-gold-base: #b76e79;
+  --metallic-rose-gold-highlight: #e5be8a;
+  --metallic-rose-gold-shadow: #7d4a52;
+  --metallic-rose-gold-shimmer: #f5d5d8;
 
   /* MD3 Color Tokens Defaults (Navy Gold Preset) */
-  --ktheme-primary: #D4AF37;
-  --ktheme-on-primary: #0A1630;
-  --ktheme-primary-container: #1E293B;
-  --ktheme-on-primary-container: #F1F5F9;
+  --ktheme-primary: #d4af37;
+  --ktheme-on-primary: #0a1630;
+  --ktheme-primary-container: #1e293b;
+  --ktheme-on-primary-container: #f1f5f9;
 
-  --ktheme-secondary: #94A3B8;
-  --ktheme-on-secondary: #0F172A;
+  --ktheme-secondary: #94a3b8;
+  --ktheme-on-secondary: #0f172a;
   --ktheme-secondary-container: #334155;
-  --ktheme-on-secondary-container: #F8FAFC;
+  --ktheme-on-secondary-container: #f8fafc;
 
-  --ktheme-tertiary: #CBD5E1;
-  --ktheme-on-tertiary: #0F172A;
+  --ktheme-tertiary: #cbd5e1;
+  --ktheme-on-tertiary: #0f172a;
 
-  --ktheme-error: #EF4444;
-  --ktheme-on-error: #FFFFFF;
+  --ktheme-error: #ef4444;
+  --ktheme-on-error: #ffffff;
 
-  --ktheme-background: #0A1630;
-  --ktheme-on-background: #F8FAFC;
+  --ktheme-background: #0a1630;
+  --ktheme-on-background: #f8fafc;
 
-  --ktheme-surface: #0F1D3A;
-  --ktheme-on-surface: #F8FAFC;
-  --ktheme-surface-variant: #1E293B;
-  --ktheme-on-surface-variant: #CBD5E1;
+  --ktheme-surface: #0f1d3a;
+  --ktheme-on-surface: #f8fafc;
+  --ktheme-surface-variant: #1e293b;
+  --ktheme-on-surface-variant: #cbd5e1;
 
   --ktheme-outline: #334155;
-  --ktheme-outline-variant: #1E293B;
+  --ktheme-outline-variant: #1e293b;
 
   /* Semantics */
-  --ktheme-success: #10B981;
-  --ktheme-warning: #F59E0B;
-  --ktheme-info: #3B82F6;
-  --ktheme-critical: #EF4444;
+  --ktheme-success: #10b981;
+  --ktheme-warning: #f59e0b;
+  --ktheme-info: #3b82f6;
+  --ktheme-critical: #ef4444;
 
   /* Typography Tokens */
-  --font-family-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-family-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   --font-size-xs: 11px;
   --font-size-sm: 12px;
@@ -125,7 +125,6 @@
   --shimmer-intensity: 0.8;
 }
 
-
 /* Application Stylesheet (Compiled) */
 :root {
   --bg: #f1eee7;
@@ -163,6 +162,10 @@
   outline: none;
 }
 button:focus-visible,
+k-button:focus-visible,
+k-tab:focus-visible,
+k-card:focus-visible,
+k-input:focus-visible,
 select:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -173,6 +176,12 @@ a:focus-visible {
   outline-offset: var(--focus-ring-offset);
   position: relative;
   z-index: 1;
+}
+k-button,
+k-tab,
+k-card,
+k-input {
+  display: inline-block;
 }
 * {
   box-sizing: border-box;
@@ -981,7 +990,7 @@ input.error {
 }
 #cmd-list li:hover,
 #cmd-list li.selected,
-#cmd-list li[aria-selected="true"] {
+#cmd-list li[aria-selected='true'] {
   background: var(--ktheme-bg);
   color: var(--ktheme-accent);
 }

@@ -330,11 +330,3 @@ export function clearPresetCaches() {
   presetMaterialCache.clear();
 }
 
-export function getCachedPresetMaterial(key, createFn) {
-  if (presetMaterialCache.has(key)) {
-    return presetMaterialCache.get(key);
-  }
-  const mat = createFn();
-  presetMaterialCache.set(key, mat);
-  return mat;
-}
