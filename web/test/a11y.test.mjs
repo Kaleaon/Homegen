@@ -58,3 +58,12 @@ test('renderLevels in app.js includes aria-label and aria-hidden for add-floor a
     /id="del-floor" [^>]*aria-label="Remove top floor"[^>]*><span aria-hidden="true">−<\/span> Floor<\/button>/
   );
 });
+
+test('index.html dynamic status updates and error containers declare ARIA live region and alert attributes', () => {
+  assert.match(
+    htmlContent,
+    /id="diff-drawer" [^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/
+  );
+  assert.match(htmlContent, /id="p-status" [^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(htmlContent, /id="p-error" [^>]*role="alert"[^>]*aria-live="assertive"/);
+});
