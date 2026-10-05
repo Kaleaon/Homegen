@@ -85,7 +85,6 @@ function createMockElement(id = '', tagName = 'DIV') {
       if (element.items) return element.items;
       return [];
     },
-    closest: () => null,
   };
   return element;
 }

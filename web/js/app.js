@@ -2382,7 +2382,10 @@ function switchTab(targetBtn, shouldFocus = false) {
     x.setAttribute('aria-selected', isSelected ? 'true' : 'false');
     x.setAttribute('tabindex', isSelected ? '0' : '-1');
   });
-  const palette = typeof document.getElementById === 'function' ? document.getElementById('palette') : document.querySelector?.('#palette');
+  const palette =
+    typeof document.getElementById === 'function'
+      ? document.getElementById('palette')
+      : document.querySelector?.('#palette');
   if (palette && targetBtn.id) {
     palette.setAttribute('aria-labelledby', targetBtn.id);
   }
