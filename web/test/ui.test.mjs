@@ -162,4 +162,3 @@ test('PDF generation error handler toasts fallback engine errors', () => {
   assert.equal(toastMsg, 'Failed to export PDF: Cannot export PDF: add at least one room first.');
   assert.equal(toastIsErr, true);
 });
-

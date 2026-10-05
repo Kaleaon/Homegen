@@ -87,3 +87,46 @@ test('index.html applies BEM overlay classes to floating elements and replaces i
     '#svg-preview must use k-overlay-card class without inline style'
   );
 });
+
+test('overlays.css defines .k-target-min-size utility class for 24x24px minimum hit targets', () => {
+  const cssPath = path.join(__dirname, '../css/overlays.css');
+  const css = fs.readFileSync(cssPath, 'utf8');
+
+  assert.ok(
+    css.includes('.k-target-min-size'),
+    'overlays.css must define .k-target-min-size utility class'
+  );
+  assert.ok(
+    css.includes('min-width: 24px') || css.includes('min-width:24px'),
+    'overlays.css must set min-width: 24px on min target utility'
+  );
+  assert.ok(
+    css.includes('min-height: 24px') || css.includes('min-height:24px'),
+    'overlays.css must set min-height: 24px on min target utility'
+  );
+});
+
+test('style.css defines .diff-close-btn with 24x24px minimum target size and centered flex alignment', () => {
+  const cssPath = path.join(__dirname, '../css/style.css');
+  const css = fs.readFileSync(cssPath, 'utf8');
+
+  assert.ok(css.includes('.diff-close-btn'), 'style.css must define .diff-close-btn');
+  assert.ok(
+    css.includes('padding: 6px 10px;'),
+    '.diff-close-btn must use expanded padding (6px 10px)'
+  );
+  assert.ok(css.includes('min-width: 24px;'), '.diff-close-btn must set min-width: 24px');
+  assert.ok(css.includes('min-height: 24px;'), '.diff-close-btn must set min-height: 24px');
+  assert.ok(
+    css.includes('display: inline-flex;') || css.includes('display:inline-flex;'),
+    '.diff-close-btn must use display: inline-flex'
+  );
+  assert.ok(
+    css.includes('align-items: center;') || css.includes('align-items:center;'),
+    '.diff-close-btn must use align-items: center'
+  );
+  assert.ok(
+    css.includes('justify-content: center;') || css.includes('justify-content:center;'),
+    '.diff-close-btn must use justify-content: center'
+  );
+});
