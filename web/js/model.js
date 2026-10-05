@@ -12,15 +12,59 @@ import {
   wallPoint,
   footprint,
 } from './geometry.js';
-import {
-  ITEM_BY_ID,
-  OPENING_BY_ID,
-  ROOM_TYPES,
-  ROOM_KIT_BY_ID,
-} from './catalog.js';
+import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
+
+export function defaultBranding() {
+  return {
+    logoDataUrl: null,
+    stamp: {
+      shape: 'circle',
+      titleText: 'APPROVED',
+      subtitleText: 'ARCHITECTURAL PLAN',
+      licenseText: '',
+      dateText: '',
+      borderColor: '#d32f2f',
+      borderStyle: 'solid',
+      textColor: '#d32f2f',
+      opacity: 0.9,
+      enabled: true,
+    },
+    watermark: {
+      text: '',
+      color: '#9e9e9e',
+      opacity: 0.2,
+      fontSize: 24,
+      angle: -45,
+      enabled: true,
+    },
+  };
+}
+
+export function validateLogoSize(dataUrl, maxKb = 500) {
+  if (!dataUrl) return true;
+  const base64Str = dataUrl.split(',')[1] || dataUrl;
+  const sizeInBytes = Math.ceil((base64Str.length * 3) / 4);
+  const maxBytes = maxKb * 1024;
+  if (sizeInBytes > maxBytes) {
+    throw new Error(
+      `Logo asset exceeds maximum allowed size of ${maxKb}KB (${Math.round(sizeInBytes / 1024)}KB)`
+    );
+  }
+  return true;
+}
 
 export function newState() {
-  return { version: 2, name: 'My home', nextId: 1, levels: 1, rooms: [], background: null };
+  return {
+    version: 2,
+    name: 'My home',
+    nextId: 1,
+    levels: 1,
+    rooms: [],
+    background: null,
+    settings: {
+      branding: defaultBranding(),
+    },
+  };
 }
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));
@@ -250,6 +294,32 @@ export function deserialize(text) {
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
   s.background = s.background || null;
+  s.settings ||= {};
+  s.settings.branding = {
+    logoDataUrl: s.settings.branding?.logoDataUrl || null,
+    stamp: {
+      shape: 'circle',
+      titleText: 'APPROVED',
+      subtitleText: 'ARCHITECTURAL PLAN',
+      licenseText: '',
+      dateText: '',
+      borderColor: '#d32f2f',
+      borderStyle: 'solid',
+      textColor: '#d32f2f',
+      opacity: 0.9,
+      enabled: true,
+      ...s.settings.branding?.stamp,
+    },
+    watermark: {
+      text: '',
+      color: '#9e9e9e',
+      opacity: 0.2,
+      fontSize: 24,
+      angle: -45,
+      enabled: true,
+      ...s.settings.branding?.watermark,
+    },
+  };
   for (const r of s.rooms) {
     r.openings ||= [];
     r.items ||= [];
