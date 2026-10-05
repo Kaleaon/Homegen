@@ -14,6 +14,7 @@ function resolveTokensPath() {
     '/context/Ktheme/tokens.css',
     path.resolve(webRoot, '../../Ktheme/tokens.css'),
     path.resolve(webRoot, '../Ktheme/tokens.css'),
+    path.resolve(webRoot, 'css/tokens.css'),
     path.resolve(webRoot, 'tokens.css'),
     path.resolve(webRoot, 'css/tokens.css'),
   ].filter(Boolean);
