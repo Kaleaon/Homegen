@@ -51,7 +51,7 @@ function computeStateHash(state) {
 export class SpatialOverlayNode {
   constructor(id, type, bounds, data = {}) {
     this.id = id;
-    this.type = type; // 'violation' | 'fixtureClearance' | 'egressReach' | 'constraintHandle' | 'dimensionLabel'
+    this.type = type; // 'violation' | 'fixtureClearance' | 'egressReach' | 'constraintHandle' | 'dimensionLabel' | 'activeDragRejection'
     this.bounds = bounds; // { x, y, w, h } or { x, y }
     this.data = data;
     this.visible = data.visible !== false;
@@ -428,6 +428,23 @@ export class ComplianceOverlayScene {
         dimViolations.push('Min dim < 7 ft');
       }
 
+      const roomViolations = (report?.violations || []).filter(
+        (v) =>
+          v.roomId === room.id &&
+          v.severity === 'error' &&
+          (v.rule === 'room_overlap' ||
+            v.rule === 'undersized' ||
+            v.rule === 'room_bounds' ||
+            v.rule === 'min_dim' ||
+            v.blocking)
+      );
+      if (roomViolations.length > 0) {
+        isValid = false;
+        for (const rv of roomViolations) {
+          if (!dimViolations.includes(rv.msg)) dimViolations.push(rv.msg);
+        }
+      }
+
       // Corner handles
       const cornerCoords = [
         { id: 'nw', x: room.x, y: room.y, index: 0 },
@@ -485,6 +502,87 @@ export class ComplianceOverlayScene {
           }
         )
       );
+    }
+
+    // 5. Compile active drag rejection node & conflict indicators during active drag
+    if (drag) {
+      const preview = options.preview || null;
+      const freshViolations = options.freshViolations || preview?.fresh || [];
+      const dragBlocked = preview ? !preview.ok : false;
+
+      let relevantViolations = [...freshViolations];
+      if (report && report.violations) {
+        for (const v of report.violations) {
+          if (v.severity === 'error') {
+            if (
+              (drag.id &&
+                (v.itemId === drag.id || v.openingId === drag.id || v.roomId === drag.id)) ||
+              (drag.kind === 'room-new' && v.roomId)
+            ) {
+              if (!relevantViolations.some((rv) => (rv.id && rv.id === v.id) || rv.msg === v.msg)) {
+                relevantViolations.push(v);
+              }
+            }
+          }
+        }
+      }
+
+      if (dragBlocked || relevantViolations.length > 0) {
+        let rejectionBounds = null;
+        let targetId = drag.id || null;
+
+        if (drag.kind === 'item' && drag.id) {
+          const itemEntry = this.itemIndex.get(drag.id);
+          if (itemEntry) {
+            rejectionBounds = itemEntry.footprint || footprint(itemEntry.item, itemEntry.def);
+          }
+        } else if (drag.kind === 'opening' && drag.id) {
+          const openingEntry = this.openingIndex.get(drag.id);
+          if (openingEntry) {
+            const p = openingEntry.p0;
+            rejectionBounds = {
+              x: p.x - 12,
+              y: p.y - 12,
+              w: openingEntry.opening.width + 24,
+              h: 24,
+            };
+          }
+        } else if ((drag.kind === 'room' || drag.kind === 'resize') && drag.id) {
+          const roomEntry = this.roomIndex.get(drag.id);
+          if (roomEntry) {
+            rejectionBounds = {
+              x: roomEntry.room.x,
+              y: roomEntry.room.y,
+              w: roomEntry.room.w,
+              h: roomEntry.room.h,
+            };
+          }
+        } else if (drag.kind === 'room-new' && drag.rect) {
+          rejectionBounds = { ...drag.rect };
+        }
+
+        if (rejectionBounds) {
+          const mainMsg =
+            relevantViolations.length > 0
+              ? relevantViolations[0].msg || relevantViolations[0]
+              : 'Placement Violation';
+          nextNodes.push(
+            new SpatialOverlayNode(
+              `node:rejection:${drag.kind}:${drag.id || 'new'}`,
+              'activeDragRejection',
+              rejectionBounds,
+              {
+                dragKind: drag.kind,
+                targetId,
+                violations: relevantViolations,
+                message: mainMsg,
+                haloColor: '#e84040',
+                fillColor: 'rgba(232, 64, 64, 0.22)',
+              }
+            )
+          );
+        }
+      }
     }
 
     // Replace current nodes map and list cleanly

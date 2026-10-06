@@ -4,12 +4,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -22,11 +25,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.homegen.templates.data.RoomTemplateRepository
 import com.homegen.templates.model.RoomTemplate
 import com.homegen.templates.model.RoomType
+import com.ktheme.android.LocalKthemeSemanticColors
 
 /**
  * Browsable panel for selecting pre-designed room templates.
@@ -37,6 +42,7 @@ fun RoomTemplatePanel(
     onTemplateSelected: (RoomTemplate) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val kthemeColors = LocalKthemeSemanticColors.current
     var selectedType by remember { mutableStateOf<RoomType?>(null) }
 
     val templates = remember(selectedType) {
@@ -64,7 +70,7 @@ fun RoomTemplatePanel(
                 modifier = Modifier
                     .clickable { onDismiss() }
                     .padding(8.dp),
-                color = MaterialTheme.colorScheme.primary,
+                color = kthemeColors.brand,
                 style = MaterialTheme.typography.labelLarge,
             )
         }
@@ -97,13 +103,67 @@ fun RoomTemplatePanel(
             }
         }
 
-        // Templates list
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(templates, key = { it.id }) { template ->
-                RoomTemplateCard(template = template, onClick = { onTemplateSelected(template) })
+        // Templates list or empty state
+        if (templates.isEmpty()) {
+            EmptyTemplateState(
+                selectedType = selectedType,
+                onResetFilter = { selectedType = null },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            )
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(templates, key = { it.id }) { template ->
+                    RoomTemplateCard(template = template, onClick = { onTemplateSelected(template) })
+                }
             }
+        }
+    }
+}
+
+/**
+ * Centered empty state displayed when template query returns no results.
+ */
+@Composable
+fun EmptyTemplateState(
+    selectedType: RoomType?,
+    onResetFilter: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val message = if (selectedType != null) {
+        val typeName = selectedType.name.lowercase()
+            .replace('_', ' ')
+            .replaceFirstChar { it.uppercase() }
+        "No templates available for $typeName."
+    } else {
+        "No templates available."
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "No Templates Found",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = onResetFilter) {
+            Text("Reset Filter")
         }
     }
 }
@@ -113,6 +173,8 @@ private fun RoomTemplateCard(
     template: RoomTemplate,
     onClick: () -> Unit,
 ) {
+    val kthemeColors = LocalKthemeSemanticColors.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -126,7 +188,7 @@ private fun RoomTemplateCard(
                 text = template.description,
                 modifier = Modifier.padding(top = 4.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = kthemeColors.onCardBackgroundAlt,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -143,21 +205,21 @@ private fun RoomTemplateCard(
                         .replace('_', ' ')
                         .replaceFirstChar { it.uppercase() },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = kthemeColors.brand,
                 )
 
                 // Dimensions
                 Text(
                     text = "${template.widthMeters}m x ${template.depthMeters}m",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = kthemeColors.onCardBackgroundAlt,
                 )
 
                 // Furniture count
                 Text(
                     text = "${template.placements.size} items",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = kthemeColors.onCardBackgroundAlt,
                 )
             }
         }

@@ -32,7 +32,17 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob, getTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
-import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
+import {
+  evaluate,
+  blockingIds,
+  commit,
+  commitSequence,
+  autoComply,
+  getRoomMinBounds,
+  clampRoomWidth,
+  clampRoomDepth,
+  clampRoomDimensions,
+} from './codes.js';
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor, clearPatternCache } from './patterns.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
@@ -473,9 +483,18 @@ function redraw() {
   const state = preview ? preview.next : doc;
   const rep = preview ? evaluate(preview.next) : report;
   const bad = new Set([...badIds(rep)]);
-  complianceScene.update(state, rep, { curLevel, selection, drag, hover, view });
+  complianceScene.update(state, rep, {
+    curLevel,
+    selection,
+    drag,
+    hover,
+    view,
+    preview,
+    freshViolations: preview?.fresh || [],
+  });
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
     dpr,
+    gridSettings: interaction.gridSettings,
     complianceScene,
     snappingBridge,
     bad,
@@ -911,8 +930,8 @@ function renderInspector() {
           )
           .join('')}</select>`
       )}
-      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}">`)}
-      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}">`)}
+      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
+      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
       <div class="btns"><button id="i-del">Delete room</button></div>
 
@@ -994,18 +1013,24 @@ function renderInspector() {
         const r = roomOf(n, room.id);
         if (r.name === ROOM_TYPES[r.type].name) r.name = ROOM_TYPES[e.target.value].name;
         r.type = e.target.value;
+        const clamped = clampRoomDimensions(r, r.w, r.h);
+        M.resizeRoom(r, r.x, r.y, clamped.w, clamped.h);
       })
     );
     $('#i-w').addEventListener('change', (e) =>
       apply((n) => {
         const r = roomOf(n, room.id);
-        M.resizeRoom(r, r.x, r.y, Math.max(36, snap(e.target.value * 12)), r.h);
+        const targetW = snap(e.target.value * 12);
+        const clampedW = clampRoomWidth(r, targetW, r.h);
+        M.resizeRoom(r, r.x, r.y, clampedW, r.h);
       })
     );
     $('#i-h').addEventListener('change', (e) =>
       apply((n) => {
         const r = roomOf(n, room.id);
-        M.resizeRoom(r, r.x, r.y, r.w, Math.max(36, snap(e.target.value * 12)));
+        const targetH = snap(e.target.value * 12);
+        const clampedH = clampRoomDepth(r, targetH, r.w);
+        M.resizeRoom(r, r.x, r.y, r.w, clampedH);
       })
     );
     $('#i-ceil').addEventListener('change', (e) =>
@@ -2010,12 +2035,13 @@ canvas?.addEventListener('pointermove', (e) => {
       const sy = snap(p.y, 6);
       const right = drag.corner % 2 === 1;
       const bottom = drag.corner >= 2;
-      const x0 = right ? r.x : Math.min(sx, r.x + r.w - 36);
-      const y0 = bottom ? r.y : Math.min(sy, r.y + r.h - 36);
-      const x1 = right ? Math.max(sx, r.x + 36) : r.x + r.w;
-      const y1 = bottom ? Math.max(sy, r.y + 36) : r.y + r.h;
-      drag.target = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-      preview = tryPreview((n) => M.resizeRoom(roomOf(n, drag.id), x0, y0, x1 - x0, y1 - y0));
+      const rawW = right ? Math.max(0, sx - r.x) : Math.max(0, r.x + r.w - sx);
+      const rawH = bottom ? Math.max(0, sy - r.y) : Math.max(0, r.y + r.h - sy);
+      const clamped = clampRoomDimensions(r, rawW, rawH);
+      const x0 = right ? r.x : r.x + r.w - clamped.w;
+      const y0 = bottom ? r.y : r.y + r.h - clamped.h;
+      drag.target = { x: x0, y: y0, w: clamped.w, h: clamped.h };
+      preview = tryPreview((n) => M.resizeRoom(roomOf(n, drag.id), x0, y0, clamped.w, clamped.h));
     } else if (drag.kind === 'room-new') {
       const x1 = snap(p.x, 6);
       const y1 = snap(p.y, 6);
@@ -2163,22 +2189,16 @@ canvas?.addEventListener('dblclick', (e) => {
           .map((s) => parseFloat(s.trim()))
           .filter((n) => !isNaN(n) && n > 0);
         if (parts.length >= 1) {
-          const newWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
-          const newHInches =
-            parts.length >= 2
-              ? parts[1] < 30
-                ? Math.round(parts[1] * 12)
-                : Math.round(parts[1])
-              : r.h;
-          apply((n) =>
-            M.resizeRoom(
-              roomOf(n, r.id),
-              r.x,
-              r.y,
-              Math.max(36, newWInches),
-              Math.max(36, newHInches)
-            )
-          );
+          const rawWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
+          let clamped;
+          if (parts.length >= 2) {
+            const rawHInches = parts[1] < 30 ? Math.round(parts[1] * 12) : Math.round(parts[1]);
+            clamped = clampRoomDimensions(r, rawWInches, rawHInches);
+          } else {
+            const clampedW = clampRoomWidth(r, rawWInches, r.h);
+            clamped = { w: clampedW, h: r.h };
+          }
+          apply((n) => M.resizeRoom(roomOf(n, r.id), r.x, r.y, clamped.w, clamped.h));
         }
       }
     }

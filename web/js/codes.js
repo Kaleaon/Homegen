@@ -1647,3 +1647,109 @@ export function commitSequence(state, mutations, opts) {
   }
   return { state: cur, changes, placed, skipped };
 }
+
+// ---------------------------------------------------------------- dynamic room clamping
+
+/**
+ * Returns the minimum clear interior and outer dimensions and required area for a room or room type.
+ * @param {Object|string} roomOrType Room object or type string (e.g. 'bedroom', 'kitchen', 'hallway')
+ * @returns {{ minIntDim: number, minOuterDim: number, minAreaSqFt: number }}
+ */
+export function getRoomMinBounds(roomOrType) {
+  const type = typeof roomOrType === 'string' ? roomOrType : roomOrType?.type;
+  const t = ROOM_TYPES[type] || {};
+
+  if (t.habitable && type !== 'kitchen') {
+    // Habitable rooms (living, bedroom, dining, office): 84" interior clear dimension, 70 sq ft min area
+    return { minIntDim: 84, minOuterDim: 84 + WT, minAreaSqFt: 70 };
+  }
+  if (type === 'kitchen') {
+    // Kitchens: 60" interior clear dimension
+    return { minIntDim: 60, minOuterDim: 60 + WT, minAreaSqFt: 0 };
+  }
+  if (t.circulation || t.stairs) {
+    // Circulation and stairs (hallway, entry, stairs): 36" interior clear dimension
+    return { minIntDim: 36, minOuterDim: 36 + WT, minAreaSqFt: 0 };
+  }
+  // Non-habitable (closet, bathroom, laundry, etc.): 36" outer minimum bound
+  return { minIntDim: 31.5, minOuterDim: 36, minAreaSqFt: 0 };
+}
+
+/**
+ * Clamps outer width to enforce room-type minimum bounds and 70 sq ft area requirement.
+ * @param {Object|string} roomOrType
+ * @param {number} targetW Outer target width in inches
+ * @param {number|null} [currentH=null] Outer current height/depth in inches
+ * @returns {number} Clamped outer width in inches
+ */
+export function clampRoomWidth(roomOrType, targetW, currentH = null) {
+  const bounds = getRoomMinBounds(roomOrType);
+  let minW = bounds.minOuterDim;
+
+  const h = currentH ?? (typeof roomOrType === 'object' ? roomOrType.h : null);
+  if (bounds.minAreaSqFt > 0 && h != null) {
+    const hInt = Math.max(bounds.minIntDim, h - WT);
+    const reqWInt = Math.max(bounds.minIntDim, (bounds.minAreaSqFt * 144 + 1e-4) / hInt);
+    minW = Math.max(minW, reqWInt + WT);
+  }
+
+  const val = Number(targetW);
+  return Math.max(minW, isNaN(val) ? minW : val);
+}
+
+/**
+ * Clamps outer depth/height to enforce room-type minimum bounds and 70 sq ft area requirement.
+ * @param {Object|string} roomOrType
+ * @param {number} targetH Outer target depth in inches
+ * @param {number|null} [currentW=null] Outer current width in inches
+ * @returns {number} Clamped outer depth in inches
+ */
+export function clampRoomDepth(roomOrType, targetH, currentW = null) {
+  const bounds = getRoomMinBounds(roomOrType);
+  let minH = bounds.minOuterDim;
+
+  const w = currentW ?? (typeof roomOrType === 'object' ? roomOrType.w : null);
+  if (bounds.minAreaSqFt > 0 && w != null) {
+    const wInt = Math.max(bounds.minIntDim, w - WT);
+    const reqHInt = Math.max(bounds.minIntDim, (bounds.minAreaSqFt * 144 + 1e-4) / wInt);
+    minH = Math.max(minH, reqHInt + WT);
+  }
+
+  const val = Number(targetH);
+  return Math.max(minH, isNaN(val) ? minH : val);
+}
+
+/**
+ * Clamps outer width and depth together.
+ * @param {Object|string} roomOrType
+ * @param {number} targetW Outer target width in inches
+ * @param {number} targetH Outer target depth in inches
+ * @returns {{ w: number, h: number }} Clamped outer dimensions
+ */
+export function clampRoomDimensions(roomOrType, targetW, targetH) {
+  const bounds = getRoomMinBounds(roomOrType);
+  let w = Math.max(
+    bounds.minOuterDim,
+    isNaN(Number(targetW)) ? bounds.minOuterDim : Number(targetW)
+  );
+  let h = Math.max(
+    bounds.minOuterDim,
+    isNaN(Number(targetH)) ? bounds.minOuterDim : Number(targetH)
+  );
+
+  if (bounds.minAreaSqFt > 0) {
+    let wInt = w - WT;
+    let hInt = h - WT;
+    const areaSqIn = wInt * hInt;
+    const reqAreaSqIn = bounds.minAreaSqFt * 144 + 1e-4;
+    if (areaSqIn < reqAreaSqIn) {
+      const scale = Math.sqrt(reqAreaSqIn / areaSqIn);
+      wInt = wInt * scale;
+      hInt = hInt * scale;
+      w = wInt + WT;
+      h = hInt + WT;
+    }
+  }
+
+  return { w, h };
+}

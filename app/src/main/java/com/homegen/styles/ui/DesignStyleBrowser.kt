@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.homegen.styles.data.DesignStyleRepository
 import com.homegen.styles.model.DesignStyle
 import com.homegen.styles.model.DesignStyleCategory
+import com.ktheme.android.LocalKthemeSemanticColors
 
 /**
  * Full-screen design style browser. Users can browse 20 curated interior
@@ -56,6 +57,8 @@ fun DesignStyleBrowser(
         DesignStyleRepository.filterStyles(catalog, search, selectedCategory)
     }
 
+    val kthemeColors = LocalKthemeSemanticColors.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -73,7 +76,7 @@ fun DesignStyleBrowser(
                 modifier = Modifier
                     .clickable { onDismiss() }
                     .padding(8.dp),
-                color = MaterialTheme.colorScheme.primary,
+                color = kthemeColors.brand,
                 style = MaterialTheme.typography.labelLarge,
             )
         }
@@ -121,6 +124,8 @@ private fun DesignStyleCard(
     style: DesignStyle,
     onClick: () -> Unit,
 ) {
+    val kthemeColors = LocalKthemeSemanticColors.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -139,7 +144,7 @@ private fun DesignStyleCard(
                     Text(
                         text = style.era,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = kthemeColors.onCardBackgroundAlt,
                     )
                 }
             }
@@ -149,7 +154,7 @@ private fun DesignStyleCard(
                 text = style.description,
                 modifier = Modifier.padding(top = 4.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = kthemeColors.onCardBackgroundAlt,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -173,14 +178,14 @@ private fun DesignStyleCard(
                             modifier = Modifier
                                 .size(28.dp)
                                 .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.errorContainer)
-                                .border(1.dp, MaterialTheme.colorScheme.error, CircleShape),
+                                .background(kthemeColors.dangerContainer)
+                                .border(1.dp, kthemeColors.danger, CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 text = "!",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                color = kthemeColors.onDangerContainer,
                             )
                         }
                     }
@@ -199,14 +204,14 @@ private fun DesignStyleCard(
                             modifier = Modifier
                                 .size(28.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.errorContainer)
-                                .border(1.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp)),
+                                .background(kthemeColors.dangerContainer)
+                                .border(1.dp, kthemeColors.danger, RoundedCornerShape(4.dp)),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 text = "!",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                color = kthemeColors.onDangerContainer,
                             )
                         }
                     }
@@ -223,12 +228,12 @@ private fun DesignStyleCard(
                         text = tag,
                         modifier = Modifier
                             .background(
-                                MaterialTheme.colorScheme.secondaryContainer,
+                                kthemeColors.cardBackgroundAlt,
                                 RoundedCornerShape(4.dp),
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        color = kthemeColors.onCardBackgroundAlt,
                     )
                 }
             }

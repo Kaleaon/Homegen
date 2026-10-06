@@ -3,6 +3,7 @@ package com.homegen.styles.ui
 import androidx.compose.ui.graphics.Color
 import com.homegen.styles.data.DesignStyleRepository
 import com.homegen.styles.model.ColorPalette
+import com.ktheme.utils.ColorUtils
 
 /**
  * Helper extension functions and properties on [ColorPalette] to get Compose [Color] instances.
@@ -22,13 +23,7 @@ fun parseHexToColor(hex: String): Color? {
     val normalized = DesignStyleRepository.normalizeHexColor(hex)
     if (!DesignStyleRepository.isValidHexColor(normalized)) return null
     return try {
-        val clean = normalized.substring(1)
-        val colorInt = if (clean.length == 6) {
-            (0xFF000000 or clean.toLong(16)).toInt()
-        } else {
-            clean.toLong(16).toInt()
-        }
-        Color(colorInt)
+        Color(ColorUtils.hexToColorInt(normalized))
     } catch (_: Exception) {
         null
     }
