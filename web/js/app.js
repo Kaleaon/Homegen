@@ -45,7 +45,15 @@ import {
 } from './codes.js';
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor, clearPatternCache } from './patterns.js';
-import { registerCustomWallFinish } from './presetRegistry.js';
+import {
+  registerCustomWallFinish,
+  getWindowPresets,
+  getCladdingPresets,
+  getBuildingPresets,
+  applyBuildingPreset,
+  applyCladdingMaterial,
+  resolveWindowStyle,
+} from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
 import {
@@ -835,8 +843,46 @@ function renderInspector() {
   const selectedList = getSelectionList();
 
   if (selectedList.length === 0) {
-    el.innerHTML =
-      '<h3>Inspector</h3><p class="note" style="margin:0">Select a room, door, window or item to edit it. Shift-click or drag marquee to select multiple. Drag to move; drag room corners to resize; <b>R</b> rotates, <b>Del</b> removes.</p>';
+    const bPresets = getBuildingPresets();
+    const cPresets = getCladdingPresets();
+    el.innerHTML = `<h3>Inspector</h3>
+      <p class="note" style="margin:0 0 10px">Select a room, door, window or item to edit it. Shift-click or drag marquee to select multiple. Drag to move; drag room corners to resize; <b>R</b> rotates, <b>Del</b> removes.</p>
+      <hr style="margin:10px 0;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Building Design & Cladding Presets</h4>
+      ${formRow(
+        'i-plan-bpreset',
+        'Building Preset',
+        `<select id="i-plan-bpreset">${Object.values(bPresets)
+          .map((bp) => `<option value="${bp.key}">${esc(bp.name)}</option>`)
+          .join('')}</select>`
+      )}
+      <div class="btns" style="margin:6px 0 12px">
+        <button id="i-plan-bpreset-apply">Apply Building Preset to Whole Plan</button>
+      </div>
+      ${formRow(
+        'i-plan-cladding',
+        'Exterior Cladding',
+        `<select id="i-plan-cladding">${Object.values(cPresets)
+          .map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)
+          .join('')}</select>`
+      )}
+      <div class="btns" style="margin:6px 0 12px">
+        <button id="i-plan-cladding-apply">Apply Exterior Cladding to Whole Plan</button>
+      </div>`;
+
+    $('#i-plan-bpreset-apply')?.addEventListener('click', () => {
+      const presetKey = $('#i-plan-bpreset')?.value;
+      if (presetKey) {
+        apply((n) => applyBuildingPreset(n, presetKey, { scope: 'plan' }));
+      }
+    });
+
+    $('#i-plan-cladding-apply')?.addEventListener('click', () => {
+      const claddingKey = $('#i-plan-cladding')?.value;
+      if (claddingKey) {
+        apply((n) => applyCladdingMaterial(n, claddingKey, { scope: 'plan' }));
+      }
+    });
     return;
   }
 
@@ -998,6 +1044,37 @@ function renderInspector() {
           </select>
           <button id="i-uv-reset" style="font-size:0.8rem;padding:2px 6px">Reset UV</button>
         </div>
+      </div>
+
+      <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Building Design & Exterior Cladding</h4>
+      ${formRow(
+        'i-bpreset',
+        'Building Preset',
+        `<select id="i-bpreset">${Object.values(getBuildingPresets())
+          .map((bp) => `<option value="${bp.key}">${esc(bp.name)}</option>`)
+          .join('')}</select>`
+      )}
+      <div class="row" style="margin:6px 0 12px;display:flex;gap:4px">
+        <button id="i-bpreset-room" style="flex:1;font-size:0.75rem;padding:3px 4px">Apply to Room</button>
+        <button id="i-bpreset-level" style="flex:1;font-size:0.75rem;padding:3px 4px">Apply to Level</button>
+        <button id="i-bpreset-plan" style="flex:1;font-size:0.75rem;padding:3px 4px">Apply to Plan</button>
+      </div>
+
+      ${formRow(
+        'i-cladding',
+        'Cladding Material',
+        `<select id="i-cladding">${Object.values(getCladdingPresets())
+          .map(
+            (c) =>
+              `<option value="${c.id}" ${c.id === (room.cladding || 'cladding_siding_white') ? 'selected' : ''}>${esc(c.name)}</option>`
+          )
+          .join('')}</select>`
+      )}
+      <div class="row" style="margin:6px 0 12px;display:flex;gap:4px">
+        <button id="i-cladding-room" style="flex:1;font-size:0.75rem;padding:3px 4px">Apply to Room</button>
+        <button id="i-cladding-level" style="flex:1;font-size:0.75rem;padding:3px 4px">Apply to Level</button>
+        <button id="i-cladding-plan" style="flex:1;font-size:0.75rem;padding:3px 4px">Apply to Plan</button>
       </div>`;
 
     $('#i-name').addEventListener('change', (e) =>
@@ -1137,8 +1214,35 @@ function renderInspector() {
       redraw();
       window.__scene3d?.render?.();
     });
+
+    const handleBuildingPresetApply = (scope) => {
+      const presetKey = $('#i-bpreset')?.value;
+      if (!presetKey) return;
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        applyBuildingPreset(n, presetKey, { room: r, level: r?.level || 0, scope });
+      });
+    };
+    $('#i-bpreset-room')?.addEventListener('click', () => handleBuildingPresetApply('room'));
+    $('#i-bpreset-level')?.addEventListener('click', () => handleBuildingPresetApply('level'));
+    $('#i-bpreset-plan')?.addEventListener('click', () => handleBuildingPresetApply('plan'));
+
+    const handleCladdingApply = (scope) => {
+      const claddingKey = $('#i-cladding')?.value;
+      if (!claddingKey) return;
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        applyCladdingMaterial(n, claddingKey, { room: r, level: r?.level || 0, scope });
+      });
+    };
+    $('#i-cladding-room')?.addEventListener('click', () => handleCladdingApply('room'));
+    $('#i-cladding-level')?.addEventListener('click', () => handleCladdingApply('level'));
+    $('#i-cladding-plan')?.addEventListener('click', () => handleCladdingApply('plan'));
   } else {
     const def = kind === 'item' ? ITEM_BY_ID[obj.type] : OPENING_BY_ID[obj.type];
+    const winStyle = kind === 'opening' && def.kind === 'window' ? resolveWindowStyle(obj) : null;
+    const winPresets = getWindowPresets();
+
     el.innerHTML = `<h3>${esc(def.name)}</h3><p class="note" style="margin:0 0 6px">in ${esc(room.name)}</p><div class="btns">
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
@@ -1156,6 +1260,47 @@ function renderInspector() {
                 .join('')}</select>`
             )
           : ''
+      }
+      ${
+        kind === 'opening' && def.kind === 'window' && winStyle
+          ? `<hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+             <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Window Styling & Preset</h4>
+             ${formRow(
+               'i-win-preset',
+               'Preset',
+               `<select id="i-win-preset">${Object.values(winPresets)
+                 .map(
+                   (p) =>
+                     `<option value="${p.key}" ${p.key === winStyle.presetKey ? 'selected' : ''}>${esc(p.name)}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-win-mat',
+               'Frame Material',
+               `<select id="i-win-mat">${['vinyl', 'wood', 'aluminum', 'bronze', 'steel']
+                 .map(
+                   (m) =>
+                     `<option value="${m}" ${m === winStyle.frameMaterial ? 'selected' : ''}>${m.charAt(0).toUpperCase() + m.slice(1)}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-win-color',
+               'Frame Color',
+               `<input id="i-win-color" type="color" value="${winStyle.frameColor || '#ffffff'}">`
+             )}
+             ${formRow(
+               'i-win-mullions',
+               'Mullion Grid (cols × rows)',
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px"></div>`
+             )}
+             ${formRow(
+               'i-win-casing',
+               'Casing Size (W × D in)',
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px"></div>`
+             )}`
+          : ''
       }`;
     $('#i-rot')?.addEventListener('click', rotateSelected);
     $('#i-swing')?.addEventListener('click', () =>
@@ -1172,6 +1317,47 @@ function renderInspector() {
         o.width = nd.w;
       })
     );
+    if (kind === 'opening' && def.kind === 'window') {
+      $('#i-win-preset')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.presetKey = e.target.value;
+        })
+      );
+      $('#i-win-mat')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.frameMaterial = e.target.value;
+        })
+      );
+      $('#i-win-color')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.frameColor = e.target.value;
+        })
+      );
+      const updateMullions = () => {
+        const cols = parseInt($('#i-win-mull-cols')?.value || 1, 10);
+        const rows = parseInt($('#i-win-mull-rows')?.value || 1, 10);
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.mullions = { ...(target.mullions || {}), cols, rows };
+        });
+      };
+      $('#i-win-mull-cols')?.addEventListener('change', updateMullions);
+      $('#i-win-mull-rows')?.addEventListener('change', updateMullions);
+
+      const updateCasing = () => {
+        const width = parseFloat($('#i-win-casing-w')?.value || 2.0);
+        const depth = parseFloat($('#i-win-casing-d')?.value || 0.75);
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.casing = { ...(target.casing || {}), width, depth };
+        });
+      };
+      $('#i-win-casing-w')?.addEventListener('change', updateCasing);
+      $('#i-win-casing-d')?.addEventListener('change', updateCasing);
+    }
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, obj.id));
       select(null);
