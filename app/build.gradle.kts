@@ -20,26 +20,17 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
-    }
-
-    kotlinOptions {
-        jvmTarget = "21"
-    }
-
-    buildFeatures {
-        viewBinding = true
-        compose = true
-    }
-
-    compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildFeatures {
+        viewBinding = true
+        compose = true
     }
 }
 
@@ -59,7 +50,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-compose:1.9.1")
-    implementation("com.google.android.material:material:1.12.0")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))

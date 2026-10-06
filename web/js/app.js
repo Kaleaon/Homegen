@@ -44,6 +44,7 @@ import {
   SNAP_TOGGLE_DEFINITIONS,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
+import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
 import {
@@ -2246,13 +2247,22 @@ $('#export-pdf')?.addEventListener('click', () => {
       levelSelect.appendChild(opt);
     }
   }
+  const sessionBox = $('#pdf-session-branding-box');
+  if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
   $('#pdf-export')?.showModal();
 });
+
+$('#pdf-branding-mode')?.addEventListener('change', (e) => {
+  const sessionBox = $('#pdf-session-branding-box');
+  if (sessionBox) sessionBox.hidden = e.target.value !== 'session';
+});
+
 $('#pdf-cancel')?.addEventListener('click', () => {
   $('#pdf-export')?.close();
 });
 $('#pdf-generate')?.addEventListener('click', () => {
   try {
+    const brandingMode = $('#pdf-branding-mode')?.value || 'project';
     const opts = {
       pageSize: $('#pdf-size').value,
       orientation: $('#pdf-orientation').value,
@@ -2266,6 +2276,32 @@ $('#pdf-generate')?.addEventListener('click', () => {
       includeTitleBlock: $('#pdf-tb').checked,
       includeScaleBar: $('#pdf-scalebar').checked,
       includeRoomSchedule: $('#pdf-schedule').checked,
+      brandingMode,
+      includeLogo: $('#pdf-inc-logo')?.checked !== false,
+      includeStamp: $('#pdf-inc-stamp')?.checked !== false,
+      includeWatermark: $('#pdf-inc-watermark')?.checked !== false,
+      sessionBranding:
+        brandingMode === 'session'
+          ? {
+              stamp: {
+                shape: 'circle',
+                titleText: $('#pdf-session-stamp-title')?.value || 'APPROVED',
+                subtitleText: 'ARCHITECTURAL PLAN',
+                borderColor: '#d32f2f',
+                textColor: '#d32f2f',
+                opacity: 0.9,
+                enabled: true,
+              },
+              watermark: {
+                text: $('#pdf-session-watermark')?.value || '',
+                color: '#9e9e9e',
+                opacity: 0.2,
+                fontSize: 24,
+                angle: -45,
+                enabled: true,
+              },
+            }
+          : null,
     };
     const pdf = generatePDF(doc, opts);
     const fileName = `${(doc.name || 'plan').replace(/\W+/g, '_')}_scaled_plan.pdf`;
@@ -2276,6 +2312,182 @@ $('#pdf-generate')?.addEventListener('click', () => {
     toast(`Failed to export PDF: ${err.message}`, true);
   }
 });
+
+// ------------------------------------------------------------- Interactive Branding & Stamp Builder UI
+let workingBranding = M.defaultBranding();
+
+function updateStampPreview() {
+  const cv = $('#stamp-preview-canvas');
+  if (cv) {
+    renderStampCanvas(cv, workingBranding.stamp);
+  }
+}
+
+function updateLogoPreviewUI() {
+  const img = $('#logo-preview-img');
+  const msg = $('#logo-none-msg');
+  if (workingBranding.logoDataUrl) {
+    if (img) {
+      img.src = workingBranding.logoDataUrl;
+      img.style.display = 'inline-block';
+    }
+    if (msg) msg.style.display = 'none';
+  } else {
+    if (img) {
+      img.src = '';
+      img.style.display = 'none';
+    }
+    if (msg) msg.style.display = 'inline-block';
+  }
+}
+
+function openBrandingDialog() {
+  const dlg = $('#dlg-branding');
+  if (!dlg) return;
+
+  doc.settings ||= {};
+  doc.settings.branding ||= M.defaultBranding();
+  workingBranding = JSON.parse(JSON.stringify(doc.settings.branding));
+
+  const st = workingBranding.stamp || {};
+  if ($('#stamp-enabled')) $('#stamp-enabled').checked = st.enabled !== false;
+  if ($('#stamp-shape')) $('#stamp-shape').value = st.shape || 'circle';
+  if ($('#stamp-title')) $('#stamp-title').value = st.titleText ?? 'APPROVED';
+  if ($('#stamp-subtitle')) $('#stamp-subtitle').value = st.subtitleText ?? 'ARCHITECTURAL PLAN';
+  if ($('#stamp-license')) $('#stamp-license').value = st.licenseText ?? '';
+  if ($('#stamp-date')) $('#stamp-date').value = st.dateText ?? '';
+  if ($('#stamp-border-style')) $('#stamp-border-style').value = st.borderStyle || 'solid';
+  if ($('#stamp-border-color')) $('#stamp-border-color').value = st.borderColor || '#d32f2f';
+  if ($('#stamp-text-color')) $('#stamp-text-color').value = st.textColor || '#d32f2f';
+  if ($('#stamp-opacity')) $('#stamp-opacity').value = st.opacity ?? 0.9;
+
+  const wm = workingBranding.watermark || {};
+  if ($('#wm-enabled')) $('#wm-enabled').checked = wm.enabled !== false;
+  if ($('#wm-text')) $('#wm-text').value = wm.text ?? '';
+  if ($('#wm-color')) $('#wm-color').value = wm.color || '#9e9e9e';
+  if ($('#wm-opacity')) $('#wm-opacity').value = wm.opacity ?? 0.2;
+
+  updateLogoPreviewUI();
+  updateStampPreview();
+
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+function syncWorkingStampFromInputs() {
+  workingBranding.stamp = {
+    enabled: $('#stamp-enabled')?.checked !== false,
+    shape: $('#stamp-shape')?.value || 'circle',
+    titleText: $('#stamp-title')?.value ?? 'APPROVED',
+    subtitleText: $('#stamp-subtitle')?.value ?? 'ARCHITECTURAL PLAN',
+    licenseText: $('#stamp-license')?.value ?? '',
+    dateText: $('#stamp-date')?.value ?? '',
+    borderStyle: $('#stamp-border-style')?.value || 'solid',
+    borderColor: $('#stamp-border-color')?.value || '#d32f2f',
+    textColor: $('#stamp-text-color')?.value || '#d32f2f',
+    opacity: parseFloat($('#stamp-opacity')?.value ?? '0.9'),
+  };
+  updateStampPreview();
+}
+
+function syncWorkingWatermarkFromInputs() {
+  workingBranding.watermark = {
+    enabled: $('#wm-enabled')?.checked !== false,
+    text: $('#wm-text')?.value ?? '',
+    color: $('#wm-color')?.value || '#9e9e9e',
+    opacity: parseFloat($('#wm-opacity')?.value ?? '0.2'),
+    fontSize: 24,
+    angle: -45,
+  };
+}
+
+if (typeof document !== 'undefined') {
+  $('#branding-btn')?.addEventListener('click', openBrandingDialog);
+
+  document.querySelectorAll('.branding-tabs .tab-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const sec = e.currentTarget.dataset.bsection;
+      document.querySelectorAll('.branding-tabs .tab-btn').forEach((b) => {
+        const active = b === e.currentTarget;
+        b.classList.toggle('on', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('.bsection').forEach((s) => {
+        s.hidden = s.id !== `bsection-${sec}`;
+      });
+    });
+  });
+
+  [
+    '#stamp-enabled',
+    '#stamp-shape',
+    '#stamp-title',
+    '#stamp-subtitle',
+    '#stamp-license',
+    '#stamp-date',
+    '#stamp-border-style',
+    '#stamp-border-color',
+    '#stamp-text-color',
+    '#stamp-opacity',
+  ].forEach((selector) => {
+    $(selector)?.addEventListener('input', syncWorkingStampFromInputs);
+    $(selector)?.addEventListener('change', syncWorkingStampFromInputs);
+  });
+
+  ['#wm-enabled', '#wm-text', '#wm-color', '#wm-opacity'].forEach((selector) => {
+    $(selector)?.addEventListener('input', syncWorkingWatermarkFromInputs);
+    $(selector)?.addEventListener('change', syncWorkingWatermarkFromInputs);
+  });
+
+  $('#logo-file')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      toast('Logo asset exceeds 500KB limit. Please choose a smaller image.', true);
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const dataUrl = evt.target.result;
+        M.validateLogoSize(dataUrl, 500);
+        workingBranding.logoDataUrl = dataUrl;
+        updateLogoPreviewUI();
+        toast('Logo uploaded successfully.');
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  $('#logo-clear-btn')?.addEventListener('click', () => {
+    workingBranding.logoDataUrl = null;
+    const fileInput = $('#logo-file');
+    if (fileInput) fileInput.value = '';
+    updateLogoPreviewUI();
+    toast('Logo cleared.');
+  });
+
+  $('#branding-cancel')?.addEventListener('click', () => {
+    $('#dlg-branding')?.close();
+  });
+
+  $('#branding-save')?.addEventListener('click', () => {
+    syncWorkingStampFromInputs();
+    syncWorkingWatermarkFromInputs();
+    doc.settings ||= {};
+    doc.settings.branding = JSON.parse(JSON.stringify(workingBranding));
+    hist.push(doc);
+    persist();
+    $('#dlg-branding')?.close();
+    toast('Branding and stamp settings saved to project.');
+  });
+}
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
