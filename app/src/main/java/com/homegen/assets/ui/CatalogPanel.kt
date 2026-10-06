@@ -5,8 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
@@ -15,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -31,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.homegen.assets.data.CatalogRepository
@@ -111,19 +115,36 @@ fun CatalogPanel(
             onSelected = { selectedCategory = it },
         )
 
-        // Items grid
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 150.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(entries, key = { it.id }) { entry ->
-                CatalogGridItem(
-                    entry = entry,
-                    repository = repository,
-                    onMaterialPicked = onMaterialPicked,
-                    onPlaceablePicked = onPlaceablePicked,
-                )
+        // Items grid or empty state
+        if (entries.isEmpty()) {
+            EmptyCatalogState(
+                search = search,
+                selectedCategory = selectedCategory,
+                activeStyleTag = if (filterByStyle) activeStyleTag else null,
+                onResetFilters = {
+                    search = ""
+                    selectedCategory = CatalogCategory.ALL
+                    filterByStyle = false
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            )
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 150.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                items(entries, key = { it.id }) { entry ->
+                    CatalogGridItem(
+                        entry = entry,
+                        repository = repository,
+                        onMaterialPicked = onMaterialPicked,
+                        onPlaceablePicked = onPlaceablePicked,
+                    )
+                }
             }
         }
     }
@@ -230,6 +251,66 @@ private fun CategoryChips(
                 onClick = { onSelected(category) },
                 label = { Text(category.label) },
             )
+        }
+    }
+}
+
+/**
+ * Centered empty state displayed when catalog query or filter returns no results.
+ */
+@Composable
+fun EmptyCatalogState(
+    search: String,
+    selectedCategory: CatalogCategory,
+    activeStyleTag: String? = null,
+    onResetFilters: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val hasSearch = search.isNotBlank()
+    val hasCategory = selectedCategory != CatalogCategory.ALL
+    val hasStyle = !activeStyleTag.isNullOrBlank()
+
+    val message = when {
+        hasSearch && hasCategory && hasStyle ->
+            "No items matching \"$search\" in category \"${selectedCategory.label}\" with style \"$activeStyleTag\"."
+        hasSearch && hasCategory ->
+            "No items matching \"$search\" in category \"${selectedCategory.label}\"."
+        hasSearch && hasStyle ->
+            "No items matching \"$search\" with style \"$activeStyleTag\"."
+        hasCategory && hasStyle ->
+            "No items found in category \"${selectedCategory.label}\" with style \"$activeStyleTag\"."
+        hasSearch ->
+            "No items matching \"$search\"."
+        hasCategory ->
+            "No items found in category \"${selectedCategory.label}\"."
+        hasStyle ->
+            "No items found with style \"$activeStyleTag\"."
+        else ->
+            "No catalog items available."
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "No Items Found",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = onResetFilters) {
+            Text("Reset Filters")
         }
     }
 }
