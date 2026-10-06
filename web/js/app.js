@@ -476,6 +476,7 @@ function redraw() {
   complianceScene.update(state, rep, { curLevel, selection, drag, hover, view });
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
     dpr,
+    gridSettings: interaction.gridSettings,
     complianceScene,
     snappingBridge,
     bad,

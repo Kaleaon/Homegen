@@ -55,7 +55,7 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
   if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
-  drawGrid(ctx, view, w / dpr, h / dpr);
+  drawGrid(ctx, view, w / dpr, h / dpr, opts);
 
   const bad = opts.bad || new Set(); // ids of violating rooms/items/openings
   for (const u of opts.under || []) {
@@ -210,15 +210,25 @@ export function drawComplianceScene(ctx, complianceScene, view) {
   }
 }
 
-function drawGrid(ctx, view, cw, ch) {
+export function drawGrid(ctx, view, cw, ch, opts = {}) {
+  const unitSize =
+    opts.gridSettings?.unitSize ??
+    opts.unitSize ??
+    opts.snappingBridge?.interaction?.gridSettings?.unitSize ??
+    6;
+  const subGrid = unitSize;
+  const minorGrid = opts.gridSettings?.minorGrid ?? opts.minorGrid ?? 12;
+  const majorGrid = opts.gridSettings?.majorGrid ?? opts.majorGrid ?? 60;
+
   const x0 = -view.ox / view.scale;
   const y0 = -view.oy / view.scale;
   const x1 = x0 + cw / view.scale;
   const y1 = y0 + ch / view.scale;
   ctx.lineWidth = 1 / view.scale;
   for (const [step, color] of [
-    [12, getToken('--ktheme-border-light', '#ebe7de')],
-    [60, getToken('--ktheme-border', '#dcd6c8')],
+    [subGrid, '#f0ede6'],
+    [minorGrid, '#ebe7de'],
+    [majorGrid, '#dcd6c8'],
   ]) {
     if (step * view.scale < 6) continue;
     ctx.strokeStyle = color;
@@ -292,7 +302,9 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
   const horizontal = s.dx === 1;
   const th = WT + 0.6;
   const style = resolveWindowStyle(o) || resolveWindowStyle(def);
-  const frameColor = isBad ? getToken('--ktheme-critical', '#d33') : style.frameColor || getToken('--ktheme-border', '#2d2a26');
+  const frameColor = isBad
+    ? getToken('--ktheme-critical', '#d33')
+    : style.frameColor || getToken('--ktheme-border', '#2d2a26');
 
   ctx.fillStyle = 'rgba(120,180,230,.55)';
   if (horizontal) {
@@ -1023,7 +1035,8 @@ export function drawSnapGuides(ctx, snapResult, view) {
 
     for (const g of guideLines) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
-      else if (g.type === 'perpendicular') ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else if (g.type === 'perpendicular')
+        ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
       else ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
 
       ctx.beginPath();
