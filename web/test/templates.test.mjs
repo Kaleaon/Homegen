@@ -135,7 +135,11 @@ test('sampleHome in app.js delegates floorplan generation to buildMultiLevel', a
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
     localStorage: { getItem: () => null, setItem: () => {} },
   };
-  global.navigator = global.window.navigator;
+  Object.defineProperty(globalThis, 'navigator', {
+    value: global.window.navigator,
+    writable: true,
+    configurable: true,
+  });
 
   await import(`../js/app.js?t=${Date.now()}`);
 
