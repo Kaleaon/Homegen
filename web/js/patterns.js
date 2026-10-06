@@ -166,8 +166,30 @@ function draw(g, f) {
         }
       }
       break;
+    case 'custom':
+      if (f.dataUrl && typeof Image !== 'undefined') {
+        const img = new Image();
+        img.onload = () => {
+          g.clearRect(0, 0, N, N);
+          g.drawImage(img, 0, 0, N, N);
+        };
+        img.src = f.dataUrl;
+        if (img.complete && img.naturalWidth !== 0) {
+          g.clearRect(0, 0, N, N);
+          g.drawImage(img, 0, 0, N, N);
+        }
+      }
+      break;
     default:
       break;
+  }
+}
+
+export function clearPatternCache(finishId) {
+  if (finishId) {
+    cache.delete(finishId);
+  } else {
+    cache.clear();
   }
 }
 
