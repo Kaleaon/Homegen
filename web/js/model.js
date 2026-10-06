@@ -4,7 +4,6 @@ import {
   GRID,
   EPS,
   WALLS,
-  OPPOSITE,
   snap,
   wallSeg,
   wallLength,
@@ -72,6 +71,23 @@ export function newState() {
 export const clone = (s) => JSON.parse(JSON.stringify(s));
 export const nid = (state, p) => `${p}${state.nextId++}`;
 
+export const DEFAULT_UV_TRANSFORM = {
+  scaleU: 1.0,
+  scaleV: 1.0,
+  rotation: 0,
+  offsetU: 0,
+  offsetV: 0,
+};
+
+export function createDefaultWallUV() {
+  return {
+    N: { ...DEFAULT_UV_TRANSFORM },
+    E: { ...DEFAULT_UV_TRANSFORM },
+    S: { ...DEFAULT_UV_TRANSFORM },
+    W: { ...DEFAULT_UV_TRANSFORM },
+  };
+}
+
 export function createRoom(state, type, x, y, w, h, opts = {}) {
   const room = {
     id: nid(state, 'r'),
@@ -91,6 +107,7 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
       S: opts.wallFinish ?? 'paint_white',
       W: opts.wallFinish ?? 'paint_white',
     },
+    wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
     openings: [],
     items: [],
   };
@@ -224,6 +241,46 @@ export function placeRoomKit(state, kitId, x, y, level = 0) {
 }
 
 // ---- persistence ----
+export function getWallUV(room, wall) {
+  if (!room || !wall) return { ...DEFAULT_UV_TRANSFORM };
+  room.wallUV ||= {};
+  const uv = room.wallUV[wall] || {};
+  return {
+    scaleU: typeof uv.scaleU === 'number' ? uv.scaleU : 1.0,
+    scaleV: typeof uv.scaleV === 'number' ? uv.scaleV : 1.0,
+    rotation: typeof uv.rotation === 'number' ? uv.rotation : 0,
+    offsetU: typeof uv.offsetU === 'number' ? uv.offsetU : 0,
+    offsetV: typeof uv.offsetV === 'number' ? uv.offsetV : 0,
+  };
+}
+
+export function setWallUV(room, wall, params = {}) {
+  if (!room || !wall) return;
+  room.wallUV ||= {};
+  const current = getWallUV(room, wall);
+  room.wallUV[wall] = {
+    scaleU: typeof params.scaleU === 'number' ? params.scaleU : current.scaleU,
+    scaleV: typeof params.scaleV === 'number' ? params.scaleV : current.scaleV,
+    rotation: typeof params.rotation === 'number' ? params.rotation : current.rotation,
+    offsetU: typeof params.offsetU === 'number' ? params.offsetU : current.offsetU,
+    offsetV: typeof params.offsetV === 'number' ? params.offsetV : current.offsetV,
+  };
+}
+
+export function applyWallUV(state, params, { scope = 'single', room, wall, level = 0 } = {}) {
+  const applyToRoomWall = (r, w) => setWallUV(r, w, params);
+  if (scope === 'plan') {
+    for (const r of state.rooms) for (const w of WALLS) applyToRoomWall(r, w);
+  } else if (scope === 'level') {
+    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level))
+      for (const w of WALLS) applyToRoomWall(r, w);
+  } else if (scope === 'room') {
+    if (room) for (const w of WALLS) applyToRoomWall(room, w);
+  } else {
+    if (room && wall) applyToRoomWall(room, wall);
+  }
+}
+
 export function applyWallFinish(state, finishId, { scope = 'single', room, wall, level = 0 } = {}) {
   if (scope === 'plan') {
     for (const r of state.rooms) for (const w of WALLS) r.walls[w] = finishId;
@@ -327,6 +384,10 @@ export function deserialize(text) {
     r.openings ||= [];
     r.items ||= [];
     r.level ||= 0;
+    r.wallUV ||= {};
+    for (const w of WALLS) {
+      r.wallUV[w] = getWallUV(r, w);
+    }
   }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
   for (const finish of s.customFinishes) {

@@ -21,6 +21,7 @@
   <k-button id="sample">Sample home</k-button>
   <k-button id="new">New</k-button>
   <k-button id="save">Save</k-button>
+  <k-button id="save-zip" title="Export composite ZIP archive with embedded textures">Save ZIP</k-button>
   <k-button id="load">Open</k-button>
   <k-button id="import-blueprint">Import Blueprint</k-button>
   <k-button id="png">PNG</k-button>
@@ -29,7 +30,7 @@
   <k-button id="export-pdf">Export PDF</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="report">Code report</k-button>
-  <input type="file" id="file" accept="application/json" hidden>
+  <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden>
   <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
 </header>
 <main>
@@ -81,13 +82,13 @@
       <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
-    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="dialog" aria-modal="true" aria-labelledby="diff-drawer-title" hidden>
       <div class="diff-header">
         <div class="diff-title">
-          <span>✨ Auto-Fix Summary</span>
+          <h2 id="diff-drawer-title">✨ Auto-Fix Summary</h2>
           <span id="diff-count" class="diff-badge-count">0</span>
         </div>
-        <button id="diff-close" class="diff-close-btn" title="Dismiss highlights">✕</button>
+        <button id="diff-close" class="diff-close-btn" title="Dismiss highlights" aria-label="Dismiss highlights">✕</button>
       </div>
       <ul id="diff-list" class="diff-items"></ul>
     </div>
@@ -124,6 +125,35 @@
     <div class="btns" style="margin-top:16px">
       <button id="btn-save-custom-material" class="primary" type="button">Save Material</button>
       <button id="btn-cancel-custom-material" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dlg-welcome" aria-labelledby="dlg-welcome-title" class="k-overlay-dialog welcome-wizard-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-welcome-title">Welcome to Homegen Designer</h2>
+    <button value="close" id="welcome-close" aria-label="Close welcome wizard"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body welcome-body">
+    <p class="welcome-tagline">Create interactive 2D floor plans and 3D architectural spaces in minutes with real-time building code compliance.</p>
+    <div class="welcome-choices">
+      <div class="welcome-card" id="welcome-card-tour">
+        <div class="welcome-card-icon">🧭</div>
+        <h3>Take 60s Tour</h3>
+        <p>A quick interactive spotlight tour of the palette, canvas, view controls, auto-comply, and export options.</p>
+        <button id="welcome-btn-tour" class="primary" type="button">Take 60s Tour</button>
+      </div>
+      <div class="welcome-card" id="welcome-card-templates">
+        <div class="welcome-card-icon">📐</div>
+        <h3>Choose Starter Template</h3>
+        <p>Pick from pre-built floor plan layouts including living suites, kitchens, and multi-room layouts.</p>
+        <button id="welcome-btn-templates" class="secondary" type="button">Choose Template</button>
+      </div>
+      <div class="welcome-card" id="welcome-card-blank">
+        <div class="welcome-card-icon">✏️</div>
+        <h3>Start Blank Canvas</h3>
+        <p>Jump straight into design on a clean grid paper canvas with standard drafting tools.</p>
+        <button id="welcome-btn-blank" class="secondary" type="button">Start Blank Canvas</button>
+      </div>
     </div>
   </div>
 </dialog>
@@ -170,8 +200,11 @@
     <p class="note">Generated images are AI interpretations, not construction documents. Check each service's terms before commercial use.</p>
   </div>
 </dialog>
-<dialog id="dlg-export" class="k-overlay-dialog">
-  <form method="dialog" class="dlg-head"><h2>SVG Vector Export &amp; Print Sheet</h2><button value="close">✕</button></form>
+<dialog id="dlg-export" aria-labelledby="dlg-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-export-title">SVG Vector Export &amp; Print Sheet</h2>
+    <button value="close" aria-label="Close SVG export modal"><span aria-hidden="true">✕</span></button>
+  </form>
   <div class="dlg-body">
     <div class="row"><label for="e-sheet">Sheet Size</label><select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></select></div>
     <div class="row"><label for="e-orient">Orientation</label><select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></select></div>
@@ -186,8 +219,11 @@
   </div>
 </dialog>
 <div id="print-sheet" class="print-only"></div>
-<dialog id="pdf-export" class="k-overlay-dialog">
-  <form method="dialog" class="dlg-head"><h2>Export Scaled Vector PDF</h2><button value="close">✕</button></form>
+<dialog id="pdf-export" aria-labelledby="pdf-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="pdf-export-title">Export Scaled Vector PDF</h2>
+    <button value="close" aria-label="Close PDF export modal"><span aria-hidden="true">✕</span></button>
+  </form>
   <div class="dlg-body">
     <div class="row">
       <label for="pdf-size">Sheet size</label>
@@ -258,6 +294,7 @@
     </div>
   </div>
 </dialog>
+<<<<<<< HEAD
 <dialog id="dlg-branding" class="k-overlay-dialog" aria-labelledby="branding-title">
   <form method="dialog" class="dlg-head">
     <h2 id="branding-title">Project Branding &amp; Approval Stamp</h2>
@@ -378,9 +415,12 @@
     </div>
   </div>
 </dialog>
-<dialog id="calib-dlg" class="k-overlay-dialog">
+<dialog id="calib-dlg" aria-labelledby="calib-dlg-title" class="k-overlay-dialog">
   <form id="calib-form" method="dialog">
-    <div class="dlg-head"><h2>Calibrate Blueprint Scale</h2><button type="button" id="calib-close">✕</button></div>
+    <div class="dlg-head">
+      <h2 id="calib-dlg-title">Calibrate Blueprint Scale</h2>
+      <button type="button" id="calib-close" aria-label="Close scale calibration modal">✕</button>
+    </div>
     <div class="dlg-body">
       <p>Enter the known real-world distance between the two selected points:</p>
       <div class="row">
@@ -451,7 +491,7 @@
     </div>
   </div>
 </dialog>
-<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","jspdf":"./vendor/jspdf/jspdf.es.min.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

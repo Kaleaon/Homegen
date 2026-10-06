@@ -200,3 +200,52 @@ test('ComplianceOverlayScene dispose clears cached nodes, indexes, and spatial g
   assert.equal(scene.spatialGrid.size, 0, 'dispose() must clear spatial grid');
   assert.equal(scene.lastStateHash, null, 'dispose() must clear state hash');
 });
+
+test('ComplianceOverlayScene calculates fixButtonBounds for fixable violations and supports hitTest', () => {
+  const state = newState();
+  // Room with ceiling < 84 inches generates fixable ceiling violation
+  const room = createRoom(state, 'living', 0, 0, 144, 144, { ceiling: 72 });
+  const report = evaluate(state);
+
+  const scene = new ComplianceOverlayScene();
+  scene.update(state, report, { curLevel: 0, selection: room.id });
+
+  const violationNodes = scene.getNodesByType('violation');
+  const ceilingNode = violationNodes.find((n) => n.data.violation.rule === 'ceiling');
+  assert.ok(ceilingNode, 'Ceiling violation node should exist');
+  assert.equal(ceilingNode.data.fixable, true);
+  assert.ok(ceilingNode.data.fixButtonBounds, 'Fixable violation must have fixButtonBounds');
+
+  const fb = ceilingNode.data.fixButtonBounds;
+  assert.ok(fb.w > 0 && fb.h > 0, 'Fix button bounds must have positive dimensions');
+
+  // hitTest inside fixButtonBounds returns the violation node
+  const hit = scene.hitTest({ x: fb.x + fb.w / 2, y: fb.y + fb.h / 2 });
+  assert.ok(hit, 'hitTest should match inside fix button bounds');
+  assert.equal(hit.id, ceilingNode.id, 'hitTest should return the targeted violation node');
+
+  // hitTest outside fixButtonBounds returns null for violation
+  const miss = scene.hitTest({ x: fb.x - 100, y: fb.y - 100 });
+  assert.equal(miss, null);
+});
+
+test('hitTest resolves overlapping violation fix buttons in favor of topmost badge', () => {
+  const state = newState();
+  const room = createRoom(state, 'bathroom', 0, 0, 144, 144, { ceiling: 72, floor: 'wood_oak' });
+  const report = evaluate(state);
+
+  const scene = new ComplianceOverlayScene();
+  scene.update(state, report, { curLevel: 0, selection: room.id });
+
+  const violationNodes = scene.getNodesByType('violation');
+  assert.ok(violationNodes.length >= 2, 'Should have multiple violations for room');
+
+  // Both room violations will have overlapping fix buttons placed at room bounds top-right
+  const lastNode = violationNodes[violationNodes.length - 1];
+  const fb = lastNode.data.fixButtonBounds;
+  assert.ok(fb);
+
+  const hit = scene.hitTest({ x: fb.x + fb.w / 2, y: fb.y + fb.h / 2 });
+  assert.ok(hit);
+  assert.equal(hit.id, lastNode.id, 'hitTest must return the topmost (last added) violation badge');
+});

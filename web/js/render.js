@@ -116,6 +116,23 @@ export function drawComplianceScene(ctx, complianceScene, view) {
     ctx.lineWidth = 2 / view.scale;
     ctx.setLineDash([5 / view.scale, 3 / view.scale]);
     ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+
+    if (d.fixButtonBounds) {
+      const fb = d.fixButtonBounds;
+      const fs = Math.max(7, Math.min(10, 9 / view.scale));
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath();
+      ctx.roundRect
+        ? ctx.roundRect(fb.x, fb.y, fb.w, fb.h, 4 / view.scale)
+        : ctx.rect(fb.x, fb.y, fb.w, fb.h);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `600 ${fs}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Fix', fb.x + fb.w / 2, fb.y + fb.h / 2);
+    }
     ctx.restore();
   }
 

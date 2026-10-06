@@ -30,6 +30,8 @@ import {
   filterItems,
 } from './catalog.js';
 import * as M from './model.js';
+import { saveTextureBlob, getTextureBlob } from './textureStore.js';
+import { exportProjectZip, importProjectZip } from './archive.js';
 import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
 import { draw, drawItem, handles, fmtLen } from './render.js';
 import { patternFor, clearPatternCache } from './patterns.js';
@@ -54,6 +56,15 @@ import {
   TEMPLATE_BY_ID,
   renderTemplatePreviewSVG,
 } from './templates.js';
+import {
+  getOnboardingStatus,
+  setOnboardingStatus,
+  resetOnboardingStatus,
+  OnboardingTour,
+  checkOnboardingOnStartup,
+} from './onboardingTour.js';
+
+const onboardingTour = new OnboardingTour();
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -877,6 +888,17 @@ function renderInspector() {
   }
   const { room, kind, obj } = hit;
   if (kind === 'room') {
+    if (!window.__activeUVWall) window.__activeUVWall = 'N';
+    const activeWall = window.__activeUVWall;
+    const uv = M.getWallUV(room, activeWall);
+    const wallFinishId = room.walls?.[activeWall] || 'paint_white';
+    const finishObj = WALL_BY_ID[wallFinishId];
+    const finishLabel = finishObj
+      ? finishObj.name
+      : wallFinishId.startsWith('tex_')
+        ? `Custom Texture (${wallFinishId.slice(0, 10)})`
+        : wallFinishId;
+
     el.innerHTML = `<h3>${esc(room.name)}</h3>
       ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
       ${formRow(
@@ -892,7 +914,73 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="3" value="${room.w / 12}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="3" value="${room.h / 12}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
-      <div class="btns"><button id="i-del">Delete room</button></div>`;
+      <div class="btns"><button id="i-del">Delete room</button></div>
+
+      <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Advanced Material Mapping (UV)</h4>
+      ${formRow(
+        'i-uv-wall',
+        'Wall Face',
+        `<select id="i-uv-wall">
+          <option value="N" ${activeWall === 'N' ? 'selected' : ''}>North (N)</option>
+          <option value="E" ${activeWall === 'E' ? 'selected' : ''}>East (E)</option>
+          <option value="S" ${activeWall === 'S' ? 'selected' : ''}>South (S)</option>
+          <option value="W" ${activeWall === 'W' ? 'selected' : ''}>West (W)</option>
+        </select>`
+      )}
+      <div class="row" style="margin:6px 0;display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <span style="font-size:0.8rem;color:var(--text-muted,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(finishLabel)}">Finish: <b>${esc(finishLabel)}</b></span>
+        <button id="i-custom-tex-btn" style="font-size:0.75rem;padding:3px 8px;white-space:nowrap">Upload Texture</button>
+        <input type="file" id="i-custom-tex-file" accept="image/*" hidden>
+      </div>
+
+      <div class="uv-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
+        <div class="row" style="margin-bottom:6px">
+          <label style="font-size:0.8rem;font-weight:600">Scale U</label>
+          <div style="display:flex;gap:6px;align-items:center;flex:1">
+            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1">
+            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem">
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:6px">
+          <label style="font-size:0.8rem;font-weight:600">Scale V</label>
+          <div style="display:flex;gap:6px;align-items:center;flex:1">
+            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1">
+            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem">
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:6px">
+          <label style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
+          <div style="display:flex;gap:6px;align-items:center;flex:1">
+            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1">
+            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem">
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:6px">
+          <label style="font-size:0.8rem;font-weight:600">Offset U</label>
+          <div style="display:flex;gap:6px;align-items:center;flex:1">
+            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1">
+            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem">
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:6px">
+          <label style="font-size:0.8rem;font-weight:600">Offset V</label>
+          <div style="display:flex;gap:6px;align-items:center;flex:1">
+            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1">
+            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem">
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px">
+            <option value="single">Active Wall Only</option>
+            <option value="room">Entire Room</option>
+            <option value="level">Level</option>
+            <option value="plan">Whole Plan</option>
+          </select>
+          <button id="i-uv-reset" style="font-size:0.8rem;padding:2px 6px">Reset UV</button>
+        </div>
+      </div>`;
+
     $('#i-name').addEventListener('change', (e) =>
       apply(
         (n) => {
@@ -928,6 +1016,101 @@ function renderInspector() {
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, room.id));
       select(null);
+    });
+
+    $('#i-uv-wall')?.addEventListener('change', (e) => {
+      window.__activeUVWall = e.target.value;
+      renderInspector();
+    });
+
+    $('#i-custom-tex-btn')?.addEventListener('click', () => {
+      $('#i-custom-tex-file')?.click();
+    });
+
+    $('#i-custom-tex-file')?.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const texId = `tex_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      try {
+        await saveTextureBlob(texId, file, { name: file.name, mimeType: file.type });
+        apply((n) => {
+          const r = roomOf(n, room.id);
+          if (r) r.walls[window.__activeUVWall || 'N'] = texId;
+        });
+        toast(`Uploaded custom texture: ${file.name}`);
+        renderInspector();
+        redraw();
+        window.__scene3d?.render?.();
+      } catch (err) {
+        toast(`Failed to save texture: ${err.message}`, true);
+      }
+    });
+
+    const readUVInputs = () => {
+      const scaleU = parseFloat(
+        $('#i-uv-scale-u-num')?.value || $('#i-uv-scale-u-range')?.value || 1.0
+      );
+      const scaleV = parseFloat(
+        $('#i-uv-scale-v-num')?.value || $('#i-uv-scale-v-range')?.value || 1.0
+      );
+      const rotation = parseFloat($('#i-uv-rot-num')?.value || $('#i-uv-rot-range')?.value || 0);
+      const offsetU = parseFloat($('#i-uv-off-u-num')?.value || $('#i-uv-off-u-range')?.value || 0);
+      const offsetV = parseFloat($('#i-uv-off-v-num')?.value || $('#i-uv-off-v-range')?.value || 0);
+      const scope = $('#i-uv-scope')?.value || 'single';
+      return { scaleU, scaleV, rotation, offsetU, offsetV, scope };
+    };
+
+    const updateUV = () => {
+      const { scaleU, scaleV, rotation, offsetU, offsetV, scope } = readUVInputs();
+      apply(
+        (n) => {
+          const r = roomOf(n, room.id);
+          M.applyWallUV(
+            n,
+            { scaleU, scaleV, rotation, offsetU, offsetV },
+            { scope, room: r, wall: window.__activeUVWall || 'N', level: r?.level || 0 }
+          );
+        },
+        { quiet: true }
+      );
+      redraw();
+      window.__scene3d?.render?.();
+    };
+
+    const bindPair = (rangeId, numId) => {
+      const rangeEl = $(rangeId);
+      const numEl = $(numId);
+      if (!rangeEl || !numEl) return;
+      rangeEl.addEventListener('input', (e) => {
+        numEl.value = e.target.value;
+        updateUV();
+      });
+      numEl.addEventListener('change', (e) => {
+        rangeEl.value = e.target.value;
+        updateUV();
+      });
+    };
+
+    bindPair('#i-uv-scale-u-range', '#i-uv-scale-u-num');
+    bindPair('#i-uv-scale-v-range', '#i-uv-scale-v-num');
+    bindPair('#i-uv-rot-range', '#i-uv-rot-num');
+    bindPair('#i-uv-off-u-range', '#i-uv-off-u-num');
+    bindPair('#i-uv-off-v-range', '#i-uv-off-v-num');
+
+    $('#i-uv-reset')?.addEventListener('click', () => {
+      const scope = $('#i-uv-scope')?.value || 'single';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallUV(n, M.DEFAULT_UV_TRANSFORM, {
+          scope,
+          room: r,
+          wall: window.__activeUVWall || 'N',
+          level: r?.level || 0,
+        });
+      });
+      renderInspector();
+      redraw();
+      window.__scene3d?.render?.();
     });
   } else {
     const def = kind === 'item' ? ITEM_BY_ID[obj.type] : OPENING_BY_ID[obj.type];
@@ -1522,6 +1705,20 @@ canvas?.addEventListener('pointerdown', (e) => {
     drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
     return;
   }
+  if (e.button === 0 && !e.altKey) {
+    const hitNode = complianceScene.hitTest(p, view);
+    if (hitNode && hitNode.type === 'violation' && hitNode.data?.fixButtonBounds) {
+      const v = hitNode.data.violation;
+      const targetId = v?.id || hitNode.data.targetId;
+      const r = apply((state) => autoComply(state, { targetId }), { quiet: true });
+      if (r.ok && r.changes.length) {
+        toast(`Remediated: ${r.changes[0].msg}`);
+      } else {
+        toast('Violation could not be remediated automatically.', true);
+      }
+      return;
+    }
+  }
   switch (tool.kind) {
     case 'select': {
       const id = pickAt(p);
@@ -2040,6 +2237,57 @@ function setDoc(next, label) {
   refresh();
 }
 
+function trapFocus(containerEl, returnFocusEl) {
+  const focusableSelector =
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const focusableElements = Array.from(containerEl.querySelectorAll(focusableSelector));
+  if (!focusableElements.length) return () => {};
+
+  const firstEl = focusableElements[0];
+  const lastEl = focusableElements[focusableElements.length - 1];
+
+  firstEl.focus();
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') {
+      if (typeof containerEl.close === 'function') {
+        containerEl.close();
+      } else {
+        containerEl.hidden = true;
+        if (containerEl.id === 'diff-drawer') {
+          autoFixDiffs = [];
+          hoveredDiffIndex = null;
+          redraw();
+        }
+      }
+      if (returnFocusEl) returnFocusEl.focus();
+      return;
+    }
+
+    if (e.key !== 'Tab') return;
+
+    if (e.shiftKey) {
+      if (document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      }
+    } else {
+      if (document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    }
+  }
+
+  containerEl.addEventListener('keydown', handleKeyDown);
+  return () => {
+    containerEl.removeEventListener('keydown', handleKeyDown);
+    if (returnFocusEl) returnFocusEl.focus();
+  };
+}
+
+let activeDiffDrawerCleanup = null;
+
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
   const countEl = $('#diff-count');
@@ -2049,10 +2297,15 @@ function renderDiffDrawer() {
   if (!drawer || !countEl || !listEl) return;
 
   if (!autoFixDiffs || !autoFixDiffs.length) {
+    if (activeDiffDrawerCleanup) {
+      activeDiffDrawerCleanup();
+      activeDiffDrawerCleanup = null;
+    }
     drawer.hidden = true;
     return;
   }
 
+  const wasHidden = drawer.hidden;
   drawer.hidden = false;
   countEl.textContent = String(autoFixDiffs.length);
 
@@ -2088,9 +2341,19 @@ function renderDiffDrawer() {
     closeBtn.onclick = () => {
       autoFixDiffs = [];
       hoveredDiffIndex = null;
+      if (activeDiffDrawerCleanup) {
+        activeDiffDrawerCleanup();
+        activeDiffDrawerCleanup = null;
+      }
       renderDiffDrawer();
       redraw();
     };
+  }
+
+  if (wasHidden) {
+    const returnFocusEl = document.activeElement;
+    if (activeDiffDrawerCleanup) activeDiffDrawerCleanup();
+    activeDiffDrawerCleanup = trapFocus(drawer, returnFocusEl);
   }
 }
 
@@ -2244,12 +2507,31 @@ $('#save')?.addEventListener('click', () =>
     'application/json'
   )
 );
+$('#save-zip')?.addEventListener('click', async () => {
+  try {
+    const zipBlob = await exportProjectZip(doc);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(zipBlob);
+    a.download = `${doc.name.replace(/\W+/g, '_') || 'plan'}.homegen.zip`;
+    a.click();
+    toast('Exported composite ZIP project archive with embedded textures.');
+  } catch (err) {
+    toast(`Failed to export ZIP archive: ${err.message}`, true);
+  }
+});
 $('#load')?.addEventListener('click', () => $('#file').click());
 $('#file')?.addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
   try {
-    setDoc(M.deserialize(await f.text()));
+    if (f.name.endsWith('.zip') || f.type.includes('zip')) {
+      const loadedDoc = await importProjectZip(f);
+      setDoc(loadedDoc);
+      toast('Opened ZIP project archive and loaded textures.');
+    } else {
+      setDoc(M.deserialize(await f.text()));
+      toast('Opened plan JSON.');
+    }
     fit();
   } catch (err) {
     toast(`Could not open file: ${err.message}`, true);
@@ -2265,11 +2547,12 @@ $('#png')?.addEventListener('click', () => {
     a.click();
   });
 });
-$('#export-pdf')?.addEventListener('click', () => {
+$('#export-pdf')?.addEventListener('click', (e) => {
   if (!doc.rooms || doc.rooms.length === 0) {
     toast('Cannot export PDF: add at least one room first.', true);
     return;
   }
+  const returnFocusEl = e.currentTarget || document.activeElement;
   $('#pdf-title').value = doc.name || 'My home';
   $('#pdf-date').value = new Date().toISOString().slice(0, 10);
   const levelSelect = $('#pdf-level');
@@ -2289,7 +2572,12 @@ $('#export-pdf')?.addEventListener('click', () => {
   }
   const sessionBox = $('#pdf-session-branding-box');
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
-  $('#pdf-export')?.showModal();
+  const dlg = $('#pdf-export');
+  if (dlg) {
+    dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
+  }
 });
 
 $('#pdf-branding-mode')?.addEventListener('change', (e) => {
@@ -2548,9 +2836,10 @@ function updateExportPreview() {
   if (prevEl) prevEl.innerHTML = currentSvg;
 }
 
-function openExportDialog() {
+function openExportDialog(e) {
   const dlg = $('#dlg-export');
   if (!dlg) return;
+  const returnFocusEl = e?.currentTarget || document.activeElement;
   const levelSel = $('#e-level');
   if (levelSel) {
     const numLevels = doc.levels || 1;
@@ -2564,6 +2853,8 @@ function openExportDialog() {
   }
   updateExportPreview();
   dlg.showModal();
+  const cleanup = trapFocus(dlg, returnFocusEl);
+  dlg.addEventListener('close', () => cleanup(), { once: true });
 }
 
 $('#btn-cancel-custom-material')?.addEventListener('click', () => {
@@ -2798,6 +3089,10 @@ if (typeof window !== 'undefined') {
   resize();
   refresh();
   if (doc.rooms.length) fit();
+
+  checkOnboardingOnStartup(() => {
+    openWelcomeWizard();
+  });
 }
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -2811,7 +3106,10 @@ function triggerCalibrationDialog(p1, p2) {
   const input = $('#calib-distance');
   if (input) input.value = fmtLen(distPx);
   if (dlg && typeof dlg.showModal === 'function') {
+    const returnFocusEl = document.activeElement;
     dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
   } else {
     const str = prompt('Enter real-world distance (e.g. 10 ft, 120 in, 10\' 6"):', fmtLen(distPx));
     applyCalibration(p1, p2, distPx, str);
@@ -2957,6 +3255,68 @@ $('#calib-close')?.addEventListener('click', () => {
   setTool({ kind: 'select' });
   refresh();
 });
+
+function openWelcomeWizard() {
+  const dlg = $('#dlg-welcome');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    try {
+      dlg.showModal();
+    } catch {
+      dlg.setAttribute('open', '');
+    }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+function closeWelcomeWizard() {
+  const dlg = $('#dlg-welcome');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try {
+      dlg.close();
+    } catch {
+      dlg.removeAttribute('open');
+    }
+  } else {
+    dlg.removeAttribute('open');
+  }
+}
+
+if (typeof document !== 'undefined') {
+  const welcomeDlg = $('#dlg-welcome');
+  if (welcomeDlg) {
+    $('#welcome-btn-tour')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      onboardingTour.start();
+    });
+
+    $('#welcome-btn-templates')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      setOnboardingStatus('completed');
+      openTemplatePicker();
+    });
+
+    $('#welcome-btn-blank')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      setOnboardingStatus('skipped');
+    });
+
+    $('#welcome-close')?.addEventListener('click', () => {
+      closeWelcomeWizard();
+      if (!getOnboardingStatus()) {
+        setOnboardingStatus('skipped');
+      }
+    });
+
+    welcomeDlg.addEventListener('close', () => {
+      if (!getOnboardingStatus()) {
+        setOnboardingStatus('skipped');
+      }
+    });
+  }
+}
 
 // ------------------------------------------------------------- Command Palette & Shortcut Overlay
 let selectedCmdIndex = 0;
@@ -3169,6 +3529,30 @@ const COMMAND_REGISTRY = [
     category: 'Help',
     shortcut: '?',
     action: () => openShortcutOverlay(),
+  },
+  {
+    id: 'help-tour',
+    name: 'Start Guided Onboarding Tour',
+    category: 'Help',
+    shortcut: '',
+    action: () => onboardingTour.start(),
+  },
+  {
+    id: 'help-welcome',
+    name: 'Show Welcome Wizard',
+    category: 'Help',
+    shortcut: '',
+    action: () => openWelcomeWizard(),
+  },
+  {
+    id: 'help-reset-onboarding',
+    name: 'Reset Onboarding Status',
+    category: 'Help',
+    shortcut: '',
+    action: () => {
+      resetOnboardingStatus();
+      toast('Onboarding status reset.');
+    },
   },
   {
     id: 'setting-autocomply',
@@ -3401,4 +3785,11 @@ if (typeof window !== 'undefined')
     openShortcutOverlay,
     closeShortcutOverlay,
     renderCommandList,
+    trapFocus,
+    onboardingTour,
+    openWelcomeWizard,
+    closeWelcomeWizard,
+    getOnboardingStatus,
+    setOnboardingStatus,
+    resetOnboardingStatus,
   };
