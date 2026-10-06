@@ -39,6 +39,7 @@ import com.homegen.assets.model.CatalogCategory
 import com.homegen.assets.model.CatalogEntry
 import com.homegen.assets.model.MaterialEntry
 import com.homegen.assets.model.PlaceableEntry
+import com.ktheme.android.LocalKthemeSemanticColors
 
 @Composable
 fun CatalogPanel(
@@ -63,6 +64,8 @@ fun CatalogPanel(
             baseEntries
         }
     }
+
+    val kthemeColors = LocalKthemeSemanticColors.current
 
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         // Search + view mode toggle
@@ -97,7 +100,7 @@ fun CatalogPanel(
                     text = "${entries.size} items",
                     modifier = Modifier.padding(start = 8.dp),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = kthemeColors.onCardBackgroundAlt,
                 )
             }
         }
@@ -133,6 +136,7 @@ private fun CatalogGridItem(
     onMaterialPicked: (MaterialEntry) -> Unit,
     onPlaceablePicked: (PlaceableEntry) -> Unit,
 ) {
+    val kthemeColors = LocalKthemeSemanticColors.current
     var thumbnail by remember(entry.thumbnailPath) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(entry.thumbnailPath) {
         thumbnail = repository.loadThumbnail(entry.thumbnailPath)
@@ -171,7 +175,7 @@ private fun CatalogGridItem(
             Text(
                 text = entry.categoryPath,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = kthemeColors.onCardBackgroundAlt,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
