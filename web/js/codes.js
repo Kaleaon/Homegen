@@ -7,7 +7,6 @@ import {
   EPS,
   WALLS,
   OPPOSITE,
-  wallSeg,
   wallLength,
   interior,
   floorAreaSqFt,
@@ -23,12 +22,10 @@ import {
   intersectInterval,
   lv,
   rectsTouch,
-  computeRoomBoundingBox,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics } from './catalog.js';
-import { clone, nid, addItem, addOpening, createRoom } from './model.js';
+import { clone, addItem, addOpening, createRoom } from './model.js';
 
-const habitable = (r) => !!ROOM_TYPES[r.type].habitable;
 const MOISTURE_ROOMS = new Set(['bathroom', 'laundry']);
 const EGRESS = { minW: 20, minH: 24, minArea: 5.7 * 144, maxSill: 44 };
 

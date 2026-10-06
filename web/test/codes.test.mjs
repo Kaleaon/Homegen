@@ -71,11 +71,6 @@ test('furniture overlap and door swing blocking are rejected', () => {
   const door = room.openings.find((o) => o.kind === 'door');
   const r2 = c.commit(s, (n) => {
     const rr = n.rooms[0];
-    const info = c.openingInfo(
-      n,
-      rr,
-      rr.openings.find((o) => o.id === door.id)
-    );
     const p = m.wallPoint(rr, door.wall, door.offset + 16, 14);
     m.addItem(n, rr, 'armchair', { x: p.x, y: p.y, rot: 0 });
   });
@@ -479,7 +474,6 @@ test('bulk applying dry finishes triggers code compliance auto-fixes when auto-c
   const res = c.commit(
     s,
     (n) => {
-      const r = n.rooms.find((x) => x.id === bath.id);
       m.applyWallFinish(n, 'wp_floral', { scope: 'plan' });
     },
     { autoFix: true }
