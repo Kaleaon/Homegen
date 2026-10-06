@@ -61,6 +61,7 @@ export function newState() {
     levels: 1,
     rooms: [],
     background: null,
+    site: null, // { crs: 'EPSG:4326', features: [], segments: [], layers: [] }
     customFinishes: [],
     settings: {
       branding: defaultBranding(),

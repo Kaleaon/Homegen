@@ -22,9 +22,11 @@ import {
   intersectInterval,
   lv,
   rectsTouch,
+  roomToPolygon,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics } from './catalog.js';
 import { clone, addItem, addOpening, createRoom } from './model.js';
+import { ensureSpatialIndex } from './gisBridge.js';
 
 const MOISTURE_ROOMS = new Set(['bathroom', 'laundry']);
 const EGRESS = { minW: 20, minH: 24, minArea: 5.7 * 144, maxSill: 44 };
@@ -227,10 +229,12 @@ export const CODE_MAP = {
   'NEC 210.52(H)': 'Hallway Outlets',
   'NEC 210.52(D)': 'Bathroom Outlets',
   'NEC 210.8': 'GFCI Protection',
+  'Zoning / Site Code': 'Zoning / Site Code',
   Geometry: 'Spatial Layout',
   Practice: 'Design Guidance',
 
   // Specific Rule Overrides
+  'setback-clearance': 'Zoning Setback Compliance',
   overlap: 'Room Overlap',
   'min-area': 'Minimum Room Area',
   'min-dim': 'Minimum Room Dimension',
@@ -475,6 +479,29 @@ export function evaluate(state, options = {}) {
         }
       }
     }
+
+  if (state.site) {
+    ensureSpatialIndex(state.site);
+    if (state.site.spatialIndex) {
+      for (const room of rooms) {
+        if (lv(room) === 0) {
+          const roomPoly = roomToPolygon(room);
+          const violations = state.site.spatialIndex.querySetbackViolations(roomPoly);
+          if (violations.length > 0) {
+            add(
+              'setback-clearance',
+              'Zoning / Site Code',
+              'error',
+              true,
+              room.id,
+              `${room.name} violates GIS site boundary setback limit.`,
+              { roomId: room.id }
+            );
+          }
+        }
+      }
+    }
+  }
 
   for (const room of rooms) {
     if (affectedRoomIds && !affectedRoomIds.has(room.id)) continue;

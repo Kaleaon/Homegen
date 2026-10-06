@@ -29,9 +29,11 @@
   <k-button id="print-btn">Print Sheet</k-button>
   <k-button id="export-pdf">Export PDF</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
+  <k-button id="gis-btn">GIS Site</k-button>
   <k-button id="report">Code report</k-button>
   <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden>
   <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
+  <input type="file" id="geojson-file" accept=".geojson, .json, application/json" hidden>
 </header>
 <main>
   <aside id="left">
@@ -412,6 +414,30 @@
     <div class="btns" style="margin-top: 18px;">
       <button id="branding-cancel" type="button">Cancel</button>
       <button id="branding-save" class="primary" type="button">Apply &amp; Save Branding</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dlg-gis" aria-labelledby="gis-dlg-title" class="k-overlay-dialog">
+  <div class="dlg-head">
+    <h2 id="gis-dlg-title">Municipal GIS &amp; Spatial Subsystem</h2>
+    <button type="button" id="gis-close" aria-label="Close GIS modal">✕</button>
+  </div>
+  <div class="dlg-body">
+    <div class="row">
+      <label for="gis-crs">Coordinate Reference System</label>
+      <select id="gis-crs">
+        <option value="EPSG:4326">EPSG:4326 (WGS84 Lat/Lon)</option>
+        <option value="EPSG:3857">EPSG:3857 (Web Mercator)</option>
+        <option value="EPSG:32610">EPSG:32610 (UTM Zone 10N)</option>
+      </select>
+    </div>
+    <div class="btns" style="margin: 12px 0;">
+      <button type="button" id="gis-load-sample" class="primary">Load Sample Municipal Lot</button>
+      <button type="button" id="gis-import-file">Upload GeoJSON File</button>
+    </div>
+    <div id="gis-segment-list" class="gis-segment-container" style="max-height: 200px; overflow-y: auto; margin-top: 12px;"></div>
+    <div class="btns" style="margin-top: 18px;">
+      <button type="button" id="gis-done" class="primary">Done</button>
     </div>
   </div>
 </dialog>

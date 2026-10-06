@@ -585,6 +585,26 @@ export class ComplianceOverlayScene {
       }
     }
 
+    // 5. Compile GIS site layer overlay nodes
+    if (state.site && Array.isArray(state.site.layers)) {
+      for (const layer of state.site.layers) {
+        const nodeType = layer.type || 'gisLotLine';
+        const bounds = layer.bounds || { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+        const nodeW = bounds.maxX - bounds.minX || 0;
+        const nodeH = bounds.maxY - bounds.minY || 0;
+        const rectBounds = { x: bounds.minX, y: bounds.minY, w: nodeW, h: nodeH };
+
+        nextNodes.push(
+          new SpatialOverlayNode(layer.id || `gis-${Math.random()}`, nodeType, rectBounds, {
+            layer,
+            points: layer.points || [],
+            innerPoints: layer.innerPoints || [],
+            name: layer.name,
+          })
+        );
+      }
+    }
+
     // Replace current nodes map and list cleanly
     this.nodes = nextNodes;
     this.nodesById.clear();

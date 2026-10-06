@@ -69,6 +69,12 @@ import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
 import {
+  GISBridge,
+  projectGeoJSON,
+  computeVariableBuffers,
+  ensureSpatialIndex,
+} from './gisBridge.js';
+import {
   buildMultiLevel,
   TEMPLATES,
   TEMPLATE_BY_ID,
@@ -3021,6 +3027,156 @@ if (typeof document !== 'undefined') {
     $('#dlg-branding')?.close();
     toast('Branding and stamp settings saved to project.');
   });
+
+  $('#gis-btn')?.addEventListener('click', openGISDialog);
+  $('#gis-close')?.addEventListener('click', closeGISDialog);
+  $('#gis-done')?.addEventListener('click', closeGISDialog);
+
+  $('#gis-load-sample')?.addEventListener('click', () => {
+    loadGISSubsystem(SAMPLE_MUNICIPAL_GIS);
+    toast('Sample municipal GIS lot loaded successfully.');
+  });
+
+  $('#gis-import-file')?.addEventListener('click', () => {
+    $('#geojson-file')?.click();
+  });
+
+  $('#geojson-file')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const json = JSON.parse(evt.target.result);
+        loadGISSubsystem(json);
+        toast('GeoJSON imported successfully.');
+      } catch (err) {
+        toast(`Failed to parse GeoJSON: ${err.message}`, true);
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  $('#gis-crs')?.addEventListener('change', (e) => {
+    if (doc.site && doc.site.features) {
+      loadGISSubsystem(
+        { type: 'FeatureCollection', features: doc.site.features },
+        { crs: e.target.value }
+      );
+    }
+  });
+}
+
+// ------------------------------------------------------------- GIS Subsystem Helpers
+export const SAMPLE_MUNICIPAL_GIS = {
+  type: 'FeatureCollection',
+  crs: { properties: { name: 'EPSG:4326' } },
+  features: [
+    {
+      type: 'Feature',
+      id: 'lot-polygon-1',
+      properties: { name: 'Municipal Lot Boundary 402B', layer: 'lot', setback: 36 },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [-122.4194, 37.7749],
+            [-122.4174, 37.7749],
+            [-122.4174, 37.7734],
+            [-122.4194, 37.7734],
+            [-122.4194, 37.7749],
+          ],
+        ],
+      },
+    },
+    {
+      type: 'Feature',
+      id: 'easement-polygon-1',
+      properties: { name: 'Public Utility Easement', layer: 'easement' },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [-122.4194, 37.7737],
+            [-122.4184, 37.7737],
+            [-122.4184, 37.7734],
+            [-122.4194, 37.7734],
+            [-122.4194, 37.7737],
+          ],
+        ],
+      },
+    },
+  ],
+};
+
+export function loadGISSubsystem(geojson, options = {}) {
+  const bridge = new GISBridge(doc.site);
+  doc.site = bridge.importGeoJSON(geojson, {
+    targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
+    crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+    ...options,
+  });
+  hist.push(doc);
+  persist();
+  redraw();
+  renderGISSegments();
+  return doc.site;
+}
+
+export function setGISSegmentSetback(segmentId, setbackDistance) {
+  if (!doc.site) return null;
+  const bridge = new GISBridge(doc.site);
+  doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
+  hist.push(doc);
+  persist();
+  redraw();
+  renderGISSegments();
+  return doc.site;
+}
+
+export function openGISDialog() {
+  const dlg = $('#dlg-gis');
+  if (!dlg) return;
+  renderGISSegments();
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
+}
+
+export function closeGISDialog() {
+  const dlg = $('#dlg-gis');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
+}
+
+export function renderGISSegments() {
+  const container = $('#gis-segment-list');
+  if (!container) return;
+  if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
+    container.innerHTML =
+      '<p style="color: #666; font-size: 13px;">No GIS lot segments loaded yet. Click "Load Sample Municipal Lot" or upload a GeoJSON file.</p>';
+    return;
+  }
+
+  let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+  html +=
+    '<thead><tr style="border-bottom: 1px solid #ccc; text-align: left;"><th>Segment</th><th>Setback (in)</th></tr></thead><tbody>';
+  for (const seg of doc.site.segments) {
+    html += `<tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 4px 0;">${seg.label || seg.id}</td>
+      <td style="padding: 4px 0;"><input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input" style="width: 70px; padding: 2px 4px;"> in</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  container.querySelectorAll('.gis-setback-input').forEach((input) => {
+    input.addEventListener('change', (e) => {
+      const segId = e.target.dataset.segId;
+      const val = parseFloat(e.target.value) || 0;
+      setGISSegmentSetback(segId, val);
+    });
+  });
 }
 $('#report')?.addEventListener('click', () =>
   download(
@@ -3551,6 +3707,13 @@ const COMMAND_REGISTRY = [
     shortcut: 'X',
     action: () => setTool({ kind: 'erase' }),
   },
+  {
+    id: 'gis-subsystem',
+    name: 'GIS Site & Projection Controls',
+    category: 'Tools',
+    shortcut: '',
+    action: () => openGISDialog(),
+  },
 
   // Views
   {
@@ -3998,4 +4161,13 @@ if (typeof window !== 'undefined')
     getOnboardingStatus,
     setOnboardingStatus,
     resetOnboardingStatus,
+    GISBridge,
+    projectGeoJSON,
+    computeVariableBuffers,
+    ensureSpatialIndex,
+    loadGISSubsystem,
+    setGISSegmentSetback,
+    openGISDialog,
+    closeGISDialog,
+    SAMPLE_MUNICIPAL_GIS,
   };

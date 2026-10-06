@@ -88,6 +88,74 @@ export function drawComplianceScene(ctx, complianceScene, view) {
   if (!complianceScene) return;
   const nodes = complianceScene.getNodes();
 
+  // Pass 0: GIS Site Subsystem Layers
+  for (const node of nodes) {
+    if (node.type === 'gisLotLine') {
+      const pts = node.data.points || node.data.layer?.points;
+      if (pts && pts.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2 / view.scale;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else if (node.type === 'gisEasement') {
+      const pts = node.data.points || node.data.layer?.points;
+      if (pts && pts.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = '#7e22ce';
+        ctx.lineWidth = 1.5 / view.scale;
+        ctx.setLineDash([6 / view.scale, 4 / view.scale]);
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else if (node.type === 'gisSetbackBuffer') {
+      const outer = node.data.points || node.data.layer?.points;
+      const inner = node.data.innerPoints || node.data.layer?.innerPoints;
+      ctx.save();
+      ctx.fillStyle = 'rgba(234, 88, 12, 0.2)';
+      ctx.strokeStyle = '#ea580c';
+      ctx.lineWidth = 1.5 / view.scale;
+      ctx.setLineDash([4 / view.scale, 2 / view.scale]);
+
+      if (outer && outer.length >= 3 && inner && inner.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(outer[0].x, outer[0].y);
+        for (let i = 1; i < outer.length; i++) ctx.lineTo(outer[i].x, outer[i].y);
+        ctx.closePath();
+
+        ctx.moveTo(inner[0].x, inner[0].y);
+        for (let i = 1; i < inner.length; i++) ctx.lineTo(inner[i].x, inner[i].y);
+        ctx.closePath();
+
+        ctx.fill('evenodd');
+
+        // Draw inner buildable setback boundary stroke
+        ctx.beginPath();
+        ctx.moveTo(inner[0].x, inner[0].y);
+        for (let i = 1; i < inner.length; i++) ctx.lineTo(inner[i].x, inner[i].y);
+        ctx.closePath();
+        ctx.stroke();
+      } else if (outer && outer.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(outer[0].x, outer[0].y);
+        for (let i = 1; i < outer.length; i++) ctx.lineTo(outer[i].x, outer[i].y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   // Pass 1: Fixture clearance zones
   for (const node of nodes) {
     if (node.type !== 'fixtureClearance') continue;
