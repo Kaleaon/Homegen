@@ -190,8 +190,3 @@ export function rectsTouch(a, b, margin = 0) {
   const by1 = b.y + b.h;
   return Math.max(ax0, bx0) < Math.min(ax1, bx1) && Math.max(ay0, by0) < Math.min(ay1, by1);
 }
-
-export function computeRoomBoundingBox(room) {
-  if (!room) return null;
-  return { x: room.x, y: room.y, w: room.w, h: room.h, level: room.level || 0 };
-}
