@@ -12,6 +12,8 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
+      attestations: write
       contents: write
 
     steps:
@@ -33,6 +35,9 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
       - name: Build and Test Web Module
         run: |
           cd web
@@ -50,7 +55,7 @@ jobs:
 
       - name: Build Android Binaries
         run: |
-          gradle :app:assembleRelease :app:bundleRelease
+          ./gradlew :app:assembleRelease :app:bundleRelease
 
       - name: Prepare Release Artifacts and Calculate Checksums
         run: |
@@ -68,6 +73,11 @@ jobs:
             fi
           done
           cat checksums.txt
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'release-artifacts/*'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
