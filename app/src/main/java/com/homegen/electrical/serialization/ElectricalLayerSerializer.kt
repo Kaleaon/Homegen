@@ -10,8 +10,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
- * Replaces the old manual-JSON ElectricalLayerExporter with
- * kotlinx.serialization and adds deserialization (import) support.
+ * Provides serialization and deserialization support for [ElectricalLayer] using kotlinx.serialization.
  */
 object ElectricalLayerSerializer {
 
