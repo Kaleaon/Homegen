@@ -128,6 +128,35 @@
     </div>
   </div>
 </dialog>
+<dialog id="dlg-welcome" aria-labelledby="dlg-welcome-title" class="k-overlay-dialog welcome-wizard-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-welcome-title">Welcome to Homegen Designer</h2>
+    <button value="close" id="welcome-close" aria-label="Close welcome wizard"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body welcome-body">
+    <p class="welcome-tagline">Create interactive 2D floor plans and 3D architectural spaces in minutes with real-time building code compliance.</p>
+    <div class="welcome-choices">
+      <div class="welcome-card" id="welcome-card-tour">
+        <div class="welcome-card-icon">🧭</div>
+        <h3>Take 60s Tour</h3>
+        <p>A quick interactive spotlight tour of the palette, canvas, view controls, auto-comply, and export options.</p>
+        <button id="welcome-btn-tour" class="primary" type="button">Take 60s Tour</button>
+      </div>
+      <div class="welcome-card" id="welcome-card-templates">
+        <div class="welcome-card-icon">📐</div>
+        <h3>Choose Starter Template</h3>
+        <p>Pick from pre-built floor plan layouts including living suites, kitchens, and multi-room layouts.</p>
+        <button id="welcome-btn-templates" class="secondary" type="button">Choose Template</button>
+      </div>
+      <div class="welcome-card" id="welcome-card-blank">
+        <div class="welcome-card-icon">✏️</div>
+        <h3>Start Blank Canvas</h3>
+        <p>Jump straight into design on a clean grid paper canvas with standard drafting tools.</p>
+        <button id="welcome-btn-blank" class="secondary" type="button">Start Blank Canvas</button>
+      </div>
+    </div>
+  </div>
+</dialog>
 <dialog id="dlg-templates" aria-labelledby="dlg-templates-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
     <h2 id="dlg-templates-title">Choose a Starter Template</h2>
