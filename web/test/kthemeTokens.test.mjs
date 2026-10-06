@@ -17,7 +17,11 @@ test('kthemeTokens provides getToken and getPalette APIs with fallbacks in headl
 
   // Test getToken without leading dashes
   const accentToken = getToken('ktheme-accent');
-  assert.equal(accentToken, DEFAULT_TOKENS['--ktheme-accent'], 'getToken normalizes name without leading dashes');
+  assert.equal(
+    accentToken,
+    DEFAULT_TOKENS['--ktheme-accent'],
+    'getToken normalizes name without leading dashes'
+  );
 
   // Test getToken with explicit fallback
   const customFallback = getToken('--custom-unknown-token', '#123456');
