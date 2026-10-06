@@ -153,6 +153,53 @@ export const BUILDING_PRESETS = {
 const registeredWindowPresets = new Map(Object.entries(WINDOW_PRESETS));
 const registeredCladdingMaterials = new Map(Object.entries(CLADDING_PRESETS));
 
+// Global revision counter for dynamic preset updates
+let presetRegistryRevision = 0;
+
+/**
+ * Returns the current global preset revision counter.
+ */
+export function getPresetRevision() {
+  return presetRegistryRevision;
+}
+
+/**
+ * Increments the global preset revision counter.
+ */
+export function incrementPresetRevision() {
+  presetRegistryRevision++;
+  return presetRegistryRevision;
+}
+
+/**
+ * Returns all registered window presets as an object map.
+ */
+export function getWindowPresets() {
+  const result = {};
+  for (const [key, val] of registeredWindowPresets.entries()) {
+    result[key] = val;
+  }
+  return result;
+}
+
+/**
+ * Returns all registered exterior cladding materials as an object map.
+ */
+export function getCladdingPresets() {
+  const result = {};
+  for (const [key, val] of registeredCladdingMaterials.entries()) {
+    result[key] = val;
+  }
+  return result;
+}
+
+/**
+ * Returns all building design presets as an object map.
+ */
+export function getBuildingPresets() {
+  return BUILDING_PRESETS;
+}
+
 // Caches for memory accumulation prevention across plan updates
 const presetMaterialCache = new Map();
 
@@ -182,6 +229,7 @@ export function registerWindowPreset(key, presetSpec) {
     ...presetSpec,
   };
   registeredWindowPresets.set(key, spec);
+  incrementPresetRevision();
   return spec;
 }
 
@@ -230,6 +278,7 @@ export function registerCladdingMaterial(key, finishSpec) {
     WALL_FINISHES.push(spec);
     WALL_BY_ID[spec.id] = spec;
   }
+  incrementPresetRevision();
   return spec;
 }
 
@@ -261,6 +310,26 @@ export function applyBuildingPreset(state, presetKey, { room, level = 0, scope =
         o.presetKey = bPreset.windowPresetKey;
       }
     }
+  }
+}
+
+/**
+ * Apply an exterior cladding material definition to a room or plan state.
+ */
+export function applyCladdingMaterial(
+  state,
+  claddingKey,
+  { room, level = 0, scope = 'plan' } = {}
+) {
+  const targetRooms =
+    scope === 'room' && room
+      ? [room]
+      : scope === 'level'
+        ? state.rooms.filter((r) => (r.level || 0) === level)
+        : state.rooms;
+
+  for (const r of targetRooms) {
+    r.cladding = claddingKey;
   }
 }
 
@@ -328,6 +397,7 @@ export function clearPresetCaches() {
     }
   }
   presetMaterialCache.clear();
+  incrementPresetRevision();
 }
 const ALLOWED_TILE_PRESETS = [12, 24, 48, 96];
 
@@ -386,6 +456,7 @@ export function registerCustomWallFinish(specOrId, maybeSpec, maybeState) {
     }
   }
 
+  incrementPresetRevision();
   return WALL_BY_ID[id];
 }
 

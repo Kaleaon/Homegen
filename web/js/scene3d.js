@@ -23,7 +23,7 @@ import {
   polyHavenHdriUrl,
   MaterialPreloader,
 } from './resources.js';
-import { getCladdingMaterial } from './presetRegistry.js';
+import { getCladdingMaterial, getPresetRevision, resolveWindowStyle } from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
@@ -711,6 +711,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           activeKeys.add(wallKey);
           const ops = wallOpenings(state, room, wall);
           const nbrs = wallNeighbors(state.rooms, room, wall);
+          const winStyles = ops.map(({ o }) => {
+            const isWindow = o.kind === 'window' || OPENING_BY_ID[o.type]?.kind === 'window';
+            return isWindow ? resolveWindowStyle(o) : null;
+          });
           const wallSig = JSON.stringify({
             rx: room.x,
             ry: room.y,
@@ -726,6 +730,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             hd: opts.hd,
             cur,
             ops,
+            winStyles,
+            presetRev: getPresetRevision(),
             nbrs,
           });
           let wallGroup = entityMap.get(wallKey);

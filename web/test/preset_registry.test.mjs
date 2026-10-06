@@ -13,7 +13,9 @@ import {
   registerCladdingMaterial,
   resolveWindowStyle,
   applyBuildingPreset,
+  applyCladdingMaterial,
   clearPresetCaches,
+  getPresetRevision,
 } from '../js/presetRegistry.js';
 import { buildWindow3DMesh } from '../js/windowBuilder.js';
 import { drawWindow2D } from '../js/render.js';
@@ -250,4 +252,103 @@ test('Clear preset caches executes cleanly without errors', () => {
   assert.doesNotThrow(() => {
     clearPresetCaches();
   }, 'Cache cleanup succeeds');
+});
+
+test('Global preset revision counter increments on preset registration or cache clearing', () => {
+  const revBefore = getPresetRevision();
+
+  registerWindowPreset('test_rev_window', {
+    name: 'Test Revision Window',
+    frameColor: '#123456',
+  });
+  const rev1 = getPresetRevision();
+  assert.ok(rev1 > revBefore, 'Revision counter incremented on window preset registration');
+
+  registerCladdingMaterial('test_rev_cladding', {
+    name: 'Test Revision Cladding',
+    c1: '#654321',
+  });
+  const rev2 = getPresetRevision();
+  assert.ok(rev2 > rev1, 'Revision counter incremented on cladding preset registration');
+
+  clearPresetCaches();
+  const rev3 = getPresetRevision();
+  assert.ok(rev3 > rev2, 'Revision counter incremented on clearing preset caches');
+});
+
+test('Wall signature calculation in 3D scene invalidates cached wall group on preset revision increment', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'living', 0, 0, 144, 144);
+  const o = m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
+
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+  api.show();
+
+  const wallKey = `${room.id}:wall:N`;
+  const initialWallGroup = api.entityMap.get(wallKey);
+  assert.ok(initialWallGroup, 'Initial wall group created');
+
+  // Registering a new window preset increments preset revision
+  registerWindowPreset('dynamic_preset_update', {
+    name: 'Dynamic Update Preset',
+    frameColor: '#ff00ff',
+  });
+
+  // Re-run update on 3D scene
+  api.update();
+
+  const updatedWallGroup = api.entityMap.get(wallKey);
+  assert.ok(updatedWallGroup, 'Wall group reconstructed after revision increment');
+  assert.notStrictEqual(
+    updatedWallGroup,
+    initialWallGroup,
+    'Cached wall group invalidated and rebuilt due to preset revision increment'
+  );
+});
+
+test('Wall signature invalidates cached wall group when window opening style properties change', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'bedroom', 0, 0, 144, 144);
+  const o = m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
+
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+  api.show();
+
+  const wallKey = `${room.id}:wall:N`;
+  const wallGroup1 = api.entityMap.get(wallKey);
+
+  // Update window opening properties directly (e.g. frameColor)
+  o.frameColor = '#00ff00';
+  api.update();
+
+  const wallGroup2 = api.entityMap.get(wallKey);
+  assert.notStrictEqual(
+    wallGroup2,
+    wallGroup1,
+    'Wall signature updated and invalidated cached mesh when window frame color changed'
+  );
+});
+
+test('applyCladdingMaterial applies exterior cladding across room, level, and plan scopes', () => {
+  const state = m.newState();
+  const room1 = m.createRoom(state, 'living', 0, 0, 144, 144, { level: 0 });
+  const room2 = m.createRoom(state, 'bedroom', 144, 0, 144, 144, { level: 0 });
+
+  // Room scope
+  applyCladdingMaterial(state, 'cladding_stone', { room: room1, scope: 'room' });
+  assert.strictEqual(room1.cladding, 'cladding_stone');
+  assert.strictEqual(room2.cladding, undefined);
+
+  // Plan scope
+  applyCladdingMaterial(state, 'wall_brick', { scope: 'plan' });
+  assert.strictEqual(room1.cladding, 'wall_brick');
+  assert.strictEqual(room2.cladding, 'wall_brick');
 });
