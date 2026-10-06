@@ -3484,7 +3484,19 @@ function applyCalibration(p1, p2, distPx, valStr) {
   toast(`Blueprint scale calibrated (${fmtLen(targetInches)}).`);
 }
 
-function handleBlueprintImport(file) {
+function setBackgroundAttribution(attr = {}) {
+  if (!doc.background) return;
+  doc.background.attributionText = attr.attributionText ?? doc.background.attributionText ?? null;
+  doc.background.provider = attr.provider ?? doc.background.provider ?? null;
+  doc.background.licenseUrl = attr.licenseUrl ?? doc.background.licenseUrl ?? null;
+  doc.background.logoUrl = attr.logoUrl ?? doc.background.logoUrl ?? null;
+  if (attr.isGeospatial !== undefined) doc.background.isGeospatial = attr.isGeospatial;
+  hist.push(doc);
+  persist();
+  refresh();
+}
+
+function handleBlueprintImport(file, meta = {}) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -3516,6 +3528,11 @@ function handleBlueprintImport(file) {
         locked: false,
         width: w,
         height: h,
+        attributionText: meta.attributionText || null,
+        provider: meta.provider || null,
+        licenseUrl: meta.licenseUrl || null,
+        logoUrl: meta.logoUrl || null,
+        isGeospatial: !!meta.isGeospatial,
       };
       hist.push(doc, 'Import Blueprint');
       persist();
@@ -4193,6 +4210,7 @@ if (typeof window !== 'undefined')
     generatePDF,
     applyCalibration,
     handleBlueprintImport,
+    setBackgroundAttribution,
     renderCompliance,
     renderViolationItem,
     complianceScene,
