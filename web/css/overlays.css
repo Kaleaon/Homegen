@@ -146,3 +146,12 @@
   align-items: center;
   justify-content: center;
 }
+
+/* 6. Target Size Minimum Enforcer Utility */
+.k-target-min-size,
+.k-overlay-dialog button[value='close'],
+.k-overlay-drawer .close-btn {
+  min-width: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
+}
