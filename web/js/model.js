@@ -13,6 +13,7 @@ import {
   footprint,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
+import { registerCustomWallFinish } from './presetRegistry.js';
 
 export function newState() {
   return {
@@ -22,6 +23,7 @@ export function newState() {
     levels: 1,
     rooms: [],
     background: null,
+    customFinishes: [],
     settings: {
       branding: defaultBranding(),
     },
@@ -255,6 +257,7 @@ export function deserialize(text) {
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
   s.background = s.background || null;
+  s.customFinishes = s.customFinishes || [];
   s.settings ||= {};
   s.settings.branding = {
     logoDataUrl: s.settings.branding?.logoDataUrl || null,
@@ -287,6 +290,9 @@ export function deserialize(text) {
     r.level ||= 0;
   }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
+  for (const finish of s.customFinishes) {
+    registerCustomWallFinish(finish, s);
+  }
   return s;
 }
 

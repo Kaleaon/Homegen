@@ -32,7 +32,8 @@ import {
 import * as M from './model.js';
 import { evaluate, blockingIds, commit, commitSequence, autoComply } from './codes.js';
 import { draw, drawItem, handles, fmtLen } from './render.js';
-import { patternFor } from './patterns.js';
+import { patternFor, clearPatternCache } from './patterns.js';
+import { registerCustomWallFinish } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
 import {
@@ -1310,16 +1311,23 @@ function renderPalette() {
       ) +
       '</div>';
     h +=
-      '<h4>Wallpaper & paint (click a wall)</h4><div class="grid">' +
-      WALL_FINISHES.map((f) =>
-        card(
+      '<h4>Wallpaper & paint (click a wall)</h4>' +
+      '<div style="margin-bottom:12px"><button id="btn-add-custom-material" class="btn primary" style="width:100%" type="button">+ Add Custom Material</button></div>' +
+      '<div class="grid">' +
+      WALL_FINISHES.map((f) => {
+        const sub = f.wet ? 'moisture-rated' : f.tileInches ? `${f.tileInches}" tile` : '';
+        let cardHtml = card(
           f.name,
-          f.wet ? 'moisture-rated' : '',
+          sub,
           tool.kind === 'wall' && tool.id === f.id,
           `data-tool="wall" data-id="${f.id}"`,
           swatchStyle(f)
-        )
-      ).join('') +
+        );
+        if (f.isCustom) {
+          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label style="margin:0;font-size:11px">Tile Density:</label><select class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
+        }
+        return cardHtml;
+      }).join('') +
       '</div>';
     h +=
       '<h4>Flooring (click a room)</h4><div class="grid">' +
@@ -1361,6 +1369,38 @@ function renderPalette() {
       '<p class="note">Kits arrive pre-designed and then pass through the same code checks and auto-fixes as everything else.</p>';
   }
   p.innerHTML = h;
+  p.querySelector('#btn-add-custom-material')?.addEventListener('click', () => {
+    const dlg = $('#dlg-custom-material');
+    if (dlg) {
+      const nameInput = $('#custom-mat-name');
+      const fileInput = $('#custom-mat-file');
+      const densitySel = $('#custom-mat-density');
+      if (nameInput) nameInput.value = '';
+      if (fileInput) fileInput.value = '';
+      if (densitySel) densitySel.value = '24';
+      if (typeof dlg.showModal === 'function') {
+        try {
+          dlg.showModal();
+        } catch {
+          dlg.setAttribute('open', '');
+        }
+      }
+    }
+  });
+  p.querySelectorAll('.custom-density-select').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const finishId = sel.dataset.id;
+      const finish = WALL_BY_ID[finishId];
+      if (finish) {
+        const newDensity = Number(sel.value);
+        registerCustomWallFinish({ ...finish, tileInches: newDensity }, doc);
+        clearPatternCache(finishId);
+        refresh();
+        toast(`Updated tile density for "${finish.name}" to ${newDensity}"`);
+      }
+    });
+  });
   p.querySelectorAll('[data-tool]').forEach((b) =>
     b.addEventListener('click', () =>
       setTool({ kind: b.dataset.tool, type: b.dataset.type, id: b.dataset.id })
@@ -2525,6 +2565,37 @@ function openExportDialog() {
   updateExportPreview();
   dlg.showModal();
 }
+
+$('#btn-cancel-custom-material')?.addEventListener('click', () => {
+  $('#dlg-custom-material')?.close();
+});
+
+$('#btn-save-custom-material')?.addEventListener('click', () => {
+  const nameInput = $('#custom-mat-name');
+  const fileInput = $('#custom-mat-file');
+  const densitySel = $('#custom-mat-density');
+
+  const name = (nameInput?.value || '').trim() || 'Custom Material';
+  const density = Number(densitySel?.value) || 24;
+
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+    toast('Please select an image file for the custom material.', true);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    const spec = { name, dataUrl, tileInches: density };
+    const registered = registerCustomWallFinish(spec, doc);
+    clearPatternCache(registered.id);
+    $('#dlg-custom-material')?.close();
+    renderPalette();
+    refresh();
+    toast(`Custom material "${registered.name}" added`);
+  };
+  reader.readAsDataURL(fileInput.files[0]);
+});
 
 $('#svg-btn')?.addEventListener('click', openExportDialog);
 $('#print-btn')?.addEventListener('click', openExportDialog);
