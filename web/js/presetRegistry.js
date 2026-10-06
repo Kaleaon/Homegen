@@ -329,7 +329,6 @@ export function clearPresetCaches() {
   }
   presetMaterialCache.clear();
 }
-
 const ALLOWED_TILE_PRESETS = [12, 24, 48, 96];
 
 /**

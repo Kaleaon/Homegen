@@ -27,6 +27,7 @@
   <k-button id="svg-btn">Export SVG</k-button>
   <k-button id="print-btn">Print Sheet</k-button>
   <k-button id="export-pdf">Export PDF</k-button>
+  <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="report">Code report</k-button>
   <input type="file" id="file" accept="application/json" hidden>
   <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
@@ -80,7 +81,7 @@
       <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
-    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" hidden>
+    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="status" aria-live="polite" aria-atomic="true" hidden>
       <div class="diff-header">
         <div class="diff-title">
           <span>✨ Auto-Fix Summary</span>
@@ -154,8 +155,8 @@
       <button id="p-horde" class="primary">AI Horde (follows your 3D layout, queued)</button>
     </div>
     <div class="row"><label for="p-key">Horde key</label><input id="p-key" placeholder="0000000000 (anonymous) — free key at aihorde.net"></div>
-    <p id="p-status" class="note"></p>
-    <div id="p-error" class="p-error-box" hidden>
+    <p id="p-status" class="note" role="status" aria-live="polite"></p>
+    <div id="p-error" class="p-error-box" role="alert" aria-live="assertive" hidden>
       <div id="p-error-msg" class="p-error-msg"></div>
       <div id="p-recovery-btns" class="p-recovery-btns">
         <button id="p-retry" class="secondary" type="button" hidden>Retry Render</button>
@@ -235,9 +236,145 @@
     <div class="row"><label class="toggle"><input type="checkbox" id="pdf-tb" checked> Architectural title block</label></div>
     <div class="row"><label class="toggle"><input type="checkbox" id="pdf-scalebar" checked> Graphic scale bar</label></div>
     <div class="row"><label class="toggle"><input type="checkbox" id="pdf-schedule" checked> Room schedule &amp; area metrics table</label></div>
+    <h3>Branding &amp; Approval Stamps</h3>
+    <div class="row">
+      <label for="pdf-branding-mode">Branding Source</label>
+      <select id="pdf-branding-mode">
+        <option value="project" selected>Use Project Branding (Embedded)</option>
+        <option value="session">Custom Session Branding</option>
+        <option value="none">Suppress All Branding</option>
+      </select>
+    </div>
+    <div id="pdf-session-branding-box" hidden>
+      <div class="row"><label for="pdf-session-stamp-title">Session Stamp Title</label><input id="pdf-session-stamp-title" value="APPROVED"></div>
+      <div class="row"><label for="pdf-session-watermark">Session Watermark</label><input id="pdf-session-watermark" placeholder="e.g. DRAFT"></div>
+    </div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-inc-logo" checked> Include Branding Logo</label></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-inc-stamp" checked> Include Approval Stamp</label></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-inc-watermark" checked> Include Diagonal Watermark</label></div>
     <div class="btns">
       <button id="pdf-cancel" type="button">Cancel</button>
       <button id="pdf-generate" class="primary" type="button">Download PDF</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dlg-branding" class="k-overlay-dialog" aria-labelledby="branding-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="branding-title">Project Branding &amp; Approval Stamp</h2>
+    <button value="close" aria-label="Close branding dialog"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <div class="branding-tabs" role="tablist" aria-label="Branding Sections">
+      <button type="button" class="tab-btn on" data-bsection="stamp" role="tab" aria-selected="true">Approval Stamp</button>
+      <button type="button" class="tab-btn" data-bsection="logo" role="tab" aria-selected="false">Logo Asset</button>
+      <button type="button" class="tab-btn" data-bsection="watermark" role="tab" aria-selected="false">Diagonal Watermark</button>
+    </div>
+
+    <!-- Stamp Builder Section -->
+    <div id="bsection-stamp" class="bsection">
+      <h3>Interactive Stamp Stencil Builder</h3>
+      <div class="stamp-builder-grid">
+        <div class="stamp-controls">
+          <div class="row">
+            <label class="toggle"><input type="checkbox" id="stamp-enabled" checked> Enable approval stamp</label>
+          </div>
+          <div class="row">
+            <label for="stamp-shape">Frame shape</label>
+            <select id="stamp-shape">
+              <option value="circle" selected>Circular Seal</option>
+              <option value="rectangle">Rectangle Frame</option>
+              <option value="double-rectangle">Double Rectangle</option>
+              <option value="rounded-rectangle">Rounded Rectangle</option>
+              <option value="badge">Octagonal Badge</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="stamp-title">Primary title</label>
+            <input id="stamp-title" value="APPROVED" placeholder="e.g. APPROVED, REVIEWED, PASSED">
+          </div>
+          <div class="row">
+            <label for="stamp-subtitle">Subtitle line</label>
+            <input id="stamp-subtitle" value="ARCHITECTURAL PLAN" placeholder="e.g. ARCHITECTURAL PLAN, FINAL PERMIT">
+          </div>
+          <div class="row">
+            <label for="stamp-license">License / ID</label>
+            <input id="stamp-license" placeholder="e.g. LIC #123456">
+          </div>
+          <div class="row">
+            <label for="stamp-date">Date text</label>
+            <input id="stamp-date" placeholder="Leave blank for auto date">
+          </div>
+          <div class="row">
+            <label for="stamp-border-style">Border style</label>
+            <select id="stamp-border-style">
+              <option value="solid" selected>Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="double">Double Line</option>
+              <option value="bold">Bold Thick</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="stamp-border-color">Border color</label>
+            <input id="stamp-border-color" type="color" value="#d32f2f">
+          </div>
+          <div class="row">
+            <label for="stamp-text-color">Text color</label>
+            <input id="stamp-text-color" type="color" value="#d32f2f">
+          </div>
+          <div class="row">
+            <label for="stamp-opacity">Opacity</label>
+            <input id="stamp-opacity" type="range" min="0.1" max="1.0" step="0.05" value="0.9">
+          </div>
+        </div>
+        <div class="stamp-preview-box">
+          <label>Live Stamp Preview</label>
+          <div class="stamp-canvas-wrap">
+            <canvas id="stamp-preview-canvas" width="220" height="180"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logo Section -->
+    <div id="bsection-logo" class="bsection" hidden>
+      <h3>Embedded Base64 Branding Logo</h3>
+      <p class="note">Logos persist inside <code>.homegen</code> project files (Max file size: 500KB).</p>
+      <div class="row">
+        <label for="logo-file">Upload Logo Image</label>
+        <input type="file" id="logo-file" accept="image/png, image/jpeg, image/webp">
+      </div>
+      <div id="logo-preview-box" class="logo-preview-box">
+        <img id="logo-preview-img" alt="Branding Logo Preview" style="max-height:80px; display:none;">
+        <span id="logo-none-msg">No logo embedded yet</span>
+      </div>
+      <div class="btns">
+        <button id="logo-clear-btn" type="button">Remove Logo</button>
+      </div>
+    </div>
+
+    <!-- Watermark Section -->
+    <div id="bsection-watermark" class="bsection" hidden>
+      <h3>Diagonal Watermark Overlay</h3>
+      <div class="row">
+        <label class="toggle"><input type="checkbox" id="wm-enabled"> Enable diagonal watermark</label>
+      </div>
+      <div class="row">
+        <label for="wm-text">Watermark text</label>
+        <input id="wm-text" placeholder="e.g. PRELIMINARY, CONFIDENTIAL, NOT FOR CONSTRUCTION">
+      </div>
+      <div class="row">
+        <label for="wm-color">Text color</label>
+        <input id="wm-color" type="color" value="#9e9e9e">
+      </div>
+      <div class="row">
+        <label for="wm-opacity">Opacity</label>
+        <input id="wm-opacity" type="range" min="0.05" max="0.8" step="0.05" value="0.2">
+      </div>
+    </div>
+
+    <div class="btns" style="margin-top: 18px;">
+      <button id="branding-cancel" type="button">Cancel</button>
+      <button id="branding-save" class="primary" type="button">Apply &amp; Save Branding</button>
     </div>
   </div>
 </dialog>
