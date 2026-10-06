@@ -173,6 +173,7 @@ test('command palette query filtering and execution unit test', async () => {
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
+  global.navigator = global.window.navigator;
 
   // Import app module to initialize command registry and listeners
   await import(`../js/app.js?t=${Date.now()}`);
@@ -243,6 +244,7 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
+  global.navigator = global.window.navigator;
   global.document = {
     activeElement: createMockElement('body', 'BODY'),
     getElementById: (id) => getEl(id),
@@ -301,6 +303,7 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
+  global.navigator = global.window.navigator;
   global.document = {
     activeElement: createMockElement('body', 'BODY'),
     getElementById: (id) => getEl(id),
