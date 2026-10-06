@@ -2237,6 +2237,57 @@ function setDoc(next, label) {
   refresh();
 }
 
+function trapFocus(containerEl, returnFocusEl) {
+  const focusableSelector =
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const focusableElements = Array.from(containerEl.querySelectorAll(focusableSelector));
+  if (!focusableElements.length) return () => {};
+
+  const firstEl = focusableElements[0];
+  const lastEl = focusableElements[focusableElements.length - 1];
+
+  firstEl.focus();
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') {
+      if (typeof containerEl.close === 'function') {
+        containerEl.close();
+      } else {
+        containerEl.hidden = true;
+        if (containerEl.id === 'diff-drawer') {
+          autoFixDiffs = [];
+          hoveredDiffIndex = null;
+          redraw();
+        }
+      }
+      if (returnFocusEl) returnFocusEl.focus();
+      return;
+    }
+
+    if (e.key !== 'Tab') return;
+
+    if (e.shiftKey) {
+      if (document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      }
+    } else {
+      if (document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    }
+  }
+
+  containerEl.addEventListener('keydown', handleKeyDown);
+  return () => {
+    containerEl.removeEventListener('keydown', handleKeyDown);
+    if (returnFocusEl) returnFocusEl.focus();
+  };
+}
+
+let activeDiffDrawerCleanup = null;
+
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
   const countEl = $('#diff-count');
@@ -2246,10 +2297,15 @@ function renderDiffDrawer() {
   if (!drawer || !countEl || !listEl) return;
 
   if (!autoFixDiffs || !autoFixDiffs.length) {
+    if (activeDiffDrawerCleanup) {
+      activeDiffDrawerCleanup();
+      activeDiffDrawerCleanup = null;
+    }
     drawer.hidden = true;
     return;
   }
 
+  const wasHidden = drawer.hidden;
   drawer.hidden = false;
   countEl.textContent = String(autoFixDiffs.length);
 
@@ -2285,9 +2341,19 @@ function renderDiffDrawer() {
     closeBtn.onclick = () => {
       autoFixDiffs = [];
       hoveredDiffIndex = null;
+      if (activeDiffDrawerCleanup) {
+        activeDiffDrawerCleanup();
+        activeDiffDrawerCleanup = null;
+      }
       renderDiffDrawer();
       redraw();
     };
+  }
+
+  if (wasHidden) {
+    const returnFocusEl = document.activeElement;
+    if (activeDiffDrawerCleanup) activeDiffDrawerCleanup();
+    activeDiffDrawerCleanup = trapFocus(drawer, returnFocusEl);
   }
 }
 
@@ -2481,11 +2547,12 @@ $('#png')?.addEventListener('click', () => {
     a.click();
   });
 });
-$('#export-pdf')?.addEventListener('click', () => {
+$('#export-pdf')?.addEventListener('click', (e) => {
   if (!doc.rooms || doc.rooms.length === 0) {
     toast('Cannot export PDF: add at least one room first.', true);
     return;
   }
+  const returnFocusEl = e.currentTarget || document.activeElement;
   $('#pdf-title').value = doc.name || 'My home';
   $('#pdf-date').value = new Date().toISOString().slice(0, 10);
   const levelSelect = $('#pdf-level');
@@ -2505,7 +2572,12 @@ $('#export-pdf')?.addEventListener('click', () => {
   }
   const sessionBox = $('#pdf-session-branding-box');
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
-  $('#pdf-export')?.showModal();
+  const dlg = $('#pdf-export');
+  if (dlg) {
+    dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
+  }
 });
 
 $('#pdf-branding-mode')?.addEventListener('change', (e) => {
@@ -2764,9 +2836,10 @@ function updateExportPreview() {
   if (prevEl) prevEl.innerHTML = currentSvg;
 }
 
-function openExportDialog() {
+function openExportDialog(e) {
   const dlg = $('#dlg-export');
   if (!dlg) return;
+  const returnFocusEl = e?.currentTarget || document.activeElement;
   const levelSel = $('#e-level');
   if (levelSel) {
     const numLevels = doc.levels || 1;
@@ -2780,6 +2853,8 @@ function openExportDialog() {
   }
   updateExportPreview();
   dlg.showModal();
+  const cleanup = trapFocus(dlg, returnFocusEl);
+  dlg.addEventListener('close', () => cleanup(), { once: true });
 }
 
 $('#btn-cancel-custom-material')?.addEventListener('click', () => {
@@ -3031,7 +3106,10 @@ function triggerCalibrationDialog(p1, p2) {
   const input = $('#calib-distance');
   if (input) input.value = fmtLen(distPx);
   if (dlg && typeof dlg.showModal === 'function') {
+    const returnFocusEl = document.activeElement;
     dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
   } else {
     const str = prompt('Enter real-world distance (e.g. 10 ft, 120 in, 10\' 6"):', fmtLen(distPx));
     applyCalibration(p1, p2, distPx, str);
@@ -3707,6 +3785,7 @@ if (typeof window !== 'undefined')
     openShortcutOverlay,
     closeShortcutOverlay,
     renderCommandList,
+    trapFocus,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
