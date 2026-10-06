@@ -32,6 +32,7 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob, getTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
+import { parseElevationRaster, computeContoursAsync, ElevationGrid } from './elevationEngine.js';
 import {
   evaluate,
   blockingIds,
@@ -2441,6 +2442,12 @@ function setDoc(next, label) {
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
+  if (doc.elevationGrid) {
+    computeContoursAsync(doc.elevationGrid).then((contours) => {
+      doc._cachedContours = contours;
+      redraw();
+    });
+  }
   refresh();
 }
 
@@ -2727,6 +2734,83 @@ $('#save-zip')?.addEventListener('click', async () => {
   }
 });
 $('#load')?.addEventListener('click', () => $('#file').click());
+$('#import-elevation')?.addEventListener('click', () => {
+  if (doc.elevationGrid) {
+    $('#dlg-elevation')?.showModal();
+  } else {
+    $('#elevation-file')?.click();
+  }
+});
+
+$('#elevation-file')?.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    let inputData = null;
+    if (file.type.includes('json') || file.name.endsWith('.json')) {
+      inputData = await file.text();
+    } else if (file.name.endsWith('.tif') || file.name.endsWith('.tiff')) {
+      inputData = await file.arrayBuffer();
+    } else {
+      // Image file (PNG / JPEG)
+      const dataUrl = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = dataUrl;
+      });
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth || img.width;
+      c.height = img.naturalHeight || img.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      inputData = c;
+    }
+
+    const grid = await parseElevationRaster(inputData);
+    doc.elevationGrid = grid;
+    doc._cachedContours = await computeContoursAsync(grid);
+    window.__scene3d?.update();
+    redraw();
+    toast(`Imported terrain elevation grid (${grid.width}x${grid.height}).`);
+  } catch (err) {
+    toast(`Failed to import elevation data: ${err.message}`, true);
+  }
+  e.target.value = '';
+});
+
+$('#btn-apply-elevation')?.addEventListener('click', async () => {
+  if (!doc.elevationGrid) return;
+  const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
+  const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
+  const visible = $('#elevation-visible')?.checked !== false;
+
+  doc.elevationGrid.contourInterval = interval;
+  doc.elevationGrid.verticalScale = scale;
+  doc.elevationGrid.visible = visible;
+
+  doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
+  window.__scene3d?.update();
+  redraw();
+  $('#dlg-elevation')?.close();
+  toast('Updated elevation terrain settings.');
+});
+
+$('#btn-clear-elevation')?.addEventListener('click', () => {
+  doc.elevationGrid = null;
+  doc._cachedContours = null;
+  window.__scene3d?.update();
+  redraw();
+  $('#dlg-elevation')?.close();
+  toast('Cleared terrain elevation data.');
+});
 $('#file')?.addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
@@ -4051,6 +4135,9 @@ if (typeof window !== 'undefined')
     closeShortcutOverlay,
     renderCommandList,
     trapFocus,
+    parseElevationRaster,
+    computeContoursAsync,
+    ElevationGrid,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,

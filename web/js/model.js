@@ -13,6 +13,7 @@ import {
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
+import { deserializeElevationGrid } from './elevationEngine.js';
 
 export function defaultBranding() {
   return {
@@ -61,6 +62,7 @@ export function newState() {
     levels: 1,
     rooms: [],
     background: null,
+    elevationGrid: null,
     customFinishes: [],
     settings: {
       branding: defaultBranding(),
@@ -443,6 +445,7 @@ export function deserialize(text) {
     }
   }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
+  s.elevationGrid = s.elevationGrid ? deserializeElevationGrid(s.elevationGrid) : null;
   for (const finish of s.customFinishes) {
     registerCustomWallFinish(finish, s);
   }
