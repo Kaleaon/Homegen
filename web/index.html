@@ -25,6 +25,7 @@
   <k-button id="save-zip" title="Export composite ZIP archive with embedded textures">Save ZIP</k-button>
   <k-button id="load">Open</k-button>
   <k-button id="import-blueprint">Import Blueprint</k-button>
+  <k-button id="import-elevation" title="Import heightmap PNG, GeoTIFF, or Google Elevation JSON">Import Terrain</k-button>
   <k-button id="png">PNG</k-button>
   <k-button id="svg-btn">Export SVG</k-button>
   <k-button id="print-btn">Print Sheet</k-button>
@@ -34,6 +35,7 @@
   <k-button id="report">Code report</k-button>
   <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden>
   <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
+  <input type="file" id="elevation-file" accept="image/*, .json, .tif, .tiff, application/json" hidden>
 </header>
 <main>
   <aside id="left">
@@ -136,6 +138,32 @@
     <div class="btns" style="margin-top:16px">
       <button id="btn-save-custom-material" class="primary" type="button">Save Material</button>
       <button id="btn-cancel-custom-material" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dlg-elevation" aria-labelledby="dlg-elevation-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-elevation-title">Terrain &amp; Elevation Settings</h2>
+    <button value="close" aria-label="Close elevation dialog"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals and 3D vertex displacement scale.</p>
+    <div class="row">
+      <label for="elevation-contour-interval">Contour Interval (meters)</label>
+      <input id="elevation-contour-interval" type="number" min="0.1" max="50" step="0.5" value="1.0" />
+    </div>
+    <div class="row">
+      <label for="elevation-vertical-scale">3D Displacement Scale</label>
+      <input id="elevation-vertical-scale" type="number" min="0.1" max="10" step="0.1" value="1.0" />
+    </div>
+    <div class="row">
+      <label class="toggle" for="elevation-visible">
+        <input id="elevation-visible" type="checkbox" checked /> Show 2D Topographic Contours
+      </label>
+    </div>
+    <div class="btns" style="margin-top:16px">
+      <button id="btn-apply-elevation" class="primary" type="button">Apply Settings</button>
+      <button id="btn-clear-elevation" class="secondary" type="button">Clear Terrain</button>
     </div>
   </div>
 </dialog>
