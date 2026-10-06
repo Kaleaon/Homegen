@@ -473,7 +473,15 @@ function redraw() {
   const state = preview ? preview.next : doc;
   const rep = preview ? evaluate(preview.next) : report;
   const bad = new Set([...badIds(rep)]);
-  complianceScene.update(state, rep, { curLevel, selection, drag, hover, view });
+  complianceScene.update(state, rep, {
+    curLevel,
+    selection,
+    drag,
+    hover,
+    view,
+    preview,
+    freshViolations: preview?.fresh || [],
+  });
   draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
     dpr,
     complianceScene,
