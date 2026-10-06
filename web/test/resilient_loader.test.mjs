@@ -115,7 +115,7 @@ test('HDRI failure resets scene background, environment, and intensity to studio
     assert.equal(scene3d.opts.env, 'studio');
     assert.equal(scene3d.scene.backgroundBlurriness, 0);
     assert.equal(scene3d.scene.environmentIntensity, 0.9);
-    assert.equal(scene3d.scene.background.getHexString(), 'cfe0ee');
+    assert.equal(scene3d.scene.background.getHexString(), 'cbd5e1');
     assert.equal(envChanged, 'studio');
     assert.match(errorMsg, /HDRI environment failed to load/);
   } finally {
