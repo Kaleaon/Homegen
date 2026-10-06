@@ -318,8 +318,8 @@ export class ComplianceOverlayScene {
               itemName: def.name,
               isColliding,
               fillColor: isColliding
-                ? (getToken('--ktheme-critical-muted') || 'rgba(232, 64, 64, 0.25)')
-                : (getToken('--ktheme-accent-muted') || 'rgba(42, 127, 255, 0.12)'),
+                ? getToken('--ktheme-critical-muted') || 'rgba(232, 64, 64, 0.25)'
+                : getToken('--ktheme-accent-muted') || 'rgba(42, 127, 255, 0.12)',
               borderColor: isColliding
                 ? getToken('--ktheme-critical', '#e84040')
                 : getToken('--ktheme-accent', '#2a7fff'),
@@ -453,7 +453,11 @@ export class ComplianceOverlayScene {
               handleId: c.id,
               isSelected,
               isValid,
-              color: isValid ? (isSelected ? getToken('--ktheme-accent', '#2a7fff') : getToken('--ktheme-border', '#444444')) : getToken('--ktheme-critical', '#f87171'),
+              color: isValid
+                ? isSelected
+                  ? getToken('--ktheme-accent', '#2a7fff')
+                  : getToken('--ktheme-border', '#444444')
+                : getToken('--ktheme-critical', '#f87171'),
             }
           )
         );
