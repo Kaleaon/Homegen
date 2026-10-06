@@ -319,10 +319,13 @@ aside {
   background: var(--ktheme-bg-surface);
   color: var(--ktheme-text);
   font-size: 13px;
-  outline: none;
 }
 .catalog-search-input:focus {
   border-color: var(--ktheme-accent);
+}
+.catalog-search-input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .catalog-filters {
   display: flex;
@@ -348,10 +351,13 @@ aside {
   background: var(--ktheme-bg-surface);
   color: var(--ktheme-text);
   font-size: var(--font-size-sm);
-  outline: none;
 }
 .catalog-dim-input:focus {
   border-color: var(--ktheme-accent);
+}
+.catalog-dim-input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .catalog-empty {
   padding: 20px 8px;
