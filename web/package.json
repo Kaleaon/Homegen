@@ -32,7 +32,10 @@
     "three": "0.186.0"
   },
   "imports": {
-    "three": "./vendor/three/three.module.js",
+    "#jszip": "./vendor/jszip/jszip.module.js",
+    "#jspdf": "./vendor/jspdf/jspdf.es.min.js",
+    "#three": "./vendor/three/three.module.js",
+    "#three/*": "./vendor/three/*",
     "designer3d/tools": "../designer3d/tools/index.mjs",
     "designer3d/tools/*": "../designer3d/tools/*",
     "#designer3d/tools": "../designer3d/tools/index.mjs"

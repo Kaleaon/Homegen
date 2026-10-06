@@ -1,8 +1,8 @@
 // 3D view: builds a three.js scene from the plan. Units are feet; plan x -> x, plan y -> z, up is +y.
-import * as THREE from 'three';
-import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
-import { RoomEnvironment } from '../vendor/three/addons/RoomEnvironment.js';
-import { HDRLoader } from '../vendor/three/addons/HDRLoader.js';
+import * as THREE from '#three';
+import { OrbitControls } from '#three/addons/OrbitControls.js';
+import { RoomEnvironment } from '#three/addons/RoomEnvironment.js';
+import { HDRLoader } from '#three/addons/HDRLoader.js';
 import {
   WT,
   WALLS,

@@ -1,5 +1,5 @@
 // Composite ZIP archive export and import for Homegen project files and IndexedDB textures.
-import JSZip from 'jszip';
+import JSZip from '#jszip';
 import { serialize, deserialize } from './model.js';
 import { getAllTextureBlobs, saveTextureBlob } from './textureStore.js';
 
