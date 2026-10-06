@@ -69,6 +69,49 @@ export function newState() {
 }
 
 export const clone = (s) => JSON.parse(JSON.stringify(s));
+
+export function isRoomEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function cloneWithSharing(state, prevState = null) {
+  if (!state) return state;
+  const clonedBase = clone(state);
+  if (!prevState || !Array.isArray(prevState.rooms)) {
+    return clonedBase;
+  }
+
+  const prevRoomMap = new Map();
+  for (const r of prevState.rooms) {
+    if (r && r.id != null) {
+      prevRoomMap.set(r.id, r);
+    }
+  }
+
+  clonedBase.rooms = (state.rooms || []).map((room) => {
+    const prevRoom = prevRoomMap.get(room.id);
+    if (prevRoom && isRoomEqual(room, prevRoom)) {
+      return prevRoom;
+    }
+    return clone(room);
+  });
+
+  return clonedBase;
+}
+
+export function ensureRoomCopy(state, room) {
+  if (!state || !Array.isArray(state.rooms) || !room || !room.id) {
+    return room;
+  }
+  const idx = state.rooms.findIndex((r) => r.id === room.id);
+  if (idx === -1) {
+    return room;
+  }
+  return state.rooms[idx];
+}
+
 export const nid = (state, p) => `${p}${state.nextId++}`;
 
 export const DEFAULT_UV_TRANSFORM = {
@@ -116,6 +159,7 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
 }
 
 export function addOpening(state, room, type, wall, offset, props = {}) {
+  room = ensureRoomCopy(state, room);
   const def = OPENING_BY_ID[type] || {};
   const o = {
     id: nid(state, 'o'),
@@ -140,6 +184,7 @@ export function addOpening(state, room, type, wall, offset, props = {}) {
 
 /** Adds an item. Floor/ceiling items take x/y, wall items take wall+offset. */
 export function addItem(state, room, type, props) {
+  room = ensureRoomCopy(state, room);
   const def = ITEM_BY_ID[type];
   const item = { id: nid(state, 'i'), type, ...props };
   if (def.mount !== 'wall') item.rot = item.rot ?? 0;
@@ -161,13 +206,20 @@ export function findOwner(state, id) {
 export function removeById(state, id) {
   const hit = findOwner(state, id);
   if (!hit) return false;
-  if (hit.kind === 'room') state.rooms = state.rooms.filter((r) => r.id !== id);
-  else if (hit.kind === 'opening') hit.room.openings = hit.room.openings.filter((x) => x.id !== id);
-  else hit.room.items = hit.room.items.filter((x) => x.id !== id);
+  if (hit.kind === 'room') {
+    state.rooms = state.rooms.filter((r) => r.id !== id);
+  } else if (hit.kind === 'opening') {
+    const r = ensureRoomCopy(state, hit.room);
+    r.openings = r.openings.filter((x) => x.id !== id);
+  } else {
+    const r = ensureRoomCopy(state, hit.room);
+    r.items = r.items.filter((x) => x.id !== id);
+  }
   return true;
 }
 
-export function moveRoom(room, nx, ny) {
+export function moveRoom(room, nx, ny, state = null) {
+  if (state) room = ensureRoomCopy(state, room);
   const dx = nx - room.x;
   const dy = ny - room.y;
   room.x = nx;
@@ -179,7 +231,8 @@ export function moveRoom(room, nx, ny) {
     }
 }
 
-export function resizeRoom(room, x, y, w, h) {
+export function resizeRoom(room, x, y, w, h, state = null) {
+  if (state) room = ensureRoomCopy(state, room);
   // Floor/ceiling items keep world position; code engine rejects any that end up outside.
   room.x = x;
   room.y = y;
@@ -426,12 +479,13 @@ export function parseDistanceInInches(str) {
 
 export class History {
   constructor(state) {
-    this.stack = [clone(state)];
+    this.stack = [cloneWithSharing(state)];
     this.i = 0;
   }
   push(state) {
     this.stack = this.stack.slice(0, this.i + 1);
-    this.stack.push(clone(state));
+    const prev = this.stack[this.i];
+    this.stack.push(cloneWithSharing(state, prev));
     this.i++;
     if (this.stack.length > 100) {
       this.stack.shift();
@@ -451,6 +505,8 @@ export class History {
     return this.canRedo() ? clone(this.stack[++this.i]) : null;
   }
 }
+
+export const ModelHistory = History;
 
 export function getBounds(state, id) {
   const hit = findOwner(state, id);
