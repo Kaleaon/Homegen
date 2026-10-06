@@ -5,13 +5,7 @@
 
 const KTHEME_STYLES = `
   :host {
-    --ktheme-accent: var(--accent, #2f6f5e);
-    --ktheme-accent-ink: var(--accent-ink, #ffffff);
-    --ktheme-bg-surface: var(--panel, #fffdf9);
-    --ktheme-text: var(--ink, #2b2824);
-    --ktheme-text-muted: var(--muted, #5f5950);
-    --ktheme-border: var(--line, #ded8cb);
-    --focus-ring-color: var(--ktheme-accent);
+    --focus-ring-color: var(--ktheme-accent, var(--accent, #2f6f5e));
     --focus-ring-width: 2px;
     --focus-ring-offset: 2px;
   }
@@ -51,9 +45,9 @@ export class KButton extends BaseElement {
         }
         button {
           font: inherit;
-          color: var(--ktheme-text);
-          background: var(--ktheme-bg-surface);
-          border: 1px solid var(--ktheme-border);
+          color: var(--ktheme-text, var(--ink, #2b2824));
+          background: var(--ktheme-bg-surface, var(--panel, #fffdf9));
+          border: 1px solid var(--ktheme-border, var(--line, #ded8cb));
           border-radius: var(--radius-sm, 6px);
           padding: 5px 10px;
           cursor: pointer;
@@ -67,16 +61,16 @@ export class KButton extends BaseElement {
           transition: background 0.15s, border-color 0.15s, color 0.15s;
         }
         button:hover {
-          border-color: var(--ktheme-accent);
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
         :host([primary]) button,
         :host([active]) button,
         :host([on]) button,
         button.primary,
         button.on {
-          background: var(--ktheme-accent);
-          color: var(--ktheme-accent-ink);
-          border-color: var(--ktheme-accent);
+          background: var(--ktheme-accent, var(--accent, #2f6f5e));
+          color: var(--ktheme-accent-ink, var(--accent-ink, #ffffff));
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
         :host([disabled]) button,
         button:disabled {
@@ -197,9 +191,9 @@ export class KInput extends BaseElement {
         }
         input {
           font: inherit;
-          color: var(--ktheme-text);
-          background: var(--ktheme-bg-surface);
-          border: 1px solid var(--ktheme-border);
+          color: var(--ktheme-text, var(--ink, #2b2824));
+          background: var(--ktheme-bg-surface, var(--panel, #fffdf9));
+          border: 1px solid var(--ktheme-border, var(--line, #ded8cb));
           border-radius: var(--radius-sm, 6px);
           padding: 4px 8px;
           width: 100%;
@@ -209,7 +203,7 @@ export class KInput extends BaseElement {
         }
         input:hover,
         input:focus {
-          border-color: var(--ktheme-accent);
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
         input:disabled {
           opacity: 0.5;
@@ -363,9 +357,9 @@ export class KTab extends BaseElement {
         }
         button {
           font: inherit;
-          color: var(--ktheme-text-muted);
-          background: var(--ktheme-bg-surface);
-          border: 1px solid var(--ktheme-border);
+          color: var(--ktheme-text-muted, var(--muted, #5f5950));
+          background: var(--ktheme-bg-surface, var(--panel, #fffdf9));
+          border: 1px solid var(--ktheme-border, var(--line, #ded8cb));
           border-radius: var(--radius-sm, 6px);
           padding: 6px 12px;
           cursor: pointer;
@@ -375,16 +369,16 @@ export class KTab extends BaseElement {
           transition: all 0.15s;
         }
         button:hover {
-          border-color: var(--ktheme-accent);
-          color: var(--ktheme-text);
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
+          color: var(--ktheme-text, var(--ink, #2b2824));
         }
         :host([active]) button,
         :host([selected]) button,
         :host(.on) button,
         button.on {
-          background: var(--ktheme-accent);
-          color: var(--ktheme-accent-ink);
-          border-color: var(--ktheme-accent);
+          background: var(--ktheme-accent, var(--accent, #2f6f5e));
+          color: var(--ktheme-accent-ink, var(--accent-ink, #ffffff));
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
         :host([disabled]) button,
         button:disabled {
@@ -475,22 +469,22 @@ export class KCard extends BaseElement {
           text-align: left;
           font-size: var(--font-size-sm, 12px);
           line-height: var(--line-height-tight, 1.25);
-          background: var(--ktheme-bg-surface);
-          border: 1px solid var(--ktheme-border);
+          background: var(--ktheme-bg-surface, var(--panel, #fffdf9));
+          border: 1px solid var(--ktheme-border, var(--line, #ded8cb));
           border-radius: var(--radius-sm, 6px);
           cursor: pointer;
           box-sizing: border-box;
           transition: border-color 0.15s, box-shadow 0.15s;
         }
         :host(:hover) {
-          border-color: var(--ktheme-accent);
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
         :host([active]),
         :host([selected]),
         :host([primary]),
         :host(.on) {
-          box-shadow: 0 0 0 2px var(--ktheme-accent);
-          border-color: var(--ktheme-accent);
+          box-shadow: 0 0 0 2px var(--ktheme-accent, var(--accent, #2f6f5e));
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
         :host([disabled]) {
           opacity: 0.4;
@@ -507,7 +501,7 @@ export class KCard extends BaseElement {
           border: 1px solid rgba(0, 0, 0, 0.15);
         }
         ::slotted(small) {
-          color: var(--ktheme-text-muted);
+          color: var(--ktheme-text-muted, var(--muted, #5f5950));
         }
       </style>
       <slot></slot>
