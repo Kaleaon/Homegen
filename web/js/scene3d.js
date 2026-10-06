@@ -31,6 +31,8 @@ import {
 } from './resources.js';
 import { getCladdingMaterial, resolveWindowStyle } from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
+import { getTextureUrl } from './textureStore.js';
+import { getWallUV } from './model.js';
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
@@ -434,18 +436,112 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
   }
 
-  function finishMaterial(finish, wIn, hIn, finishId, rough) {
+  function updateTextureMatrix(texture, uv, rx = 1, ry = 1) {
+    if (!texture) return;
+    const scaleU = (typeof uv?.scaleU === 'number' ? uv.scaleU : 1.0) * rx;
+    const scaleV = (typeof uv?.scaleV === 'number' ? uv.scaleV : 1.0) * ry;
+    const rotationDeg = typeof uv?.rotation === 'number' ? uv.rotation : 0;
+    const offsetU = typeof uv?.offsetU === 'number' ? uv.offsetU : 0;
+    const offsetV = typeof uv?.offsetV === 'number' ? uv.offsetV : 0;
+    const rotRad = (rotationDeg * Math.PI) / 180;
+
+    texture.matrixAutoUpdate = false;
+    texture.matrix.setUvTransform(offsetU, offsetV, scaleU, scaleV, rotRad, 0.5, 0.5);
+    texture.needsUpdate = true;
+  }
+
+  const customTextureCache = new Map();
+
+  function finishMaterial(finish, wIn, hIn, finishId, rough, uv) {
     const m = plain('#ffffff', rough);
-    if (!finish) return m;
-    const tileInches = finish.tileInches || 24;
+    const fin = finish || WALL_BY_ID.paint_white;
+    const tileInches = fin?.tileInches || 24;
     const rx = wIn / tileInches;
     const ry = hIn / tileInches;
-    if (finish.pattern === 'solid') {
-      m.color.set(finish.c1);
-    } else if (finish.dataUrl || finish.pattern === 'custom') {
-      m.map = customTexture(finish, rx, ry);
+
+    if (finishId && (finishId.startsWith('tex_') || !WALL_BY_ID[finishId])) {
+      m.color.set('#ffffff');
+      getTextureUrl(finishId)
+        .then((url) => {
+          if (!url) {
+            if (fin.pattern === 'solid') m.color.set(fin.c1);
+            else if (fin.dataUrl || fin.pattern === 'custom') {
+              const tex = customTexture(fin, rx, ry);
+              if (uv) updateTextureMatrix(tex, uv, 1, 1);
+              m.map = tex;
+            } else {
+              const tex = proceduralTexture(fin, rx, ry);
+              if (uv) updateTextureMatrix(tex, uv, 1, 1);
+              m.map = tex;
+            }
+            m.needsUpdate = true;
+            render();
+            return;
+          }
+          if (customTextureCache.has(finishId)) {
+            const cachedTex = customTextureCache.get(finishId);
+            const tex = cachedTex.clone();
+            if (uv) updateTextureMatrix(tex, uv, rx, ry);
+            m.map = tex;
+            m.needsUpdate = true;
+            render();
+          } else {
+            const loader = new THREE.TextureLoader();
+            loader.load(
+              url,
+              (tex) => {
+                tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+                tex.colorSpace = THREE.SRGBColorSpace;
+                customTextureCache.set(finishId, tex);
+                if (uv) updateTextureMatrix(tex, uv, rx, ry);
+                m.map = tex;
+                m.needsUpdate = true;
+                render();
+              },
+              undefined,
+              (err) => {
+                console.warn(`Failed to load texture ${finishId}:`, err);
+                if (fin.pattern === 'solid') m.color.set(fin.c1);
+                else if (fin.dataUrl || fin.pattern === 'custom') {
+                  const tex = customTexture(fin, rx, ry);
+                  if (uv) updateTextureMatrix(tex, uv, 1, 1);
+                  m.map = tex;
+                } else {
+                  const tex = proceduralTexture(fin, rx, ry);
+                  if (uv) updateTextureMatrix(tex, uv, 1, 1);
+                  m.map = tex;
+                }
+                m.needsUpdate = true;
+                render();
+              }
+            );
+          }
+        })
+        .catch((err) => {
+          console.warn(`Error loading custom texture ${finishId}:`, err);
+          if (fin.pattern === 'solid') m.color.set(fin.c1);
+          else if (fin.dataUrl || fin.pattern === 'custom') {
+            const tex = customTexture(fin, rx, ry);
+            if (uv) updateTextureMatrix(tex, uv, 1, 1);
+            m.map = tex;
+          } else {
+            const tex = proceduralTexture(fin, rx, ry);
+            if (uv) updateTextureMatrix(tex, uv, 1, 1);
+            m.map = tex;
+          }
+          m.needsUpdate = true;
+          render();
+        });
+    } else if (fin.pattern === 'solid') {
+      m.color.set(fin.c1);
+    } else if (fin.dataUrl || fin.pattern === 'custom') {
+      const tex = customTexture(fin, rx, ry);
+      if (uv) updateTextureMatrix(tex, uv, 1, 1);
+      m.map = tex;
     } else {
-      m.map = proceduralTexture(finish, rx, ry);
+      const tex = proceduralTexture(fin, rx, ry);
+      if (uv) updateTextureMatrix(tex, uv, 1, 1);
+      m.map = tex;
     }
     if (opts.hd) applyHD(m, finishId, wIn, hIn);
     return m;
@@ -629,6 +725,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             rh: room.h,
             ceiling: room.ceiling,
             finish: room.walls[wall],
+            uv: getWallUV(room, wall),
             cladding: room.cladding || room.exteriorCladding,
             e,
             wallH,
@@ -767,8 +864,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const len = wallLength(room, wall);
     const s = wallSeg(room, wall);
     const fin = WALL_BY_ID[room.walls[wall]] || WALL_BY_ID.paint_white;
+    const wallUV = getWallUV(room, wall);
     const base = plain('#efece4', 0.9);
-    const visMat = finishMaterial(fin, len, room.ceiling, room.walls[wall], 0.8);
+    const visMat = finishMaterial(fin, len, room.ceiling, room.walls[wall], 0.8, wallUV);
     // interior face index in BoxGeometry order [+x,-x,+y,-y,+z,-z]
     const face = s.nx === 1 ? 0 : s.nx === -1 ? 1 : s.ny === 1 ? 4 : 5;
     const outFace = s.nx === 1 ? 1 : s.nx === -1 ? 0 : s.ny === 1 ? 5 : 4;
