@@ -15,7 +15,8 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "jspdf": "^4.2.1"
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
