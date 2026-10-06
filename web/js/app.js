@@ -3528,6 +3528,56 @@ if (typeof document !== 'undefined') {
 let selectedCmdIndex = 0;
 let filteredCommands = [];
 
+const RECENT_COMMANDS_KEY = 'homegen_recent_commands';
+const MAX_RECENT_COMMANDS = 5;
+let memoryRecentCommands = [];
+
+function getRecentCommands() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(RECENT_COMMANDS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          memoryRecentCommands = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    /* fallback to memory state */
+  }
+  return memoryRecentCommands;
+}
+
+function recordCommandExecution(cmdId) {
+  if (!cmdId) return;
+  let recent = getRecentCommands().filter((id) => id !== cmdId);
+  recent.unshift(cmdId);
+  if (recent.length > MAX_RECENT_COMMANDS) {
+    recent = recent.slice(0, MAX_RECENT_COMMANDS);
+  }
+  memoryRecentCommands = recent;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(RECENT_COMMANDS_KEY, JSON.stringify(recent));
+    }
+  } catch {
+    /* fallback to memory state on storage failure */
+  }
+}
+
+function clearRecentCommands() {
+  memoryRecentCommands = [];
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(RECENT_COMMANDS_KEY);
+    }
+  } catch {
+    /* ignore storage removal failure */
+  }
+}
+
 const COMMAND_REGISTRY = [
   // Tools
   {
@@ -3855,6 +3905,18 @@ function renderCommandList(query = '') {
     );
   });
 
+  const recentIds = getRecentCommands();
+  filteredCommands.sort((a, b) => {
+    const rankA = recentIds.indexOf(a.id);
+    const rankB = recentIds.indexOf(b.id);
+    if (rankA !== -1 && rankB !== -1) {
+      return rankA - rankB;
+    }
+    if (rankA !== -1) return -1;
+    if (rankB !== -1) return 1;
+    return 0;
+  });
+
   if (selectedCmdIndex >= filteredCommands.length) {
     selectedCmdIndex = Math.max(0, filteredCommands.length - 1);
   }
@@ -3902,8 +3964,10 @@ function renderCommandList(query = '') {
     li.addEventListener('click', () => {
       const idx = parseInt(li.dataset.cmdIdx, 10);
       if (filteredCommands[idx]) {
+        const cmd = filteredCommands[idx];
+        recordCommandExecution(cmd.id);
         closeCommandPalette();
-        filteredCommands[idx].action();
+        cmd.action();
       }
     });
   });
@@ -3946,6 +4010,7 @@ function initCommandPaletteUI() {
         e.preventDefault();
         if (filteredCommands.length > 0 && filteredCommands[selectedCmdIndex]) {
           const cmd = filteredCommands[selectedCmdIndex];
+          recordCommandExecution(cmd.id);
           closeCommandPalette();
           cmd.action();
         }
@@ -3986,6 +4051,9 @@ if (typeof window !== 'undefined')
     renderViolationItem,
     complianceScene,
     COMMAND_REGISTRY,
+    getRecentCommands,
+    recordCommandExecution,
+    clearRecentCommands,
     openCommandPalette,
     closeCommandPalette,
     openShortcutOverlay,
