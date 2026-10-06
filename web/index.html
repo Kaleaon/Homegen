@@ -82,13 +82,13 @@
       <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
-    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="dialog" aria-modal="true" aria-labelledby="diff-drawer-title" hidden>
       <div class="diff-header">
         <div class="diff-title">
-          <span>✨ Auto-Fix Summary</span>
+          <h2 id="diff-drawer-title">✨ Auto-Fix Summary</h2>
           <span id="diff-count" class="diff-badge-count">0</span>
         </div>
-        <button id="diff-close" class="diff-close-btn" title="Dismiss highlights">✕</button>
+        <button id="diff-close" class="diff-close-btn" title="Dismiss highlights" aria-label="Dismiss highlights">✕</button>
       </div>
       <ul id="diff-list" class="diff-items"></ul>
     </div>
@@ -200,8 +200,11 @@
     <p class="note">Generated images are AI interpretations, not construction documents. Check each service's terms before commercial use.</p>
   </div>
 </dialog>
-<dialog id="dlg-export" class="k-overlay-dialog">
-  <form method="dialog" class="dlg-head"><h2>SVG Vector Export &amp; Print Sheet</h2><button value="close">✕</button></form>
+<dialog id="dlg-export" aria-labelledby="dlg-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-export-title">SVG Vector Export &amp; Print Sheet</h2>
+    <button value="close" aria-label="Close SVG export modal"><span aria-hidden="true">✕</span></button>
+  </form>
   <div class="dlg-body">
     <div class="row"><label for="e-sheet">Sheet Size</label><select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></select></div>
     <div class="row"><label for="e-orient">Orientation</label><select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></select></div>
@@ -216,8 +219,11 @@
   </div>
 </dialog>
 <div id="print-sheet" class="print-only"></div>
-<dialog id="pdf-export" class="k-overlay-dialog">
-  <form method="dialog" class="dlg-head"><h2>Export Scaled Vector PDF</h2><button value="close">✕</button></form>
+<dialog id="pdf-export" aria-labelledby="pdf-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="pdf-export-title">Export Scaled Vector PDF</h2>
+    <button value="close" aria-label="Close PDF export modal"><span aria-hidden="true">✕</span></button>
+  </form>
   <div class="dlg-body">
     <div class="row">
       <label for="pdf-size">Sheet size</label>
@@ -288,6 +294,7 @@
     </div>
   </div>
 </dialog>
+<<<<<<< HEAD
 <dialog id="dlg-branding" class="k-overlay-dialog" aria-labelledby="branding-title">
   <form method="dialog" class="dlg-head">
     <h2 id="branding-title">Project Branding &amp; Approval Stamp</h2>
@@ -408,9 +415,12 @@
     </div>
   </div>
 </dialog>
-<dialog id="calib-dlg" class="k-overlay-dialog">
+<dialog id="calib-dlg" aria-labelledby="calib-dlg-title" class="k-overlay-dialog">
   <form id="calib-form" method="dialog">
-    <div class="dlg-head"><h2>Calibrate Blueprint Scale</h2><button type="button" id="calib-close">✕</button></div>
+    <div class="dlg-head">
+      <h2 id="calib-dlg-title">Calibrate Blueprint Scale</h2>
+      <button type="button" id="calib-close" aria-label="Close scale calibration modal">✕</button>
+    </div>
     <div class="dlg-body">
       <p>Enter the known real-world distance between the two selected points:</p>
       <div class="row">

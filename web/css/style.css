@@ -791,6 +791,11 @@ ul.res a {
   gap: 6px;
   font-weight: 600;
 }
+.diff-title h2 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
 .diff-badge-count {
   background: var(--ktheme-success);
   color: var(--ktheme-on-primary);
