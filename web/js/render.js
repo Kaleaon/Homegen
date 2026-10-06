@@ -180,12 +180,20 @@ export function drawComplianceScene(ctx, complianceScene, view) {
       ctx.save();
       const sz = (d.isSelected ? 10 : 8) / view.scale;
       ctx.fillStyle = d.color || (d.isValid ? '#ffffff' : '#f87171');
-      ctx.strokeStyle = d.isValid ? '#2a7fff' : '#d33';
-      ctx.lineWidth = 1.5 / view.scale;
+      ctx.strokeStyle = d.isValid ? '#2a7fff' : '#dc2626';
+      ctx.lineWidth = (d.isValid ? 1.5 : 2.5) / view.scale;
       ctx.beginPath();
       ctx.rect(b.x - sz / 2, b.y - sz / 2, sz, sz);
       ctx.fill();
       ctx.stroke();
+
+      if (!d.isValid) {
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+        ctx.lineWidth = 3 / view.scale;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, sz * 0.9, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.restore();
     } else if (node.type === 'dimensionLabel') {
       const b = node.bounds;
@@ -205,8 +213,83 @@ export function drawComplianceScene(ctx, complianceScene, view) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, b.x, b.y - fs * 0.1);
+
+      if (!d.isValid && Array.isArray(d.violations) && d.violations.length > 0) {
+        const warnText = d.violations.join(', ');
+        const wfs = Math.max(7, Math.min(10, 9 / view.scale));
+        ctx.font = `600 ${wfs}px sans-serif`;
+        const wtw = ctx.measureText(warnText).width + 12;
+        const wY = b.y + fs * 1.2;
+        ctx.fillStyle = 'rgba(220, 38, 38, 0.95)';
+        ctx.beginPath();
+        ctx.roundRect
+          ? ctx.roundRect(b.x - wtw / 2, wY - wfs * 0.8, wtw, wfs * 1.6, 3)
+          : ctx.rect(b.x - wtw / 2, wY - wfs * 0.8, wtw, wfs * 1.6);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(warnText, b.x, wY);
+      }
       ctx.restore();
     }
+  }
+
+  // Pass 5: Active Drag Rejection Nodes & Conflict Halos
+  for (const node of nodes) {
+    if (node.type !== 'activeDragRejection') continue;
+    const b = node.bounds;
+    const d = node.data;
+    if (!b) continue;
+
+    ctx.save();
+    // 1. Red Conflict Halo Fill & Dashed Outline
+    ctx.fillStyle = d.fillColor || 'rgba(232, 64, 64, 0.22)';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+
+    ctx.strokeStyle = d.haloColor || '#e84040';
+    ctx.lineWidth = 2.5 / view.scale;
+    ctx.setLineDash([6 / view.scale, 3 / view.scale]);
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+    // Outer glow halo ring
+    ctx.strokeStyle = 'rgba(232, 64, 64, 0.35)';
+    ctx.lineWidth = 6 / view.scale;
+    ctx.setLineDash([]);
+    ctx.strokeRect(
+      b.x - 2 / view.scale,
+      b.y - 2 / view.scale,
+      b.w + 4 / view.scale,
+      b.h + 4 / view.scale
+    );
+
+    // 2. Rejection Callout Warning Badge
+    const msg = d.message || 'Placement Violation';
+    const fs = Math.max(8, Math.min(11, 10 / view.scale));
+    ctx.font = `600 ${fs}px sans-serif`;
+    const tw = ctx.measureText(msg).width + 16;
+    const badgeW = Math.max(60, tw);
+    const badgeH = fs * 1.9;
+    const badgeX = b.x + b.w / 2 - badgeW / 2;
+    const badgeY = b.y - badgeH - 6 / view.scale;
+
+    ctx.fillStyle = 'rgba(220, 38, 38, 0.95)';
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4 / view.scale);
+    } else {
+      ctx.rect(badgeX, badgeY, badgeW, badgeH);
+    }
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1 / view.scale;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(msg, b.x + b.w / 2, badgeY + badgeH / 2);
+
+    ctx.restore();
   }
 }
 
