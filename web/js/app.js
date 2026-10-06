@@ -12,6 +12,7 @@ import {
   extractRoomEdges,
   roomToPolygon,
   itemToPolygon,
+  reproject,
 } from './geometry.js';
 import {
   ROOM_TYPES,
@@ -2791,6 +2792,132 @@ $('#save-zip')?.addEventListener('click', async () => {
     toast(`Failed to export ZIP archive: ${err.message}`, true);
   }
 });
+export function exportGeoJSON(state, targetEPSG = 'EPSG:4326') {
+  const sourceCRS = state?.crs || M.defaultCRS();
+  const targetCRS = M.isValidEPSGCode(targetEPSG) ? M.normalizeEPSGCode(targetEPSG) : targetEPSG;
+  const features = [];
+
+  for (const room of state?.rooms || []) {
+    const cornersPlan = [
+      [room.x, room.y],
+      [room.x + room.w, room.y],
+      [room.x + room.w, room.y + room.h],
+      [room.x, room.y + room.h],
+      [room.x, room.y],
+    ];
+
+    const cornersTarget = reproject(cornersPlan, sourceCRS, targetCRS);
+
+    features.push({
+      type: 'Feature',
+      id: room.id,
+      geometry: {
+        type: 'Polygon',
+        coordinates: [cornersTarget],
+      },
+      properties: {
+        id: room.id,
+        name: room.name || room.type,
+        type: room.type,
+        level: room.level || 0,
+        areaSqFt: floorAreaSqFt(room),
+        ceilingInches: room.ceiling,
+        wallFinish: room.walls,
+        floorFinish: room.floor,
+      },
+    });
+
+    for (const item of room.items || []) {
+      const itemPlan = [room.x + item.x, room.y + item.y];
+      const itemTarget = reproject(itemPlan, sourceCRS, targetCRS);
+      features.push({
+        type: 'Feature',
+        id: item.id,
+        geometry: {
+          type: 'Point',
+          coordinates: itemTarget,
+        },
+        properties: {
+          id: item.id,
+          type: item.type,
+          roomId: room.id,
+          rot: item.rot || 0,
+        },
+      });
+    }
+  }
+
+  return {
+    type: 'FeatureCollection',
+    name: state?.name || 'Homegen Floorplan',
+    crs: {
+      type: 'name',
+      properties: {
+        name: typeof targetCRS === 'string' ? targetCRS : targetCRS.epsg || 'EPSG:4326',
+      },
+    },
+    features,
+  };
+}
+
+export function importGeoJSON(geojsonInput, state, opts = {}) {
+  const geojson = typeof geojsonInput === 'string' ? JSON.parse(geojsonInput) : geojsonInput;
+  if (!geojson) throw new Error('Invalid GeoJSON content');
+
+  const sourceEPSG = opts.sourceEPSG || geojson.crs?.properties?.name || 'EPSG:4326';
+  const targetCRS = state?.crs || M.defaultCRS();
+
+  let features = [];
+  if (geojson.type === 'FeatureCollection') {
+    features = geojson.features || [];
+  } else if (geojson.type === 'Feature') {
+    features = [geojson];
+  } else if (geojson.type === 'Polygon' || geojson.type === 'MultiPolygon') {
+    features = [{ geometry: geojson, properties: {} }];
+  }
+
+  let importedCount = 0;
+  for (const feature of features) {
+    if (!feature || !feature.geometry) continue;
+    const geom = feature.geometry;
+    let rings = [];
+
+    if (geom.type === 'Polygon') {
+      rings = [geom.coordinates[0]];
+    } else if (geom.type === 'MultiPolygon') {
+      rings = (geom.coordinates || []).map((poly) => poly[0]);
+    }
+
+    for (const ring of rings) {
+      if (!ring || ring.length < 3) continue;
+      const planPts = reproject(ring, sourceEPSG, targetCRS);
+      const xs = planPts.map((p) => p[0]);
+      const ys = planPts.map((p) => p[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      const w = snap(Math.max(24, maxX - minX));
+      const h = snap(Math.max(24, maxY - minY));
+      const x = snap(minX);
+      const y = snap(minY);
+
+      const type =
+        feature.properties?.type && ROOM_TYPES[feature.properties.type]
+          ? feature.properties.type
+          : 'living';
+      const r = M.createRoom(state, type, x, y, w, h);
+      if (feature.properties?.name) {
+        r.name = feature.properties.name;
+      }
+      importedCount++;
+    }
+  }
+
+  return importedCount;
+}
+
 $('#load')?.addEventListener('click', () => $('#file').click());
 $('#file')?.addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -2801,7 +2928,31 @@ $('#file')?.addEventListener('change', async (e) => {
       setDoc(loadedDoc);
       toast('Opened ZIP project archive and loaded textures.');
     } else {
-      setDoc(M.deserialize(await f.text()));
+      const text = await f.text();
+      if (
+        f.name.endsWith('.geojson') ||
+        text.includes('"FeatureCollection"') ||
+        text.includes('"Feature"')
+      ) {
+        try {
+          const json = JSON.parse(text);
+          if (
+            json.type === 'FeatureCollection' ||
+            json.type === 'Feature' ||
+            json.type === 'Polygon'
+          ) {
+            const count = importGeoJSON(json, doc);
+            toast(`Imported ${count} spatial parcel/room boundaries from GeoJSON.`);
+            refresh();
+            fit();
+            e.target.value = '';
+            return;
+          }
+        } catch (err) {
+          // fall back to standard JSON deserialize
+        }
+      }
+      setDoc(M.deserialize(text));
       toast('Opened plan JSON.');
     }
     fit();
@@ -3923,6 +4074,28 @@ const COMMAND_REGISTRY = [
     shortcut: '',
     action: () => $('#report')?.click(),
   },
+  {
+    id: 'export-geojson',
+    name: 'Export GeoJSON Feature Collection',
+    category: 'Export',
+    shortcut: '',
+    action: () => {
+      const geojson = exportGeoJSON(doc, doc.crs?.epsg || 'EPSG:4326');
+      download(
+        `${doc.name.replace(/\W+/g, '_') || 'plan'}.geojson`,
+        JSON.stringify(geojson, null, 2),
+        'application/geo+json'
+      );
+      toast(`Exported GeoJSON feature collection in ${doc.crs?.epsg || 'EPSG:4326'}.`);
+    },
+  },
+  {
+    id: 'import-geojson',
+    name: 'Import GeoJSON Spatial Dataset',
+    category: 'File Operations',
+    shortcut: '',
+    action: () => $('#file')?.click(),
+  },
 
   // Help & Settings
   {
@@ -4209,6 +4382,9 @@ if (typeof window !== 'undefined')
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
+    exportGeoJSON,
+    importGeoJSON,
+    reproject,
     getOnboardingStatus,
     setOnboardingStatus,
     resetOnboardingStatus,

@@ -40,6 +40,35 @@ export function defaultBranding() {
   };
 }
 
+export function defaultCRS() {
+  return {
+    epsg: 'EPSG:4326',
+    proj4: '+proj=longlat +datum=WGS84 +no_defs +type=crs',
+    wkt: 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]',
+    origin: { longitude: -122.4194, latitude: 37.7749 },
+    units: 'inches',
+    geojson: {
+      type: 'FeatureCollection',
+      features: [],
+    },
+  };
+}
+
+export function isValidEPSGCode(code) {
+  if (!code || typeof code !== 'string') return false;
+  const trimmed = code.trim().toUpperCase();
+  return /^EPSG:\d+$/.test(trimmed);
+}
+
+export function normalizeEPSGCode(code) {
+  if (code == null) return 'EPSG:4326';
+  if (typeof code === 'number') return `EPSG:${code}`;
+  const str = String(code).trim().toUpperCase();
+  if (/^\d+$/.test(str)) return `EPSG:${str}`;
+  if (/^EPSG:\d+$/.test(str)) return str;
+  return 'EPSG:4326';
+}
+
 export function validateLogoSize(dataUrl, maxKb = 500) {
   if (!dataUrl) return true;
   const base64Str = dataUrl.split(',')[1] || dataUrl;
@@ -62,6 +91,7 @@ export function newState() {
     rooms: [],
     background: null,
     customFinishes: [],
+    crs: defaultCRS(),
     settings: {
       branding: defaultBranding(),
     },
@@ -407,6 +437,29 @@ export function deserialize(text) {
   s.nextId = s.nextId || 1000;
   s.background = s.background || null;
   s.customFinishes = s.customFinishes || [];
+  if (!s.crs || typeof s.crs !== 'object' || !isValidEPSGCode(s.crs.epsg)) {
+    const fallback = defaultCRS();
+    const existingCrs = s.crs && typeof s.crs === 'object' ? s.crs : {};
+    const epsg = isValidEPSGCode(existingCrs.epsg)
+      ? normalizeEPSGCode(existingCrs.epsg)
+      : fallback.epsg;
+    s.crs = {
+      epsg,
+      proj4: existingCrs.proj4 || fallback.proj4,
+      wkt: existingCrs.wkt || fallback.wkt,
+      origin: existingCrs.origin || fallback.origin,
+      units: existingCrs.units || fallback.units,
+      geojson: existingCrs.geojson || fallback.geojson,
+    };
+  } else {
+    const fallback = defaultCRS();
+    s.crs.epsg = normalizeEPSGCode(s.crs.epsg);
+    s.crs.proj4 = s.crs.proj4 || fallback.proj4;
+    s.crs.wkt = s.crs.wkt || fallback.wkt;
+    s.crs.origin = s.crs.origin || fallback.origin;
+    s.crs.units = s.crs.units || fallback.units;
+    s.crs.geojson = s.crs.geojson || fallback.geojson;
+  }
   s.settings ||= {};
   s.settings.branding = {
     logoDataUrl: s.settings.branding?.logoDataUrl || null,

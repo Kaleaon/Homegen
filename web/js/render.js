@@ -35,15 +35,112 @@ function getBgImage(bg, onLoaded) {
   return img;
 }
 
+function drawWarpedTriangle(ctx, img, u0, v0, u1, v1, u2, v2, x0, y0, x1, y1, x2, y2) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.closePath();
+  ctx.clip();
+
+  const delta = u0 * (v1 - v2) - v0 * (u1 - u2) + (u1 * v2 - u2 * v1);
+  if (Math.abs(delta) < 1e-6) {
+    ctx.restore();
+    return;
+  }
+
+  const a = (x0 * (v1 - v2) - v0 * (x1 - x2) + (x1 * v2 - x2 * v1)) / delta;
+  const b = (y0 * (v1 - v2) - v0 * (y1 - y2) + (y1 * v2 - y2 * v1)) / delta;
+  const c = (u0 * (x1 - x2) - x0 * (u1 - u2) + (x0 * u1 - x1 * u0)) / delta;
+  const d = (u0 * (y1 - y2) - y0 * (u1 - u2) + (y0 * u1 - y1 * u0)) / delta;
+  const e =
+    (u0 * (v1 * x2 - v2 * x1) - v0 * (u1 * x2 - u2 * x1) + x0 * (u1 * v2 - u2 * v1)) / delta;
+  const f =
+    (u0 * (v1 * y2 - v2 * y1) - v0 * (u1 * y2 - u2 * y1) + y0 * (u1 * v2 - u2 * v1)) / delta;
+
+  ctx.transform(a, b, c, d, e, f);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
+}
+
+function drawQuadmeshWarpedImage(ctx, img, quadmesh) {
+  const rows = quadmesh.rows || Math.round(Math.sqrt(quadmesh.grid?.length || 0));
+  const cols = quadmesh.cols || rows;
+  const grid = quadmesh.grid || quadmesh;
+
+  if (!Array.isArray(grid) || grid.length < 4 || !rows || !cols) return;
+
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const p0 = grid[r * cols + c];
+      const p1 = grid[r * cols + c + 1];
+      const p2 = grid[(r + 1) * cols + c + 1];
+      const p3 = grid[(r + 1) * cols + c];
+
+      if (!p0 || !p1 || !p2 || !p3) continue;
+
+      drawWarpedTriangle(
+        ctx,
+        img,
+        p0.u,
+        p0.v,
+        p1.u,
+        p1.v,
+        p2.u,
+        p2.v,
+        p0.x,
+        p0.y,
+        p1.x,
+        p1.y,
+        p2.x,
+        p2.y
+      );
+      drawWarpedTriangle(
+        ctx,
+        img,
+        p0.u,
+        p0.v,
+        p2.u,
+        p2.v,
+        p3.u,
+        p3.v,
+        p0.x,
+        p0.y,
+        p2.x,
+        p2.y,
+        p3.x,
+        p3.y
+      );
+    }
+  }
+}
+
 function drawBackground(ctx, bg, onLoaded) {
   if (!bg || !bg.visible || !bg.dataUrl) return;
   const img = getBgImage(bg, onLoaded);
   if (!img || !img.complete || !img.naturalWidth) return;
   ctx.save();
   ctx.globalAlpha = bg.opacity ?? 0.5;
-  const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
-  const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
-  ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
+
+  if (bg.quadmesh || bg.mesh) {
+    drawQuadmeshWarpedImage(ctx, img, bg.quadmesh || bg.mesh);
+  } else if (bg.matrix || bg.transform) {
+    const m = bg.matrix || bg.transform;
+    if (Array.isArray(m) && m.length >= 6) {
+      ctx.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
+      ctx.drawImage(img, 0, 0, bg.width || img.naturalWidth, bg.height || img.naturalHeight);
+    } else {
+      const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
+      const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
+      ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
+    }
+  } else {
+    const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
+    const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
+    ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
+  }
+
   ctx.restore();
 }
 
