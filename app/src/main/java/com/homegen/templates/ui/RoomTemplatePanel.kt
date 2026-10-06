@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.homegen.templates.data.RoomTemplateRepository
 import com.homegen.templates.model.RoomTemplate
 import com.homegen.templates.model.RoomType
+import com.ktheme.android.LocalKthemeSemanticColors
 
 /**
  * Browsable panel for selecting pre-designed room templates.
@@ -41,6 +42,7 @@ fun RoomTemplatePanel(
     onTemplateSelected: (RoomTemplate) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val kthemeColors = LocalKthemeSemanticColors.current
     var selectedType by remember { mutableStateOf<RoomType?>(null) }
 
     val templates = remember(selectedType) {
@@ -68,7 +70,7 @@ fun RoomTemplatePanel(
                 modifier = Modifier
                     .clickable { onDismiss() }
                     .padding(8.dp),
-                color = MaterialTheme.colorScheme.primary,
+                color = kthemeColors.brand,
                 style = MaterialTheme.typography.labelLarge,
             )
         }
@@ -171,6 +173,8 @@ private fun RoomTemplateCard(
     template: RoomTemplate,
     onClick: () -> Unit,
 ) {
+    val kthemeColors = LocalKthemeSemanticColors.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -184,7 +188,7 @@ private fun RoomTemplateCard(
                 text = template.description,
                 modifier = Modifier.padding(top = 4.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = kthemeColors.onCardBackgroundAlt,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -201,21 +205,21 @@ private fun RoomTemplateCard(
                         .replace('_', ' ')
                         .replaceFirstChar { it.uppercase() },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = kthemeColors.brand,
                 )
 
                 // Dimensions
                 Text(
                     text = "${template.widthMeters}m x ${template.depthMeters}m",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = kthemeColors.onCardBackgroundAlt,
                 )
 
                 // Furniture count
                 Text(
                     text = "${template.placements.size} items",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = kthemeColors.onCardBackgroundAlt,
                 )
             }
         }
