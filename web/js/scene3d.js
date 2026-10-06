@@ -13,13 +13,7 @@ import {
   subtractInterval,
   lv,
 } from './geometry.js';
-import {
-  OPENING_BY_ID,
-  ITEM_BY_ID,
-  WALL_BY_ID,
-  FLOOR_BY_ID,
-  WINDOW_FRAME_BY_ID,
-} from './catalog.js';
+import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import {
@@ -29,7 +23,7 @@ import {
   polyHavenHdriUrl,
   MaterialPreloader,
 } from './resources.js';
-import { getCladdingMaterial, resolveWindowStyle } from './presetRegistry.js';
+import { getCladdingMaterial } from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
@@ -231,7 +225,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   let ground;
   let active = false;
   let raf = 0;
-  let timer = 0;
   let framed = false;
 
   async function fetchWithTimeout(url, timeoutMs = 8000) {
@@ -362,7 +355,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const preloader = new MaterialPreloader(loader);
   const hdBase = new Map(); // `${polyhavenId}:${map}` -> loaded base Texture (shared image)
   let textureErrorTimer = null;
-  function handleTextureError(err) {
+  function handleTextureError() {
     opts.hd = false;
     const notifyHD = callbacks.onHDChange || api?.onHDChange;
     notifyHD?.(false);
@@ -1346,7 +1339,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       camera.position.set(px * S, (e + 64) * S, pz * S);
 
       const targetX = (long ? cx + 40 : cx) * S;
-      const targetY = (e + 56) * S;
       const targetZ = (long ? cy : cy + 40) * S;
 
       const dirX = targetX - camera.position.x;

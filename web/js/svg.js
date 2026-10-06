@@ -1,17 +1,8 @@
 // SVG exporter module for Homegen.
 // Generates CAD-compatible, structured vector SVG documents with title block, graphic scale bar, and room schedule.
 
-import {
-  WT,
-  WALLS,
-  wallSeg,
-  wallLength,
-  wallPoint,
-  interior,
-  footprint,
-  floorAreaSqFt,
-} from './geometry.js';
-import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
+import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { getPalette } from './kthemeTokens.js';
 
 const fmt = (inches) =>
