@@ -518,18 +518,41 @@ ul.v {
   gap: 6px;
 }
 ul.v li {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
+}
+ul.v li:not(.v-item) {
   padding: 6px 8px;
   border-left: 3px solid var(--ktheme-critical);
   background: var(--ktheme-bg);
   border-radius: var(--radius-xs);
+}
+.v-item-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  border-left: 3px solid var(--ktheme-critical);
+  background: var(--ktheme-bg);
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  color: inherit;
+  font: inherit;
   font-size: 12.5px;
+  box-sizing: border-box;
 }
-ul.v li.warn {
-  border-color: var(--ktheme-warning);
+.v-item-btn.warn {
+  border-left-color: var(--ktheme-warning);
 }
-ul.v li:hover {
+.v-item-btn:hover {
   outline: 1px solid var(--ktheme-accent);
+}
+.v-item-btn:focus-visible {
+  outline: 2px solid var(--ktheme-accent);
+  outline-offset: 2px;
 }
 ul.v .ref {
   display: block;
@@ -838,22 +861,36 @@ ul.res a {
   gap: var(--space-1);
 }
 .diff-items li {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.diff-item-btn {
   display: flex;
   align-items: center;
+  width: 100%;
+  text-align: left;
   gap: var(--space-2);
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   background: var(--ktheme-bg-surface);
   border: 1px solid transparent;
   cursor: pointer;
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
   transition:
     background 0.15s,
     border-color 0.15s;
 }
-.diff-items li:hover,
-.diff-items li.hovered {
+.diff-item-btn:hover,
+.diff-item-btn.hovered {
   background: var(--ktheme-bg);
   border-color: var(--ktheme-accent);
+}
+.diff-item-btn:focus-visible {
+  outline: 2px solid var(--ktheme-accent);
+  outline-offset: 2px;
 }
 .diff-num {
   width: 20px;

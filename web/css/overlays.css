@@ -264,3 +264,25 @@
   opacity: 0.75;
   margin-left: 8px;
 }
+
+/* 8. Interactive List Item Buttons */
+.diff-item-btn,
+.v-item-btn {
+  display: flex;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--radius-sm, 6px);
+  box-sizing: border-box;
+}
+
+.diff-item-btn:focus-visible,
+.v-item-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
