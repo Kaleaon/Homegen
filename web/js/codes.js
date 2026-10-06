@@ -1728,8 +1728,14 @@ export function clampRoomDepth(roomOrType, targetH, currentW = null) {
  */
 export function clampRoomDimensions(roomOrType, targetW, targetH) {
   const bounds = getRoomMinBounds(roomOrType);
-  let w = Math.max(bounds.minOuterDim, isNaN(Number(targetW)) ? bounds.minOuterDim : Number(targetW));
-  let h = Math.max(bounds.minOuterDim, isNaN(Number(targetH)) ? bounds.minOuterDim : Number(targetH));
+  let w = Math.max(
+    bounds.minOuterDim,
+    isNaN(Number(targetW)) ? bounds.minOuterDim : Number(targetW)
+  );
+  let h = Math.max(
+    bounds.minOuterDim,
+    isNaN(Number(targetH)) ? bounds.minOuterDim : Number(targetH)
+  );
 
   if (bounds.minAreaSqFt > 0) {
     let wInt = w - WT;
@@ -1747,4 +1753,3 @@ export function clampRoomDimensions(roomOrType, targetW, targetH) {
 
   return { w, h };
 }
-

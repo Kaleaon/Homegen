@@ -3,11 +3,11 @@ package com.homegen.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
 import com.homegen.assets.data.CatalogRepository
 import com.homegen.designer3d.commands.CommandStack
 import com.homegen.designer3d.input.InteractionController
 import com.homegen.designer3d.rendering.FilamentSurfaceManager
+import com.ktheme.android.KthemeComposeTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
         val catalogRepository = CatalogRepository(this)
 
         setContent {
-            MaterialTheme {
+            KthemeComposeTheme {
                 HomegenScreen(
                     surfaceManager = surfaceManager,
                     commandStack = commandStack,
