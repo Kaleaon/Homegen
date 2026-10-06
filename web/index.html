@@ -17,7 +17,7 @@
   <div class="spacer"></div>
   <k-button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></k-button>
   <k-button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></k-button>
-  <label class="toggle" title="Automatically add the windows, outlets, alarms, doors and finishes the code requires after every edit"><input type="checkbox" id="auto" checked> Auto-comply</label>
+  <label class="toggle" for="auto" title="Automatically add the windows, outlets, alarms, doors and finishes the code requires after every edit"><input type="checkbox" id="auto" checked> Auto-comply</label>
   <k-button id="sample">Sample home</k-button>
   <k-button id="new">New</k-button>
   <k-button id="save">Save</k-button>
@@ -31,8 +31,8 @@
   <k-button id="export-csv" title="Export Bill of Materials schedule to CSV">Export CSV</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="report">Code report</k-button>
-  <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden>
-  <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden>
+  <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden aria-label="Upload plan file">
+  <input type="file" id="blueprint-file" accept="image/png, image/jpeg, image/jpg, image/webp" hidden aria-label="Upload blueprint image">
 </header>
 <main>
   <aside id="left">
@@ -53,8 +53,8 @@
       <span id="snap-toggles" class="seg"></span>
       <span id="bg-toolbar" hidden>
         <span class="toolbar-sep">|</span>
-        <label class="toggle" title="Toggle blueprint visibility"><input type="checkbox" id="bg-visible" checked> Blueprint</label>
-        <label title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+        <label class="toggle" for="bg-visible" title="Toggle blueprint visibility"><input type="checkbox" id="bg-visible" checked> Blueprint</label>
+        <label for="bg-opacity" title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5"></label>
         <button id="bg-lock-btn" title="Toggle blueprint position lock">🔓 Unlocked</button>
         <button id="bg-calibrate-btn" title="Calibrate scale with 2 points">📏 Calibrate</button>
         <button id="bg-remove-btn" title="Remove blueprint image">✕</button>
@@ -64,12 +64,12 @@
       <button id="zoom-out" aria-label="Zoom out"><span aria-hidden="true">−</span></button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in"><span aria-hidden="true">+</span></button><button id="fit">Fit</button>
     </div>
     <div id="bar3d" hidden>
-      <label>Walls <select id="o-walls"><option value="full">Full</option><option value="cut" selected>Cutaway</option><option value="hidden">Hidden</option></select></label>
-      <label>Floors <select id="o-levels"><option value="all">All</option><option value="upto">This floor &amp; below</option></select></label>
-      <label>Sky <select id="o-env"></select></label>
-      <label>Sun <input id="o-sun" type="range" min="0" max="1" step="0.05" value="0.65"></label>
-      <label class="toggle"><input type="checkbox" id="o-ceil"> Ceilings</label>
-      <label class="toggle" title="Streams free CC0 PBR textures from Poly Haven"><input type="checkbox" id="o-hd"> HD textures</label>
+      <label for="o-walls">Walls <select id="o-walls"><option value="full">Full</option><option value="cut" selected>Cutaway</option><option value="hidden">Hidden</option></select></label>
+      <label for="o-levels">Floors <select id="o-levels"><option value="all">All</option><option value="upto">This floor &amp; below</option></select></label>
+      <label for="o-env">Sky <select id="o-env"></select></label>
+      <label for="o-sun">Sun <input id="o-sun" type="range" min="0" max="1" step="0.05" value="0.65"></label>
+      <label class="toggle" for="o-ceil"><input type="checkbox" id="o-ceil"> Ceilings</label>
+      <label class="toggle" for="o-hd" title="Streams free CC0 PBR textures from Poly Haven"><input type="checkbox" id="o-hd"> HD textures</label>
       <button id="o-eye" title="Stand in the selected room at eye height"><span aria-hidden="true">👁</span> Eye level</button>
       <button id="o-walk" title="Toggle First-Person Walkthrough mode"><span aria-hidden="true">🚶</span> Walkthrough</button>
       <button id="o-reset">Reset view</button>
@@ -270,9 +270,9 @@
     <div class="row"><label for="pdf-subtitle">Sheet title</label><input id="pdf-subtitle" value="FLOOR PLAN"></div>
     <div class="row"><label for="pdf-notes">Notes / Remarks</label><textarea id="pdf-notes" rows="2" placeholder="Project notes or submission comments…"></textarea></div>
     <h3>Sheet contents</h3>
-    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-tb" checked> Architectural title block</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-scalebar" checked> Graphic scale bar</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-schedule" checked> Room schedule &amp; area metrics table</label></div>
+    <div class="row"><label class="toggle" for="pdf-tb"><input type="checkbox" id="pdf-tb" checked> Architectural title block</label></div>
+    <div class="row"><label class="toggle" for="pdf-scalebar"><input type="checkbox" id="pdf-scalebar" checked> Graphic scale bar</label></div>
+    <div class="row"><label class="toggle" for="pdf-schedule"><input type="checkbox" id="pdf-schedule" checked> Room schedule &amp; area metrics table</label></div>
     <h3>Branding &amp; Approval Stamps</h3>
     <div class="row">
       <label for="pdf-branding-mode">Branding Source</label>
@@ -286,9 +286,9 @@
       <div class="row"><label for="pdf-session-stamp-title">Session Stamp Title</label><input id="pdf-session-stamp-title" value="APPROVED"></div>
       <div class="row"><label for="pdf-session-watermark">Session Watermark</label><input id="pdf-session-watermark" placeholder="e.g. DRAFT"></div>
     </div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-inc-logo" checked> Include Branding Logo</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-inc-stamp" checked> Include Approval Stamp</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="pdf-inc-watermark" checked> Include Diagonal Watermark</label></div>
+    <div class="row"><label class="toggle" for="pdf-inc-logo"><input type="checkbox" id="pdf-inc-logo" checked> Include Branding Logo</label></div>
+    <div class="row"><label class="toggle" for="pdf-inc-stamp"><input type="checkbox" id="pdf-inc-stamp" checked> Include Approval Stamp</label></div>
+    <div class="row"><label class="toggle" for="pdf-inc-watermark"><input type="checkbox" id="pdf-inc-watermark" checked> Include Diagonal Watermark</label></div>
     <div class="btns">
       <button id="pdf-cancel" type="button">Cancel</button>
       <button id="pdf-generate" class="primary" type="button">Download PDF</button>
@@ -302,11 +302,11 @@
   </form>
   <div class="dlg-body">
     <p>Select schedule sections to include in the exported CSV spreadsheet:</p>
-    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-meta" checked> Project Metadata</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-furniture" checked> Furniture &amp; Fixtures</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-openings" checked> Doors &amp; Windows</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-finishes" checked> Finishes (Floors &amp; Walls)</label></div>
-    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-rooms" checked> Room Area Summary</label></div>
+    <div class="row"><label class="toggle" for="csv-sec-meta"><input type="checkbox" id="csv-sec-meta" checked> Project Metadata</label></div>
+    <div class="row"><label class="toggle" for="csv-sec-furniture"><input type="checkbox" id="csv-sec-furniture" checked> Furniture &amp; Fixtures</label></div>
+    <div class="row"><label class="toggle" for="csv-sec-openings"><input type="checkbox" id="csv-sec-openings" checked> Doors &amp; Windows</label></div>
+    <div class="row"><label class="toggle" for="csv-sec-finishes"><input type="checkbox" id="csv-sec-finishes" checked> Finishes (Floors &amp; Walls)</label></div>
+    <div class="row"><label class="toggle" for="csv-sec-rooms"><input type="checkbox" id="csv-sec-rooms" checked> Room Area Summary</label></div>
     <div class="btns">
       <button id="csv-cancel" type="button">Cancel</button>
       <button id="csv-generate" class="primary" type="button">Generate CSV</button>
@@ -331,7 +331,7 @@
       <div class="stamp-builder-grid">
         <div class="stamp-controls">
           <div class="row">
-            <label class="toggle"><input type="checkbox" id="stamp-enabled" checked> Enable approval stamp</label>
+            <label class="toggle" for="stamp-enabled"><input type="checkbox" id="stamp-enabled" checked> Enable approval stamp</label>
           </div>
           <div class="row">
             <label for="stamp-shape">Frame shape</label>
@@ -411,7 +411,7 @@
     <div id="bsection-watermark" class="bsection" hidden>
       <h3>Diagonal Watermark Overlay</h3>
       <div class="row">
-        <label class="toggle"><input type="checkbox" id="wm-enabled"> Enable diagonal watermark</label>
+        <label class="toggle" for="wm-enabled"><input type="checkbox" id="wm-enabled"> Enable diagonal watermark</label>
       </div>
       <div class="row">
         <label for="wm-text">Watermark text</label>
