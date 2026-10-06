@@ -292,7 +292,9 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
   const horizontal = s.dx === 1;
   const th = WT + 0.6;
   const style = resolveWindowStyle(o) || resolveWindowStyle(def);
-  const frameColor = isBad ? getToken('--ktheme-critical', '#d33') : style.frameColor || getToken('--ktheme-border', '#2d2a26');
+  const frameColor = isBad
+    ? getToken('--ktheme-critical', '#d33')
+    : style.frameColor || getToken('--ktheme-border', '#2d2a26');
 
   ctx.fillStyle = 'rgba(120,180,230,.55)';
   if (horizontal) {
@@ -1023,7 +1025,8 @@ export function drawSnapGuides(ctx, snapResult, view) {
 
     for (const g of guideLines) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
-      else if (g.type === 'perpendicular') ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else if (g.type === 'perpendicular')
+        ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
       else ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
 
       ctx.beginPath();
