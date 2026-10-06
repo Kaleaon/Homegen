@@ -1,4 +1,6 @@
 // Interactive Vector Stamp & Watermark Engine for Canvas 2D preview and jsPDF vector export
+import { getToken } from './kthemeTokens.js';
+
 export const STAMP_SHAPES = [
   { id: 'circle', name: 'Circular Seal' },
   { id: 'rectangle', name: 'Rectangle Frame' },
@@ -29,8 +31,8 @@ export function renderStampCanvas(canvas, stampConfig = {}, _options = {}) {
 
   if (stampConfig.enabled === false) {
     ctx.save();
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillStyle = '#888888';
+    ctx.font = `12px ${getToken('--font-family-sans', 'system-ui, sans-serif')}`;
+    ctx.fillStyle = getToken('--ktheme-text-muted', '#888888');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('Stamp Disabled', width / 2, height / 2);
@@ -40,8 +42,8 @@ export function renderStampCanvas(canvas, stampConfig = {}, _options = {}) {
 
   const shape = stampConfig.shape || 'circle';
   const borderStyle = stampConfig.borderStyle || 'solid';
-  const borderColor = stampConfig.borderColor || '#d32f2f';
-  const textColor = stampConfig.textColor || '#d32f2f';
+  const borderColor = stampConfig.borderColor || getToken('--ktheme-accent', '#d32f2f');
+  const textColor = stampConfig.textColor || getToken('--ktheme-text', '#d32f2f');
   const opacity = stampConfig.opacity ?? 0.9;
 
   const titleText = (stampConfig.titleText ?? 'APPROVED').toUpperCase();
@@ -88,18 +90,21 @@ export function renderStampCanvas(canvas, stampConfig = {}, _options = {}) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = 'bold 15px sans-serif';
+    const sansFont = getToken('--font-family-sans', 'sans-serif');
+    const monoFont = getToken('--font-family-mono', 'monospace');
+
+    ctx.font = `bold 15px ${sansFont}`;
     ctx.fillText(titleText, cx, cy - r * 0.35);
 
-    ctx.font = '10px sans-serif';
+    ctx.font = `10px ${sansFont}`;
     ctx.fillText(subtitleText, cx, cy);
 
     if (licenseText) {
-      ctx.font = '9px monospace';
+      ctx.font = `9px ${monoFont}`;
       ctx.fillText(licenseText, cx, cy + r * 0.32);
     }
 
-    ctx.font = '8px sans-serif';
+    ctx.font = `8px ${sansFont}`;
     ctx.fillText(dateText, cx, cy + r * 0.55);
   } else if (
     shape === 'rectangle' ||
@@ -130,19 +135,22 @@ export function renderStampCanvas(canvas, stampConfig = {}, _options = {}) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = 'bold 16px sans-serif';
+    const sansFont = getToken('--font-family-sans', 'sans-serif');
+    const monoFont = getToken('--font-family-mono', 'monospace');
+
+    ctx.font = `bold 16px ${sansFont}`;
     ctx.fillText(titleText, cx, cy - 16);
 
-    ctx.font = '11px sans-serif';
+    ctx.font = `11px ${sansFont}`;
     ctx.fillText(subtitleText, cx, cy + 4);
 
     if (licenseText) {
-      ctx.font = '10px monospace';
+      ctx.font = `10px ${monoFont}`;
       ctx.fillText(licenseText, cx, cy + 20);
     }
 
     if (dateText) {
-      ctx.font = '9px sans-serif';
+      ctx.font = `9px ${sansFont}`;
       ctx.fillText(dateText, cx, cy + 34);
     }
   } else if (shape === 'badge') {
@@ -174,19 +182,22 @@ export function renderStampCanvas(canvas, stampConfig = {}, _options = {}) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = 'bold 15px sans-serif';
+    const sansFont = getToken('--font-family-sans', 'sans-serif');
+    const monoFont = getToken('--font-family-mono', 'monospace');
+
+    ctx.font = `bold 15px ${sansFont}`;
     ctx.fillText(titleText, cx, cy - 14);
 
-    ctx.font = '11px sans-serif';
+    ctx.font = `11px ${sansFont}`;
     ctx.fillText(subtitleText, cx, cy + 5);
 
     if (licenseText) {
-      ctx.font = '9px monospace';
+      ctx.font = `9px ${monoFont}`;
       ctx.fillText(licenseText, cx, cy + 20);
     }
 
     if (dateText) {
-      ctx.font = '8px sans-serif';
+      ctx.font = `8px ${sansFont}`;
       ctx.fillText(dateText, cx, cy + 33);
     }
   }
@@ -202,8 +213,8 @@ export function drawStampPDF(pdf, stampConfig, x, y, width, height) {
 
   const shape = stampConfig.shape || 'circle';
   const borderStyle = stampConfig.borderStyle || 'solid';
-  const borderColor = stampConfig.borderColor || '#d32f2f';
-  const textColor = stampConfig.textColor || '#d32f2f';
+  const borderColor = stampConfig.borderColor || getToken('--ktheme-accent', '#d32f2f');
+  const textColor = stampConfig.textColor || getToken('--ktheme-text', '#d32f2f');
   const opacity = stampConfig.opacity ?? 0.9;
 
   const titleText = (stampConfig.titleText ?? 'APPROVED').toUpperCase();

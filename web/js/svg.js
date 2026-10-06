@@ -12,6 +12,7 @@ import {
   floorAreaSqFt,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { getPalette } from './kthemeTokens.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
@@ -105,30 +106,38 @@ export function exportSVG(doc, options = {}) {
   const py = (y) => planOffsetY + y * S;
   const pLen = (l) => l * S;
 
+  const palette = getPalette();
+  const themeCssVars = Object.entries(palette)
+    .map(([key, val]) => `    ${key}: ${val};`)
+    .join('\n');
+
   const svgParts = [];
 
   // SVG Header
   svgParts.push(`<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${sheetW}pt" height="${sheetH}pt" viewBox="0 0 ${sheetW} ${sheetH}">
 <style>
-  text { font-family: Arial, Helvetica, sans-serif; }
-  .sheet-bg { fill: #ffffff; }
-  .sheet-border { fill: none; stroke: #1a1a1a; stroke-width: 1.5; }
-  .title-border { fill: none; stroke: #2a2a2a; stroke-width: 1; }
-  .title-head { font-size: 14px; font-weight: bold; fill: #111111; }
-  .title-sub { font-size: 9px; fill: #444444; }
-  .floor-rect { fill: #faf8f5; stroke: #e0dcd3; stroke-width: 0.5; }
-  .wall-struct { fill: #3a3836; stroke: #1a1a1a; stroke-width: 0.5; }
-  .wall-finish { fill: #e5e2dc; stroke: #aaaaaa; stroke-width: 0.25; }
-  .door-frame { stroke: #2a2a2a; stroke-width: 1; fill: none; }
-  .door-swing { stroke: #555555; stroke-dasharray: 3,2; stroke-width: 0.75; fill: none; }
-  .window-glass { fill: #d0e8f8; stroke: #2a2a2a; stroke-width: 0.75; }
-  .item-fill { fill: #ffffff; stroke: #222222; stroke-width: 0.75; }
-  .label-title { font-size: 10px; font-weight: bold; fill: #1a1a1a; text-anchor: middle; }
-  .label-sub { font-size: 8px; fill: #555555; text-anchor: middle; }
-  .tbl-header { font-size: 8.5px; font-weight: bold; fill: #111111; }
-  .tbl-cell { font-size: 8px; fill: #222222; }
-  .scale-text { font-size: 8px; fill: #222222; text-anchor: middle; }
+  :root {
+${themeCssVars}
+  }
+  text { font-family: var(--font-family-sans, Arial, Helvetica, sans-serif); font-family: Arial, Helvetica, sans-serif; }
+  .sheet-bg { fill: var(--ktheme-bg, #ffffff); }
+  .sheet-border { fill: none; stroke: var(--ktheme-border, #1a1a1a); stroke-width: 1.5; }
+  .title-border { fill: none; stroke: var(--ktheme-border, #2a2a2a); stroke-width: 1; }
+  .title-head { font-size: 14px; font-weight: bold; fill: var(--ktheme-text, #111111); }
+  .title-sub { font-size: 9px; fill: var(--ktheme-text-muted, #444444); }
+  .floor-rect { fill: var(--ktheme-bg-surface, #faf8f5); stroke: var(--ktheme-border, #e0dcd3); stroke-width: 0.5; }
+  .wall-struct { fill: var(--ktheme-border, #3a3836); stroke: var(--ktheme-border, #1a1a1a); stroke-width: 0.5; }
+  .wall-finish { fill: var(--ktheme-bg-surface, #e5e2dc); stroke: var(--ktheme-border, #aaaaaa); stroke-width: 0.25; }
+  .door-frame { stroke: var(--ktheme-text, #2a2a2a); stroke-width: 1; fill: none; }
+  .door-swing { stroke: var(--ktheme-text-muted, #555555); stroke-dasharray: 3,2; stroke-width: 0.75; fill: none; }
+  .window-glass { fill: var(--ktheme-info, #d0e8f8); stroke: var(--ktheme-text, #2a2a2a); stroke-width: 0.75; }
+  .item-fill { fill: var(--ktheme-bg-surface, #ffffff); stroke: var(--ktheme-text, #222222); stroke-width: 0.75; }
+  .label-title { font-size: 10px; font-weight: bold; fill: var(--ktheme-text, #1a1a1a); text-anchor: middle; }
+  .label-sub { font-size: 8px; fill: var(--ktheme-text-muted, #555555); text-anchor: middle; }
+  .tbl-header { font-size: 8.5px; font-weight: bold; fill: var(--ktheme-text, #111111); }
+  .tbl-cell { font-size: 8px; fill: var(--ktheme-text, #222222); }
+  .scale-text { font-size: 8px; fill: var(--ktheme-text, #222222); text-anchor: middle; }
 </style>
 <rect class="sheet-bg" x="0" y="0" width="${sheetW}" height="${sheetH}"/>
 <rect class="sheet-border" x="${margin}" y="${margin}" width="${sheetW - margin * 2}" height="${sheetH - margin * 2}"/>`);

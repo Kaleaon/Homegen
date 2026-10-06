@@ -13,6 +13,7 @@ import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from '
 import { patternFor } from './patterns.js';
 import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
+import { getToken } from './kthemeTokens.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
@@ -50,7 +51,7 @@ export function draw(ctx, state, view, opts = {}) {
   const { width: w, height: h } = ctx.canvas;
   const dpr = opts.dpr || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#f7f5f0';
+  ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
   ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
   if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
@@ -121,14 +122,14 @@ export function drawComplianceScene(ctx, complianceScene, view) {
       const fb = d.fixButtonBounds;
       const fs = Math.max(7, Math.min(10, 9 / view.scale));
       ctx.setLineDash([]);
-      ctx.fillStyle = '#2563eb';
+      ctx.fillStyle = getToken('--ktheme-accent', '#2563eb');
       ctx.beginPath();
       ctx.roundRect
         ? ctx.roundRect(fb.x, fb.y, fb.w, fb.h, 4 / view.scale)
         : ctx.rect(fb.x, fb.y, fb.w, fb.h);
       ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `600 ${fs}px sans-serif`;
+      ctx.fillStyle = getToken('--ktheme-on-primary', '#ffffff');
+      ctx.font = `600 ${fs}px ${getToken('--font-family-sans', 'sans-serif')}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('Fix', fb.x + fb.w / 2, fb.y + fb.h / 2);
@@ -154,7 +155,7 @@ export function drawComplianceScene(ctx, complianceScene, view) {
     }
     // Badge pill
     const fs = Math.max(7, Math.min(10, 10 / view.scale));
-    ctx.font = `600 ${fs}px sans-serif`;
+    ctx.font = `600 ${fs}px ${getToken('--font-family-sans', 'sans-serif')}`;
     const textWidth = ctx.measureText(d.badgeText).width + 8;
     const badgeW = Math.max(b.w, textWidth);
     const badgeH = fs * 1.8;
@@ -191,7 +192,7 @@ export function drawComplianceScene(ctx, complianceScene, view) {
       const d = node.data;
       ctx.save();
       const fs = Math.max(8, Math.min(11, 10 / view.scale));
-      ctx.font = `600 ${fs}px sans-serif`;
+      ctx.font = `600 ${fs}px ${getToken('--font-family-sans', 'sans-serif')}`;
       const label = d.dimensionText;
       const tw = ctx.measureText(label).width + 10;
       ctx.fillStyle = d.isValid ? 'rgba(30, 41, 59, 0.85)' : 'rgba(220, 38, 38, 0.9)';
@@ -228,6 +229,8 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
     [subGrid, '#f0ede6'],
     [minorGrid, '#ebe7de'],
     [majorGrid, '#dcd6c8'],
+    [12, getToken('--ktheme-border-light', '#ebe7de')],
+    [60, getToken('--ktheme-border', '#dcd6c8')],
   ]) {
     if (step * view.scale < 6) continue;
     ctx.strokeStyle = color;
@@ -286,7 +289,7 @@ function drawWalls(ctx, state, room, bad, opts) {
     const side = horizontal ? s.ny : s.nx; // +1: interior is on +axis side
     const inner = side > 0 ? [0, WT / 2] : [-WT / 2, 0];
     const outer = side > 0 ? [-WT / 2, 0] : [0, WT / 2];
-    ctx.fillStyle = '#3c3a38';
+    ctx.fillStyle = getToken('--ktheme-border', '#3c3a38');
     ctx.fillRect(...rect(-WT / 2, len + WT / 2, outer[0], outer[1]));
     ctx.fillStyle = fin ? patternFor(ctx, fin) : '#ddd';
     ctx.fillRect(...rect(-WT / 2, len + WT / 2, inner[0], inner[1]));
@@ -301,7 +304,7 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
   const horizontal = s.dx === 1;
   const th = WT + 0.6;
   const style = resolveWindowStyle(o) || resolveWindowStyle(def);
-  const frameColor = isBad ? '#d33' : style.frameColor || '#2d2a26';
+  const frameColor = isBad ? getToken('--ktheme-critical', '#d33') : style.frameColor || getToken('--ktheme-border', '#2d2a26');
 
   ctx.fillStyle = 'rgba(120,180,230,.55)';
   if (horizontal) {
@@ -383,7 +386,7 @@ function drawOpening(ctx, state, room, o, bad) {
   ctx.translate(a.x, a.y);
   const th = WT + 0.6;
   // gap in wall
-  ctx.fillStyle = '#f7f5f0';
+  ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
   if (horizontal) ctx.fillRect(0, -th / 2, o.width, th);
   else ctx.fillRect(-th / 2, 0, th, o.width);
   const isBad = bad.has(o.id);
@@ -664,16 +667,17 @@ function drawLabel(ctx, room, view) {
   ctx.textBaseline = 'middle';
   const fs = Math.max(7, Math.min(11, Math.min(ir.w, ir.h) / 9));
   if (fs * view.scale > 5) {
-    ctx.font = `600 ${fs}px sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    const sansFont = getToken('--font-family-sans', 'sans-serif');
+    ctx.font = `600 ${fs}px ${sansFont}`;
+    ctx.fillStyle = getToken('--ktheme-bg-surface', 'rgba(255,255,255,.7)');
     const label = `${room.name}`;
     const sub = `${fmt(ir.w)} × ${fmt(ir.h)} · ${area.toFixed(0)} sf`;
     const tw = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width * 0.85) + 6;
     ctx.fillRect(room.x + room.w / 2 - tw / 2, room.y + room.h / 2 - fs * 1.1, tw, fs * 2.2);
-    ctx.fillStyle = 'rgba(30,30,30,.9)';
+    ctx.fillStyle = getToken('--ktheme-text', 'rgba(30,30,30,.9)');
     ctx.fillText(label, room.x + room.w / 2, room.y + room.h / 2 - fs * 0.4);
-    ctx.font = `${fs * 0.8}px sans-serif`;
-    ctx.fillStyle = 'rgba(30,30,30,.65)';
+    ctx.font = `${fs * 0.8}px ${sansFont}`;
+    ctx.fillStyle = getToken('--ktheme-text-muted', 'rgba(30,30,30,.65)');
     ctx.fillText(sub, room.x + room.w / 2, room.y + room.h / 2 + fs * 0.6);
   }
   ctx.restore();
@@ -1030,9 +1034,9 @@ export function drawSnapGuides(ctx, snapResult, view) {
     ctx.setLineDash([4 / view.scale, 4 / view.scale]);
 
     for (const g of guideLines) {
-      if (g.type === 'midpoint') ctx.strokeStyle = '#a855f7';
-      else if (g.type === 'perpendicular') ctx.strokeStyle = '#f59e0b';
-      else ctx.strokeStyle = '#3b82f6';
+      if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
+      else if (g.type === 'perpendicular') ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
 
       ctx.beginPath();
       ctx.moveTo(g.start.x, g.start.y);
@@ -1047,10 +1051,10 @@ export function drawSnapGuides(ctx, snapResult, view) {
     const rOuter = 8 / view.scale;
     const rInner = 3.5 / view.scale;
 
-    let color = '#3b82f6';
-    if (snap.type === 'midpoint') color = '#a855f7';
-    if (snap.type === 'perpendicular') color = '#f59e0b';
-    if (snap.type === 'grid') color = '#10b981';
+    let color = getToken('--ktheme-accent', '#3b82f6');
+    if (snap.type === 'midpoint') color = getToken('--ktheme-info', '#a855f7');
+    if (snap.type === 'perpendicular') color = getToken('--ktheme-warning', '#f59e0b');
+    if (snap.type === 'grid') color = getToken('--ktheme-success', '#10b981');
 
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 / view.scale;

@@ -10,6 +10,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
+import { getToken } from './kthemeTokens.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ' 0"'}`;
@@ -316,8 +317,12 @@ export class ComplianceOverlayScene {
               roomId: room.id,
               itemName: def.name,
               isColliding,
-              fillColor: isColliding ? 'rgba(232, 64, 64, 0.25)' : 'rgba(42, 127, 255, 0.12)',
-              borderColor: isColliding ? '#e84040' : '#2a7fff',
+              fillColor: isColliding
+                ? (getToken('--ktheme-critical-muted') || 'rgba(232, 64, 64, 0.25)')
+                : (getToken('--ktheme-accent-muted') || 'rgba(42, 127, 255, 0.12)'),
+              borderColor: isColliding
+                ? getToken('--ktheme-critical', '#e84040')
+                : getToken('--ktheme-accent', '#2a7fff'),
               label: `${def.name} Clearance`,
             })
           );
@@ -448,7 +453,7 @@ export class ComplianceOverlayScene {
               handleId: c.id,
               isSelected,
               isValid,
-              color: isValid ? (isSelected ? '#2a7fff' : '#444444') : '#f87171',
+              color: isValid ? (isSelected ? getToken('--ktheme-accent', '#2a7fff') : getToken('--ktheme-border', '#444444')) : getToken('--ktheme-critical', '#f87171'),
             }
           )
         );
