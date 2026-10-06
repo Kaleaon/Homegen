@@ -16,7 +16,11 @@ test('getRoomMinBounds returns correct thresholds per room category', () => {
   const kitchenBounds = c.getRoomMinBounds('kitchen');
   assert.equal(kitchenBounds.minIntDim, 60, 'kitchen interior min dimension should be 60"');
   assert.equal(kitchenBounds.minOuterDim, 64.5, 'kitchen outer min dimension should be 64.5"');
-  assert.equal(kitchenBounds.minAreaSqFt, 0, 'kitchen has no min area requirement beyond 60" clear dim');
+  assert.equal(
+    kitchenBounds.minAreaSqFt,
+    0,
+    'kitchen has no min area requirement beyond 60" clear dim'
+  );
 
   // Circulation & Stairs
   for (const type of ['hallway', 'entry', 'stairs']) {
@@ -111,7 +115,11 @@ test('State mutation with clamped dimensions evaluates with zero building code e
     m.createRoom(n, 'bedroom', 0, 0, clampedBed.w, clampedBed.h);
   });
 
-  assert.equal(resBed.ok, true, `Commit failed with reasons: ${resBed.reasons?.map((r) => r.msg).join(', ')}`);
+  assert.equal(
+    resBed.ok,
+    true,
+    `Commit failed with reasons: ${resBed.reasons?.map((r) => r.msg).join(', ')}`
+  );
   assert.equal(resBed.report.violations.filter((v) => v.blocking).length, 0);
 
   // Create kitchen with clamped dimensions
@@ -119,12 +127,20 @@ test('State mutation with clamped dimensions evaluates with zero building code e
   const resKit = c.commit(state, (n) => {
     m.createRoom(n, 'kitchen', 200, 0, clampedKit.w, clampedKit.h);
   });
-  assert.equal(resKit.ok, true, `Kitchen commit failed: ${resKit.reasons?.map((r) => r.msg).join(', ')}`);
+  assert.equal(
+    resKit.ok,
+    true,
+    `Kitchen commit failed: ${resKit.reasons?.map((r) => r.msg).join(', ')}`
+  );
 
   // Create hallway with clamped dimensions
   const clampedHall = c.clampRoomDimensions('hallway', 24, 120);
   const resHall = c.commit(state, (n) => {
     m.createRoom(n, 'hallway', 400, 0, clampedHall.w, clampedHall.h);
   });
-  assert.equal(resHall.ok, true, `Hallway commit failed: ${resHall.reasons?.map((r) => r.msg).join(', ')}`);
+  assert.equal(
+    resHall.ok,
+    true,
+    `Hallway commit failed: ${resHall.reasons?.map((r) => r.msg).join(', ')}`
+  );
 });

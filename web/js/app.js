@@ -2198,15 +2198,7 @@ canvas?.addEventListener('dblclick', (e) => {
             const clampedW = clampRoomWidth(r, rawWInches, r.h);
             clamped = { w: clampedW, h: r.h };
           }
-          apply((n) =>
-            M.resizeRoom(
-              roomOf(n, r.id),
-              r.x,
-              r.y,
-              clamped.w,
-              clamped.h
-            )
-          );
+          apply((n) => M.resizeRoom(roomOf(n, r.id), r.x, r.y, clamped.w, clamped.h));
         }
       }
     }
