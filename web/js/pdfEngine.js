@@ -1,7 +1,7 @@
 // Pure client-side vector PDF generator for Homegen floorplans
 import { jsPDF } from 'jspdf';
 import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
-import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
 
 // Standard sheet sizes in points (1 in = 72 pt)
@@ -108,12 +108,9 @@ export function generatePDF(docState, options = {}) {
   const incStamp = options.includeStamp !== undefined ? options.includeStamp : true;
   const incWatermark = options.includeWatermark !== undefined ? options.includeWatermark : true;
 
-  let totalPages = 0;
-
   for (let i = 0; i < levelsToDraw.length; i++) {
     const lvl = levelsToDraw[i];
     if (i > 0) pdf.addPage([pageWidth, pageHeight], orientation);
-    totalPages++;
 
     // Compute sheet content areas
     const borderRect = {
@@ -140,7 +137,6 @@ export function generatePDF(docState, options = {}) {
     }
 
     // Room Schedule position (if on main page)
-    let scheduleBox = null;
     const levelRooms = docState.rooms.filter((r) => (r.level || 0) === lvl);
 
     // Calculate drawing area for floorplan
@@ -183,7 +179,6 @@ export function generatePDF(docState, options = {}) {
       const fitW = (drawingArea.w - 40) / modelW;
       const fitH = (drawingArea.h - 40) / modelH;
       scalePt = Math.max(0.2, Math.min(fitW, fitH));
-      const modelFeetMax = Math.max(modelW, modelH) / 12;
       actualRatioStr = `Fit to Page (1:${Math.round(72 / (scalePt * 12))})`;
     }
 
@@ -234,7 +229,6 @@ export function generatePDF(docState, options = {}) {
 
     // Draw Graphic Scale Bar
     if (includeScaleBar) {
-      const sbWidth = 140;
       const sbX = borderRect.x + 15;
       const sbY = borderRect.y + borderRect.h - 32;
       drawGraphicScaleBar(pdf, sbX, sbY, scalePt, scaleOpt, actualRatioStr);
@@ -273,7 +267,7 @@ function drawSheetBorder(pdf, r) {
  * Draws the vector floorplan geometry on the current page.
  */
 function drawFloorplanVector(pdf, state, levelRooms, transform) {
-  const { toPdfX, toPdfY, toPdfDim, scalePt } = transform;
+  const { toPdfX, toPdfY, toPdfDim } = transform;
 
   // 1. Room Floor Fills
   for (const room of levelRooms) {
@@ -282,7 +276,6 @@ function drawFloorplanVector(pdf, state, levelRooms, transform) {
     const rw = toPdfDim(room.w);
     const rh = toPdfDim(room.h);
 
-    const fDef = FLOOR_BY_ID[room.floor];
     const roomType = ROOM_TYPES[room.type] || { color: '#f7f5f0' };
 
     pdf.setFillColor(roomType.color || '#f7f5f0');
@@ -325,7 +318,7 @@ function drawFloorplanVector(pdf, state, levelRooms, transform) {
 /**
  * Draws vector stair treads.
  */
-function drawStairsVector(pdf, room, { toPdfX, toPdfY, toPdfDim }) {
+function drawStairsVector(pdf, room, { toPdfX, toPdfY }) {
   const ir = interior(room);
   const vertical = ir.h >= ir.w;
   const n = Math.ceil((room.ceiling + 10) / 7.75);
@@ -433,8 +426,6 @@ function drawOpeningVector(pdf, room, o, transform) {
     pdf.line(toPdfX(hx), toPdfY(hy), toPdfX(lx), toPdfY(ly));
 
     // Swing arc
-    const ex = hx + s.dx * o.width;
-    const ey = hy + s.dy * o.width;
     const ang0 = Math.atan2(ny * o.width, nx * o.width);
     const ang1 = Math.atan2(s.dy * o.width, s.dx * o.width);
 
@@ -579,7 +570,7 @@ function drawItemVector(pdf, room, item, def, transform) {
  * Draws room label text (Name, Dimensions, Area).
  */
 function drawRoomLabelVector(pdf, room, transform) {
-  const { toPdfX, toPdfY, toPdfDim } = transform;
+  const { toPdfX, toPdfY } = transform;
   const ir = interior(room);
   const area = floorAreaSqFt(room);
 
