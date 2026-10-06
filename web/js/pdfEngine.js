@@ -1,5 +1,5 @@
 // Pure client-side vector PDF generator for Homegen floorplans
-import { jsPDF } from 'jspdf';
+import { jsPDF } from '#jspdf';
 import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';

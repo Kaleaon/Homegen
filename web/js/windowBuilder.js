@@ -1,5 +1,5 @@
 // Modular 3D window builder component for Homegen rendering engines.
-import * as THREE from 'three';
+import * as THREE from '#three';
 import { resolveWindowStyle } from './presetRegistry.js';
 
 /**
