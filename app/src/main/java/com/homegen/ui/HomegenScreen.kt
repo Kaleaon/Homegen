@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -29,7 +28,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -245,36 +243,26 @@ fun HomegenScreen(
             }
 
             // Right side: Floor selector
-            Column(
+            FloorSelector(
+                currentFloor = currentFloor,
+                onFloorUp = {
+                    val newFloor = (currentFloor + 1).coerceIn(0, 5)
+                    if (newFloor != currentFloor) {
+                        currentFloor = newFloor
+                        surfaceManager.sceneController.setFloorLevel(currentFloor)
+                    }
+                },
+                onFloorDown = {
+                    val newFloor = (currentFloor - 1).coerceIn(0, 5)
+                    if (newFloor != currentFloor) {
+                        currentFloor = newFloor
+                        surfaceManager.sceneController.setFloorLevel(currentFloor)
+                    }
+                },
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                IconButton(onClick = {
-                    currentFloor++
-                    surfaceManager.sceneController.setFloorLevel(currentFloor)
-                }) {
-                    Text("▲")
-                }
-                Text(
-                    text = "F$currentFloor",
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(8.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                IconButton(onClick = {
-                    if (currentFloor > 0) {
-                        currentFloor--
-                        surfaceManager.sceneController.setFloorLevel(currentFloor)
-                    }
-                }) {
-                    Text("▼")
-                }
-            }
+            )
 
             // Bottom toolbar
             Column(
