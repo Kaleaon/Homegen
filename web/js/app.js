@@ -65,6 +65,7 @@ import {
   SNAP_TOGGLE_DEFINITIONS,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
+import { generateBOMCSV } from './bomExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
@@ -2847,6 +2848,57 @@ $('#pdf-generate')?.addEventListener('click', () => {
   }
 });
 
+// ------------------------------------------------------------- CSV BOM Export
+$('#export-csv')?.addEventListener('click', (e) => {
+  if (!doc.rooms || doc.rooms.length === 0) {
+    toast('Cannot export CSV: add at least one room first.', true);
+    return;
+  }
+  const returnFocusEl = e.currentTarget || document.activeElement;
+  const dlg = $('#csv-export');
+  if (dlg) {
+    dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
+  }
+});
+
+$('#csv-cancel')?.addEventListener('click', () => {
+  $('#csv-export')?.close();
+});
+
+$('#csv-generate')?.addEventListener('click', () => {
+  try {
+    const opts = {
+      includeMetadata: $('#csv-sec-meta')?.checked !== false,
+      includeFurniture: $('#csv-sec-furniture')?.checked !== false,
+      includeOpenings: $('#csv-sec-openings')?.checked !== false,
+      includeFinishes: $('#csv-sec-finishes')?.checked !== false,
+      includeRooms: $('#csv-sec-rooms')?.checked !== false,
+    };
+
+    if (
+      !opts.includeMetadata &&
+      !opts.includeFurniture &&
+      !opts.includeOpenings &&
+      !opts.includeFinishes &&
+      !opts.includeRooms
+    ) {
+      toast('Select at least one schedule section to export.', true);
+      return;
+    }
+
+    const csvText = generateBOMCSV(doc, opts);
+    const sanitizedName = (doc.name || 'plan').trim().replace(/\W+/g, '_') || 'plan';
+    const fileName = `${sanitizedName}_bill_of_materials.csv`;
+    download(fileName, csvText, 'text/csv;charset=utf-8;');
+    $('#csv-export')?.close();
+    toast('Exported Bill of Materials to CSV.');
+  } catch (err) {
+    toast(`Failed to export CSV: ${err.message}`, true);
+  }
+});
+
 // ------------------------------------------------------------- Interactive Branding & Stamp Builder UI
 let workingBranding = M.defaultBranding();
 
@@ -3719,6 +3771,13 @@ const COMMAND_REGISTRY = [
     category: 'Export',
     shortcut: '',
     action: () => $('#export-pdf')?.click(),
+  },
+  {
+    id: 'export-csv',
+    name: 'Export CSV Bill of Materials',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#export-csv')?.click(),
   },
   {
     id: 'export-report',
