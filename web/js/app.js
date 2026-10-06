@@ -1705,6 +1705,20 @@ canvas?.addEventListener('pointerdown', (e) => {
     drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
     return;
   }
+  if (e.button === 0 && !e.altKey) {
+    const hitNode = complianceScene.hitTest(p, view);
+    if (hitNode && hitNode.type === 'violation' && hitNode.data?.fixButtonBounds) {
+      const v = hitNode.data.violation;
+      const targetId = v?.id || hitNode.data.targetId;
+      const r = apply((state) => autoComply(state, { targetId }), { quiet: true });
+      if (r.ok && r.changes.length) {
+        toast(`Remediated: ${r.changes[0].msg}`);
+      } else {
+        toast('Violation could not be remediated automatically.', true);
+      }
+      return;
+    }
+  }
   switch (tool.kind) {
     case 'select': {
       const id = pickAt(p);

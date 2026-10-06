@@ -7,7 +7,6 @@ import {
   EPS,
   WALLS,
   OPPOSITE,
-  wallSeg,
   wallLength,
   interior,
   floorAreaSqFt,
@@ -23,12 +22,10 @@ import {
   intersectInterval,
   lv,
   rectsTouch,
-  computeRoomBoundingBox,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics } from './catalog.js';
-import { clone, nid, addItem, addOpening, createRoom } from './model.js';
+import { clone, addItem, addOpening, createRoom } from './model.js';
 
-const habitable = (r) => !!ROOM_TYPES[r.type].habitable;
 const MOISTURE_ROOMS = new Set(['bathroom', 'laundry']);
 const EGRESS = { minW: 20, minH: 24, minArea: 5.7 * 144, maxSill: 44 };
 
@@ -1181,7 +1178,19 @@ function addWallItem(state, roomId, type, wall, offset, baseReport = null) {
  * Bring a plan into compliance wherever a fix exists. Mutates `state`, returns human-readable change log.
  * Only ever adds/changes things; never moves or deletes the user's own furniture.
  */
-export function autoComply(state) {
+export function autoComply(state, options = {}) {
+  const targetId = typeof options === 'string' ? options : options?.targetId;
+  const shouldFix = (checkTarget) => {
+    if (!targetId) return true;
+    if (!checkTarget) return false;
+    const t = String(targetId).toLowerCase();
+    const c = String(checkTarget).toLowerCase();
+    if (t === 'home' || c === 'home') return true;
+    return (
+      c === t || t.includes(c) || c.includes(t) || t.startsWith(c + ':') || c.startsWith(t + ':')
+    );
+  };
+
   const log = [];
   let curRep = null;
   let repDirty = true;
@@ -1206,7 +1215,6 @@ export function autoComply(state) {
     log.push(diff);
     repDirty = true;
   };
-  const name = (id) => state.rooms.find((r) => r.id === id).name;
   for (let pass = 0; pass < 3; pass++) {
     const before = JSON.stringify(state.rooms);
     repDirty = true;
@@ -1214,17 +1222,17 @@ export function autoComply(state) {
     // 1. Ceilings & moisture finishes
     for (const r of state.rooms) {
       const need = ['bathroom', 'laundry', 'closet', 'stairs'].includes(r.type) ? 80 : 84;
-      if (r.ceiling < need) {
+      if (r.ceiling < need && shouldFix(r.id)) {
         r.ceiling = 96;
         addDiff(r.id, 'modify', 'ceiling', `${r.name}: ceiling raised to 8 ft`);
       }
       if (MOISTURE_ROOMS.has(r.type)) {
-        if (!FLOOR_WET(r.floor)) {
+        if (!FLOOR_WET(r.floor) && shouldFix(r.id)) {
           r.floor = 'floor_tile_gray';
           addDiff(r.id, 'modify', 'floor', `${r.name}: moisture-resistant floor`);
         }
         for (const w of WALLS)
-          if (!WALL_WET(r.walls[w])) {
+          if (!WALL_WET(r.walls[w]) && shouldFix(`${r.id}:${w}`)) {
             r.walls[w] = r.type === 'bathroom' ? 'wall_tile_white' : 'paint_white';
             addDiff(
               `${r.id}:${w}`,
@@ -1239,6 +1247,7 @@ export function autoComply(state) {
     // 1b. Openings whose wall changed character (exterior <-> interior) after rooms moved/were added
     for (const r of state.rooms)
       for (const o of [...r.openings]) {
+        if (!shouldFix(o.id) && !shouldFix(r.id)) continue;
         const def = OPENING_BY_ID[o.type];
         const kind = openingInfo(state, r, o).kind;
         if (kind === 'straddle') continue;
@@ -1295,6 +1304,7 @@ export function autoComply(state) {
     // 1c. Stairs need a matching stair on the next level
     for (const r of [...state.rooms]) {
       if (r.type !== 'stairs' || stairPartners(state, r).length) continue;
+      if (!shouldFix(r.id)) continue;
       for (const t of [lv(r) + 1, lv(r) - 1]) {
         if (t < 0 || t >= (state.levels || 1)) continue;
         let stairRoomId = null;
@@ -1324,32 +1334,37 @@ export function autoComply(state) {
     }
     // 2. Exit and door connectivity
     if (state.rooms.length && !connectivity(state).exits.size) {
-      const order = ['entry', 'living', 'hallway', 'kitchen', 'dining', 'office', 'bedroom'];
-      const cands = state.rooms
-        .filter((r) => lv(r) === 0)
-        .sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type) || 0)
-        .filter((r) => order.includes(r.type) || true);
-      outer: for (const r of cands)
-        for (const wall of WALLS) {
-          const spans = freeSpans(state, r, wall, { exterior: true, minLen: 36 });
-          if (spans.length) {
-            const openId = tryOpening(state, r.id, 'door_entry_36', wall, spans, 36, {}, rep());
-            if (openId) {
-              addDiff(
-                openId,
-                'add',
-                'opening',
-                `${r.name}: added entry door (required exterior exit)`
-              );
-              break outer;
+      if (shouldFix('home')) {
+        const order = ['entry', 'living', 'hallway', 'kitchen', 'dining', 'office', 'bedroom'];
+        const cands = state.rooms
+          .filter((r) => lv(r) === 0)
+          .sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type) || 0)
+          .filter((r) => order.includes(r.type) || true);
+        outer: for (const r of cands) {
+          if (!shouldFix(r.id)) continue;
+          for (const wall of WALLS) {
+            const spans = freeSpans(state, r, wall, { exterior: true, minLen: 36 });
+            if (spans.length) {
+              const openId = tryOpening(state, r.id, 'door_entry_36', wall, spans, 36, {}, rep());
+              if (openId) {
+                addDiff(
+                  openId,
+                  'add',
+                  'opening',
+                  `${r.name}: added entry door (required exterior exit)`
+                );
+                break outer;
+              }
             }
           }
         }
+      }
     }
     for (let guard = 0; guard < state.rooms.length; guard++) {
       const cx = connectivity(state);
       let progressed = false;
       for (const r of state.rooms.filter((x) => !cx.reachable.has(x.id))) {
+        if (!shouldFix(r.id)) continue;
         const type =
           r.type === 'closet'
             ? 'door_closet_24'
@@ -1385,6 +1400,7 @@ export function autoComply(state) {
     }
     // 3. Windows: egress, light, ventilation, bath ventilation
     for (const r of state.rooms) {
+      if (!shouldFix(r.id)) continue;
       if (
         ROOM_TYPES[r.type].sleeping &&
         !daylight(
@@ -1417,6 +1433,7 @@ export function autoComply(state) {
     // 4. Electrical and life safety
     for (const r0 of state.rooms) {
       const id = r0.id;
+      if (!shouldFix(id)) continue;
       const get = () => state.rooms.find((x) => x.id === id);
       const r = get();
       const t = ROOM_TYPES[r.type];
@@ -1458,7 +1475,11 @@ export function autoComply(state) {
       // GFCI upgrades in wet rooms
       if (t.wet)
         for (const i of get().items)
-          if (ITEM_BY_ID[i.type].shape === 'outlet' && !ITEM_BY_ID[i.type].gfci) {
+          if (
+            ITEM_BY_ID[i.type].shape === 'outlet' &&
+            !ITEM_BY_ID[i.type].gfci &&
+            (shouldFix(i.id) || shouldFix(id))
+          ) {
             i.type = 'outlet_gfci';
             addDiff(i.id, 'upgrade', 'item', `${r.name}: outlet upgraded to GFCI`);
           }
@@ -1549,6 +1570,7 @@ export function autoComply(state) {
     // Smoke & CO alarms
     const fuel = state.rooms.some((r) => r.items.some((i) => ITEM_BY_ID[i.type].fuel));
     for (const r0 of state.rooms.filter((x) => ROOM_TYPES[x.type].sleeping)) {
+      if (!shouldFix(r0.id)) continue;
       const cx = connectivity(state);
       const get = () => state.rooms.find((x) => x.id === r0.id);
       const outside = outsideAreas(state, get(), cx).sort(
@@ -1598,11 +1620,11 @@ export function autoComply(state) {
  * The gate every edit goes through. Applies `mutate` to a copy, runs auto-compliance, and rejects the
  * edit if it would introduce a new hard violation (overlaps, undersized rooms, blocked doors, ...).
  */
-export function commit(state, mutate, { autoFix = true } = {}) {
+export function commit(state, mutate, { autoFix = true, targetId = null } = {}) {
   const base = blockingIds(state);
   const next = clone(state);
   mutate(next);
-  const changes = autoFix ? autoComply(next) : [];
+  const changes = autoFix ? autoComply(next, { targetId }) : [];
   const report = evaluate(next);
   const fresh = report.violations.filter((x) => x.blocking && !base.has(x.id));
   if (fresh.length) return { ok: false, reasons: fresh, state };

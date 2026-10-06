@@ -4,7 +4,6 @@ import {
   GRID,
   EPS,
   WALLS,
-  OPPOSITE,
   snap,
   wallSeg,
   wallLength,
