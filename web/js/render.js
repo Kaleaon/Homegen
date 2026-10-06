@@ -54,7 +54,7 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
   if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
-  drawGrid(ctx, view, w / dpr, h / dpr);
+  drawGrid(ctx, view, w / dpr, h / dpr, opts);
 
   const bad = opts.bad || new Set(); // ids of violating rooms/items/openings
   for (const u of opts.under || []) {
@@ -209,15 +209,25 @@ export function drawComplianceScene(ctx, complianceScene, view) {
   }
 }
 
-function drawGrid(ctx, view, cw, ch) {
+export function drawGrid(ctx, view, cw, ch, opts = {}) {
+  const unitSize =
+    opts.gridSettings?.unitSize ??
+    opts.unitSize ??
+    opts.snappingBridge?.interaction?.gridSettings?.unitSize ??
+    6;
+  const subGrid = unitSize;
+  const minorGrid = opts.gridSettings?.minorGrid ?? opts.minorGrid ?? 12;
+  const majorGrid = opts.gridSettings?.majorGrid ?? opts.majorGrid ?? 60;
+
   const x0 = -view.ox / view.scale;
   const y0 = -view.oy / view.scale;
   const x1 = x0 + cw / view.scale;
   const y1 = y0 + ch / view.scale;
   ctx.lineWidth = 1 / view.scale;
   for (const [step, color] of [
-    [12, '#ebe7de'],
-    [60, '#dcd6c8'],
+    [subGrid, '#f0ede6'],
+    [minorGrid, '#ebe7de'],
+    [majorGrid, '#dcd6c8'],
   ]) {
     if (step * view.scale < 6) continue;
     ctx.strokeStyle = color;
