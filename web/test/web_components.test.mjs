@@ -67,15 +67,112 @@ test('app.js card generator renders <k-card> elements', () => {
   );
 });
 
-test('k-components.js encapsulates Ktheme tokens and focus ring styles', () => {
+test('k-components.js encapsulates Ktheme tokens and focus ring styles without :host shadowing', () => {
   const compPath = path.join(__dirname, '../js/k-components.js');
   const code = fs.readFileSync(compPath, 'utf8');
 
-  assert.ok(code.includes('--ktheme-accent:'), 'Includes --ktheme-accent');
-  assert.ok(code.includes('--ktheme-bg-surface:'), 'Includes --ktheme-bg-surface');
-  assert.ok(code.includes('--ktheme-border:'), 'Includes --ktheme-border');
-  assert.ok(code.includes('--ktheme-text:'), 'Includes --ktheme-text');
+  // Verify :host block in KTHEME_STYLES does not re-declare --ktheme-* tokens (preventing shadowing)
+  const hostMatch = code.match(/const KTHEME_STYLES = `\s*:host\s*\{([^}]*)\}/);
+  assert.ok(hostMatch, 'KTHEME_STYLES :host block found');
+  const hostContent = hostMatch[1];
+  assert.ok(!hostContent.includes('--ktheme-accent:'), ':host must not redefine --ktheme-accent');
+  assert.ok(
+    !hostContent.includes('--ktheme-bg-surface:'),
+    ':host must not redefine --ktheme-bg-surface'
+  );
+  assert.ok(!hostContent.includes('--ktheme-border:'), ':host must not redefine --ktheme-border');
+  assert.ok(!hostContent.includes('--ktheme-text:'), ':host must not redefine --ktheme-text');
+
+  // Verify components use multi-level fallback chains for canonical Ktheme tokens
+  assert.ok(
+    code.includes('var(--ktheme-accent, var(--accent, #2f6f5e))'),
+    'Includes --ktheme-accent fallback chain'
+  );
+  assert.ok(
+    code.includes('var(--ktheme-bg-surface, var(--panel, #fffdf9))'),
+    'Includes --ktheme-bg-surface fallback chain'
+  );
+  assert.ok(
+    code.includes('var(--ktheme-border, var(--line, #ded8cb))'),
+    'Includes --ktheme-border fallback chain'
+  );
+  assert.ok(
+    code.includes('var(--ktheme-text, var(--ink, #2b2824))'),
+    'Includes --ktheme-text fallback chain'
+  );
+  assert.ok(
+    code.includes('var(--ktheme-text-muted, var(--muted, #5f5950))'),
+    'Includes --ktheme-text-muted fallback chain'
+  );
+  assert.ok(
+    code.includes('var(--ktheme-accent-ink, var(--accent-ink, #ffffff))'),
+    'Includes --ktheme-accent-ink fallback chain'
+  );
+
+  // Focus ring properties retained on :host
   assert.ok(code.includes('--focus-ring-width'), 'Includes focus ring width');
   assert.ok(code.includes('--focus-ring-color'), 'Includes focus ring color');
   assert.ok(code.includes('--focus-ring-offset'), 'Includes focus ring offset');
+});
+
+test('shadow DOM components inherit document-level Ktheme tokens without :host shadowing', () => {
+  const components = [
+    { name: 'k-button', cls: customElements.get('k-button') },
+    { name: 'k-input', cls: customElements.get('k-input') },
+    { name: 'k-tab', cls: customElements.get('k-tab') },
+    { name: 'k-card', cls: customElements.get('k-card') },
+  ];
+
+  for (const { name, cls } of components) {
+    let shadowRoot = null;
+    cls.prototype.attachShadow = function ({ mode }) {
+      shadowRoot = {
+        innerHTML: '',
+        querySelector: () => ({ addEventListener: () => {}, classList: { toggle: () => {} } }),
+      };
+      this.shadowRoot = shadowRoot;
+      return shadowRoot;
+    };
+    cls.prototype.setAttribute = function () {};
+    cls.prototype.removeAttribute = function () {};
+    cls.prototype.hasAttribute = function () {
+      return false;
+    };
+    cls.prototype.getAttribute = function () {
+      return null;
+    };
+    cls.prototype.dispatchEvent = function () {};
+
+    const inst = new cls();
+    const styleContent = inst.shadowRoot
+      ? inst.shadowRoot.innerHTML
+      : shadowRoot
+        ? shadowRoot.innerHTML
+        : '';
+    assert.ok(styleContent, `${name} shadow root populated with styles`);
+
+    // Ensure :host block inside component shadow DOM does not redefine --ktheme-* variables
+    const hostBlockMatch = styleContent.match(/:host\s*\{([^}]*)\}/);
+    if (hostBlockMatch) {
+      const hostCss = hostBlockMatch[1];
+      assert.ok(
+        !hostCss.includes('--ktheme-accent:'),
+        `${name} :host block must not shadow --ktheme-accent`
+      );
+      assert.ok(
+        !hostCss.includes('--ktheme-bg-surface:'),
+        `${name} :host block must not shadow --ktheme-bg-surface`
+      );
+      assert.ok(
+        !hostCss.includes('--ktheme-text:'),
+        `${name} :host block must not shadow --ktheme-text`
+      );
+    }
+
+    // Ensure element styles reference canonical --ktheme-* tokens with legacy fallbacks
+    assert.ok(
+      styleContent.includes('var(--ktheme-'),
+      `${name} shadow styles must reference canonical --ktheme-* design tokens`
+    );
+  }
 });
