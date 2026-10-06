@@ -32,8 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.ktheme.android.LocalKthemeSemanticColors
 
 internal val onboardingTooltips = listOf(
     "Tap the scene to select objects",
@@ -102,7 +102,7 @@ fun OnboardingOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
+                .background(LocalKthemeSemanticColors.current.scrim)
                 .clickable {
                     // Taps outside the dialog card dismiss the onboarding cleanly
                     dismissOnboarding()

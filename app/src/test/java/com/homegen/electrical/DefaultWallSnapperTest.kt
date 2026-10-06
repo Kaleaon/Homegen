@@ -87,4 +87,29 @@ class DefaultWallSnapperTest {
         assertEquals(0f, snapped.y, 0.001f)
         assertEquals(3f, snapped.z, 0.001f)
     }
+
+    @Test
+    fun `snaps correctly after wall position is updated dynamically`() {
+        val wall = Wall(
+            lengthMeters = 10f,
+            transform = Transform(position = Vector3(0f, 0f, 0f)),
+        )
+        val snapper = DefaultWallSnapper(
+            wallsProvider = { listOf(wall) },
+            snapThreshold = 0.5f,
+        )
+
+        val query1 = Vector3(2f, 0f, 0.3f)
+        val snapped1 = snapper.snapToNearestWall(query1)
+        assertEquals(2f, snapped1.x, 0.001f)
+        assertEquals(0f, snapped1.z, 0.001f)
+
+        // Move wall to z = 5
+        wall.transform.position = Vector3(0f, 0f, 5f)
+
+        val query2 = Vector3(2f, 0f, 5.3f)
+        val snapped2 = snapper.snapToNearestWall(query2)
+        assertEquals(2f, snapped2.x, 0.001f)
+        assertEquals(5f, snapped2.z, 0.001f)
+    }
 }
