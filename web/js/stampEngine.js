@@ -1,21 +1,6 @@
 // Interactive Vector Stamp & Watermark Engine for Canvas 2D preview and jsPDF vector export
 import { getToken } from './kthemeTokens.js';
 
-export const STAMP_SHAPES = [
-  { id: 'circle', name: 'Circular Seal' },
-  { id: 'rectangle', name: 'Rectangle Frame' },
-  { id: 'double-rectangle', name: 'Double Rectangle' },
-  { id: 'rounded-rectangle', name: 'Rounded Rectangle' },
-  { id: 'badge', name: 'Octagonal Badge' },
-];
-
-export const BORDER_STYLES = [
-  { id: 'solid', name: 'Solid' },
-  { id: 'dashed', name: 'Dashed' },
-  { id: 'double', name: 'Double Line' },
-  { id: 'bold', name: 'Bold Thick' },
-];
-
 /**
  * Renders an approval stamp onto an HTML5 Canvas 2D context.
  */
