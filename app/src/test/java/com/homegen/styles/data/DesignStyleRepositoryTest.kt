@@ -1,12 +1,15 @@
 package com.homegen.styles.data
 
 import com.homegen.styles.model.ColorPalette
+import com.homegen.styles.ui.parseHexToColor
 import com.homegen.styles.ui.parsedAccent
 import com.homegen.styles.ui.parsedColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -120,5 +123,34 @@ class DesignStyleRepositoryTest {
         assertNotNull(parsedInvalidColors[0])
         assertNull(parsedInvalidColors[1])
         assertNull(invalidPalette.parsedAccent)
+    }
+
+    @Test
+    fun `parseHexToColor and parsedColors cache parsed results consistently`() {
+        val color1 = parseHexToColor("#336699")
+        val color2 = parseHexToColor("#336699")
+        assertEquals(color1, color2)
+
+        val palette = ColorPalette(
+            id = "cache_test",
+            name = "Cache Test",
+            colors = listOf("#112233", "#445566"),
+            accent = "#778899",
+        )
+
+        val firstParsed = palette.parsedColors
+        val secondParsed = palette.parsedColors
+        assertSame(firstParsed, secondParsed)
+
+        // Verify dynamic palette update with same ID but different colors updates cache
+        val updatedPalette = ColorPalette(
+            id = "cache_test",
+            name = "Cache Test Updated",
+            colors = listOf("#112233", "#998877"),
+            accent = "#778899",
+        )
+        val updatedParsed = updatedPalette.parsedColors
+        assertNotSame(firstParsed, updatedParsed)
+        assertEquals(2, updatedParsed.size)
     }
 }

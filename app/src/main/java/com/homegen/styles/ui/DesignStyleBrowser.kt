@@ -125,6 +125,8 @@ private fun DesignStyleCard(
     onClick: () -> Unit,
 ) {
     val kthemeColors = LocalKthemeSemanticColors.current
+    val parsedColors = remember(style.palette) { style.palette.parsedColors }
+    val parsedAccent = remember(style.palette) { style.palette.parsedAccent }
 
     Card(
         modifier = Modifier
@@ -165,7 +167,7 @@ private fun DesignStyleCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                style.palette.parsedColors.forEach { color ->
+                parsedColors.forEach { color ->
                     if (color != null) {
                         Box(
                             modifier = Modifier
@@ -191,7 +193,7 @@ private fun DesignStyleCard(
                     }
                 }
                 if (style.palette.accent.isNotBlank()) {
-                    val accentColor = style.palette.parsedAccent
+                    val accentColor = parsedAccent
                     if (accentColor != null) {
                         Box(
                             modifier = Modifier
