@@ -47,7 +47,12 @@ import { generatePDF } from './pdfEngine.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
-import { TEMPLATES, TEMPLATE_BY_ID, renderTemplatePreviewSVG } from './templates.js';
+import {
+  buildMultiLevel,
+  TEMPLATES,
+  TEMPLATE_BY_ID,
+  renderTemplatePreviewSVG,
+} from './templates.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
@@ -2050,26 +2055,7 @@ function renderDiffDrawer() {
 }
 
 function sampleHome() {
-  let s = M.newState();
-  s.name = 'Sample home';
-  s.levels = 2;
-  const plan = [
-    ['kit_living', 0, 0, 0],
-    ['kit_hall', 192, 0, 0],
-    ['kit_bedroom', 240, 0, 0],
-    ['kit_bath', 240, 144, 0],
-    ['kit_kitchen', 0, 168, 0],
-    ['kit_laundry', 240, 264, 0],
-    ['kit_stairs', 192, 120, 0],
-    ['kit_hall', 192, 0, 1],
-    ['kit_bedroom', 240, 0, 1],
-    ['kit_bedroom', 48, 0, 1],
-    ['kit_bath', 234, 144, 1],
-  ];
-  for (const [k, x, y, l] of plan) {
-    const r = commit(s, (n) => M.placeRoomKit(n, k, x, y, l));
-    if (r.ok) s = r.state;
-  }
+  const s = buildMultiLevel();
   curLevel = 0;
   setDoc(s);
   fit();
