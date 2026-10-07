@@ -166,7 +166,7 @@ test('command palette query filtering and execution unit test', async () => {
   const cmdPalette = getEl('command-palette');
   const cmdSearch = getEl('cmd-search');
   const cmdList = getEl('cmd-list');
-  const shortcutOverlay = getEl('shortcut-overlay');
+  const _shortcutOverlay = getEl('shortcut-overlay');
 
   // Load app.js module (simulating browser execution)
   // We mock document.querySelector / addEventListener
@@ -178,7 +178,7 @@ test('command palette query filtering and execution unit test', async () => {
       const id = s.replace(/^#/, '');
       return getEl(id);
     },
-    querySelectorAll: (s) => [],
+    querySelectorAll: (_s) => [],
     addEventListener: (evt, fn) => {
       if (!documentListeners[evt]) documentListeners[evt] = [];
       documentListeners[evt].push(fn);
@@ -323,7 +323,7 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     return elements[id];
   };
 
-  const cmdPalette = getEl('command-palette');
+  const _cmdPalette = getEl('command-palette');
   const cmdSearch = getEl('cmd-search');
   const cmdList = getEl('cmd-list');
 
