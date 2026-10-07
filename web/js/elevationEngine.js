@@ -217,8 +217,10 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
               if (entryOffset + 12 > arrayBuffer.byteLength) break;
               const tag = view.getUint16(entryOffset, littleEndian);
               const val = view.getUint32(entryOffset + 8, littleEndian);
-              if (tag === 256) imgWidth = val; // ImageWidth
-              else if (tag === 257) imgHeight = val; // ImageLength
+              if (tag === 256)
+                imgWidth = val; // ImageWidth
+              else if (tag === 257)
+                imgHeight = val; // ImageLength
               else if (tag === 258) bitsPerSample = val & 0xffff;
               else if (tag === 273) stripOffset = val; // StripOffsets
             }
@@ -237,7 +239,9 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                     rawVal = view.getUint8(stripOffset + k);
                   }
                   const norm = rawVal / (bytesPerSample === 2 ? 65535 : 255);
-                  const elev = (options.minElevation ?? 0) + norm * ((options.maxElevation ?? 10) - (options.minElevation ?? 0));
+                  const elev =
+                    (options.minElevation ?? 0) +
+                    norm * ((options.maxElevation ?? 10) - (options.minElevation ?? 0));
                   data[k] = elev;
                   if (elev < minE) minE = elev;
                   if (elev > maxE) maxE = elev;
@@ -316,12 +320,18 @@ const MARCHING_SQUARES_LOOKUP = [
   [[2, 1]], // 2: corner 2
   [[3, 1]], // 3: corners 2,3
   [[1, 0]], // 4: corner 1
-  [[3, 0], [2, 1]], // 5: corners 1,3 (saddle)
+  [
+    [3, 0],
+    [2, 1],
+  ], // 5: corners 1,3 (saddle)
   [[2, 0]], // 6: corners 1,2
   [[3, 0]], // 7: corners 1,2,3
   [[0, 3]], // 8: corner 0
   [[0, 2]], // 9: corners 0,3
-  [[0, 1], [3, 2]], // 10: corners 0,2 (saddle)
+  [
+    [0, 1],
+    [3, 2],
+  ], // 10: corners 0,2 (saddle)
   [[0, 1]], // 11: corners 0,2,3
   [[1, 3]], // 12: corners 0,1
   [[1, 2]], // 13: corners 0,1,3
@@ -394,26 +404,45 @@ export function computeMarchingSquares(grid, intervalOverride = null) {
 }
 
 function getEdgePoint(x, y, edge, v0, v1, v2, v3, z, width, height, bounds) {
-  let cellX1 = x, cellY1 = y;
-  let cellX2 = x, cellY2 = y;
-  let val1 = v0, val2 = v1;
+  let cellX1 = x,
+    cellY1 = y;
+  let cellX2 = x,
+    cellY2 = y;
+  let val1 = v0,
+    val2 = v1;
 
   switch (edge) {
     case 0: // top edge (0 to 1)
-      cellX1 = x; cellY1 = y; val1 = v0;
-      cellX2 = x + 1; cellY2 = y; val2 = v1;
+      cellX1 = x;
+      cellY1 = y;
+      val1 = v0;
+      cellX2 = x + 1;
+      cellY2 = y;
+      val2 = v1;
       break;
     case 1: // right edge (1 to 2)
-      cellX1 = x + 1; cellY1 = y; val1 = v1;
-      cellX2 = x + 1; cellY2 = y + 1; val2 = v2;
+      cellX1 = x + 1;
+      cellY1 = y;
+      val1 = v1;
+      cellX2 = x + 1;
+      cellY2 = y + 1;
+      val2 = v2;
       break;
     case 2: // bottom edge (3 to 2)
-      cellX1 = x; cellY1 = y + 1; val1 = v3;
-      cellX2 = x + 1; cellY2 = y + 1; val2 = v2;
+      cellX1 = x;
+      cellY1 = y + 1;
+      val1 = v3;
+      cellX2 = x + 1;
+      cellY2 = y + 1;
+      val2 = v2;
       break;
     case 3: // left edge (0 to 3)
-      cellX1 = x; cellY1 = y; val1 = v0;
-      cellX2 = x; cellY2 = y + 1; val2 = v3;
+      cellX1 = x;
+      cellY1 = y;
+      val1 = v0;
+      cellX2 = x;
+      cellY2 = y + 1;
+      val2 = v3;
       break;
   }
 
@@ -440,7 +469,12 @@ export async function computeContoursAsync(grid, intervalOverride = null) {
   if (!grid) return [];
 
   // If Web Worker and Blob are available, run in background worker
-  if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
+  if (
+    typeof Worker !== 'undefined' &&
+    typeof Blob !== 'undefined' &&
+    typeof URL !== 'undefined' &&
+    URL.createObjectURL
+  ) {
     try {
       const workerCode = `
         self.onmessage = function(e) {
