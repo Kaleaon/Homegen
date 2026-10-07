@@ -9,7 +9,7 @@ globalThis.requestAnimationFrame = () => 1;
 
 const baseCtx = {
   canvas: { width: 800, height: 600 },
-  getParameter: (p) => 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
+  getParameter: (_p) => 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
   getExtension: () => null,
   getShaderPrecisionFormat: () => ({ precision: 1, rangeMin: 1, rangeMax: 1 }),
   checkFramebufferStatus: () => 36053,

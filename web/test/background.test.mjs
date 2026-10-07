@@ -70,3 +70,175 @@ test('2-point scale calibration recalculates scale and anchor position', () => {
   assert.equal(bg.x, -50);
   assert.equal(bg.y, -50);
 });
+
+// Setup WebGL and DOM mocks for scene3d tests in headless Node environment
+function setupScene3DEnvironment() {
+  if (!globalThis.cancelAnimationFrame) globalThis.cancelAnimationFrame = () => {};
+  if (!globalThis.requestAnimationFrame) globalThis.requestAnimationFrame = () => 1;
+
+  const baseCtx = {
+    canvas: { width: 800, height: 600 },
+    getParameter: () => 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
+    getExtension: () => null,
+    getShaderPrecisionFormat: () => ({ precision: 1, rangeMin: 1, rangeMax: 1 }),
+    checkFramebufferStatus: () => 36053,
+    createFramebuffer: () => ({ id: Math.random() }),
+    createRenderbuffer: () => ({ id: Math.random() }),
+    createTexture: () => ({ id: Math.random() }),
+    createBuffer: () => ({ id: Math.random() }),
+    createProgram: () => ({ id: Math.random() }),
+    createShader: () => ({ id: Math.random() }),
+    createVertexArray: () => ({ id: Math.random() }),
+    TRIANGLES: 4,
+  };
+
+  const mockCtx = new Proxy(baseCtx, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      return () => {};
+    },
+  });
+
+  const mock2d = {
+    fillRect: () => {},
+    beginPath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    stroke: () => {},
+    arc: () => {},
+    fill: () => {},
+    scale: () => {},
+    save: () => {},
+    restore: () => {},
+    setTransform: () => {},
+    drawImage: () => {},
+    translate: () => {},
+    strokeRect: () => {},
+    createLinearGradient: () => ({ addColorStop: () => {} }),
+  };
+
+  const doc = {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    createElement: () => ({ width: 256, height: 256, getContext: () => mock2d }),
+  };
+  doc.documentElement = doc;
+
+  const canvas = {
+    width: 800,
+    height: 600,
+    ownerDocument: doc,
+    getRootNode: () => doc,
+    getBoundingClientRect: () => ({ width: 800, height: 600, left: 0, top: 0 }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    style: {},
+    getContext: (type) => (type === '2d' ? mock2d : mockCtx),
+  };
+
+  if (!globalThis.window) globalThis.window = { devicePixelRatio: 1 };
+  if (!globalThis.document) globalThis.document = doc;
+  if (!globalThis.ResizeObserver) {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+
+  return { canvas };
+}
+
+test('scene3d.js initializes background and lighting colors from active Ktheme tokens', async () => {
+  const { canvas } = setupScene3DEnvironment();
+  const { createScene3D } = await import('../js/scene3d.js');
+  const { invalidateCache, DEFAULT_TOKENS } = await import('../js/kthemeTokens.js');
+
+  delete globalThis.window.getComputedStyle;
+  invalidateCache();
+
+  const state = m.newState();
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+
+  assert.equal(
+    api.scene.background.getHexString(),
+    DEFAULT_TOKENS['--ktheme-tertiary'].replace('#', '').toLowerCase()
+  );
+
+  const hemi = api.scene.children.find((c) => c.isHemisphereLight);
+  assert.ok(hemi, 'Hemisphere light should exist in scene');
+  assert.equal(
+    hemi.color.getHexString(),
+    DEFAULT_TOKENS['--ktheme-on-primary'].replace('#', '').toLowerCase()
+  );
+  assert.equal(
+    hemi.groundColor.getHexString(),
+    DEFAULT_TOKENS['--ktheme-secondary'].replace('#', '').toLowerCase()
+  );
+
+  const sun = api.scene.children.find((c) => c.isDirectionalLight);
+  assert.ok(sun, 'Directional sun light should exist in scene');
+  assert.equal(
+    sun.color.getHexString(),
+    DEFAULT_TOKENS['--ktheme-primary'].replace('#', '').toLowerCase()
+  );
+
+  api.destroy();
+});
+
+test('scene colors update dynamically when invalidateCache() is triggered', async () => {
+  const { canvas } = setupScene3DEnvironment();
+  const { createScene3D } = await import('../js/scene3d.js');
+  const { invalidateCache } = await import('../js/kthemeTokens.js');
+
+  delete globalThis.window.getComputedStyle;
+  invalidateCache();
+
+  const state = m.newState();
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+
+  const customTokens = {
+    '--ktheme-tertiary': '#112233',
+    '--ktheme-on-primary': '#445566',
+    '--ktheme-secondary': '#778899',
+    '--ktheme-primary': '#aabbcc',
+  };
+
+  globalThis.window.getComputedStyle = () => ({
+    getPropertyValue: (prop) => customTokens[prop] || '',
+  });
+
+  invalidateCache();
+
+  assert.equal(api.scene.background.getHexString(), '112233');
+
+  const hemi = api.scene.children.find((c) => c.isHemisphereLight);
+  assert.equal(hemi.color.getHexString(), '445566');
+  assert.equal(hemi.groundColor.getHexString(), '778899');
+
+  const sun = api.scene.children.find((c) => c.isDirectionalLight);
+  assert.equal(sun.color.getHexString(), 'aabbcc');
+
+  // Verify destroy unsubscribes from further token invalidations
+  api.destroy();
+
+  customTokens['--ktheme-tertiary'] = '#ff0000';
+  invalidateCache();
+
+  assert.equal(
+    api.scene.background.getHexString(),
+    '112233',
+    'Background should not update after api.destroy()'
+  );
+
+  delete globalThis.window.getComputedStyle;
+  invalidateCache();
+});
