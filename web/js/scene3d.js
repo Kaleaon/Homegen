@@ -27,6 +27,7 @@ import { getCladdingMaterial, getPresetRevision, resolveWindowStyle } from './pr
 import { buildWindow3DMesh } from './windowBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
+import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
 
 const S = 1 / 12;
@@ -242,7 +243,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   }
 
   // ---------------------------------------------------------------- environment & lighting
-  scene.background = new THREE.Color('#cfe0ee');
   envCache.set('studio', pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
   scene.environment = envCache.get('studio');
   scene.environmentIntensity = 0.9;
@@ -255,11 +255,28 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
 
+  function applyThemeColors() {
+    if (opts.env === 'studio' && !(scene.background instanceof THREE.Texture)) {
+      scene.background = new THREE.Color(getToken('--ktheme-tertiary', '#cfe0ee'));
+    }
+    if (hemi) {
+      hemi.color.set(getToken('--ktheme-on-primary', '#ffffff'));
+      hemi.groundColor.set(getToken('--ktheme-secondary', '#8a8576'));
+    }
+    if (sun) {
+      sun.color.set(getToken('--ktheme-primary', '#fff3df'));
+    }
+    render();
+  }
+
+  applyThemeColors();
+  const unsubscribe = subscribe(applyThemeColors);
+
   async function setEnv(id) {
     opts.env = id;
     if (id === 'studio') {
       scene.environment = envCache.get('studio');
-      scene.background = new THREE.Color('#cfe0ee');
+      applyThemeColors();
       scene.environmentIntensity = 0.9;
       scene.backgroundBlurriness = 0;
       render();
@@ -302,7 +319,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       console.warn('HDRI unavailable, using built-in studio lighting', err);
       opts.env = 'studio';
       scene.environment = envCache.get('studio');
-      scene.background = new THREE.Color('#cfe0ee');
+      applyThemeColors();
       scene.environmentIntensity = 0.9;
       scene.backgroundBlurriness = 0;
       render();
@@ -1431,6 +1448,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       camera.updateProjectionMatrix();
       render();
       return url;
+    },
+    destroy() {
+      active = false;
+      cancelAnimationFrame(raf);
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
     },
   };
   return api;
