@@ -82,7 +82,7 @@ function createMockElement(id = '', tagName = 'DIV') {
       }
       return null;
     },
-    querySelectorAll: (_selector) => {
+    querySelectorAll: (selector) => {
       if (element.items) return element.items;
       if (selector.includes('li[data-cmd-idx]')) {
         const matches = [...element.innerHTML.matchAll(/data-cmd-idx="(\d+)"/g)];
