@@ -1290,7 +1290,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           if (getComputedStyle(canvas.parentElement).position === 'static') {
             canvas.parentElement.style.position = 'relative';
           }
-        } catch (_err) {
+        } catch {
           // ignore computed style check error in headless environments
         }
         canvas.parentElement.appendChild(hudBadge);

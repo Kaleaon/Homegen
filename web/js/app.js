@@ -2498,7 +2498,7 @@ function fit() {
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
-function setDoc(next, label) {
+function setDoc(next, _label) {
   doc = next;
   hist.push(doc, label);
   persist();
