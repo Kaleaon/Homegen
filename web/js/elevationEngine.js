@@ -261,7 +261,7 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
         }
       }
     }
-  } catch (_) {
+  } catch {
     // Fall through to image fallback
   }
 
@@ -278,7 +278,7 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
         ctx.drawImage(bitmap, 0, 0);
         return parseImageHeightmap(canvas, options);
       }
-    } catch (_) {
+    } catch {
       // Fall through to error
     }
   }
@@ -557,13 +557,13 @@ export async function computeContoursAsync(grid, intervalOverride = null) {
       const workerUrl = URL.createObjectURL(blob);
       const worker = new Worker(workerUrl);
 
-      return new Promise((res, rej) => {
+      return new Promise((res) => {
         worker.onmessage = (evt) => {
           URL.revokeObjectURL(workerUrl);
           worker.terminate();
           res(evt.data);
         };
-        worker.onerror = (err) => {
+        worker.onerror = () => {
           URL.revokeObjectURL(workerUrl);
           worker.terminate();
           // Fallback to sync
@@ -580,7 +580,7 @@ export async function computeContoursAsync(grid, intervalOverride = null) {
           interval,
         });
       });
-    } catch (_) {
+    } catch {
       // Fallback
     }
   }
