@@ -800,7 +800,13 @@ function drawOverlay(c, _state) {
 
 export function renderViolationItem(v) {
   const title = v.title || v.category || v.label || 'Design Guidance';
-  return `<li class="${v.severity}" data-id="${v.id}" tabindex="0"><b>${esc(title)}</b><div class="msg">${esc(v.msg)}</div><span class="ref" title="${esc(v.ref)}">${esc(v.ref)}${v.fixable ? ' · auto-fixable' : ''}</span></li>`;
+  return `<li class="v-item">
+    <button type="button" class="v-item-btn ${v.severity}" data-id="${v.id}" aria-label="${esc(title)}: ${esc(v.msg)} (${esc(v.ref)})">
+      <b>${esc(title)}</b>
+      <div class="msg">${esc(v.msg)}</div>
+      <span class="ref" title="${esc(v.ref)}">${esc(v.ref)}${v.fixable ? ' · auto-fixable' : ''}</span>
+    </button>
+  </li>`;
 }
 
 // ------------------------------------------------------------- compliance + inspector panels
@@ -827,19 +833,13 @@ function renderCompliance() {
           : 'Nothing more can be fixed automatically — see the remaining issues.'
       );
   });
-  el.querySelectorAll('li[data-id]').forEach((li) => {
-    li.addEventListener('click', () => {
-      const v = report.violations.find((x) => x.id === li.dataset.id);
-      const id = v.itemId || v.openingId || v.roomId;
+  el.querySelectorAll('.v-item-btn[data-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const v = report.violations.find((x) => x.id === btn.dataset.id);
+      const id = v ? v.itemId || v.openingId || v.roomId : null;
       if (id) {
         select(id);
         focus(id);
-      }
-    });
-    li.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        li.click();
       }
     });
   });
@@ -2598,29 +2598,40 @@ function renderDiffDrawer() {
   listEl.innerHTML = autoFixDiffs
     .map(
       (d, i) =>
-        `<li data-idx="${i}" class="${hoveredDiffIndex === i ? 'hovered' : ''}"><span class="diff-num">${i + 1}</span><span class="diff-msg">${esc(d.msg || d)}</span></li>`
+        `<li data-idx="${i}">
+           <button type="button" class="diff-item-btn ${hoveredDiffIndex === i ? 'hovered' : ''}" data-idx="${i}" aria-label="Fix ${i + 1}: ${esc(d.msg || d)}">
+             <span class="diff-num">${i + 1}</span>
+             <span class="diff-msg">${esc(d.msg || d)}</span>
+           </button>
+         </li>`
     )
     .join('');
 
-  listEl.querySelectorAll('li[data-idx]').forEach((li) => {
-    const idx = Number(li.dataset.idx);
-    li.addEventListener('mouseenter', () => {
-      hoveredDiffIndex = idx;
-      li.classList.add('hovered');
-      redraw();
-    });
-    li.addEventListener('mouseleave', () => {
-      hoveredDiffIndex = null;
-      li.classList.remove('hovered');
-      redraw();
-    });
-    li.addEventListener('click', () => {
+  listEl.querySelectorAll('.diff-item-btn').forEach((btn) => {
+    const idx = Number(btn.dataset.idx);
+    const handleActivate = () => {
       const d = autoFixDiffs[idx];
       if (d && d.id) {
         select(d.id);
         focus(d.id);
       }
-    });
+    };
+    const handleHighlight = () => {
+      hoveredDiffIndex = idx;
+      btn.classList.add('hovered');
+      redraw();
+    };
+    const handleClearHighlight = () => {
+      hoveredDiffIndex = null;
+      btn.classList.remove('hovered');
+      redraw();
+    };
+
+    btn.addEventListener('mouseenter', handleHighlight);
+    btn.addEventListener('mouseleave', handleClearHighlight);
+    btn.addEventListener('focus', handleHighlight);
+    btn.addEventListener('blur', handleClearHighlight);
+    btn.addEventListener('click', handleActivate);
   });
 
   if (closeBtn) {
