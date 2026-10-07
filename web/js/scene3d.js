@@ -28,6 +28,7 @@ import { buildWindow3DMesh } from './windowBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
 import { getToken, subscribe } from './kthemeTokens.js';
+import { rateLimitedFetch } from './rateLimiter.js';
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
@@ -231,8 +232,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   async function fetchWithTimeout(url, timeoutMs = 8000) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
+    if (id && typeof id.unref === 'function') id.unref();
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await rateLimitedFetch(url, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP status ${res.status}`);
       return res;
     } finally {

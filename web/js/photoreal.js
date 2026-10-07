@@ -1,6 +1,7 @@
 // Turns the current 3D design into a prompt + guide images and sends them to free image generators.
 import { ROOM_TYPES, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { interior, floorAreaSqFt } from './geometry.js';
+import { rateLimitedFetch } from './rateLimiter.js';
 
 export const STYLES = {
   modern: 'modern contemporary',
@@ -163,7 +164,7 @@ async function fetchWithRetry(
       throw new DOMException('Cancelled', 'AbortError');
     }
     try {
-      const res = await fetchImpl(url, { ...options, signal });
+      const res = await rateLimitedFetch(url, { ...options, signal, fetchImpl });
       return res;
     } catch (err) {
       if (err.name === 'AbortError' || signal?.aborted) {
