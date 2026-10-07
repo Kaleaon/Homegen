@@ -9,7 +9,7 @@ globalThis.requestAnimationFrame = () => 1;
 
 const baseCtx = {
   canvas: { width: 800, height: 600 },
-  getParameter: (p) => 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
+  getParameter: (_p) => 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
   getExtension: () => null,
   getShaderPrecisionFormat: () => ({ precision: 1, rangeMin: 1, rangeMax: 1 }),
   checkFramebufferStatus: () => 36053,
@@ -123,7 +123,7 @@ test('Walkthrough mode locks camera height to 64 inches above active floor eleva
   // Set camera mode walk directly
   api.setCameraMode('walk');
   const activeLevelElev = 0; // level 0
-  const expectedY = (activeLevelElev + 64) * S;
+  const _expectedY = (activeLevelElev + 64) * S;
 
   // Move in walk mode
   api.updateWalkMovement(0.1, {
@@ -153,7 +153,7 @@ test('Continuous movement applies WASD translation and Shift sprint 2x speed mul
 
   // Test normal speed translation forward
   const dt = 0.1;
-  const initialPos = { x: 0, z: 0 };
+  const _initialPos = { x: 0, z: 0 };
   api.updateWalkMovement(dt, {
     forward: true,
     backward: false,

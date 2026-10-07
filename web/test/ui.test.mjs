@@ -52,7 +52,7 @@ test('UI Error Boundary state controller displays recovery buttons and flags inv
   const pErrorMsg = getEl('p-error-msg');
   const pRetry = getEl('p-retry');
   const pUseAnon = getEl('p-use-anon');
-  const pLowerRes = getEl('p-lower-res');
+  const _pLowerRes = getEl('p-lower-res');
 
   // Simulate showPhotorealError with an Auth Error
   const authErr = new HordeError('AI Horde authorization failed (401)', 'auth', 401);
