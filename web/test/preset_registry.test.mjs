@@ -276,7 +276,7 @@ test('Global preset revision counter increments on preset registration or cache 
 test('Wall signature calculation in 3D scene invalidates cached wall group on preset revision increment', () => {
   const state = m.newState();
   const room = m.createRoom(state, 'living', 0, 0, 144, 144);
-  m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
+  const _o = m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
 
   const api = createScene3D(
     canvas,

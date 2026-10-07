@@ -123,7 +123,7 @@ test('Walkthrough mode locks camera height to 64 inches above active floor eleva
   // Set camera mode walk directly
   api.setCameraMode('walk');
   const activeLevelElev = 0; // level 0
-  assert.equal((activeLevelElev + 64) * S, 64 * S);
+  const _expectedY = (activeLevelElev + 64) * S;
 
   // Move in walk mode
   api.updateWalkMovement(0.1, {
@@ -153,6 +153,7 @@ test('Continuous movement applies WASD translation and Shift sprint 2x speed mul
 
   // Test normal speed translation forward
   const dt = 0.1;
+  const _initialPos = { x: 0, z: 0 };
   api.updateWalkMovement(dt, {
     forward: true,
     backward: false,
