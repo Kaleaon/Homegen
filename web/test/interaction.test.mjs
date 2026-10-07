@@ -6,10 +6,9 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
-  SNAP_MODES,
   SNAP_TOGGLE_DEFINITIONS,
 } from '../../designer3d/tools/index.mjs';
-import { extractRoomEdges, roomToPolygon, itemToPolygon, snap } from '../js/geometry.js';
+import { extractRoomEdges, roomToPolygon, snap } from '../js/geometry.js';
 
 test('InteractionLayer instantiates and manages snap modes and gizmos', () => {
   const layer = new InteractionLayer({

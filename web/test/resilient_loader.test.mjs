@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as THREE from '#three';
+// import * as THREE from '#three';
 
 // Setup DOM stubs for Node environment
 globalThis.document = {

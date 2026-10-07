@@ -58,7 +58,7 @@ console.log(`👀 Watching for changes in:\n  - ${watchTargets.join('\n  - ')}`)
 let debounceTimer = null;
 for (const target of watchTargets) {
   if (fs.existsSync(target)) {
-    fs.watch(target, (eventType) => {
+    fs.watch(target, (_eventType) => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         runBuild();

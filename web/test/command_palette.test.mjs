@@ -82,7 +82,7 @@ function createMockElement(id = '', tagName = 'DIV') {
       }
       return null;
     },
-    querySelectorAll: (selector) => {
+    querySelectorAll: (_selector) => {
       if (element.items) return element.items;
       if (selector.includes('li[data-cmd-idx]')) {
         const matches = [...element.innerHTML.matchAll(/data-cmd-idx="(\d+)"/g)];
@@ -166,7 +166,7 @@ test('command palette query filtering and execution unit test', async () => {
   const cmdPalette = getEl('command-palette');
   const cmdSearch = getEl('cmd-search');
   const cmdList = getEl('cmd-list');
-  const _shortcutOverlay = getEl('shortcut-overlay');
+  getEl('shortcut-overlay');
 
   // Load app.js module (simulating browser execution)
   // We mock document.querySelector / addEventListener
@@ -323,7 +323,7 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     return elements[id];
   };
 
-  const _cmdPalette = getEl('command-palette');
+  getEl('command-palette');
   const cmdSearch = getEl('cmd-search');
   const cmdList = getEl('cmd-list');
 

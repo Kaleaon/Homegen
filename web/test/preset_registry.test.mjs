@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OPENINGS, WALL_FINISHES, WALL_BY_ID } from '../js/catalog.js';
+import { OPENINGS } from '../js/catalog.js';
 import * as m from '../js/model.js';
 import { createScene3D } from '../js/scene3d.js';
 import {
   WINDOW_PRESETS,
-  CLADDING_PRESETS,
-  BUILDING_PRESETS,
   getWindowPreset,
   getCladdingMaterial,
   registerWindowPreset,
@@ -17,7 +15,6 @@ import {
   clearPresetCaches,
   getPresetRevision,
 } from '../js/presetRegistry.js';
-import { buildWindow3DMesh } from '../js/windowBuilder.js';
 import { drawWindow2D } from '../js/render.js';
 
 // Setup headless WebGL and DOM Mocks
@@ -279,7 +276,7 @@ test('Global preset revision counter increments on preset registration or cache 
 test('Wall signature calculation in 3D scene invalidates cached wall group on preset revision increment', () => {
   const state = m.newState();
   const room = m.createRoom(state, 'living', 0, 0, 144, 144);
-  const o = m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
+  m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
 
   const api = createScene3D(
     canvas,
