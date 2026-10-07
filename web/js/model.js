@@ -407,7 +407,18 @@ export function deserialize(text) {
   const s = JSON.parse(text);
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
-  s.background = s.background || null;
+  if (s.background) {
+    if (s.background.attributionText !== undefined)
+      s.background.attributionText = s.background.attributionText || null;
+    if (s.background.provider !== undefined) s.background.provider = s.background.provider || null;
+    if (s.background.licenseUrl !== undefined)
+      s.background.licenseUrl = s.background.licenseUrl || null;
+    if (s.background.logoUrl !== undefined) s.background.logoUrl = s.background.logoUrl || null;
+    if (s.background.isGeospatial !== undefined)
+      s.background.isGeospatial = !!s.background.isGeospatial;
+  } else {
+    s.background = null;
+  }
   s.customFinishes = s.customFinishes || [];
   s.settings ||= {};
   s.settings.branding = {

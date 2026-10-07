@@ -21,6 +21,19 @@ const fmt = (inches) =>
 export const fmtLen = fmt;
 
 let bgCache = { dataUrl: null, img: null };
+const logoCache = new Map();
+
+function getLogoImage(logoUrl, onLoaded) {
+  if (!logoUrl) return null;
+  if (logoCache.has(logoUrl)) return logoCache.get(logoUrl);
+  const img = new Image();
+  logoCache.set(logoUrl, img);
+  img.onload = () => {
+    if (onLoaded) onLoaded();
+  };
+  img.src = logoUrl;
+  return img;
+}
 
 function getBgImage(bg, onLoaded) {
   if (!bg || !bg.dataUrl) return null;
@@ -36,7 +49,7 @@ function getBgImage(bg, onLoaded) {
   return img;
 }
 
-function drawBackground(ctx, bg, onLoaded) {
+function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, opts = {}) {
   if (!bg || !bg.visible || !bg.dataUrl) return;
   const img = getBgImage(bg, onLoaded);
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -46,6 +59,78 @@ function drawBackground(ctx, bg, onLoaded) {
   const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
   ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
   ctx.restore();
+
+  // Render mandatory attribution badge when attribution/geospatial metadata is active
+  let attrText = bg.attributionText;
+  if (!attrText && bg.provider) {
+    attrText = `Map Data © ${bg.provider}`;
+  } else if (!attrText && bg.isGeospatial) {
+    attrText = 'Geospatial Background Layer';
+  }
+  if (attrText && bg.licenseUrl && !attrText.includes(bg.licenseUrl)) {
+    attrText += ` · ${bg.licenseUrl}`;
+  }
+
+  if (attrText) {
+    ctx.save();
+    const dpr = opts.dpr || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1.0;
+
+    const fontSize = 11 * dpr;
+    ctx.font = `${fontSize}px sans-serif`;
+
+    const textMetrics = ctx.measureText(attrText);
+    const logoImg = bg.logoUrl ? getLogoImage(bg.logoUrl, onLoaded) : null;
+    const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
+    const logoWidth = hasLogo ? 16 * dpr : 0;
+    const paddingX = 8 * dpr;
+    const paddingY = 5 * dpr;
+
+    const badgeWidth = textMetrics.width + paddingX * 2 + (hasLogo ? logoWidth + 4 * dpr : 0);
+    const badgeHeight = fontSize + paddingY * 2;
+
+    const imgRight = ((bg.x ?? 0) + w) * (view.scale || 1) * dpr + (view.ox || 0) * dpr;
+    const imgBottom = ((bg.y ?? 0) + h) * (view.scale || 1) * dpr + (view.oy || 0) * dpr;
+    const canvasW = ctx.canvas.width;
+    const canvasH = ctx.canvas.height;
+
+    const margin = 10 * dpr;
+    let badgeRight = Math.min(imgRight - margin, canvasW - margin);
+    let badgeBottom = Math.min(imgBottom - margin, canvasH - margin);
+    badgeRight = Math.max(badgeRight, badgeWidth + margin);
+    badgeBottom = Math.max(badgeBottom, badgeHeight + margin);
+
+    const badgeX = badgeRight - badgeWidth;
+    const badgeY = badgeBottom - badgeHeight;
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1 * dpr;
+
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4 * dpr);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+      ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    }
+
+    let currentX = badgeX + paddingX;
+    if (hasLogo) {
+      const logoY = badgeY + (badgeHeight - 14 * dpr) / 2;
+      ctx.drawImage(logoImg, currentX, logoY, 14 * dpr, 14 * dpr);
+      currentX += logoWidth + 4 * dpr;
+    }
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(attrText, currentX, badgeY + badgeHeight / 2);
+
+    ctx.restore();
+  }
 }
 
 export function draw(ctx, state, view, opts = {}) {
@@ -55,7 +140,8 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
   ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
-  if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
+  if (state.background)
+    drawBackground(ctx, state.background, opts.onLoaded || opts.redraw, view, opts);
   drawGrid(ctx, view, w / dpr, h / dpr, opts);
   if (state.elevationGrid) drawContours(ctx, state, view, opts);
 

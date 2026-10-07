@@ -1294,8 +1294,71 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     camera.updateProjectionMatrix();
     render();
   }
+  function get3DAttributionText() {
+    const state = getState ? getState() : null;
+    const parts = [];
+
+    // Ground plane map / background layer
+    if (state && state.background && state.background.visible !== false) {
+      const bg = state.background;
+      let bgAttr = bg.attributionText;
+      if (!bgAttr && bg.provider) {
+        bgAttr = `Ground Map © ${bg.provider}`;
+      } else if (!bgAttr && bg.isGeospatial) {
+        bgAttr = 'Geospatial Ground Map';
+      }
+      if (bgAttr && bg.licenseUrl && !bgAttr.includes(bg.licenseUrl)) {
+        bgAttr += ` (${bg.licenseUrl})`;
+      }
+      if (bgAttr) parts.push(bgAttr);
+    }
+
+    // HDRI environment
+    if (opts.env && opts.env !== 'studio') {
+      const hdriDef = HDRI_ENVS.find((e) => e.id === opts.env);
+      const hdriName = hdriDef ? hdriDef.name : opts.env;
+      parts.push(`HDRI Sky: ${hdriName} (CC0 Poly Haven)`);
+    }
+
+    // HD PBR textures
+    if (opts.hd) {
+      parts.push('HD Textures © Poly Haven (CC0)');
+    }
+
+    return parts.join(' | ');
+  }
+
+  function updateHudAttribution() {
+    if (typeof document === 'undefined') return;
+    const attrText = get3DAttributionText();
+    let hudBadge = canvas?.parentElement?.querySelector('.scene3d-hud-attribution');
+    if (attrText) {
+      if (!hudBadge && canvas?.parentElement) {
+        hudBadge = document.createElement('div');
+        hudBadge.className = 'scene3d-hud-attribution';
+        hudBadge.style.cssText =
+          'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
+        try {
+          if (getComputedStyle(canvas.parentElement).position === 'static') {
+            canvas.parentElement.style.position = 'relative';
+          }
+        } catch {
+          // ignore computed style check error in headless environments
+        }
+        canvas.parentElement.appendChild(hudBadge);
+      }
+      if (hudBadge) {
+        hudBadge.style.display = 'block';
+        hudBadge.textContent = attrText;
+      }
+    } else if (hudBadge) {
+      hudBadge.style.display = 'none';
+    }
+  }
+
   function render() {
     renderer.render(scene, camera);
+    updateHudAttribution();
   }
   function loop() {
     if (!active) return;
@@ -1325,6 +1388,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     scene,
     callbacks,
     walkKeys,
+    getAttributionText: get3DAttributionText,
+    updateHudAttribution,
     getCameraMode: () => cameraMode,
     setCameraMode,
     toggleCameraMode,
