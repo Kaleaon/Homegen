@@ -512,3 +512,55 @@ test('autoComply with targetId remediates only the targeted violation', () => {
   assert.ok(log2.some((d) => d.id === room2.id && d.type === 'floor'));
   assert.equal(s.rooms.find((r) => r.id === room2.id).floor, 'floor_tile_gray');
 });
+
+test('autoComply terminates early on stable state using diff-log tracking without full JSON stringification', () => {
+  const s = house();
+  c.autoComply(s);
+  const logSecond = c.autoComply(s);
+  assert.equal(logSecond.length, 0);
+});
+
+test('isPrimitiveOrEqual and isArrayEqual perform direct property comparisons correctly', () => {
+  const itemA = { id: 'i1', type: 'chair', x: 10, y: 20, rot: 0 };
+  const itemB = { id: 'i1', type: 'chair', x: 10, y: 20, rot: 0 };
+  const itemC = { id: 'i1', type: 'chair', x: 10, y: 25, rot: 0 };
+
+  assert.ok(c.isPrimitiveOrEqual(itemA, itemB));
+  assert.ok(!c.isPrimitiveOrEqual(itemA, itemC));
+  assert.ok(!c.isPrimitiveOrEqual(itemA, null));
+
+  const arr1 = [itemA, itemB];
+  const arr2 = [itemA, itemB];
+  const arr3 = [itemA, itemC];
+
+  assert.ok(c.isArrayEqual(arr1, arr2, c.isPrimitiveOrEqual));
+  assert.ok(!c.isArrayEqual(arr1, arr3, c.isPrimitiveOrEqual));
+  assert.ok(!c.isArrayEqual(arr1, [itemA], c.isPrimitiveOrEqual));
+});
+
+test('cloneStateForTrial isolates trial edits and preserves shallow object references where untouched', () => {
+  const s = m.newState();
+  m.createRoom(s, 'bedroom', 0, 0, 144, 144);
+  const trial = c.cloneStateForTrial(s);
+
+  assert.notEqual(trial, s);
+  assert.notEqual(trial.rooms, s.rooms);
+  assert.notEqual(trial.rooms[0], s.rooms[0]);
+
+  trial.rooms[0].w = 180;
+  assert.equal(s.rooms[0].w, 144);
+  assert.equal(trial.rooms[0].w, 180);
+});
+
+test('computeAffectedBoundingBox detects changed items and openings using direct property checks', () => {
+  const s = m.newState();
+  const room = m.createRoom(s, 'bedroom', 0, 0, 144, 144);
+  m.addItem(s, room, 'bed_queen', { x: 50, y: 50 });
+
+  const trial = c.cloneStateForTrial(s);
+  trial.rooms[0].items[0].x = 70;
+
+  const box = c.computeAffectedBoundingBox(s, trial);
+  assert.ok(box !== null);
+  assert.ok(box.w > 0 && box.h > 0);
+});

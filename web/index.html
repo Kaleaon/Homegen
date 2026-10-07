@@ -17,6 +17,7 @@
   <div class="spacer"></div>
   <k-button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></k-button>
   <k-button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></k-button>
+  <k-button id="history-btn" title="Version History Timeline" aria-label="Version history timeline" aria-haspopup="true" aria-expanded="false"><span aria-hidden="true">📜</span> History</k-button>
   <label class="toggle" title="Automatically add the windows, outlets, alarms, doors and finishes the code requires after every edit"><input type="checkbox" id="auto" checked> Auto-comply</label>
   <k-button id="sample">Sample home</k-button>
   <k-button id="new">New</k-button>
@@ -92,6 +93,15 @@
         <button id="diff-close" class="diff-close-btn" title="Dismiss highlights" aria-label="Dismiss highlights">✕</button>
       </div>
       <ul id="diff-list" class="diff-items"></ul>
+    </div>
+    <div id="history-popover" class="history-popover k-overlay-drawer" role="dialog" aria-modal="true" aria-labelledby="history-popover-title" hidden>
+      <div class="history-header">
+        <div class="history-title">
+          <h2 id="history-popover-title">📜 Version History</h2>
+        </div>
+        <button id="history-close" class="history-close-btn" title="Close history timeline" aria-label="Close history timeline">✕</button>
+      </div>
+      <ul id="history-list" class="history-items"></ul>
     </div>
   </section>
   <aside id="right">
