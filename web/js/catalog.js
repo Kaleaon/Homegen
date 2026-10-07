@@ -156,63 +156,172 @@ const ceil = (id, name, w, color, shape, extra = {}) => ({
   ...extra,
 });
 
+export const SYNONYM_MAP = {
+  couch: ['sofa'],
+  worktable: ['desk'],
+  commode: ['toilet'],
+  fridge: ['refrigerator'],
+  stove: ['range'],
+  washbasin: ['sink', 'vanity'],
+  bookcase: ['bookshelf'],
+  davenport: ['sofa'],
+  settee: ['loveseat', 'sofa'],
+  armoire: ['wardrobe'],
+  bureau: ['dresser'],
+  credenza: ['dresser', 'tv_stand'],
+  receptacle: ['outlet'],
+  lamp: ['light'],
+  lighting: ['light'],
+  television: ['tv'],
+  bathroom: ['bath'],
+  'living room': ['living'],
+  'dining room': ['dining'],
+};
+
 export const ITEMS = [
-  f('bed_twin', 'Twin bed', 'bedroom', 39, 75, 24, '#8fa3c7', 'bed'),
-  f('bed_full', 'Full bed', 'bedroom', 54, 75, 24, '#8fa3c7', 'bed'),
-  f('bed_queen', 'Queen bed', 'bedroom', 60, 80, 24, '#7f95bd', 'bed'),
-  f('bed_king', 'King bed', 'bedroom', 76, 80, 24, '#7f95bd', 'bed'),
-  f('nightstand', 'Nightstand', 'bedroom', 18, 16, 24, '#a8805a', 'box'),
-  f('dresser', 'Dresser', 'bedroom', 60, 18, 32, '#a8805a', 'box'),
-  f('wardrobe', 'Wardrobe', 'bedroom', 48, 24, 78, '#9a7650', 'box'),
-  f('sofa', 'Sofa', 'living', 84, 36, 32, '#6f8f84', 'sofa'),
-  f('loveseat', 'Loveseat', 'living', 58, 36, 32, '#6f8f84', 'sofa'),
-  f('armchair', 'Armchair', 'living', 32, 34, 32, '#b06a5b', 'sofa'),
-  f('coffee_table', 'Coffee table', 'living', 48, 24, 18, '#a8805a', 'box'),
-  f('tv_stand', 'TV stand', 'living', 60, 18, 24, '#4b4b52', 'box'),
-  f('bookshelf', 'Bookshelf', 'living', 36, 12, 72, '#8b6945', 'shelf'),
-  f('rug_large', 'Area rug 8×5', 'decor', 96, 60, 1, '#c9a98f', 'rug', { flat: true }),
-  f('plant', 'Plant', 'decor', 18, 18, 36, '#5f9b5f', 'plant'),
-  f('dining_table', 'Dining table', 'dining', 60, 36, 30, '#a8805a', 'table'),
-  f('dining_chair', 'Dining chair', 'dining', 18, 18, 18, '#8b6945', 'chair', { tucks: true }),
-  f('desk', 'Desk', 'office', 48, 24, 30, '#a8805a', 'box'),
-  f('office_chair', 'Office chair', 'office', 22, 22, 36, '#4b4b52', 'chair', { tucks: true }),
-  f('fridge', 'Refrigerator', 'kitchen', 36, 30, 70, '#cfd6da', 'fridge'),
+  f('bed_twin', 'Twin bed', 'bedroom', 39, 75, 24, '#8fa3c7', 'bed', {
+    tags: ['bed', 'single', 'mattress', 'sleeping'],
+  }),
+  f('bed_full', 'Full bed', 'bedroom', 54, 75, 24, '#8fa3c7', 'bed', {
+    tags: ['bed', 'double', 'mattress', 'sleeping'],
+  }),
+  f('bed_queen', 'Queen bed', 'bedroom', 60, 80, 24, '#7f95bd', 'bed', {
+    tags: ['bed', 'mattress', 'sleeping'],
+  }),
+  f('bed_king', 'King bed', 'bedroom', 76, 80, 24, '#7f95bd', 'bed', {
+    tags: ['bed', 'mattress', 'sleeping'],
+  }),
+  f('nightstand', 'Nightstand', 'bedroom', 18, 16, 24, '#a8805a', 'box', {
+    tags: ['night table', 'side table'],
+  }),
+  f('dresser', 'Dresser', 'bedroom', 60, 18, 32, '#a8805a', 'box', {
+    tags: ['drawers', 'bureau', 'chest', 'storage'],
+  }),
+  f('wardrobe', 'Wardrobe', 'bedroom', 48, 24, 78, '#9a7650', 'box', {
+    tags: ['closet', 'armoire', 'cabinet', 'storage'],
+  }),
+  f('sofa', 'Sofa', 'living', 84, 36, 32, '#6f8f84', 'sofa', {
+    tags: ['couch', 'seating', 'davenport', 'furniture'],
+  }),
+  f('loveseat', 'Loveseat', 'living', 58, 36, 32, '#6f8f84', 'sofa', {
+    tags: ['couch', 'seating', 'settee'],
+  }),
+  f('armchair', 'Armchair', 'living', 32, 34, 32, '#b06a5b', 'sofa', {
+    tags: ['seating', 'recliner', 'lounge'],
+  }),
+  f('coffee_table', 'Coffee table', 'living', 48, 24, 18, '#a8805a', 'box', {
+    tags: ['table', 'center table', 'living room'],
+  }),
+  f('tv_stand', 'TV stand', 'living', 60, 18, 24, '#4b4b52', 'box', {
+    tags: ['entertainment', 'media console', 'television', 'credenza'],
+  }),
+  f('bookshelf', 'Bookshelf', 'living', 36, 12, 72, '#8b6945', 'shelf', {
+    tags: ['bookcase', 'shelving', 'storage', 'library'],
+  }),
+  f('rug_large', 'Area rug 8×5', 'decor', 96, 60, 1, '#c9a98f', 'rug', {
+    flat: true,
+    tags: ['carpet', 'mat', 'flooring'],
+  }),
+  f('plant', 'Plant', 'decor', 18, 18, 36, '#5f9b5f', 'plant', {
+    tags: ['greenery', 'houseplant', 'flower', 'decoration'],
+  }),
+  f('dining_table', 'Dining table', 'dining', 60, 36, 30, '#a8805a', 'table', {
+    tags: ['table', 'eating', 'dinner table'],
+  }),
+  f('dining_chair', 'Dining chair', 'dining', 18, 18, 18, '#8b6945', 'chair', {
+    tucks: true,
+    tags: ['seating', 'eating'],
+  }),
+  f('desk', 'Desk', 'office', 48, 24, 30, '#a8805a', 'box', {
+    tags: ['worktable', 'workstation', 'writing desk', 'office table'],
+  }),
+  f('office_chair', 'Office chair', 'office', 22, 22, 36, '#4b4b52', 'chair', {
+    tucks: true,
+    tags: ['desk chair', 'seating', 'task chair'],
+  }),
+  f('fridge', 'Refrigerator', 'kitchen', 36, 30, 70, '#cfd6da', 'fridge', {
+    tags: ['fridge', 'freezer', 'appliance', 'cold storage'],
+  }),
   f('range_gas', 'Gas range', 'kitchen', 30, 26, 36, '#9aa3a8', 'range', {
     fuel: true,
     cooking: true,
+    tags: ['stove', 'cooktop', 'oven', 'appliance'],
   }),
   f('range_electric', 'Electric range', 'kitchen', 30, 26, 36, '#9aa3a8', 'range', {
     cooking: true,
+    tags: ['stove', 'cooktop', 'oven', 'appliance'],
   }),
   f('sink_kitchen', 'Kitchen sink cabinet', 'kitchen', 36, 24, 36, '#b9c3c8', 'sink', {
     fixture: 'kitchen_sink',
+    tags: ['sink', 'washbasin', 'basin', 'plumbing'],
   }),
-  f('dishwasher', 'Dishwasher', 'kitchen', 24, 24, 34, '#b9c3c8', 'box'),
-  f('counter_36', 'Counter 36"', 'kitchen', 36, 24, 36, '#d8cdb8', 'box'),
-  f('counter_24', 'Counter 24"', 'kitchen', 24, 24, 36, '#d8cdb8', 'box'),
+  f('dishwasher', 'Dishwasher', 'kitchen', 24, 24, 34, '#b9c3c8', 'box', {
+    tags: ['appliance', 'dish washing'],
+  }),
+  f('counter_36', 'Counter 36"', 'kitchen', 36, 24, 36, '#d8cdb8', 'box', {
+    tags: ['countertop', 'island', 'cabinet', 'worktop'],
+  }),
+  f('counter_24', 'Counter 24"', 'kitchen', 24, 24, 36, '#d8cdb8', 'box', {
+    tags: ['countertop', 'island', 'cabinet', 'worktop'],
+  }),
   f('toilet', 'Toilet', 'bath', 20, 28, 30, '#f2f4f5', 'toilet', {
     fixture: 'toilet',
     clearance: true,
+    tags: ['commode', 'wc', 'water closet', 'bathroom fixture', 'plumbing'],
   }),
   f('vanity', 'Lavatory vanity', 'bath', 30, 21, 34, '#e5e9ec', 'sink', {
     fixture: 'lavatory',
     clearance: true,
+    tags: ['sink', 'bathroom sink', 'washbasin', 'basin', 'plumbing'],
   }),
-  f('tub', 'Bathtub 60×30', 'bath', 60, 30, 20, '#f2f4f5', 'tub', { fixture: 'tub' }),
-  f('shower', 'Shower 36×36', 'bath', 36, 36, 80, '#dbeaf0', 'shower', { fixture: 'shower' }),
-  f('washer', 'Washer', 'laundry', 27, 28, 38, '#dfe3e6', 'box'),
-  f('dryer', 'Dryer', 'laundry', 27, 28, 38, '#dfe3e6', 'box'),
+  f('tub', 'Bathtub 60×30', 'bath', 60, 30, 20, '#f2f4f5', 'tub', {
+    fixture: 'tub',
+    tags: ['bath', 'soaker', 'plumbing'],
+  }),
+  f('shower', 'Shower 36×36', 'bath', 36, 36, 80, '#dbeaf0', 'shower', {
+    fixture: 'shower',
+    tags: ['shower stall', 'bath', 'plumbing'],
+  }),
+  f('washer', 'Washer', 'laundry', 27, 28, 38, '#dfe3e6', 'box', {
+    tags: ['washing machine', 'laundry', 'appliance'],
+  }),
+  f('dryer', 'Dryer', 'laundry', 27, 28, 38, '#dfe3e6', 'box', {
+    tags: ['clothes dryer', 'laundry', 'appliance'],
+  }),
   f('water_heater_gas', 'Gas water heater', 'laundry', 22, 22, 60, '#c9ccd1', 'round', {
     fuel: true,
+    tags: ['boiler', 'water heater', 'appliance', 'plumbing'],
   }),
-  wallItem('outlet', 'Outlet', 12, '#444', 'outlet'),
-  wallItem('outlet_gfci', 'GFCI outlet', 12, '#2a7', 'outlet', { gfci: true }),
-  wallItem('switch', 'Light switch', 12, '#444', 'switch'),
-  ceil('light_ceiling', 'Ceiling light', 14, '#f2c94c', 'light', { func: ['light'] }),
-  ceil('fan_exhaust', 'Exhaust fan', 14, '#9aa', 'fan', { func: ['fan'] }),
-  ceil('smoke_alarm', 'Smoke alarm', 8, '#d94', 'alarm', { func: ['smoke'] }),
-  ceil('co_alarm', 'CO alarm', 8, '#49d', 'alarm', { func: ['co'] }),
-  ceil('smoke_co_alarm', 'Smoke + CO alarm', 8, '#a6c', 'alarm', { func: ['smoke', 'co'] }),
+  wallItem('outlet', 'Outlet', 12, '#444', 'outlet', {
+    tags: ['receptacle', 'plug', 'power', 'socket', 'electric'],
+  }),
+  wallItem('outlet_gfci', 'GFCI outlet', 12, '#2a7', 'outlet', {
+    gfci: true,
+    tags: ['receptacle', 'plug', 'power', 'socket', 'gfci', 'electric'],
+  }),
+  wallItem('switch', 'Light switch', 12, '#444', 'switch', {
+    tags: ['toggle', 'wall switch', 'electric'],
+  }),
+  ceil('light_ceiling', 'Ceiling light', 14, '#f2c94c', 'light', {
+    func: ['light'],
+    tags: ['lamp', 'fixture', 'lighting', 'electric'],
+  }),
+  ceil('fan_exhaust', 'Exhaust fan', 14, '#9aa', 'fan', {
+    func: ['fan'],
+    tags: ['vent', 'ventilation', 'fan'],
+  }),
+  ceil('smoke_alarm', 'Smoke alarm', 8, '#d94', 'alarm', {
+    func: ['smoke'],
+    tags: ['smoke detector', 'safety', 'alarm'],
+  }),
+  ceil('co_alarm', 'CO alarm', 8, '#49d', 'alarm', {
+    func: ['co'],
+    tags: ['carbon monoxide', 'safety', 'alarm'],
+  }),
+  ceil('smoke_co_alarm', 'Smoke + CO alarm', 8, '#a6c', 'alarm', {
+    func: ['smoke', 'co'],
+    tags: ['smoke detector', 'carbon monoxide', 'safety', 'alarm'],
+  }),
 ];
 export const ITEM_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
 export const ITEM_CATEGORIES = [
@@ -609,13 +718,14 @@ export const FURNITURE_KITS = [
 
 /**
  * Filter items by query string, category, maximum width, and maximum depth.
+ * Searches across item name, category, tags, and SYNONYM_MAP query expansions.
  * @param {Array} items Array of item objects.
  * @param {Object} options Filter criteria { query, q, search, cat, category, maxW, maxWidth, w, maxD, maxDepth, d }.
  * @returns {Array} Filtered items.
  */
 export function filterItems(items = [], options = {}) {
   if (!Array.isArray(items)) return [];
-  const query = (options.query ?? options.q ?? options.search ?? '')
+  const rawQuery = (options.query ?? options.q ?? options.search ?? '')
     .toString()
     .trim()
     .toLowerCase();
@@ -633,10 +743,71 @@ export function filterItems(items = [], options = {}) {
   const maxW = parseDim(rawMaxW);
   const maxD = parseDim(rawMaxD);
 
-  return items.filter((item) => {
-    if (query && (!item.name || !item.name.toLowerCase().includes(query))) {
-      return false;
+  const searchTerms = [];
+  if (rawQuery) {
+    searchTerms.push(rawQuery);
+
+    // Exact query synonym lookup
+    if (SYNONYM_MAP[rawQuery]) {
+      const syns = Array.isArray(SYNONYM_MAP[rawQuery])
+        ? SYNONYM_MAP[rawQuery]
+        : [SYNONYM_MAP[rawQuery]];
+      for (const s of syns) {
+        const norm = s.toLowerCase().trim();
+        if (norm && !searchTerms.includes(norm)) {
+          searchTerms.push(norm);
+        }
+      }
     }
+
+    // Token substitutions for multi-word queries
+    const words = rawQuery.split(/\s+/);
+    if (words.length > 1) {
+      let wordCombos = [words];
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        if (SYNONYM_MAP[w]) {
+          const syns = Array.isArray(SYNONYM_MAP[w]) ? SYNONYM_MAP[w] : [SYNONYM_MAP[w]];
+          const nextCombos = [];
+          for (const combo of wordCombos) {
+            for (const s of syns) {
+              const copy = [...combo];
+              copy[i] = s.toLowerCase().trim();
+              nextCombos.push(copy);
+            }
+          }
+          wordCombos = wordCombos.concat(nextCombos);
+        }
+      }
+      for (const combo of wordCombos) {
+        const joined = combo.join(' ');
+        if (joined && !searchTerms.includes(joined)) {
+          searchTerms.push(joined);
+        }
+      }
+    }
+  }
+
+  return items.filter((item) => {
+    if (!item) return false;
+
+    if (searchTerms.length > 0) {
+      const name = (item.name || '').toLowerCase();
+      const itemCat = (item.cat || '').toLowerCase();
+      const tags = Array.isArray(item.tags) ? item.tags.map((t) => t.toLowerCase()) : [];
+
+      const matches = searchTerms.some((term) => {
+        if (name.includes(term)) return true;
+        if (itemCat === term) return true;
+        const catPair = ITEM_CATEGORIES.find(([catId]) => catId === itemCat);
+        if (catPair && catPair[1].toLowerCase() === term) return true;
+        if (tags.some((tag) => tag.includes(term))) return true;
+        return false;
+      });
+
+      if (!matches) return false;
+    }
+
     if (cat && cat !== 'all' && item.cat !== cat) {
       return false;
     }

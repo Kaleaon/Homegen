@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterItems, ITEMS } from '../js/catalog.js';
+import { filterItems, ITEMS, SYNONYM_MAP } from '../js/catalog.js';
 
 test('filterItems substring name matching', () => {
   const result = filterItems(ITEMS, { query: 'bed' });
@@ -99,4 +99,83 @@ test('filterItems edge cases and fallback behavior', () => {
   // Safe fallback for null or empty items
   assert.deepEqual(filterItems(null), []);
   assert.deepEqual(filterItems([]), []);
+});
+
+test('filterItems synonym lookups and query expansion', () => {
+  // Verify SYNONYM_MAP structure
+  assert.ok(typeof SYNONYM_MAP === 'object' && SYNONYM_MAP !== null);
+  assert.ok(Array.isArray(SYNONYM_MAP.couch));
+  assert.ok(Array.isArray(SYNONYM_MAP.worktable));
+  assert.ok(Array.isArray(SYNONYM_MAP.commode));
+
+  // "couch" should return Sofa and Loveseat
+  const couchMatches = filterItems(ITEMS, { query: 'couch' });
+  assert.ok(couchMatches.some((item) => item.id === 'sofa'));
+  assert.ok(couchMatches.some((item) => item.id === 'loveseat'));
+
+  // "worktable" should return Desk
+  const worktableMatches = filterItems(ITEMS, { query: 'worktable' });
+  assert.ok(worktableMatches.some((item) => item.id === 'desk'));
+
+  // "commode" should return Toilet
+  const commodeMatches = filterItems(ITEMS, { query: 'commode' });
+  assert.ok(commodeMatches.some((item) => item.id === 'toilet'));
+
+  // "fridge" should return Refrigerator
+  const fridgeMatches = filterItems(ITEMS, { query: 'fridge' });
+  assert.ok(fridgeMatches.some((item) => item.id === 'fridge'));
+
+  // "stove" should return Gas range and Electric range
+  const stoveMatches = filterItems(ITEMS, { query: 'stove' });
+  assert.ok(stoveMatches.some((item) => item.id === 'range_gas'));
+  assert.ok(stoveMatches.some((item) => item.id === 'range_electric'));
+
+  // Multi-word synonym substitution ("gas stove" -> Gas range)
+  const gasStoveMatches = filterItems(ITEMS, { query: 'gas stove' });
+  assert.ok(gasStoveMatches.some((item) => item.id === 'range_gas'));
+});
+
+test('filterItems tag matching', () => {
+  // "seating" tag matching
+  const seatingMatches = filterItems(ITEMS, { query: 'seating' });
+  assert.ok(seatingMatches.length >= 4);
+  assert.ok(seatingMatches.some((item) => item.id === 'sofa'));
+  assert.ok(seatingMatches.some((item) => item.id === 'armchair'));
+  assert.ok(seatingMatches.some((item) => item.id === 'dining_chair'));
+  assert.ok(seatingMatches.some((item) => item.id === 'office_chair'));
+
+  // "appliance" tag matching
+  const applianceMatches = filterItems(ITEMS, { query: 'appliance' });
+  assert.ok(applianceMatches.length >= 5);
+  assert.ok(applianceMatches.some((item) => item.id === 'fridge'));
+  assert.ok(applianceMatches.some((item) => item.id === 'range_gas'));
+  assert.ok(applianceMatches.some((item) => item.id === 'washer'));
+  assert.ok(applianceMatches.some((item) => item.id === 'dryer'));
+
+  // "plumbing" tag matching
+  const plumbingMatches = filterItems(ITEMS, { query: 'plumbing' });
+  assert.ok(plumbingMatches.length >= 4);
+  assert.ok(plumbingMatches.some((item) => item.id === 'toilet'));
+  assert.ok(plumbingMatches.some((item) => item.id === 'vanity'));
+  assert.ok(plumbingMatches.some((item) => item.id === 'sink_kitchen'));
+});
+
+test('filterItems combined criteria with tags and synonyms', () => {
+  // Searching "couch" in living category with max width 60 (Loveseat: 58", Sofa: 84")
+  const compactCouches = filterItems(ITEMS, {
+    query: 'couch',
+    cat: 'living',
+    maxW: 60,
+  });
+  assert.ok(compactCouches.some((item) => item.id === 'loveseat'));
+  assert.ok(!compactCouches.some((item) => item.id === 'sofa'));
+
+  // Searching "appliance" in kitchen category
+  const kitchenAppliances = filterItems(ITEMS, {
+    query: 'appliance',
+    cat: 'kitchen',
+  });
+  assert.ok(kitchenAppliances.some((item) => item.id === 'fridge'));
+  assert.ok(kitchenAppliances.some((item) => item.id === 'range_gas'));
+  assert.ok(!kitchenAppliances.some((item) => item.id === 'washer'));
 });
