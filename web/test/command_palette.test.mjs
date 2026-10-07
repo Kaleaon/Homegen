@@ -195,11 +195,15 @@ test('command palette query filtering and execution unit test', async () => {
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
-  Object.defineProperty(globalThis, 'navigator', {
-    value: global.window.navigator,
-    configurable: true,
-    writable: true,
-  });
+  try {
+    global.navigator = global.window.navigator;
+  } catch {
+    Object.defineProperty(global, 'navigator', {
+      value: global.window.navigator,
+      configurable: true,
+      writable: true,
+    });
+  }
 
   // Import app module to initialize command registry and listeners
   await import(`../js/app.js?t=${Date.now()}`);
@@ -270,11 +274,15 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
-  Object.defineProperty(globalThis, 'navigator', {
-    value: global.window.navigator,
-    configurable: true,
-    writable: true,
-  });
+  try {
+    global.navigator = global.window.navigator;
+  } catch {
+    Object.defineProperty(global, 'navigator', {
+      value: global.window.navigator,
+      configurable: true,
+      writable: true,
+    });
+  }
   global.document = {
     activeElement: createMockElement('body', 'BODY'),
     getElementById: (id) => getEl(id),
@@ -333,11 +341,15 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
-  Object.defineProperty(globalThis, 'navigator', {
-    value: global.window.navigator,
-    configurable: true,
-    writable: true,
-  });
+  try {
+    global.navigator = global.window.navigator;
+  } catch {
+    Object.defineProperty(global, 'navigator', {
+      value: global.window.navigator,
+      configurable: true,
+      writable: true,
+    });
+  }
   global.document = {
     activeElement: createMockElement('body', 'BODY'),
     getElementById: (id) => getEl(id),
