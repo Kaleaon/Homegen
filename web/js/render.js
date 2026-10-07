@@ -136,6 +136,8 @@ function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, op
   if (!img || !img.complete || !img.naturalWidth) return;
   ctx.save();
   ctx.globalAlpha = bg.opacity ?? 0.5;
+  const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
+  const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
 
   if (bg.quadmesh || bg.mesh) {
     drawQuadmeshWarpedImage(ctx, img, bg.quadmesh || bg.mesh);
@@ -145,13 +147,9 @@ function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, op
       ctx.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
       ctx.drawImage(img, 0, 0, bg.width || img.naturalWidth, bg.height || img.naturalHeight);
     } else {
-      const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
-      const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
       ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
     }
   } else {
-    const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
-    const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
     ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
   }
 
