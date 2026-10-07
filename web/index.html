@@ -11,7 +11,8 @@
 <script type="module" src="js/k-components.js"></script>
 </head>
 <body>
-<header id="top">
+  <a href="#stage" class="skip-link">Skip to main content</a>
+  <header id="top">
   <div class="brand">🏠 Homegen <span>Designer</span></div>
   <k-input id="plan-name" aria-label="Plan name" value="My home"></k-input>
   <div class="spacer"></div>
@@ -49,7 +50,7 @@
     </nav>
     <div id="palette" role="tabpanel" tabindex="0" aria-labelledby="tab-build"></div>
   </aside>
-  <section id="stage">
+  <section id="stage" tabindex="-1">
     <div id="toolbar">
       <span class="seg"><button data-view="2d" class="on">2D plan</button><button data-view="3d">3D view</button></span>
       <button data-tool="select" class="on" title="Select / move (V)"><span aria-hidden="true">⬚</span> Select</button>
