@@ -11,7 +11,6 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
-// import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
