@@ -65,6 +65,7 @@ import {
   SNAP_TOGGLE_DEFINITIONS,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
+import { generateBOMCSV } from './bomExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
@@ -2847,6 +2848,57 @@ $('#pdf-generate')?.addEventListener('click', () => {
   }
 });
 
+// ------------------------------------------------------------- CSV BOM Export
+$('#export-csv')?.addEventListener('click', (e) => {
+  if (!doc.rooms || doc.rooms.length === 0) {
+    toast('Cannot export CSV: add at least one room first.', true);
+    return;
+  }
+  const returnFocusEl = e.currentTarget || document.activeElement;
+  const dlg = $('#csv-export');
+  if (dlg) {
+    dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
+  }
+});
+
+$('#csv-cancel')?.addEventListener('click', () => {
+  $('#csv-export')?.close();
+});
+
+$('#csv-generate')?.addEventListener('click', () => {
+  try {
+    const opts = {
+      includeMetadata: $('#csv-sec-meta')?.checked !== false,
+      includeFurniture: $('#csv-sec-furniture')?.checked !== false,
+      includeOpenings: $('#csv-sec-openings')?.checked !== false,
+      includeFinishes: $('#csv-sec-finishes')?.checked !== false,
+      includeRooms: $('#csv-sec-rooms')?.checked !== false,
+    };
+
+    if (
+      !opts.includeMetadata &&
+      !opts.includeFurniture &&
+      !opts.includeOpenings &&
+      !opts.includeFinishes &&
+      !opts.includeRooms
+    ) {
+      toast('Select at least one schedule section to export.', true);
+      return;
+    }
+
+    const csvText = generateBOMCSV(doc, opts);
+    const sanitizedName = (doc.name || 'plan').trim().replace(/\W+/g, '_') || 'plan';
+    const fileName = `${sanitizedName}_bill_of_materials.csv`;
+    download(fileName, csvText, 'text/csv;charset=utf-8;');
+    $('#csv-export')?.close();
+    toast('Exported Bill of Materials to CSV.');
+  } catch (err) {
+    toast(`Failed to export CSV: ${err.message}`, true);
+  }
+});
+
 // ------------------------------------------------------------- Interactive Branding & Stamp Builder UI
 let workingBranding = M.defaultBranding();
 
@@ -3528,6 +3580,56 @@ if (typeof document !== 'undefined') {
 let selectedCmdIndex = 0;
 let filteredCommands = [];
 
+const RECENT_COMMANDS_KEY = 'homegen_recent_commands';
+const MAX_RECENT_COMMANDS = 5;
+let memoryRecentCommands = [];
+
+function getRecentCommands() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(RECENT_COMMANDS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          memoryRecentCommands = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    /* fallback to memory state */
+  }
+  return memoryRecentCommands;
+}
+
+function recordCommandExecution(cmdId) {
+  if (!cmdId) return;
+  let recent = getRecentCommands().filter((id) => id !== cmdId);
+  recent.unshift(cmdId);
+  if (recent.length > MAX_RECENT_COMMANDS) {
+    recent = recent.slice(0, MAX_RECENT_COMMANDS);
+  }
+  memoryRecentCommands = recent;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(RECENT_COMMANDS_KEY, JSON.stringify(recent));
+    }
+  } catch {
+    /* fallback to memory state on storage failure */
+  }
+}
+
+function clearRecentCommands() {
+  memoryRecentCommands = [];
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(RECENT_COMMANDS_KEY);
+    }
+  } catch {
+    /* ignore storage removal failure */
+  }
+}
+
 const COMMAND_REGISTRY = [
   // Tools
   {
@@ -3721,6 +3823,13 @@ const COMMAND_REGISTRY = [
     action: () => $('#export-pdf')?.click(),
   },
   {
+    id: 'export-csv',
+    name: 'Export CSV Bill of Materials',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#export-csv')?.click(),
+  },
+  {
     id: 'export-report',
     name: 'Code Compliance Report',
     category: 'Export',
@@ -3855,6 +3964,18 @@ function renderCommandList(query = '') {
     );
   });
 
+  const recentIds = getRecentCommands();
+  filteredCommands.sort((a, b) => {
+    const rankA = recentIds.indexOf(a.id);
+    const rankB = recentIds.indexOf(b.id);
+    if (rankA !== -1 && rankB !== -1) {
+      return rankA - rankB;
+    }
+    if (rankA !== -1) return -1;
+    if (rankB !== -1) return 1;
+    return 0;
+  });
+
   if (selectedCmdIndex >= filteredCommands.length) {
     selectedCmdIndex = Math.max(0, filteredCommands.length - 1);
   }
@@ -3902,8 +4023,10 @@ function renderCommandList(query = '') {
     li.addEventListener('click', () => {
       const idx = parseInt(li.dataset.cmdIdx, 10);
       if (filteredCommands[idx]) {
+        const cmd = filteredCommands[idx];
+        recordCommandExecution(cmd.id);
         closeCommandPalette();
-        filteredCommands[idx].action();
+        cmd.action();
       }
     });
   });
@@ -3946,6 +4069,7 @@ function initCommandPaletteUI() {
         e.preventDefault();
         if (filteredCommands.length > 0 && filteredCommands[selectedCmdIndex]) {
           const cmd = filteredCommands[selectedCmdIndex];
+          recordCommandExecution(cmd.id);
           closeCommandPalette();
           cmd.action();
         }
@@ -3986,6 +4110,9 @@ if (typeof window !== 'undefined')
     renderViolationItem,
     complianceScene,
     COMMAND_REGISTRY,
+    getRecentCommands,
+    recordCommandExecution,
+    clearRecentCommands,
     openCommandPalette,
     closeCommandPalette,
     openShortcutOverlay,

@@ -94,3 +94,28 @@ test('Focus ring contrast ratio complies with WCAG 2.2 SC 2.4.7 (>= 3:1)', () =>
     `Dark bg contrast ratio ${darkBgContrast.toFixed(2)} should be >= 3.0`
   );
 });
+
+test('Catalog search and dimension inputs apply focus ring on :focus-visible and do not suppress outline', () => {
+  const css = fs.readFileSync(cssPath, 'utf8');
+
+  const searchInputRule = css.match(/\.catalog-search-input\s*\{[^}]+\}/)?.[0] || '';
+  assert.ok(
+    !searchInputRule.includes('outline: none'),
+    '.catalog-search-input should not have outline: none'
+  );
+
+  const dimInputRule = css.match(/\.catalog-dim-input\s*\{[^}]+\}/)?.[0] || '';
+  assert.ok(
+    !dimInputRule.includes('outline: none'),
+    '.catalog-dim-input should not have outline: none'
+  );
+
+  assert.ok(
+    css.includes('.catalog-search-input:focus-visible'),
+    'style.css includes .catalog-search-input:focus-visible'
+  );
+  assert.ok(
+    css.includes('.catalog-dim-input:focus-visible'),
+    'style.css includes .catalog-dim-input:focus-visible'
+  );
+});

@@ -28,6 +28,7 @@
   <k-button id="svg-btn">Export SVG</k-button>
   <k-button id="print-btn">Print Sheet</k-button>
   <k-button id="export-pdf">Export PDF</k-button>
+  <k-button id="export-csv" title="Export Bill of Materials schedule to CSV">Export CSV</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="report">Code report</k-button>
   <input type="file" id="file" accept=".json, .zip, .homegen.json, .homegen.zip, application/json, application/zip" hidden>
@@ -294,7 +295,24 @@
     </div>
   </div>
 </dialog>
-<<<<<<< HEAD
+<dialog id="csv-export" aria-labelledby="csv-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="csv-export-title">Export Bill of Materials (CSV)</h2>
+    <button value="close" aria-label="Close CSV export modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p>Select schedule sections to include in the exported CSV spreadsheet:</p>
+    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-meta" checked> Project Metadata</label></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-furniture" checked> Furniture &amp; Fixtures</label></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-openings" checked> Doors &amp; Windows</label></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-finishes" checked> Finishes (Floors &amp; Walls)</label></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="csv-sec-rooms" checked> Room Area Summary</label></div>
+    <div class="btns">
+      <button id="csv-cancel" type="button">Cancel</button>
+      <button id="csv-generate" class="primary" type="button">Generate CSV</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="dlg-branding" class="k-overlay-dialog" aria-labelledby="branding-title">
   <form method="dialog" class="dlg-head">
     <h2 id="branding-title">Project Branding &amp; Approval Stamp</h2>
