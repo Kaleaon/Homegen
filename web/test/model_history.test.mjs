@@ -196,9 +196,15 @@ test('History.jumpTo allows jumping directly to any timeline checkpoint', () => 
   const state = M.newState();
   const hist = new M.History(state, 'Step 0');
 
-  const s1 = M.clone(state); s1.name = 'S1'; hist.push(s1, 'Step 1');
-  const s2 = M.clone(state); s2.name = 'S2'; hist.push(s2, 'Step 2');
-  const s3 = M.clone(state); s3.name = 'S3'; hist.push(s3, 'Step 3');
+  const s1 = M.clone(state);
+  s1.name = 'S1';
+  hist.push(s1, 'Step 1');
+  const s2 = M.clone(state);
+  s2.name = 'S2';
+  hist.push(s2, 'Step 2');
+  const s3 = M.clone(state);
+  s3.name = 'S3';
+  hist.push(s3, 'Step 3');
 
   assert.equal(hist.stack.length, 4);
 
@@ -219,7 +225,8 @@ test('History.getTimeline returns accurate timeline array with active indicator'
   const state = M.newState();
   const hist = new M.History(state, 'Initial State');
 
-  const s1 = M.clone(state); hist.push(s1, 'Add Room');
+  const s1 = M.clone(state);
+  hist.push(s1, 'Add Room');
 
   let timeline = hist.getTimeline();
   assert.equal(timeline.length, 2);

@@ -2409,10 +2409,15 @@ canvas?.addEventListener('pointerup', () => {
     } else if (d.target) {
       apply(moveItemTo(d.id, d.target), 'Move Item');
     }
-  } else if (d.kind === 'opening') apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target), 'Move Opening');
-  else if (d.kind === 'room') apply((n) => M.moveRoom(roomOf(n, d.id), d.target.x, d.target.y), 'Move Room');
+  } else if (d.kind === 'opening')
+    apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target), 'Move Opening');
+  else if (d.kind === 'room')
+    apply((n) => M.moveRoom(roomOf(n, d.id), d.target.x, d.target.y), 'Move Room');
   else if (d.kind === 'resize')
-    apply((n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h), 'Resize Room');
+    apply(
+      (n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h),
+      'Resize Room'
+    );
 });
 
 canvas?.addEventListener('pointerleave', () => {

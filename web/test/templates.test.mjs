@@ -135,7 +135,7 @@ test('sampleHome in app.js delegates floorplan generation to buildMultiLevel', a
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
     localStorage: { getItem: () => null, setItem: () => {} },
   };
-  Object.defineProperty(global, 'navigator', {
+  Object.defineProperty(globalThis, 'navigator', {
     value: global.window.navigator,
     configurable: true,
     writable: true,

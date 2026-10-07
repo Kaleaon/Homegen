@@ -195,7 +195,7 @@ test('command palette query filtering and execution unit test', async () => {
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
-  Object.defineProperty(global, 'navigator', {
+  Object.defineProperty(globalThis, 'navigator', {
     value: global.window.navigator,
     configurable: true,
     writable: true,
@@ -270,7 +270,7 @@ test('shortcut overlay opens on ? key when not in text input and ignores ? when 
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
-  Object.defineProperty(global, 'navigator', {
+  Object.defineProperty(globalThis, 'navigator', {
     value: global.window.navigator,
     configurable: true,
     writable: true,
@@ -333,7 +333,7 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
-  Object.defineProperty(global, 'navigator', {
+  Object.defineProperty(globalThis, 'navigator', {
     value: global.window.navigator,
     configurable: true,
     writable: true,
