@@ -99,10 +99,16 @@ test('Catalog search and dimension inputs apply focus ring on :focus-visible and
   const css = fs.readFileSync(cssPath, 'utf8');
 
   const searchInputRule = css.match(/\.catalog-search-input\s*\{[^}]+\}/)?.[0] || '';
-  assert.ok(!searchInputRule.includes('outline: none'), '.catalog-search-input should not have outline: none');
+  assert.ok(
+    !searchInputRule.includes('outline: none'),
+    '.catalog-search-input should not have outline: none'
+  );
 
   const dimInputRule = css.match(/\.catalog-dim-input\s*\{[^}]+\}/)?.[0] || '';
-  assert.ok(!dimInputRule.includes('outline: none'), '.catalog-dim-input should not have outline: none');
+  assert.ok(
+    !dimInputRule.includes('outline: none'),
+    '.catalog-dim-input should not have outline: none'
+  );
 
   assert.ok(
     css.includes('.catalog-search-input:focus-visible'),
@@ -113,4 +119,3 @@ test('Catalog search and dimension inputs apply focus ring on :focus-visible and
     'style.css includes .catalog-dim-input:focus-visible'
   );
 });
-
