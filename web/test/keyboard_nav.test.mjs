@@ -14,7 +14,7 @@ test('canvas elements in index.html have correct focus and ARIA attributes', () 
   // #plan canvas check
   assert.match(
     html,
-    /<canvas\s+id="plan"\s+tabindex="0"\s+role="region"\s+aria-label="2D floor plan">\s*<\/canvas>/,
+    /<canvas\s+id="plan"\s+tabindex="0"\s+role="region"\s+aria-label="2D floor plan"(\s+aria-describedby="[^"]*")?>\s*<\/canvas>/,
     '#plan canvas must accept focus with tabindex="0", role="region", and aria-label'
   );
 

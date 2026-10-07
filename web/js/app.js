@@ -553,6 +553,39 @@ function badIds(rep) {
   return s;
 }
 
+let a11yDebounceTimer = null;
+
+export function updatePlanA11yTree(state, curLevel = 0) {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  if (a11yDebounceTimer) clearTimeout(a11yDebounceTimer);
+  a11yDebounceTimer = setTimeout(() => {
+    const summaryContainer = document.getElementById('plan-fallback-summary');
+    if (!summaryContainer) return;
+
+    const roomsOnLevel = ((state && state.rooms) || []).filter((r) => (r.level || 0) === curLevel);
+    if (roomsOnLevel.length === 0) {
+      summaryContainer.innerHTML = `<p>Level ${curLevel + 1} is empty. Use drafting tools to add rooms or furniture.</p>`;
+      return;
+    }
+
+    let html = `<p>Level ${curLevel + 1} floorplan contains ${roomsOnLevel.length} room(s):</p><ul>`;
+    for (const r of roomsOnLevel) {
+      const wFeet = Math.round((r.w / 12) * 10) / 10;
+      const hFeet = Math.round((r.h / 12) * 10) / 10;
+      const itemList = (r.items || []).map((it) => ITEM_BY_ID[it.type]?.name || it.type).join(', ');
+      const openingList = (r.openings || [])
+        .map((o) => OPENING_BY_ID[o.type]?.name || o.type)
+        .join(', ');
+
+      html += `<li><strong>${r.name}</strong>: ${wFeet} ft by ${hFeet} ft. `;
+      html += `Openings: ${openingList || 'None'}. `;
+      html += `Items: ${itemList || 'None'}.</li>`;
+    }
+    html += '</ul>';
+    summaryContainer.innerHTML = html;
+  }, 200);
+}
+
 function redraw() {
   const dpr = window.devicePixelRatio || 1;
   const state = preview ? preview.next : doc;
@@ -579,6 +612,7 @@ function redraw() {
     hoveredDiffIndex,
     overlay: (c) => drawOverlay(c, state),
   });
+  updatePlanA11yTree(state, curLevel);
 }
 
 function drawOverlay(c, _state) {

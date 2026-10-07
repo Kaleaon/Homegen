@@ -81,8 +81,10 @@
       <button id="o-reset">Reset view</button>
       <button id="o-photo" class="primary"><span aria-hidden="true">📷</span> Photoreal…</button>
     </div>
-    <canvas id="plan" tabindex="0" role="region" aria-label="2D floor plan"></canvas>
-    <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" hidden></canvas>
+    <canvas id="plan" tabindex="0" role="region" aria-label="2D floor plan" aria-describedby="plan-fallback-summary"></canvas>
+    <div id="plan-fallback-summary" class="sr-only" aria-live="polite"></div>
+    <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" aria-describedby="view3d-fallback-summary" hidden></canvas>
+    <div id="view3d-fallback-summary" class="sr-only" aria-live="polite"></div>
     <div id="walkthrough-hud" class="walkthrough-hud k-overlay-hud" hidden>
       <span class="hud-title"><span aria-hidden="true">🚶</span> Walkthrough Mode</span>
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
