@@ -1055,47 +1055,47 @@ function renderInspector() {
       <div class="row" style="margin:6px 0;display:flex;align-items:center;justify-content:space-between;gap:6px">
         <span style="font-size:0.8rem;color:var(--text-muted,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(finishLabel)}">Finish: <b>${esc(finishLabel)}</b></span>
         <button id="i-custom-tex-btn" style="font-size:0.75rem;padding:3px 8px;white-space:nowrap">Upload Texture</button>
-        <input type="file" id="i-custom-tex-file" accept="image/*" hidden>
+        <input type="file" id="i-custom-tex-file" accept="image/*" hidden aria-label="Upload custom texture image">
       </div>
 
       <div class="uv-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Scale U</label>
+          <label for="i-uv-scale-u-range" style="font-size:0.8rem;font-weight:600">Scale U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1">
-            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range">
+            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem" aria-label="Scale U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Scale V</label>
+          <label for="i-uv-scale-v-range" style="font-size:0.8rem;font-weight:600">Scale V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1">
-            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range">
+            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem" aria-label="Scale V numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
+          <label for="i-uv-rot-range" style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1">
-            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range">
+            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem" aria-label="Rotation numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Offset U</label>
+          <label for="i-uv-off-u-range" style="font-size:0.8rem;font-weight:600">Offset U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1">
-            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range">
+            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem" aria-label="Offset U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Offset V</label>
+          <label for="i-uv-off-v-range" style="font-size:0.8rem;font-weight:600">Offset V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1">
-            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range">
+            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem" aria-label="Offset V numeric">
           </div>
         </div>
         <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px">
+          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="UV transform scope">
             <option value="single">Active Wall Only</option>
             <option value="room">Entire Room</option>
             <option value="level">Level</option>
@@ -1352,12 +1352,12 @@ function renderInspector() {
              ${formRow(
                'i-win-mullions',
                'Mullion Grid (cols × rows)',
-               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px"></div>`
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px" aria-label="Mullion columns"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px" aria-label="Mullion rows"></div>`
              )}
              ${formRow(
                'i-win-casing',
                'Casing Size (W × D in)',
-               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px"></div>`
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Casing width in inches"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Casing depth in inches"></div>`
              )}`
           : ''
       }`;
@@ -1777,7 +1777,8 @@ function renderPalette() {
           swatchStyle(f)
         );
         if (f.isCustom) {
-          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label style="margin:0;font-size:11px">Tile Density:</label><select class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
+          const densityId = `custom-density-${esc(f.id)}`;
+          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label for="${densityId}" style="margin:0;font-size:11px">Tile Density:</label><select id="${densityId}" class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
         }
         return cardHtml;
       }).join('') +
