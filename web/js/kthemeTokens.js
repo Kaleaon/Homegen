@@ -77,7 +77,7 @@ export function getToken(name, fallback) {
       if (val && val.trim() !== '') {
         resolvedValue = val.trim();
       }
-    } catch (_e) {
+    } catch {
       // Ignore DOM computation errors in test or mock environments
     }
   }
@@ -181,7 +181,7 @@ function initObserverIfNeeded() {
       });
     }
     isObserverInitialized = true;
-  } catch (_e) {
+  } catch {
     // Ignore observer initialization errors in restricted test environments
   }
 }

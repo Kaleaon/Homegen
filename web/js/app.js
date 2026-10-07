@@ -113,7 +113,7 @@ try {
 } catch {
   /* ignore corrupt/blocked storage */
 }
-let hist = new M.History(doc);
+let hist = new M.History(doc, 'Initial Plan');
 let report = evaluate(doc);
 const complianceScene = new ComplianceOverlayScene();
 let view = { scale: 1.6, ox: 40, oy: 40 };
@@ -245,6 +245,53 @@ function renderBgToolbar() {
   }
 }
 
+function renderHistoryTimeline() {
+  const listEl = $('#history-list');
+  if (!listEl) return;
+  const timeline = hist.getTimeline();
+  listEl.innerHTML = timeline
+    .map((item) => {
+      const timeStr = item.timestamp
+        ? new Date(item.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })
+        : '';
+      const activeClass = item.active ? 'active' : '';
+      const activeAttr = item.active ? 'aria-current="true"' : '';
+      return `<li class="history-item ${activeClass}" data-index="${item.index}" ${activeAttr} tabindex="0" role="button">
+        <span class="history-item-label">${esc(item.label || 'Action')}</span>
+        <span class="history-item-time">${esc(timeStr)}</span>
+      </li>`;
+    })
+    .join('');
+
+  listEl.querySelectorAll('.history-item').forEach((el) => {
+    const jumpToItem = () => {
+      const idx = Number(el.dataset.index);
+      if (!isNaN(idx)) {
+        const s = hist.jumpTo(idx);
+        if (s) {
+          doc = s;
+          persist();
+          selection = null;
+          autoFixDiffs = [];
+          hoveredDiffIndex = null;
+          refresh();
+        }
+      }
+    };
+    el.addEventListener('click', jumpToItem);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        jumpToItem();
+      }
+    });
+  });
+}
+
 function refresh() {
   report = evaluate(doc);
   renderSnapToggles();
@@ -254,14 +301,27 @@ function refresh() {
   renderBgToolbar();
   renderDiffDrawer();
   window.__scene3d?.update();
-  $('#undo').disabled = !hist.canUndo();
-  $('#redo').disabled = !hist.canRedo();
+  const undoBtn = $('#undo');
+  if (undoBtn) {
+    undoBtn.disabled = !hist.canUndo();
+    const label = hist.peekUndoLabel();
+    undoBtn.title = label ? `Undo ${label} (Ctrl+Z)` : 'Undo (Ctrl+Z)';
+  }
+  const redoBtn = $('#redo');
+  if (redoBtn) {
+    redoBtn.disabled = !hist.canRedo();
+    const label = hist.peekRedoLabel();
+    redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
+  }
+  renderHistoryTimeline();
   $('#plan-name').value = doc.name;
   $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
-function apply(mutate, { quiet = false } = {}) {
+function apply(mutate, opts = {}) {
+  const options = typeof opts === 'string' ? { label: opts } : opts;
+  const { quiet = false, label = 'Action' } = options;
   const r = commit(doc, mutate, { autoFix: $('#auto').checked });
   if (!r.ok) {
     toast(
@@ -271,7 +331,7 @@ function apply(mutate, { quiet = false } = {}) {
     return r;
   }
   doc = r.state;
-  hist.push(doc);
+  hist.push(doc, label);
   persist();
   autoFixDiffs = r.changes || [];
   hoveredDiffIndex = null;
@@ -912,33 +972,33 @@ function renderInspector() {
       </div>`;
 
     $('#align-left')?.addEventListener('click', () =>
-      apply((n) => M.alignItems(n, selectedList, 'left'))
+      apply((n) => M.alignItems(n, selectedList, 'left'), 'Align Left')
     );
     $('#align-center')?.addEventListener('click', () =>
-      apply((n) => M.alignItems(n, selectedList, 'center'))
+      apply((n) => M.alignItems(n, selectedList, 'center'), 'Align Center')
     );
     $('#align-right')?.addEventListener('click', () =>
-      apply((n) => M.alignItems(n, selectedList, 'right'))
+      apply((n) => M.alignItems(n, selectedList, 'right'), 'Align Right')
     );
     $('#align-top')?.addEventListener('click', () =>
-      apply((n) => M.alignItems(n, selectedList, 'top'))
+      apply((n) => M.alignItems(n, selectedList, 'top'), 'Align Top')
     );
     $('#align-middle')?.addEventListener('click', () =>
-      apply((n) => M.alignItems(n, selectedList, 'middle'))
+      apply((n) => M.alignItems(n, selectedList, 'middle'), 'Align Middle')
     );
     $('#align-bottom')?.addEventListener('click', () =>
-      apply((n) => M.alignItems(n, selectedList, 'bottom'))
+      apply((n) => M.alignItems(n, selectedList, 'bottom'), 'Align Bottom')
     );
 
     $('#dist-h')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'horizontal'))
+      apply((n) => M.distributeItems(n, selectedList, 'horizontal'), 'Distribute Horizontally')
     );
     $('#dist-v')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'vertical'))
+      apply((n) => M.distributeItems(n, selectedList, 'vertical'), 'Distribute Vertically')
     );
 
     $('#i-del-all')?.addEventListener('click', () => {
-      apply((n) => M.removeSet(n, selectedList));
+      apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
       select(null);
     });
     return;
@@ -996,47 +1056,47 @@ function renderInspector() {
       <div class="row" style="margin:6px 0;display:flex;align-items:center;justify-content:space-between;gap:6px">
         <span style="font-size:0.8rem;color:var(--text-muted,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(finishLabel)}">Finish: <b>${esc(finishLabel)}</b></span>
         <button id="i-custom-tex-btn" style="font-size:0.75rem;padding:3px 8px;white-space:nowrap">Upload Texture</button>
-        <input type="file" id="i-custom-tex-file" accept="image/*" hidden>
+        <input type="file" id="i-custom-tex-file" accept="image/*" hidden aria-label="Upload custom texture image">
       </div>
 
       <div class="uv-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Scale U</label>
+          <label for="i-uv-scale-u-range" style="font-size:0.8rem;font-weight:600">Scale U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1">
-            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range">
+            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem" aria-label="Scale U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Scale V</label>
+          <label for="i-uv-scale-v-range" style="font-size:0.8rem;font-weight:600">Scale V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1">
-            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range">
+            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem" aria-label="Scale V numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
+          <label for="i-uv-rot-range" style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1">
-            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range">
+            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem" aria-label="Rotation numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Offset U</label>
+          <label for="i-uv-off-u-range" style="font-size:0.8rem;font-weight:600">Offset U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1">
-            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range">
+            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem" aria-label="Offset U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Offset V</label>
+          <label for="i-uv-off-v-range" style="font-size:0.8rem;font-weight:600">Offset V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1">
-            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range">
+            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem" aria-label="Offset V numeric">
           </div>
         </div>
         <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px">
+          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="UV transform scope">
             <option value="single">Active Wall Only</option>
             <option value="room">Entire Room</option>
             <option value="level">Level</option>
@@ -1082,7 +1142,7 @@ function renderInspector() {
         (n) => {
           roomOf(n, room.id).name = e.target.value || room.name;
         },
-        { quiet: true }
+        { quiet: true, label: 'Rename Room' }
       )
     );
     $('#i-type').addEventListener('change', (e) =>
@@ -1092,7 +1152,7 @@ function renderInspector() {
         r.type = e.target.value;
         const clamped = clampRoomDimensions(r, r.w, r.h);
         M.resizeRoom(r, r.x, r.y, clamped.w, clamped.h);
-      })
+      }, 'Change Room Type')
     );
     $('#i-w').addEventListener('change', (e) =>
       apply((n) => {
@@ -1100,7 +1160,7 @@ function renderInspector() {
         const targetW = snap(e.target.value * 12);
         const clampedW = clampRoomWidth(r, targetW, r.h);
         M.resizeRoom(r, r.x, r.y, clampedW, r.h);
-      })
+      }, 'Resize Room Width')
     );
     $('#i-h').addEventListener('change', (e) =>
       apply((n) => {
@@ -1108,15 +1168,15 @@ function renderInspector() {
         const targetH = snap(e.target.value * 12);
         const clampedH = clampRoomDepth(r, targetH, r.w);
         M.resizeRoom(r, r.x, r.y, r.w, clampedH);
-      })
+      }, 'Resize Room Depth')
     );
     $('#i-ceil').addEventListener('change', (e) =>
       apply((n) => {
         roomOf(n, room.id).ceiling = Number(e.target.value);
-      })
+      }, 'Change Ceiling Height')
     );
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, room.id));
+      apply((n) => M.removeById(n, room.id), 'Delete Room');
       select(null);
     });
 
@@ -1138,7 +1198,7 @@ function renderInspector() {
         apply((n) => {
           const r = roomOf(n, room.id);
           if (r) r.walls[window.__activeUVWall || 'N'] = texId;
-        });
+        }, 'Upload Wall Texture');
         toast(`Uploaded custom texture: ${file.name}`);
         renderInspector();
         redraw();
@@ -1173,7 +1233,7 @@ function renderInspector() {
             { scope, room: r, wall: window.__activeUVWall || 'N', level: r?.level || 0 }
           );
         },
-        { quiet: true }
+        { quiet: true, label: 'Update Wall UV' }
       );
       redraw();
       window.__scene3d?.render?.();
@@ -1209,7 +1269,7 @@ function renderInspector() {
           wall: window.__activeUVWall || 'N',
           level: r?.level || 0,
         });
-      });
+      }, 'Reset Wall UV');
       renderInspector();
       redraw();
       window.__scene3d?.render?.();
@@ -1221,7 +1281,7 @@ function renderInspector() {
       apply((n) => {
         const r = roomOf(n, room.id);
         applyBuildingPreset(n, presetKey, { room: r, level: r?.level || 0, scope });
-      });
+      }, 'Apply Building Preset');
     };
     $('#i-bpreset-room')?.addEventListener('click', () => handleBuildingPresetApply('room'));
     $('#i-bpreset-level')?.addEventListener('click', () => handleBuildingPresetApply('level'));
@@ -1233,7 +1293,7 @@ function renderInspector() {
       apply((n) => {
         const r = roomOf(n, room.id);
         applyCladdingMaterial(n, claddingKey, { room: r, level: r?.level || 0, scope });
-      });
+      }, 'Apply Exterior Cladding');
     };
     $('#i-cladding-room')?.addEventListener('click', () => handleCladdingApply('room'));
     $('#i-cladding-level')?.addEventListener('click', () => handleCladdingApply('level'));
@@ -1293,12 +1353,12 @@ function renderInspector() {
              ${formRow(
                'i-win-mullions',
                'Mullion Grid (cols × rows)',
-               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px"></div>`
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px" aria-label="Mullion columns"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px" aria-label="Mullion rows"></div>`
              )}
              ${formRow(
                'i-win-casing',
                'Casing Size (W × D in)',
-               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px"></div>`
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Casing width in inches"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Casing depth in inches"></div>`
              )}`
           : ''
       }`;
@@ -1307,7 +1367,7 @@ function renderInspector() {
       apply((n) => {
         const o = M.findOwner(n, obj.id).obj;
         o.swing = o.swing === 'in' ? 'out' : 'in';
-      })
+      }, 'Flip Door Swing')
     );
     $('#i-otype')?.addEventListener('change', (e) =>
       apply((n) => {
@@ -1315,26 +1375,26 @@ function renderInspector() {
         const nd = OPENING_BY_ID[e.target.value];
         o.type = nd.id;
         o.width = nd.w;
-      })
+      }, 'Change Opening Type')
     );
     if (kind === 'opening' && def.kind === 'window') {
       $('#i-win-preset')?.addEventListener('change', (e) =>
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.presetKey = e.target.value;
-        })
+        }, 'Update Window Style')
       );
       $('#i-win-mat')?.addEventListener('change', (e) =>
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.frameMaterial = e.target.value;
-        })
+        }, 'Update Window Style')
       );
       $('#i-win-color')?.addEventListener('change', (e) =>
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.frameColor = e.target.value;
-        })
+        }, 'Update Window Style')
       );
       const updateMullions = () => {
         const cols = parseInt($('#i-win-mull-cols')?.value || 1, 10);
@@ -1342,7 +1402,7 @@ function renderInspector() {
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.mullions = { ...(target.mullions || {}), cols, rows };
-        });
+        }, 'Update Window Style');
       };
       $('#i-win-mull-cols')?.addEventListener('change', updateMullions);
       $('#i-win-mull-rows')?.addEventListener('change', updateMullions);
@@ -1353,13 +1413,13 @@ function renderInspector() {
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.casing = { ...(target.casing || {}), width, depth };
-        });
+        }, 'Update Window Style');
       };
       $('#i-win-casing-w')?.addEventListener('change', updateCasing);
       $('#i-win-casing-d')?.addEventListener('change', updateCasing);
     }
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, obj.id));
+      apply((n) => M.removeById(n, obj.id), 'Delete Element');
       select(null);
     });
   }
@@ -1495,7 +1555,7 @@ function moveSelectedSpatial(dx, dy) {
     const step = 12;
     const newX = room.x + dx * step;
     const newY = room.y + dy * step;
-    const r = apply((n) => M.moveRoom(roomOf(n, room.id), newX, newY));
+    const r = apply((n) => M.moveRoom(roomOf(n, room.id), newX, newY), 'Move Room');
     if (r.ok) toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
   }
 }
@@ -1517,7 +1577,7 @@ function rotateSelected() {
     const r = apply((n) => {
       const it = M.findOwner(n, selection).obj;
       it.rot = newRot;
-    });
+    }, 'Rotate Item');
     if (r.ok) toast(`Rotated ${ITEM_BY_ID[hit.obj.type].name} to ${newRot}°`, false, 1800);
   }
 }
@@ -1557,7 +1617,7 @@ function renderLevels() {
   $('#add-floor').addEventListener('click', () => {
     if ((doc.levels || 1) >= 4) return toast('Up to 4 floors are supported.', true);
     doc.levels = (doc.levels || 1) + 1;
-    hist.push(doc);
+    hist.push(doc, 'Add Floor');
     persist();
     setLevel(doc.levels - 1);
     refresh();
@@ -1567,7 +1627,7 @@ function renderLevels() {
   });
   $('#del-floor')?.addEventListener('click', () => {
     doc.levels -= 1;
-    hist.push(doc);
+    hist.push(doc, 'Delete Floor');
     persist();
     renderLevels();
     setLevel(Math.min(curLevel, doc.levels - 1));
@@ -1718,7 +1778,8 @@ function renderPalette() {
           swatchStyle(f)
         );
         if (f.isCustom) {
-          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label style="margin:0;font-size:11px">Tile Density:</label><select class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
+          const densityId = `custom-density-${esc(f.id)}`;
+          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label for="${densityId}" style="margin:0;font-size:11px">Tile Density:</label><select id="${densityId}" class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
         }
         return cardHtml;
       }).join('') +
@@ -2021,7 +2082,7 @@ canvas?.addEventListener('pointerdown', (e) => {
     case 'erase': {
       const id = pickAt(p);
       if (id) {
-        apply((n) => M.removeById(n, id));
+        apply((n) => M.removeById(n, id), 'Erase Element');
         if (selection === id) select(null);
       }
       break;
@@ -2043,7 +2104,7 @@ canvas?.addEventListener('pointerdown', (e) => {
       const r = apply((n) => {
         const it = M.addItem(n, roomOf(n, pl.room.id), tool.id, { ...pl.props });
         selection = it.id;
-      });
+      }, 'Add Item');
       if (!r.ok) selection = null;
       else renderInspector();
       break;
@@ -2055,14 +2116,16 @@ canvas?.addEventListener('pointerdown', (e) => {
         break;
       }
       const def = OPENING_BY_ID[tool.id];
-      apply((n) =>
-        M.addOpening(
-          n,
-          roomOf(n, nw.room.id),
-          tool.id,
-          nw.wall,
-          Math.max(0, snap(nw.t - def.w / 2, 3))
-        )
+      apply(
+        (n) =>
+          M.addOpening(
+            n,
+            roomOf(n, nw.room.id),
+            tool.id,
+            nw.wall,
+            Math.max(0, snap(nw.t - def.w / 2, 3))
+          ),
+        'Add Opening'
       );
       break;
     }
@@ -2087,7 +2150,7 @@ canvas?.addEventListener('pointerdown', (e) => {
           wall: nw.wall,
           level: curLevel,
         });
-      });
+      }, 'Apply Wall Finish');
       break;
     }
     case 'floor': {
@@ -2096,7 +2159,7 @@ canvas?.addEventListener('pointerdown', (e) => {
       apply((n) => {
         const rm = roomOf(n, r.id);
         M.applyFloorFinish(n, tool.id, { scope: paintScope, room: rm, level: curLevel });
-      });
+      }, 'Apply Floor Finish');
       break;
     }
     case 'roomkit': {
@@ -2110,7 +2173,7 @@ canvas?.addEventListener('pointerdown', (e) => {
       apply((n) => {
         const r = M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel);
         selection = r.id;
-      });
+      }, 'Place Room Kit');
       break;
     }
     case 'furnkit': {
@@ -2133,7 +2196,7 @@ canvas?.addEventListener('pointerdown', (e) => {
       );
       if (out.placed) {
         doc = out.state;
-        hist.push(doc);
+        hist.push(doc, `Place ${kit.name}`);
         persist();
         autoFixDiffs = out.changes || [];
         hoveredDiffIndex = null;
@@ -2272,7 +2335,7 @@ canvas?.addEventListener('pointerup', () => {
   if (d.kind === 'pan') return;
   if (d.kind === 'background') {
     if (d.moved) {
-      hist.push(doc);
+      hist.push(doc, 'Move Blueprint');
       persist();
       refresh();
     }
@@ -2313,7 +2376,7 @@ canvas?.addEventListener('pointerup', () => {
           level: curLevel,
         });
         select(room.id);
-      });
+      }, 'Add Room');
       if (!r.ok) select(null);
     } else toast('Drag to size the room.', true, 1800);
     refresh();
@@ -2342,14 +2405,19 @@ canvas?.addEventListener('pointerup', () => {
             M.setItemPosition(n, h, initial.cx + dx, initial.cy + dy);
           }
         }
-      });
+      }, 'Move Item');
     } else if (d.target) {
-      apply(moveItemTo(d.id, d.target));
+      apply(moveItemTo(d.id, d.target), 'Move Item');
     }
-  } else if (d.kind === 'opening') apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target));
-  else if (d.kind === 'room') apply((n) => M.moveRoom(roomOf(n, d.id), d.target.x, d.target.y));
+  } else if (d.kind === 'opening')
+    apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target), 'Move Opening');
+  else if (d.kind === 'room')
+    apply((n) => M.moveRoom(roomOf(n, d.id), d.target.x, d.target.y), 'Move Room');
   else if (d.kind === 'resize')
-    apply((n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h));
+    apply(
+      (n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h),
+      'Resize Room'
+    );
 });
 
 canvas?.addEventListener('pointerleave', () => {
@@ -2434,7 +2502,7 @@ function fit() {
 // ------------------------------------------------------------- toolbar / keyboard / file
 function setDoc(next, _label) {
   doc = next;
-  hist.push(doc);
+  hist.push(doc, label);
   persist();
   curLevel = 0;
   selection = null;
@@ -3150,7 +3218,7 @@ if (typeof document !== 'undefined') {
     syncWorkingWatermarkFromInputs();
     doc.settings ||= {};
     doc.settings.branding = JSON.parse(JSON.stringify(workingBranding));
-    hist.push(doc);
+    hist.push(doc, 'Save Branding Settings');
     persist();
     $('#dlg-branding')?.close();
     toast('Branding and stamp settings saved to project.');
@@ -3248,7 +3316,7 @@ $('#e-print')?.addEventListener('click', () => {
 });
 $('#plan-name')?.addEventListener('change', (e) => {
   doc.name = e.target.value;
-  hist.push(doc);
+  hist.push(doc, 'Change Plan Name');
   persist();
 });
 $('#zoom-in')?.addEventListener('click', () => {
@@ -3394,6 +3462,11 @@ if (typeof window !== 'undefined') {
       $('#redo').click();
     } else if (lk === 'r') rotateSelected();
     else if (lk === 'escape') {
+      const historyPopover = $('#history-popover');
+      if (historyPopover && !historyPopover.hidden) {
+        historyPopover.hidden = true;
+        $('#history-btn')?.setAttribute('aria-expanded', 'false');
+      }
       setTool({ kind: 'select' });
       select(null);
       toast('Selection cleared', false, 1800);
@@ -3401,7 +3474,7 @@ if (typeof window !== 'undefined') {
       const selectedList = getSelectionList();
       if (selectedList.length > 0) {
         const label = getSelectionLabel();
-        apply((n) => M.removeSet(n, selectedList));
+        apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
         select(null);
         toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
       }
@@ -3424,6 +3497,23 @@ if (typeof window !== 'undefined') {
     toast,
     setLevel,
   });
+
+  function toggleHistoryPopover() {
+    const popover = $('#history-popover');
+    const btn = $('#history-btn');
+    if (!popover) return;
+    const isHidden = popover.hidden;
+    popover.hidden = !isHidden;
+    if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+  }
+
+  $('#history-btn')?.addEventListener('click', toggleHistoryPopover);
+  $('#history-close')?.addEventListener('click', () => {
+    const popover = $('#history-popover');
+    if (popover) popover.hidden = true;
+    $('#history-btn')?.setAttribute('aria-expanded', 'false');
+  });
+
   renderPalette();
   setTool({ kind: 'select' });
   resize();
@@ -3471,7 +3561,7 @@ function applyCalibration(p1, p2, distPx, valStr) {
   bg.scale = (bg.scale || 1) * factor;
   bg.x = p1.x - (p1.x - (bg.x || 0)) * factor;
   bg.y = p1.y - (p1.y - (bg.y || 0)) * factor;
-  hist.push(doc);
+  hist.push(doc, 'Calibrate Blueprint');
   persist();
   calibPoints = [];
   setTool({ kind: 'select' });
@@ -3512,7 +3602,7 @@ function handleBlueprintImport(file) {
         width: w,
         height: h,
       };
-      hist.push(doc);
+      hist.push(doc, 'Import Blueprint');
       persist();
       calibPoints = [];
       setTool({ kind: 'calibrate' });
@@ -3535,7 +3625,7 @@ $('#blueprint-file')?.addEventListener('change', (e) => {
 $('#bg-visible')?.addEventListener('change', (e) => {
   if (doc.background) {
     doc.background.visible = e.target.checked;
-    hist.push(doc);
+    hist.push(doc, 'Toggle Blueprint Visibility');
     persist();
     redraw();
   }
@@ -3543,7 +3633,7 @@ $('#bg-visible')?.addEventListener('change', (e) => {
 $('#bg-opacity')?.addEventListener('input', (e) => {
   if (doc.background) {
     doc.background.opacity = parseFloat(e.target.value);
-    hist.push(doc);
+    hist.push(doc, 'Change Blueprint Opacity');
     persist();
     redraw();
   }
@@ -3551,7 +3641,7 @@ $('#bg-opacity')?.addEventListener('input', (e) => {
 $('#bg-lock-btn')?.addEventListener('click', () => {
   if (doc.background) {
     doc.background.locked = !doc.background.locked;
-    hist.push(doc);
+    hist.push(doc, 'Toggle Blueprint Lock');
     persist();
     refresh();
   }
@@ -3563,7 +3653,7 @@ $('#bg-calibrate-btn')?.addEventListener('click', () => {
 $('#bg-remove-btn')?.addEventListener('click', () => {
   if (confirm('Remove blueprint image?')) {
     doc.background = null;
-    hist.push(doc);
+    hist.push(doc, 'Remove Blueprint');
     persist();
     setTool({ kind: 'select' });
     refresh();
@@ -3661,6 +3751,56 @@ if (typeof document !== 'undefined') {
 // ------------------------------------------------------------- Command Palette & Shortcut Overlay
 let selectedCmdIndex = 0;
 let filteredCommands = [];
+
+const RECENT_COMMANDS_KEY = 'homegen_recent_commands';
+const MAX_RECENT_COMMANDS = 5;
+let memoryRecentCommands = [];
+
+function getRecentCommands() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(RECENT_COMMANDS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          memoryRecentCommands = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    /* fallback to memory state */
+  }
+  return memoryRecentCommands;
+}
+
+function recordCommandExecution(cmdId) {
+  if (!cmdId) return;
+  let recent = getRecentCommands().filter((id) => id !== cmdId);
+  recent.unshift(cmdId);
+  if (recent.length > MAX_RECENT_COMMANDS) {
+    recent = recent.slice(0, MAX_RECENT_COMMANDS);
+  }
+  memoryRecentCommands = recent;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(RECENT_COMMANDS_KEY, JSON.stringify(recent));
+    }
+  } catch {
+    /* fallback to memory state on storage failure */
+  }
+}
+
+function clearRecentCommands() {
+  memoryRecentCommands = [];
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(RECENT_COMMANDS_KEY);
+    }
+  } catch {
+    /* ignore storage removal failure */
+  }
+}
 
 const COMMAND_REGISTRY = [
   // Tools
@@ -3996,6 +4136,18 @@ function renderCommandList(query = '') {
     );
   });
 
+  const recentIds = getRecentCommands();
+  filteredCommands.sort((a, b) => {
+    const rankA = recentIds.indexOf(a.id);
+    const rankB = recentIds.indexOf(b.id);
+    if (rankA !== -1 && rankB !== -1) {
+      return rankA - rankB;
+    }
+    if (rankA !== -1) return -1;
+    if (rankB !== -1) return 1;
+    return 0;
+  });
+
   if (selectedCmdIndex >= filteredCommands.length) {
     selectedCmdIndex = Math.max(0, filteredCommands.length - 1);
   }
@@ -4043,8 +4195,10 @@ function renderCommandList(query = '') {
     li.addEventListener('click', () => {
       const idx = parseInt(li.dataset.cmdIdx, 10);
       if (filteredCommands[idx]) {
+        const cmd = filteredCommands[idx];
+        recordCommandExecution(cmd.id);
         closeCommandPalette();
-        filteredCommands[idx].action();
+        cmd.action();
       }
     });
   });
@@ -4087,6 +4241,7 @@ function initCommandPaletteUI() {
         e.preventDefault();
         if (filteredCommands.length > 0 && filteredCommands[selectedCmdIndex]) {
           const cmd = filteredCommands[selectedCmdIndex];
+          recordCommandExecution(cmd.id);
           closeCommandPalette();
           cmd.action();
         }
@@ -4127,6 +4282,9 @@ if (typeof window !== 'undefined')
     renderViolationItem,
     complianceScene,
     COMMAND_REGISTRY,
+    getRecentCommands,
+    recordCommandExecution,
+    clearRecentCommands,
     openCommandPalette,
     closeCommandPalette,
     openShortcutOverlay,

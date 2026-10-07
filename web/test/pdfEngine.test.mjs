@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../js/model.js';
 import { commit } from '../js/codes.js';
-import { generatePDF, SCALE_OPTIONS, SHEET_SIZES } from '../js/pdfEngine.js';
+import { generatePDF, SCALE_OPTIONS } from '../js/pdfEngine.js';
 
 test('pdfEngine scale options map 1/4"=1\'0" scale correctly', () => {
   const scaleOpt = SCALE_OPTIONS['1/4"=1\'0"'];

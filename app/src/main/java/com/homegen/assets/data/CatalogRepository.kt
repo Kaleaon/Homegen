@@ -21,6 +21,7 @@ class CatalogRepository(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     private val catalogCache = ConcurrentHashMap<String, Catalog>()
+    private val entryCache = ConcurrentHashMap<Catalog, List<CatalogEntry>>()
 
     private val thumbnailCache = object : LruCache<String, Bitmap>((8 * 1024 * 1024)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
@@ -39,25 +40,27 @@ class CatalogRepository(
             }
             val payload = context.assets.open(assetPath).bufferedReader().use { it.readText() }
             val parsedCatalog = json.decodeFromString<Catalog>(payload)
-            catalogCache[assetPath] = parsedCatalog
+            catalogCache.put(assetPath, parsedCatalog)?.let { oldCatalog ->
+                entryCache.remove(oldCatalog)
+            }
             parsedCatalog
         }
     }
 
     fun clearCache(assetPath: String? = null) {
         if (assetPath != null) {
-            catalogCache.remove(assetPath)
+            catalogCache.remove(assetPath)?.let { catalog ->
+                entryCache.remove(catalog)
+            }
         } else {
             catalogCache.clear()
+            entryCache.clear()
         }
     }
 
     fun filterEntries(catalog: Catalog, query: String, category: CatalogCategory): List<CatalogEntry> {
         val normalizedQuery = query.trim().lowercase()
-        val entries = buildList {
-            addAll(catalog.materials.map(::MaterialEntry))
-            addAll(catalog.placeableObjects.map(::PlaceableEntry))
-        }
+        val entries = getEntries(catalog)
 
         return entries.filter { entry ->
             matchesCategory(entry, category) &&
@@ -76,12 +79,18 @@ class CatalogRepository(
     fun filterByStyleTag(catalog: Catalog, styleTag: String): List<CatalogEntry> {
         val tag = styleTag.trim().lowercase()
         if (tag.isBlank()) return emptyList()
-        val entries = buildList {
-            addAll(catalog.materials.map(::MaterialEntry))
-            addAll(catalog.placeableObjects.map(::PlaceableEntry))
-        }
+        val entries = getEntries(catalog)
         return entries.filter { entry ->
             entry.tags.any { it.lowercase() == tag }
+        }
+    }
+
+    private fun getEntries(catalog: Catalog): List<CatalogEntry> {
+        return entryCache.computeIfAbsent(catalog) { cat ->
+            buildList {
+                addAll(cat.materials.map(::MaterialEntry))
+                addAll(cat.placeableObjects.map(::PlaceableEntry))
+            }
         }
     }
 

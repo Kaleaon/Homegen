@@ -481,14 +481,24 @@ export function parseDistanceInInches(str) {
 }
 
 export class History {
-  constructor(state) {
-    this.stack = [cloneWithSharing(state)];
+  constructor(state, label = 'Initial State') {
+    this.stack = [
+      {
+        state: cloneWithSharing(state),
+        label: label || 'Initial State',
+        timestamp: Date.now(),
+      },
+    ];
     this.i = 0;
   }
-  push(state) {
+  push(state, label = 'Action', timestamp = Date.now()) {
     this.stack = this.stack.slice(0, this.i + 1);
-    const prev = this.stack[this.i];
-    this.stack.push(cloneWithSharing(state, prev));
+    const prev = this.stack[this.i]?.state;
+    this.stack.push({
+      state: cloneWithSharing(state, prev),
+      label: label || 'Action',
+      timestamp: timestamp || Date.now(),
+    });
     this.i++;
     if (this.stack.length > 100) {
       this.stack.shift();
@@ -502,10 +512,31 @@ export class History {
     return this.i < this.stack.length - 1;
   }
   undo() {
-    return this.canUndo() ? clone(this.stack[--this.i]) : null;
+    return this.canUndo() ? clone(this.stack[--this.i].state) : null;
   }
   redo() {
-    return this.canRedo() ? clone(this.stack[++this.i]) : null;
+    return this.canRedo() ? clone(this.stack[++this.i].state) : null;
+  }
+  peekUndoLabel() {
+    return this.canUndo() ? this.stack[this.i].label : null;
+  }
+  peekRedoLabel() {
+    return this.canRedo() ? this.stack[this.i + 1].label : null;
+  }
+  jumpTo(index) {
+    if (typeof index !== 'number' || index < 0 || index >= this.stack.length) {
+      return null;
+    }
+    this.i = index;
+    return clone(this.stack[this.i].state);
+  }
+  getTimeline() {
+    return this.stack.map((entry, idx) => ({
+      index: idx,
+      label: entry.label,
+      timestamp: entry.timestamp,
+      active: idx === this.i,
+    }));
   }
 }
 

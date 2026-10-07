@@ -11,6 +11,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
+// import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
@@ -465,7 +466,6 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
 function drawOpening(ctx, state, room, o, bad) {
   const def = OPENING_BY_ID[o.type];
   const a = wallPoint(room, o.wall, o.offset, 0);
-  const _b = wallPoint(room, o.wall, o.offset + o.width, 0);
   const s = wallSeg(room, o.wall);
   const horizontal = s.dx === 1;
   ctx.save();
