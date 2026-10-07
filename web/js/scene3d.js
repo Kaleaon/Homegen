@@ -831,7 +831,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       ctr.set(10, 0, 10);
     }
 
-    // Ground plane: update in place
+    // Ground plane: update in place with heightmap displacement if available
     const gs = Math.max(size.x, size.z) * 6 + 60;
     if (!ground) {
       ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), plain('#93a07f', 1));
@@ -839,8 +839,60 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       ground.receiveShadow = true;
       scene.add(ground);
     }
-    ground.scale.set(gs, gs, 1);
-    ground.position.set(ctr.x, -(SLAB + 0.2) * S, ctr.z);
+
+    const grid = state.elevationGrid;
+    if (grid && grid.data && grid.width > 1 && grid.height > 1) {
+      const bounds = grid.bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
+      const worldWidth = Math.max(1, (bounds.maxX - bounds.minX) * S);
+      const worldDepth = Math.max(1, (bounds.maxY - bounds.minY) * S);
+      const centerX = ((bounds.minX + bounds.maxX) / 2) * S;
+      const centerZ = ((bounds.minY + bounds.maxY) / 2) * S;
+
+      const segX = Math.min(grid.width - 1, 128);
+      const segY = Math.min(grid.height - 1, 128);
+
+      if (
+        !ground.userData.isGridTerrain ||
+        ground.userData.segX !== segX ||
+        ground.userData.segY !== segY ||
+        ground.userData.w !== worldWidth ||
+        ground.userData.h !== worldDepth
+      ) {
+        ground.geometry.dispose();
+        ground.geometry = new THREE.PlaneGeometry(worldWidth, worldDepth, segX, segY);
+        ground.userData = { isGridTerrain: true, segX, segY, w: worldWidth, h: worldDepth };
+      }
+
+      const posAttr = ground.geometry.attributes.position;
+      const vertCount = posAttr.count;
+      const halfW = worldWidth / 2;
+      const halfH = worldDepth / 2;
+
+      for (let i = 0; i < vertCount; i++) {
+        const lx = posAttr.getX(i);
+        const ly = posAttr.getY(i);
+        const u = (lx + halfW) / worldWidth;
+        const v = (halfH - ly) / worldDepth;
+
+        let elev = grid.getElevationAt(u, v) * (grid.verticalScale ?? 1.0);
+        // Convert elevation in meters to 3D feet
+        const elevFeet = elev * 3.28084;
+        posAttr.setZ(i, elevFeet);
+      }
+      posAttr.needsUpdate = true;
+      ground.geometry.computeVertexNormals();
+
+      ground.scale.set(1, 1, 1);
+      ground.position.set(centerX, -(SLAB + 0.2) * S, centerZ);
+    } else {
+      if (ground.userData.isGridTerrain) {
+        ground.geometry.dispose();
+        ground.geometry = new THREE.PlaneGeometry(1, 1);
+        ground.userData = {};
+      }
+      ground.scale.set(gs, gs, 1);
+      ground.position.set(ctr.x, -(SLAB + 0.2) * S, ctr.z);
+    }
 
     // Sun light: update in place
     const r = Math.max(size.x, size.z) * 0.75 + 6;

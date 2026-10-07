@@ -14,6 +14,7 @@ import { patternFor } from './patterns.js';
 // import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
+import { computeMarchingSquares } from './elevationEngine.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
@@ -56,6 +57,7 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
   if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
   drawGrid(ctx, view, w / dpr, h / dpr, opts);
+  if (state.elevationGrid) drawContours(ctx, state, view, opts);
 
   const bad = opts.bad || new Set(); // ids of violating rooms/items/openings
   for (const u of opts.under || []) {
@@ -1151,6 +1153,64 @@ export function drawSnapGuides(ctx, snapResult, view) {
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rInner, 0, 2 * Math.PI);
     ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+export function drawContours(ctx, state, view, opts = {}) {
+  const grid = state.elevationGrid;
+  if (!grid || grid.visible === false) return;
+
+  const contours = opts.contours || state._cachedContours || computeMarchingSquares(grid);
+  if (!contours || contours.length === 0) return;
+
+  ctx.save();
+  const strokeColor = getToken('--ktheme-text-muted', '#78716c');
+  const majorColor = getToken('--ktheme-text', '#44403c');
+  const fontColor = getToken('--ktheme-text-muted', '#57534e');
+  const fontSize = Math.max(9, Math.min(13, 11 / (view.scale || 1)));
+
+  for (let cIdx = 0; cIdx < contours.length; cIdx++) {
+    const contour = contours[cIdx];
+    const elev = contour.elevation;
+    const isMajor = Math.abs(elev % (grid.contourInterval * 5)) < 1e-3;
+
+    ctx.strokeStyle = isMajor ? majorColor : strokeColor;
+    ctx.lineWidth = (isMajor ? 1.5 : 0.8) / (view.scale || 1);
+    ctx.globalAlpha = isMajor ? 0.85 : 0.6;
+
+    ctx.beginPath();
+    for (const line of contour.lines) {
+      ctx.moveTo(line.x1, line.y1);
+      ctx.lineTo(line.x2, line.y2);
+    }
+    ctx.stroke();
+
+    // Draw altitude labels at midpoints of selected segments
+    if (contour.lines.length > 0 && elev !== undefined) {
+      const step = Math.max(1, Math.floor(contour.lines.length / 3));
+      for (let lIdx = Math.floor(step / 2); lIdx < contour.lines.length; lIdx += step) {
+        const seg = contour.lines[lIdx];
+        const mx = (seg.x1 + seg.x2) / 2;
+        const my = (seg.y1 + seg.y2) / 2;
+
+        const text = `${elev.toFixed(1)}m`;
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = getToken('--ktheme-bg', '#f7f5f0');
+        ctx.lineWidth = 3 / (view.scale || 1);
+        ctx.strokeText(text, mx, my);
+
+        ctx.fillStyle = fontColor;
+        ctx.fillText(text, mx, my);
+        ctx.restore();
+      }
+    }
   }
 
   ctx.restore();
