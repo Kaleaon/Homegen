@@ -64,3 +64,16 @@ test('index.html dynamic status updates and error containers declare ARIA live r
   assert.match(htmlContent, /id="p-status" [^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(htmlContent, /id="p-error" [^>]*role="alert"[^>]*aria-live="assertive"/);
 });
+
+test('index.html contains skip-to-content link before header and tabindex="-1" on stage section', () => {
+  assert.match(
+    htmlContent,
+    /<body[^>]*>\s*<a href="#stage" class="skip-link">Skip to main content<\/a>\s*<header id="top">/
+  );
+  assert.match(htmlContent, /<section id="stage" tabindex="-1">/);
+
+  const cssPath = resolve('css/style.css');
+  const cssContent = readFileSync(cssPath, 'utf8');
+  assert.match(cssContent, /\.skip-link\s*\{/);
+  assert.match(cssContent, /\.skip-link:(focus|focus-visible)/);
+});
