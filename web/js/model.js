@@ -130,7 +130,8 @@ export const MAP_PRESETS = {
     name: 'Copernicus Sentinel',
     provider: 'Copernicus',
     attributionText: 'Imagery © Copernicus Sentinel Data',
-    licenseUrl: 'https://sentinels.copernicus.eu/documents/247904/685211/Sentinel_Data_Legal_Notice.pdf',
+    licenseUrl:
+      'https://sentinels.copernicus.eu/documents/247904/685211/Sentinel_Data_Legal_Notice.pdf',
     isGeospatial: true,
     description: 'European Space Agency Earth observation satellite multispectral imagery',
     dataUrl: createMapPresetSvgDataUrl('Copernicus Sentinel', '#f0f9ff', '#bae6fd'),
