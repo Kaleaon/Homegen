@@ -30,7 +30,7 @@ import {
   filterItems,
 } from './catalog.js';
 import * as M from './model.js';
-import { saveTextureBlob, getTextureBlob } from './textureStore.js';
+import { saveTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
 import {
   evaluate,
@@ -38,7 +38,6 @@ import {
   commit,
   commitSequence,
   autoComply,
-  getRoomMinBounds,
   clampRoomWidth,
   clampRoomDepth,
   clampRoomDimensions,
@@ -62,7 +61,6 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
-  SNAP_TOGGLE_DEFINITIONS,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -515,7 +513,7 @@ function redraw() {
   });
 }
 
-function drawOverlay(c, state) {
+function drawOverlay(c, _state) {
   // highlight rooms with blocking-free but open compliance errors with a subtle marker
   for (const v of report.violations) {
     if (v.severity !== 'error' || !v.roomId || preview) continue;
@@ -2433,7 +2431,7 @@ function fit() {
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
-function setDoc(next, label) {
+function setDoc(next, _label) {
   doc = next;
   hist.push(doc);
   persist();
