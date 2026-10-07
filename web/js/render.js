@@ -14,12 +14,26 @@ import { patternFor } from './patterns.js';
 // import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
+import { computeMarchingSquares } from './elevationEngine.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
 export const fmtLen = fmt;
 
 let bgCache = { dataUrl: null, img: null };
+const logoCache = new Map();
+
+function getLogoImage(logoUrl, onLoaded) {
+  if (!logoUrl) return null;
+  if (logoCache.has(logoUrl)) return logoCache.get(logoUrl);
+  const img = new Image();
+  logoCache.set(logoUrl, img);
+  img.onload = () => {
+    if (onLoaded) onLoaded();
+  };
+  img.src = logoUrl;
+  return img;
+}
 
 function getBgImage(bg, onLoaded) {
   if (!bg || !bg.dataUrl) return null;
@@ -116,7 +130,7 @@ function drawQuadmeshWarpedImage(ctx, img, quadmesh) {
   }
 }
 
-function drawBackground(ctx, bg, onLoaded) {
+function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, opts = {}) {
   if (!bg || !bg.visible || !bg.dataUrl) return;
   const img = getBgImage(bg, onLoaded);
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -142,6 +156,78 @@ function drawBackground(ctx, bg, onLoaded) {
   }
 
   ctx.restore();
+
+  // Render mandatory attribution badge when attribution/geospatial metadata is active
+  let attrText = bg.attributionText;
+  if (!attrText && bg.provider) {
+    attrText = `Map Data © ${bg.provider}`;
+  } else if (!attrText && bg.isGeospatial) {
+    attrText = 'Geospatial Background Layer';
+  }
+  if (attrText && bg.licenseUrl && !attrText.includes(bg.licenseUrl)) {
+    attrText += ` · ${bg.licenseUrl}`;
+  }
+
+  if (attrText) {
+    ctx.save();
+    const dpr = opts.dpr || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1.0;
+
+    const fontSize = 11 * dpr;
+    ctx.font = `${fontSize}px sans-serif`;
+
+    const textMetrics = ctx.measureText(attrText);
+    const logoImg = bg.logoUrl ? getLogoImage(bg.logoUrl, onLoaded) : null;
+    const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
+    const logoWidth = hasLogo ? 16 * dpr : 0;
+    const paddingX = 8 * dpr;
+    const paddingY = 5 * dpr;
+
+    const badgeWidth = textMetrics.width + paddingX * 2 + (hasLogo ? logoWidth + 4 * dpr : 0);
+    const badgeHeight = fontSize + paddingY * 2;
+
+    const imgRight = ((bg.x ?? 0) + w) * (view.scale || 1) * dpr + (view.ox || 0) * dpr;
+    const imgBottom = ((bg.y ?? 0) + h) * (view.scale || 1) * dpr + (view.oy || 0) * dpr;
+    const canvasW = ctx.canvas.width;
+    const canvasH = ctx.canvas.height;
+
+    const margin = 10 * dpr;
+    let badgeRight = Math.min(imgRight - margin, canvasW - margin);
+    let badgeBottom = Math.min(imgBottom - margin, canvasH - margin);
+    badgeRight = Math.max(badgeRight, badgeWidth + margin);
+    badgeBottom = Math.max(badgeBottom, badgeHeight + margin);
+
+    const badgeX = badgeRight - badgeWidth;
+    const badgeY = badgeBottom - badgeHeight;
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1 * dpr;
+
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4 * dpr);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+      ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    }
+
+    let currentX = badgeX + paddingX;
+    if (hasLogo) {
+      const logoY = badgeY + (badgeHeight - 14 * dpr) / 2;
+      ctx.drawImage(logoImg, currentX, logoY, 14 * dpr, 14 * dpr);
+      currentX += logoWidth + 4 * dpr;
+    }
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(attrText, currentX, badgeY + badgeHeight / 2);
+
+    ctx.restore();
+  }
 }
 
 export function draw(ctx, state, view, opts = {}) {
@@ -151,8 +237,10 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
   ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
-  if (state.background) drawBackground(ctx, state.background, opts.onLoaded || opts.redraw);
+  if (state.background)
+    drawBackground(ctx, state.background, opts.onLoaded || opts.redraw, view, opts);
   drawGrid(ctx, view, w / dpr, h / dpr, opts);
+  if (state.elevationGrid) drawContours(ctx, state, view, opts);
 
   const bad = opts.bad || new Set(); // ids of violating rooms/items/openings
   for (const u of opts.under || []) {
@@ -184,6 +272,74 @@ export function draw(ctx, state, view, opts = {}) {
 export function drawComplianceScene(ctx, complianceScene, view) {
   if (!complianceScene) return;
   const nodes = complianceScene.getNodes();
+
+  // Pass 0: GIS Site Subsystem Layers
+  for (const node of nodes) {
+    if (node.type === 'gisLotLine') {
+      const pts = node.data.points || node.data.layer?.points;
+      if (pts && pts.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2 / view.scale;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else if (node.type === 'gisEasement') {
+      const pts = node.data.points || node.data.layer?.points;
+      if (pts && pts.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = '#7e22ce';
+        ctx.lineWidth = 1.5 / view.scale;
+        ctx.setLineDash([6 / view.scale, 4 / view.scale]);
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else if (node.type === 'gisSetbackBuffer') {
+      const outer = node.data.points || node.data.layer?.points;
+      const inner = node.data.innerPoints || node.data.layer?.innerPoints;
+      ctx.save();
+      ctx.fillStyle = 'rgba(234, 88, 12, 0.2)';
+      ctx.strokeStyle = '#ea580c';
+      ctx.lineWidth = 1.5 / view.scale;
+      ctx.setLineDash([4 / view.scale, 2 / view.scale]);
+
+      if (outer && outer.length >= 3 && inner && inner.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(outer[0].x, outer[0].y);
+        for (let i = 1; i < outer.length; i++) ctx.lineTo(outer[i].x, outer[i].y);
+        ctx.closePath();
+
+        ctx.moveTo(inner[0].x, inner[0].y);
+        for (let i = 1; i < inner.length; i++) ctx.lineTo(inner[i].x, inner[i].y);
+        ctx.closePath();
+
+        ctx.fill('evenodd');
+
+        // Draw inner buildable setback boundary stroke
+        ctx.beginPath();
+        ctx.moveTo(inner[0].x, inner[0].y);
+        for (let i = 1; i < inner.length; i++) ctx.lineTo(inner[i].x, inner[i].y);
+        ctx.closePath();
+        ctx.stroke();
+      } else if (outer && outer.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(outer[0].x, outer[0].y);
+        for (let i = 1; i < outer.length; i++) ctx.lineTo(outer[i].x, outer[i].y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
 
   // Pass 1: Fixture clearance zones
   for (const node of nodes) {
@@ -1248,6 +1404,64 @@ export function drawSnapGuides(ctx, snapResult, view) {
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rInner, 0, 2 * Math.PI);
     ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+export function drawContours(ctx, state, view, opts = {}) {
+  const grid = state.elevationGrid;
+  if (!grid || grid.visible === false) return;
+
+  const contours = opts.contours || state._cachedContours || computeMarchingSquares(grid);
+  if (!contours || contours.length === 0) return;
+
+  ctx.save();
+  const strokeColor = getToken('--ktheme-text-muted', '#78716c');
+  const majorColor = getToken('--ktheme-text', '#44403c');
+  const fontColor = getToken('--ktheme-text-muted', '#57534e');
+  const fontSize = Math.max(9, Math.min(13, 11 / (view.scale || 1)));
+
+  for (let cIdx = 0; cIdx < contours.length; cIdx++) {
+    const contour = contours[cIdx];
+    const elev = contour.elevation;
+    const isMajor = Math.abs(elev % (grid.contourInterval * 5)) < 1e-3;
+
+    ctx.strokeStyle = isMajor ? majorColor : strokeColor;
+    ctx.lineWidth = (isMajor ? 1.5 : 0.8) / (view.scale || 1);
+    ctx.globalAlpha = isMajor ? 0.85 : 0.6;
+
+    ctx.beginPath();
+    for (const line of contour.lines) {
+      ctx.moveTo(line.x1, line.y1);
+      ctx.lineTo(line.x2, line.y2);
+    }
+    ctx.stroke();
+
+    // Draw altitude labels at midpoints of selected segments
+    if (contour.lines.length > 0 && elev !== undefined) {
+      const step = Math.max(1, Math.floor(contour.lines.length / 3));
+      for (let lIdx = Math.floor(step / 2); lIdx < contour.lines.length; lIdx += step) {
+        const seg = contour.lines[lIdx];
+        const mx = (seg.x1 + seg.x2) / 2;
+        const my = (seg.y1 + seg.y2) / 2;
+
+        const text = `${elev.toFixed(1)}m`;
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = getToken('--ktheme-bg', '#f7f5f0');
+        ctx.lineWidth = 3 / (view.scale || 1);
+        ctx.strokeText(text, mx, my);
+
+        ctx.fillStyle = fontColor;
+        ctx.fillText(text, mx, my);
+        ctx.restore();
+      }
+    }
   }
 
   ctx.restore();

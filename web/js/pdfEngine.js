@@ -51,6 +51,51 @@ const fmtLen = (inches) => {
   return `${ft}'${inch ? ` ${inch}"` : ''}`;
 };
 
+export function resolvePDFAttributionAndLicensing(docState, options = {}) {
+  const attributions = [];
+  const licenses = [];
+
+  const attrText = options.attributionText || docState?.background?.attributionText;
+  const provider = options.provider || docState?.background?.provider;
+  const licenseUrl = options.licenseUrl || docState?.background?.licenseUrl;
+  const isGeospatial = options.isGeospatial || docState?.background?.isGeospatial;
+
+  if (attrText) {
+    attributions.push(attrText);
+  } else if (provider) {
+    attributions.push(`Map & Geospatial Data © ${provider}`);
+  } else if (isGeospatial) {
+    attributions.push('Geospatial Dataset Layer');
+  }
+
+  if (licenseUrl) {
+    licenses.push(`License: ${licenseUrl}`);
+  }
+
+  const licNotice = options.licenseNotice || docState?.settings?.branding?.stamp?.licenseText;
+  if (licNotice) {
+    licenses.push(licNotice);
+  }
+
+  const combinedAttribution = attributions.join(' · ');
+  const combinedLicense = licenses.join(' · ');
+  const fullNotice = [combinedAttribution, combinedLicense].filter(Boolean).join(' | ');
+
+  return {
+    attribution: combinedAttribution,
+    licenseNotice: combinedLicense,
+    fullNotice,
+  };
+}
+
+function drawFooterNotice(pdf, borderRect, fullNotice) {
+  if (!pdf || !fullNotice) return;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(6);
+  pdf.setTextColor('#555555');
+  pdf.text(fullNotice, borderRect.x + 6, borderRect.y + borderRect.h - 5);
+}
+
 /**
  * Generates a pure vector PDF for a Homegen plan.
  * Returns a jsPDF document instance.
@@ -107,6 +152,8 @@ export function generatePDF(docState, options = {}) {
   const incLogo = options.includeLogo !== undefined ? options.includeLogo : true;
   const incStamp = options.includeStamp !== undefined ? options.includeStamp : true;
   const incWatermark = options.includeWatermark !== undefined ? options.includeWatermark : true;
+
+  const pdfAttr = resolvePDFAttributionAndLicensing(docState, options);
 
   for (let i = 0; i < levelsToDraw.length; i++) {
     const lvl = levelsToDraw[i];
@@ -209,7 +256,15 @@ export function generatePDF(docState, options = {}) {
         sheetNumber: `A-10${lvl + 1}`,
         scaleLabel: actualRatioStr,
         notes: options.notes || '',
+        attribution: pdfAttr.attribution,
+        licenseNotice: pdfAttr.licenseNotice,
+        fullNotice: pdfAttr.fullNotice,
       });
+    }
+
+    // Draw Footer Notice
+    if (pdfAttr.fullNotice) {
+      drawFooterNotice(pdf, borderRect, pdfAttr.fullNotice);
     }
 
     // Draw Embedded or Session Logo
@@ -246,6 +301,9 @@ export function generatePDF(docState, options = {}) {
       designer: options.designer || 'Homegen Designer',
       date: options.date || new Date().toISOString().slice(0, 10),
       includeTitleBlock,
+      attribution: pdfAttr.attribution,
+      licenseNotice: pdfAttr.licenseNotice,
+      fullNotice: pdfAttr.fullNotice,
     });
   }
 
@@ -630,7 +688,16 @@ function drawTitleBlock(pdf, box, info) {
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(9);
-  pdf.text(info.sheetNumber, box.x + box.w * 0.5 + 4, box.y + 54);
+  pdf.text(info.sheetNumber, box.x + box.w * 0.5 + 4, box.y + 48);
+
+  const noticeStr =
+    info.fullNotice || [info.attribution, info.licenseNotice].filter(Boolean).join(' | ');
+  if (noticeStr) {
+    pdf.setFont('helvetica', 'italic');
+    pdf.setFontSize(5);
+    pdf.setTextColor('#555555');
+    pdf.text(noticeStr, box.x + box.w * 0.5 + 4, box.y + 58, { maxWidth: box.w * 0.48 });
+  }
 }
 
 /**
@@ -686,6 +753,9 @@ function drawRoomSchedulePages(pdf, docState, opts) {
     designer,
     date,
     includeTitleBlock,
+    attribution,
+    licenseNotice,
+    fullNotice,
   } = opts;
 
   pdf.addPage([pageWidth, pageHeight], orientation);
@@ -697,6 +767,9 @@ function drawRoomSchedulePages(pdf, docState, opts) {
     h: pageHeight - margin * 2,
   };
   drawSheetBorder(pdf, borderRect);
+  if (fullNotice) {
+    drawFooterNotice(pdf, borderRect, fullNotice);
+  }
 
   if (includeTitleBlock) {
     const tbWidth = Math.min(220, borderRect.w * 0.35);
@@ -717,6 +790,9 @@ function drawRoomSchedulePages(pdf, docState, opts) {
         sheetNumber: 'A-201',
         scaleLabel: 'N/A (SCHEDULE)',
         notes: '',
+        attribution,
+        licenseNotice,
+        fullNotice,
       }
     );
   }
@@ -772,6 +848,9 @@ function drawRoomSchedulePages(pdf, docState, opts) {
     if (currentY + rowHeight > maxTableY) {
       pdf.addPage([pageWidth, pageHeight], orientation);
       drawSheetBorder(pdf, borderRect);
+      if (fullNotice) {
+        drawFooterNotice(pdf, borderRect, fullNotice);
+      }
       if (includeTitleBlock) {
         const tbWidth = Math.min(220, borderRect.w * 0.35);
         const tbHeight = 64;
@@ -791,6 +870,9 @@ function drawRoomSchedulePages(pdf, docState, opts) {
             sheetNumber: 'A-202',
             scaleLabel: 'N/A (SCHEDULE)',
             notes: '',
+            attribution,
+            licenseNotice,
+            fullNotice,
           }
         );
       }
