@@ -125,7 +125,7 @@ test('shadow DOM components inherit document-level Ktheme tokens without :host s
 
   for (const { name, cls } of components) {
     let shadowRoot = null;
-    cls.prototype.attachShadow = function ({ mode }) {
+    cls.prototype.attachShadow = function ({ mode: _mode }) {
       shadowRoot = {
         innerHTML: '',
         querySelector: () => ({ addEventListener: () => {}, classList: { toggle: () => {} } }),

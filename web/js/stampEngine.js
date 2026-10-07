@@ -213,7 +213,7 @@ export function drawStampPDF(pdf, stampConfig, x, y, width, height) {
     if (typeof pdf.GState === 'function') {
       pdf.setGState(new pdf.GState({ opacity, 'fill-opacity': opacity }));
     }
-  } catch (_e) {
+  } catch {
     // Ignore GState fallback
   }
 
@@ -352,7 +352,7 @@ export function drawWatermarkPDF(pdf, watermarkConfig, rect) {
     if (typeof pdf.GState === 'function') {
       pdf.setGState(new pdf.GState({ opacity, 'fill-opacity': opacity }));
     }
-  } catch (_e) {
+  } catch {
     // Ignore GState fallback
   }
 
