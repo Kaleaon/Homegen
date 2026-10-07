@@ -5,7 +5,6 @@ import {
   SpatialRTree,
   projectGeoJSON,
   computeVariableBuffers,
-  ensureSpatialIndex,
 } from '../js/gisBridge.js';
 import { newState } from '../js/model.js';
 import { evaluate } from '../js/codes.js';

@@ -230,7 +230,6 @@ export class SpatialRTree {
         cand.layerType === 'gisSetbackBuffer'
       ) {
         const innerPoly = cand.innerPoints || cand.innerPolygon;
-        const outerPoly = cand.outerPoints || cand.outerPolygon;
 
         // Check if any room vertex lies outside inner buildable polygon or inside setback buffer
         if (innerPoly && innerPoly.length >= 3) {
