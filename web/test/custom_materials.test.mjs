@@ -53,7 +53,7 @@ test('Modifying tile density preset updates finish in WALL_BY_ID and syncs acros
   const state = M.newState();
   const room = M.createRoom(state, 'living', 0, 0, 144, 144);
 
-  const _mat = registerCustomWallFinish(
+  registerCustomWallFinish(
     {
       id: 'shared_custom_finish',
       name: 'Custom Oak Panel',
