@@ -33,6 +33,22 @@ import { rateLimitedFetch } from './rateLimiter.js';
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
 
+export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const container = document.getElementById('view3d-fallback-summary');
+  if (!container) return;
+
+  const modeLabel =
+    cameraMode === 'walkthrough' || cameraMode === 'walk'
+      ? 'First-Person Walkthrough'
+      : 'Orbit View';
+  const roomCount = ((state && state.rooms) || []).filter(
+    (r) => (r.level || 0) === curLevel
+  ).length;
+
+  container.textContent = `3D Viewport in ${modeLabel} mode. Rendering Level ${curLevel + 1} with ${roomCount} room(s) and standard scene lighting.`;
+}
+
 export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -1359,6 +1375,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   function render() {
     renderer.render(scene, camera);
     updateHudAttribution();
+    updateView3dA11yTree(getState?.(), getLevel?.() || 0, cameraMode);
   }
   function loop() {
     if (!active) return;
