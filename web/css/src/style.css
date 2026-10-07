@@ -183,10 +183,13 @@ aside {
   background: var(--panel);
   color: var(--ink);
   font-size: 13px;
-  outline: none;
 }
 .catalog-search-input:focus {
   border-color: var(--accent);
+}
+.catalog-search-input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .catalog-filters {
   display: flex;
@@ -212,10 +215,13 @@ aside {
   background: var(--panel);
   color: var(--ink);
   font-size: 12px;
-  outline: none;
 }
 .catalog-dim-input:focus {
   border-color: var(--accent);
+}
+.catalog-dim-input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .catalog-empty {
   padding: 20px 8px;
