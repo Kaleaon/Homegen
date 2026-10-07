@@ -13,6 +13,7 @@ import {
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
+import { deserializeElevationGrid } from './elevationEngine.js';
 
 export function defaultBranding() {
   return {
@@ -62,6 +63,7 @@ export function newState() {
     rooms: [],
     background: null,
     site: null, // { crs: 'EPSG:4326', features: [], segments: [], layers: [] }
+    elevationGrid: null,
     customFinishes: [],
     settings: {
       branding: defaultBranding(),
@@ -406,7 +408,18 @@ export function deserialize(text) {
   const s = JSON.parse(text);
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
-  s.background = s.background || null;
+  if (s.background) {
+    if (s.background.attributionText !== undefined)
+      s.background.attributionText = s.background.attributionText || null;
+    if (s.background.provider !== undefined) s.background.provider = s.background.provider || null;
+    if (s.background.licenseUrl !== undefined)
+      s.background.licenseUrl = s.background.licenseUrl || null;
+    if (s.background.logoUrl !== undefined) s.background.logoUrl = s.background.logoUrl || null;
+    if (s.background.isGeospatial !== undefined)
+      s.background.isGeospatial = !!s.background.isGeospatial;
+  } else {
+    s.background = null;
+  }
   s.customFinishes = s.customFinishes || [];
   s.settings ||= {};
   s.settings.branding = {
@@ -444,6 +457,7 @@ export function deserialize(text) {
     }
   }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
+  s.elevationGrid = s.elevationGrid ? deserializeElevationGrid(s.elevationGrid) : null;
   for (const finish of s.customFinishes) {
     registerCustomWallFinish(finish, s);
   }
@@ -479,14 +493,24 @@ export function parseDistanceInInches(str) {
 }
 
 export class History {
-  constructor(state) {
-    this.stack = [cloneWithSharing(state)];
+  constructor(state, label = 'Initial State') {
+    this.stack = [
+      {
+        state: cloneWithSharing(state),
+        label: label || 'Initial State',
+        timestamp: Date.now(),
+      },
+    ];
     this.i = 0;
   }
-  push(state) {
+  push(state, label = 'Action', timestamp = Date.now()) {
     this.stack = this.stack.slice(0, this.i + 1);
-    const prev = this.stack[this.i];
-    this.stack.push(cloneWithSharing(state, prev));
+    const prev = this.stack[this.i]?.state;
+    this.stack.push({
+      state: cloneWithSharing(state, prev),
+      label: label || 'Action',
+      timestamp: timestamp || Date.now(),
+    });
     this.i++;
     if (this.stack.length > 100) {
       this.stack.shift();
@@ -500,10 +524,31 @@ export class History {
     return this.i < this.stack.length - 1;
   }
   undo() {
-    return this.canUndo() ? clone(this.stack[--this.i]) : null;
+    return this.canUndo() ? clone(this.stack[--this.i].state) : null;
   }
   redo() {
-    return this.canRedo() ? clone(this.stack[++this.i]) : null;
+    return this.canRedo() ? clone(this.stack[++this.i].state) : null;
+  }
+  peekUndoLabel() {
+    return this.canUndo() ? this.stack[this.i].label : null;
+  }
+  peekRedoLabel() {
+    return this.canRedo() ? this.stack[this.i + 1].label : null;
+  }
+  jumpTo(index) {
+    if (typeof index !== 'number' || index < 0 || index >= this.stack.length) {
+      return null;
+    }
+    this.i = index;
+    return clone(this.stack[this.i].state);
+  }
+  getTimeline() {
+    return this.stack.map((entry, idx) => ({
+      index: idx,
+      label: entry.label,
+      timestamp: entry.timestamp,
+      active: idx === this.i,
+    }));
   }
 }
 

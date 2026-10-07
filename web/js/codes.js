@@ -25,7 +25,7 @@ import {
   roomToPolygon,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics } from './catalog.js';
-import { clone, addItem, addOpening, createRoom } from './model.js';
+import { addItem, addOpening, createRoom } from './model.js';
 import { ensureSpatialIndex } from './gisBridge.js';
 
 const MOISTURE_ROOMS = new Set(['bathroom', 'laundry']);
@@ -286,6 +286,98 @@ export function getRuleCategory(ref, rule) {
   return CODE_MAP[ref] || CODE_MAP[rule] || 'Design Guidance';
 }
 
+export function isPrimitiveOrEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return a === b;
+
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+
+  for (let i = 0; i < keysA.length; i++) {
+    const key = keysA[i];
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    const valA = a[key];
+    const valB = b[key];
+    if (valA === valB) continue;
+    if (typeof valA === 'object' && valA !== null && typeof valB === 'object' && valB !== null) {
+      if (!isPrimitiveOrEqual(valA, valB)) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function isArrayEqual(a, b, itemEqual = (x, y) => x === y) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!itemEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+function cleanCloneObject(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = {};
+  for (const k of Object.keys(obj)) {
+    if (obj[k] !== undefined) {
+      out[k] = obj[k];
+    }
+  }
+  return out;
+}
+
+export function cloneStateForTrial(state) {
+  if (!state) return state;
+  const res = cleanCloneObject(state);
+  if (state.customFinishes) res.customFinishes = [...state.customFinishes];
+  if (state.settings) {
+    res.settings = cleanCloneObject(state.settings);
+    if (state.settings.branding) {
+      res.settings.branding = cleanCloneObject(state.settings.branding);
+      if (state.settings.branding.stamp) {
+        res.settings.branding.stamp = cleanCloneObject(state.settings.branding.stamp);
+      }
+      if (state.settings.branding.watermark) {
+        res.settings.branding.watermark = cleanCloneObject(state.settings.branding.watermark);
+      }
+    }
+  }
+  if (state.rooms) {
+    res.rooms = state.rooms.map((room) => {
+      const r = cleanCloneObject(room);
+      if (room.walls) r.walls = cleanCloneObject(room.walls);
+      if (room.wallUV) {
+        r.wallUV = {
+          N: cleanCloneObject(room.wallUV.N),
+          E: cleanCloneObject(room.wallUV.E),
+          S: cleanCloneObject(room.wallUV.S),
+          W: cleanCloneObject(room.wallUV.W),
+        };
+      }
+      if (room.openings) {
+        r.openings = room.openings.map((o) => {
+          const op = cleanCloneObject(o);
+          if (o.mullions && typeof o.mullions === 'object')
+            op.mullions = cleanCloneObject(o.mullions);
+          if (o.casing && typeof o.casing === 'object') op.casing = cleanCloneObject(o.casing);
+          return op;
+        });
+      }
+      if (room.items) {
+        r.items = room.items.map((i) => cleanCloneObject(i));
+      }
+      return r;
+    });
+  }
+  return res;
+}
+
 export function computeAffectedBoundingBox(state, trial) {
   if (!state || !trial || state.levels !== trial.levels) return null;
 
@@ -323,13 +415,13 @@ export function computeAffectedBoundingBox(state, trial) {
 
     const sItems = sRoom.items || [];
     const tItems = tRoom.items || [];
-    if (JSON.stringify(sItems) !== JSON.stringify(tItems)) {
+    if (!isArrayEqual(sItems, tItems, isPrimitiveOrEqual)) {
       const sItemMap = new Map(sItems.map((i) => [i.id, i]));
       const tItemMap = new Map(tItems.map((i) => [i.id, i]));
 
       for (const item of tItems) {
         const oldItem = sItemMap.get(item.id);
-        if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(item)) {
+        if (!oldItem || !isPrimitiveOrEqual(oldItem, item)) {
           pushItemBox(boxes, tRoom, item);
         }
       }
@@ -342,13 +434,13 @@ export function computeAffectedBoundingBox(state, trial) {
 
     const sOpenings = sRoom.openings || [];
     const tOpenings = tRoom.openings || [];
-    if (JSON.stringify(sOpenings) !== JSON.stringify(tOpenings)) {
+    if (!isArrayEqual(sOpenings, tOpenings, isPrimitiveOrEqual)) {
       const sOpMap = new Map(sOpenings.map((o) => [o.id, o]));
       const tOpMap = new Map(tOpenings.map((o) => [o.id, o]));
 
       for (const op of tOpenings) {
         const oldOp = sOpMap.get(op.id);
-        if (!oldOp || JSON.stringify(oldOp) !== JSON.stringify(op)) {
+        if (!oldOp || !isPrimitiveOrEqual(oldOp, op)) {
           pushOpeningBox(boxes, tRoom, op);
         }
       }
@@ -1084,7 +1176,7 @@ function freeSpans(state, room, wall, { exterior = false, neighbor = null, minLe
 function attempt(state, mutate, baseReport = null) {
   const baseRep = baseReport || evaluate(state);
   const base = new Set(baseRep.violations.filter((x) => x.blocking).map((x) => x.id));
-  const trial = clone(state);
+  const trial = cloneStateForTrial(state);
   mutate(trial);
   const affectedBox = computeAffectedBoundingBox(state, trial);
   const trialRep = evaluate(trial, { affectedBox, baseReport: baseRep });
@@ -1243,7 +1335,7 @@ export function autoComply(state, options = {}) {
     repDirty = true;
   };
   for (let pass = 0; pass < 3; pass++) {
-    const before = JSON.stringify(state.rooms);
+    const logLenBefore = log.length;
     repDirty = true;
 
     // 1. Ceilings & moisture finishes
@@ -1638,7 +1730,7 @@ export function autoComply(state, options = {}) {
         }
       }
     }
-    if (JSON.stringify(state.rooms) === before) break;
+    if (log.length === logLenBefore) break;
   }
   return log;
 }
@@ -1649,7 +1741,7 @@ export function autoComply(state, options = {}) {
  */
 export function commit(state, mutate, { autoFix = true, targetId = null } = {}) {
   const base = blockingIds(state);
-  const next = clone(state);
+  const next = cloneStateForTrial(state);
   mutate(next);
   const changes = autoFix ? autoComply(next, { targetId }) : [];
   const report = evaluate(next);

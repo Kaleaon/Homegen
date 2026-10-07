@@ -1,6 +1,8 @@
 // Free resources for photoreal output. Everything here was checked against the live service/API on 2026-10-01;
 // licences are as reported by the source (see RESOURCES.md). Re-check before commercial use.
 
+import { rateLimitedFetch } from './rateLimiter.js';
+
 /** Plan finish id -> Poly Haven (CC0) PBR texture. `tile` = inches covered by one texture repeat (approximate). */
 export const HD_MATERIALS = {
   floor_oak: { id: 'plank_flooring', tile: 48 },
@@ -85,21 +87,46 @@ export class MaterialPreloader {
     ];
 
     const promise = Promise.all(
-      slots.map(
-        ([key, srgb]) =>
-          new Promise((resolve) => {
-            if (!this.loader) {
-              resolve({ key, status: 'fallback' });
-              return;
-            }
-            this.loader.load(
-              urls[key],
-              (tex) => resolve({ key, tex, srgb, status: 'loaded' }),
-              undefined,
-              (err) => resolve({ key, err, status: 'error' })
-            );
-          })
-      )
+      slots.map(([key, srgb]) => {
+        if (
+          !this.loader ||
+          (typeof HTMLImageElement === 'undefined' &&
+            this.loader.constructor?.name === 'TextureLoader')
+        ) {
+          return Promise.resolve({ key, status: 'fallback' });
+        }
+        return rateLimitedFetch(urls[key], {
+          fetchImpl: (url) =>
+            new Promise((resolve) => {
+              let settled = false;
+              let timer = null;
+
+              const done = (val) => {
+                if (!settled) {
+                  settled = true;
+                  if (timer) clearTimeout(timer);
+                  resolve(val);
+                }
+              };
+
+              try {
+                this.loader.load(
+                  url,
+                  (tex) => done({ key, tex, srgb, status: 'loaded' }),
+                  undefined,
+                  (err) => done({ key, err, status: 'error' })
+                );
+              } catch (err) {
+                done({ key, err, status: 'error' });
+              }
+
+              if (!settled) {
+                timer = setTimeout(() => done({ key, status: 'fallback' }), 500);
+                if (timer && typeof timer.unref === 'function') timer.unref();
+              }
+            }),
+        });
+      })
     )
       .then((results) => {
         const maps = {};
