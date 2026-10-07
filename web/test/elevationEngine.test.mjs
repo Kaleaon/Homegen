@@ -70,10 +70,7 @@ test('parseImageHeightmap extracts height values from ImageData', () => {
   // 2x2 pixels RGBA buffer
   // Black (0), Mid Gray (128), Full White (255), Full White (255)
   const pixels = new Uint8ClampedArray([
-    0, 0, 0, 255,
-    128, 128, 128, 255,
-    255, 255, 255, 255,
-    255, 255, 255, 255,
+    0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255, 255, 255, 255, 255,
   ]);
   const imageData = { width: 2, height: 2, data: pixels };
 
@@ -89,10 +86,7 @@ test('parseImageHeightmap extracts height values from ImageData', () => {
 test('parseElevationRaster auto-routes JSON string and object inputs', async () => {
   const jsonInput = JSON.stringify({
     status: 'OK',
-    results: [
-      { elevation: 5 }, { elevation: 10 },
-      { elevation: 15 }, { elevation: 20 },
-    ],
+    results: [{ elevation: 5 }, { elevation: 10 }, { elevation: 15 }, { elevation: 20 }],
   });
 
   const grid = await parseElevationRaster(jsonInput);
@@ -105,11 +99,7 @@ test('computeMarchingSquares computes topographic isolines with linear edge inte
   const grid = new ElevationGrid({
     width: 3,
     height: 3,
-    data: [
-      0, 5, 10,
-      0, 5, 10,
-      0, 5, 10,
-    ],
+    data: [0, 5, 10, 0, 5, 10, 0, 5, 10],
     minElevation: 0,
     maxElevation: 10,
     contourInterval: 5.0,
