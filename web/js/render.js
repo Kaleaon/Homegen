@@ -11,7 +11,6 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
-import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
@@ -332,7 +331,7 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
   }
 }
 
-function drawFloor(ctx, room, opts) {
+function drawFloor(ctx, room, _opts) {
   const f = FLOOR_BY_ID[room.floor];
   ctx.fillStyle = f ? patternFor(ctx, f) : ROOM_TYPES[room.type].color;
   ctx.fillRect(room.x, room.y, room.w, room.h);
@@ -360,7 +359,7 @@ function drawStairs(ctx, room) {
   ctx.stroke();
 }
 
-function drawWalls(ctx, state, room, bad, opts) {
+function drawWalls(ctx, state, room, bad, _opts) {
   for (const wall of WALLS) {
     const s = wallSeg(room, wall);
     const fin = WALL_BY_ID[room.walls[wall]];
@@ -466,7 +465,7 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
 function drawOpening(ctx, state, room, o, bad) {
   const def = OPENING_BY_ID[o.type];
   const a = wallPoint(room, o.wall, o.offset, 0);
-  const b = wallPoint(room, o.wall, o.offset + o.width, 0);
+  const _b = wallPoint(room, o.wall, o.offset + o.width, 0);
   const s = wallSeg(room, o.wall);
   const horizontal = s.dx === 1;
   ctx.save();
