@@ -8,7 +8,7 @@
     "start": "node serve.mjs",
     "build": "node scripts/build-css.mjs",
     "build:css": "node scripts/build-css.mjs",
-    "lint": "eslint .",
+    "lint": "eslint . && npm run lint:css",
     "lint:css": "node scripts/lint-css.mjs",
     "watch:css": "node scripts/watch-css.mjs",
     "format": "prettier --write .",
