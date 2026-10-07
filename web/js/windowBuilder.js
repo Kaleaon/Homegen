@@ -12,7 +12,7 @@ export function buildWindow3DMesh({
   opening,
   definition,
   elevation,
-  scale = 1 / 12,
+  _scale = 1 / 12,
   wallThickness = 6,
   getFrameMaterial,
   glassMaterial,

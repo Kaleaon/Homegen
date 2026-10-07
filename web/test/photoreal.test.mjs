@@ -40,7 +40,7 @@ function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) 
     getContext() {
       return { drawImage: () => {} };
     }
-    async convertToBlob({ type, quality }) {
+    async convertToBlob({ type: _type, quality: _quality }) {
       if (offscreenFails) {
         throw new Error('OffscreenCanvas unsupported format');
       }
@@ -56,7 +56,7 @@ function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) 
           width: 0,
           height: 0,
           getContext: () => ({ drawImage: () => {} }),
-          toBlob: (cb, mimeType, quality) => {
+          toBlob: (cb, mimeType, _quality) => {
             canvasToBlobCalled = true;
             queueMicrotask(() => {
               cb(new Blob(['fake-webp-data-from-toblob'], { type: mimeType }));
@@ -69,7 +69,7 @@ function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) 
   };
 
   class MockFileReader {
-    readAsDataURL(blob) {
+    readAsDataURL(_blob) {
       queueMicrotask(() => {
         this.result = 'data:image/webp;base64,ZmFrZS13ZWJwLWRhdGE=';
         if (this.onloadend) this.onloadend();
@@ -78,7 +78,7 @@ function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) 
   }
 
   const mockURL = {
-    createObjectURL(blob) {
+    createObjectURL(_blob) {
       const url = `blob:http://localhost/${Math.random()}`;
       createdUrls.push(url);
       return url;
