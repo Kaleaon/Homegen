@@ -28,14 +28,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install web dependencies
-        run: npm ci
-        working-directory: web
-
-      - name: Install designer3d-tools dependencies
-        run: npm ci
-        working-directory: designer3d/tools
-
       - name: Setup Java JDK 17
         uses: actions/setup-java@v4
         with:
@@ -46,6 +38,15 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           cache-disabled: true
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Install designer3d-tools dependencies
+        run: npm ci
+        working-directory: designer3d/tools
+
 
       - name: Run Node lint checks
         run: npm run lint

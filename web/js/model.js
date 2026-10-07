@@ -13,6 +13,7 @@ import {
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
+import { deserializeElevationGrid } from './elevationEngine.js';
 
 export function defaultBranding() {
   return {
@@ -61,6 +62,8 @@ export function newState() {
     levels: 1,
     rooms: [],
     background: null,
+    site: null, // { crs: 'EPSG:4326', features: [], segments: [], layers: [] }
+    elevationGrid: null,
     customFinishes: [],
     settings: {
       branding: defaultBranding(),
@@ -405,7 +408,18 @@ export function deserialize(text) {
   const s = JSON.parse(text);
   if (!s || !Array.isArray(s.rooms)) throw new Error('Not a Homegen plan');
   s.nextId = s.nextId || 1000;
-  s.background = s.background || null;
+  if (s.background) {
+    if (s.background.attributionText !== undefined)
+      s.background.attributionText = s.background.attributionText || null;
+    if (s.background.provider !== undefined) s.background.provider = s.background.provider || null;
+    if (s.background.licenseUrl !== undefined)
+      s.background.licenseUrl = s.background.licenseUrl || null;
+    if (s.background.logoUrl !== undefined) s.background.logoUrl = s.background.logoUrl || null;
+    if (s.background.isGeospatial !== undefined)
+      s.background.isGeospatial = !!s.background.isGeospatial;
+  } else {
+    s.background = null;
+  }
   s.customFinishes = s.customFinishes || [];
   s.settings ||= {};
   s.settings.branding = {
@@ -443,6 +457,7 @@ export function deserialize(text) {
     }
   }
   s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
+  s.elevationGrid = s.elevationGrid ? deserializeElevationGrid(s.elevationGrid) : null;
   for (const finish of s.customFinishes) {
     registerCustomWallFinish(finish, s);
   }

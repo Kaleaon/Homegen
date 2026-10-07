@@ -172,6 +172,7 @@ export class KInput extends BaseElement {
       'step',
       'accept',
       'aria-label',
+      'aria-labelledby',
     ];
   }
 
@@ -260,7 +261,16 @@ export class KInput extends BaseElement {
 
   _syncAttributes() {
     if (!this._input) return;
-    const attrs = ['type', 'placeholder', 'min', 'max', 'step', 'accept', 'aria-label'];
+    const attrs = [
+      'type',
+      'placeholder',
+      'min',
+      'max',
+      'step',
+      'accept',
+      'aria-label',
+      'aria-labelledby',
+    ];
     for (const a of attrs) {
       if (this.hasAttribute(a)) {
         this._input.setAttribute(a, this.getAttribute(a));

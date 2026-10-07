@@ -32,6 +32,7 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
+import { parseElevationRaster, computeContoursAsync, ElevationGrid } from './elevationEngine.js';
 import {
   evaluate,
   blockingIds,
@@ -67,6 +68,12 @@ import { generateBOMCSV } from './bomExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
+import {
+  GISBridge,
+  projectGeoJSON,
+  computeVariableBuffers,
+  ensureSpatialIndex,
+} from './gisBridge.js';
 import {
   buildMultiLevel,
   TEMPLATES,
@@ -1055,47 +1062,47 @@ function renderInspector() {
       <div class="row" style="margin:6px 0;display:flex;align-items:center;justify-content:space-between;gap:6px">
         <span style="font-size:0.8rem;color:var(--text-muted,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(finishLabel)}">Finish: <b>${esc(finishLabel)}</b></span>
         <button id="i-custom-tex-btn" style="font-size:0.75rem;padding:3px 8px;white-space:nowrap">Upload Texture</button>
-        <input type="file" id="i-custom-tex-file" accept="image/*" hidden>
+        <input type="file" id="i-custom-tex-file" accept="image/*" hidden aria-label="Upload custom texture image">
       </div>
 
       <div class="uv-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Scale U</label>
+          <label for="i-uv-scale-u-range" style="font-size:0.8rem;font-weight:600">Scale U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1">
-            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range">
+            <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem" aria-label="Scale U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Scale V</label>
+          <label for="i-uv-scale-v-range" style="font-size:0.8rem;font-weight:600">Scale V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1">
-            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range">
+            <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem" aria-label="Scale V numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
+          <label for="i-uv-rot-range" style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1">
-            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range">
+            <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem" aria-label="Rotation numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Offset U</label>
+          <label for="i-uv-off-u-range" style="font-size:0.8rem;font-weight:600">Offset U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1">
-            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range">
+            <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem" aria-label="Offset U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
-          <label style="font-size:0.8rem;font-weight:600">Offset V</label>
+          <label for="i-uv-off-v-range" style="font-size:0.8rem;font-weight:600">Offset V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1">
-            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem">
+            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range">
+            <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem" aria-label="Offset V numeric">
           </div>
         </div>
         <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px">
+          <select id="i-uv-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="UV transform scope">
             <option value="single">Active Wall Only</option>
             <option value="room">Entire Room</option>
             <option value="level">Level</option>
@@ -1352,12 +1359,12 @@ function renderInspector() {
              ${formRow(
                'i-win-mullions',
                'Mullion Grid (cols × rows)',
-               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px"></div>`
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-mull-cols" type="number" min="1" max="10" value="${winStyle.mullions?.cols ?? 1}" style="width:60px" aria-label="Mullion columns"><span>×</span><input id="i-win-mull-rows" type="number" min="1" max="10" value="${winStyle.mullions?.rows ?? 1}" style="width:60px" aria-label="Mullion rows"></div>`
              )}
              ${formRow(
                'i-win-casing',
                'Casing Size (W × D in)',
-               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px"></div>`
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Casing width in inches"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Casing depth in inches"></div>`
              )}`
           : ''
       }`;
@@ -1777,7 +1784,8 @@ function renderPalette() {
           swatchStyle(f)
         );
         if (f.isCustom) {
-          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label style="margin:0;font-size:11px">Tile Density:</label><select class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
+          const densityId = `custom-density-${esc(f.id)}`;
+          cardHtml += `<div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;font-size:11px"><label for="${densityId}" style="margin:0;font-size:11px">Tile Density:</label><select id="${densityId}" class="custom-density-select" data-id="${f.id}" style="padding:1px 4px;font-size:11px"><option value="12" ${f.tileInches === 12 ? 'selected' : ''}>12"</option><option value="24" ${f.tileInches === 24 ? 'selected' : ''}>24"</option><option value="48" ${f.tileInches === 48 ? 'selected' : ''}>48"</option><option value="96" ${f.tileInches === 96 ? 'selected' : ''}>96"</option></select></div>`;
         }
         return cardHtml;
       }).join('') +
@@ -2506,6 +2514,12 @@ function setDoc(next, label) {
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
+  if (doc.elevationGrid) {
+    computeContoursAsync(doc.elevationGrid).then((contours) => {
+      doc._cachedContours = contours;
+      redraw();
+    });
+  }
   refresh();
 }
 
@@ -2803,6 +2817,83 @@ $('#save-zip')?.addEventListener('click', async () => {
   }
 });
 $('#load')?.addEventListener('click', () => $('#file').click());
+$('#import-elevation')?.addEventListener('click', () => {
+  if (doc.elevationGrid) {
+    $('#dlg-elevation')?.showModal();
+  } else {
+    $('#elevation-file')?.click();
+  }
+});
+
+$('#elevation-file')?.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    let inputData = null;
+    if (file.type.includes('json') || file.name.endsWith('.json')) {
+      inputData = await file.text();
+    } else if (file.name.endsWith('.tif') || file.name.endsWith('.tiff')) {
+      inputData = await file.arrayBuffer();
+    } else {
+      // Image file (PNG / JPEG)
+      const dataUrl = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = dataUrl;
+      });
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth || img.width;
+      c.height = img.naturalHeight || img.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      inputData = c;
+    }
+
+    const grid = await parseElevationRaster(inputData);
+    doc.elevationGrid = grid;
+    doc._cachedContours = await computeContoursAsync(grid);
+    window.__scene3d?.update();
+    redraw();
+    toast(`Imported terrain elevation grid (${grid.width}x${grid.height}).`);
+  } catch (err) {
+    toast(`Failed to import elevation data: ${err.message}`, true);
+  }
+  e.target.value = '';
+});
+
+$('#btn-apply-elevation')?.addEventListener('click', async () => {
+  if (!doc.elevationGrid) return;
+  const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
+  const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
+  const visible = $('#elevation-visible')?.checked !== false;
+
+  doc.elevationGrid.contourInterval = interval;
+  doc.elevationGrid.verticalScale = scale;
+  doc.elevationGrid.visible = visible;
+
+  doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
+  window.__scene3d?.update();
+  redraw();
+  $('#dlg-elevation')?.close();
+  toast('Updated elevation terrain settings.');
+});
+
+$('#btn-clear-elevation')?.addEventListener('click', () => {
+  doc.elevationGrid = null;
+  doc._cachedContours = null;
+  window.__scene3d?.update();
+  redraw();
+  $('#dlg-elevation')?.close();
+  toast('Cleared terrain elevation data.');
+});
 $('#file')?.addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
@@ -3148,6 +3239,156 @@ if (typeof document !== 'undefined') {
     persist();
     $('#dlg-branding')?.close();
     toast('Branding and stamp settings saved to project.');
+  });
+
+  $('#gis-btn')?.addEventListener('click', openGISDialog);
+  $('#gis-close')?.addEventListener('click', closeGISDialog);
+  $('#gis-done')?.addEventListener('click', closeGISDialog);
+
+  $('#gis-load-sample')?.addEventListener('click', () => {
+    loadGISSubsystem(SAMPLE_MUNICIPAL_GIS);
+    toast('Sample municipal GIS lot loaded successfully.');
+  });
+
+  $('#gis-import-file')?.addEventListener('click', () => {
+    $('#geojson-file')?.click();
+  });
+
+  $('#geojson-file')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const json = JSON.parse(evt.target.result);
+        loadGISSubsystem(json);
+        toast('GeoJSON imported successfully.');
+      } catch (err) {
+        toast(`Failed to parse GeoJSON: ${err.message}`, true);
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  $('#gis-crs')?.addEventListener('change', (e) => {
+    if (doc.site && doc.site.features) {
+      loadGISSubsystem(
+        { type: 'FeatureCollection', features: doc.site.features },
+        { crs: e.target.value }
+      );
+    }
+  });
+}
+
+// ------------------------------------------------------------- GIS Subsystem Helpers
+export const SAMPLE_MUNICIPAL_GIS = {
+  type: 'FeatureCollection',
+  crs: { properties: { name: 'EPSG:4326' } },
+  features: [
+    {
+      type: 'Feature',
+      id: 'lot-polygon-1',
+      properties: { name: 'Municipal Lot Boundary 402B', layer: 'lot', setback: 36 },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [-122.4194, 37.7749],
+            [-122.4174, 37.7749],
+            [-122.4174, 37.7734],
+            [-122.4194, 37.7734],
+            [-122.4194, 37.7749],
+          ],
+        ],
+      },
+    },
+    {
+      type: 'Feature',
+      id: 'easement-polygon-1',
+      properties: { name: 'Public Utility Easement', layer: 'easement' },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [-122.4194, 37.7737],
+            [-122.4184, 37.7737],
+            [-122.4184, 37.7734],
+            [-122.4194, 37.7734],
+            [-122.4194, 37.7737],
+          ],
+        ],
+      },
+    },
+  ],
+};
+
+export function loadGISSubsystem(geojson, options = {}) {
+  const bridge = new GISBridge(doc.site);
+  doc.site = bridge.importGeoJSON(geojson, {
+    targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
+    crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+    ...options,
+  });
+  hist.push(doc);
+  persist();
+  redraw();
+  renderGISSegments();
+  return doc.site;
+}
+
+export function setGISSegmentSetback(segmentId, setbackDistance) {
+  if (!doc.site) return null;
+  const bridge = new GISBridge(doc.site);
+  doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
+  hist.push(doc);
+  persist();
+  redraw();
+  renderGISSegments();
+  return doc.site;
+}
+
+export function openGISDialog() {
+  const dlg = $('#dlg-gis');
+  if (!dlg) return;
+  renderGISSegments();
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
+}
+
+export function closeGISDialog() {
+  const dlg = $('#dlg-gis');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
+}
+
+export function renderGISSegments() {
+  const container = $('#gis-segment-list');
+  if (!container) return;
+  if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
+    container.innerHTML =
+      '<p style="color: #666; font-size: 13px;">No GIS lot segments loaded yet. Click "Load Sample Municipal Lot" or upload a GeoJSON file.</p>';
+    return;
+  }
+
+  let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+  html +=
+    '<thead><tr style="border-bottom: 1px solid #ccc; text-align: left;"><th>Segment</th><th>Setback (in)</th></tr></thead><tbody>';
+  for (const seg of doc.site.segments) {
+    html += `<tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 4px 0;">${seg.label || seg.id}</td>
+      <td style="padding: 4px 0;"><input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input" style="width: 70px; padding: 2px 4px;"> in</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  container.querySelectorAll('.gis-setback-input').forEach((input) => {
+    input.addEventListener('change', (e) => {
+      const segId = e.target.dataset.segId;
+      const val = parseFloat(e.target.value) || 0;
+      setGISSegmentSetback(segId, val);
+    });
   });
 }
 $('#report')?.addEventListener('click', () =>
@@ -3495,7 +3736,19 @@ function applyCalibration(p1, p2, distPx, valStr) {
   toast(`Blueprint scale calibrated (${fmtLen(targetInches)}).`);
 }
 
-function handleBlueprintImport(file) {
+function setBackgroundAttribution(attr = {}) {
+  if (!doc.background) return;
+  doc.background.attributionText = attr.attributionText ?? doc.background.attributionText ?? null;
+  doc.background.provider = attr.provider ?? doc.background.provider ?? null;
+  doc.background.licenseUrl = attr.licenseUrl ?? doc.background.licenseUrl ?? null;
+  doc.background.logoUrl = attr.logoUrl ?? doc.background.logoUrl ?? null;
+  if (attr.isGeospatial !== undefined) doc.background.isGeospatial = attr.isGeospatial;
+  hist.push(doc);
+  persist();
+  refresh();
+}
+
+function handleBlueprintImport(file, meta = {}) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -3527,6 +3780,11 @@ function handleBlueprintImport(file) {
         locked: false,
         width: w,
         height: h,
+        attributionText: meta.attributionText || null,
+        provider: meta.provider || null,
+        licenseUrl: meta.licenseUrl || null,
+        logoUrl: meta.logoUrl || null,
+        isGeospatial: !!meta.isGeospatial,
       };
       hist.push(doc, 'Import Blueprint');
       persist();
@@ -3750,6 +4008,13 @@ const COMMAND_REGISTRY = [
     category: 'Tools',
     shortcut: 'X',
     action: () => setTool({ kind: 'erase' }),
+  },
+  {
+    id: 'gis-subsystem',
+    name: 'GIS Site & Projection Controls',
+    category: 'Tools',
+    shortcut: '',
+    action: () => openGISDialog(),
   },
 
   // Views
@@ -4204,6 +4469,7 @@ if (typeof window !== 'undefined')
     generatePDF,
     applyCalibration,
     handleBlueprintImport,
+    setBackgroundAttribution,
     renderCompliance,
     renderViolationItem,
     complianceScene,
@@ -4217,10 +4483,22 @@ if (typeof window !== 'undefined')
     closeShortcutOverlay,
     renderCommandList,
     trapFocus,
+    parseElevationRaster,
+    computeContoursAsync,
+    ElevationGrid,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
     getOnboardingStatus,
     setOnboardingStatus,
     resetOnboardingStatus,
+    GISBridge,
+    projectGeoJSON,
+    computeVariableBuffers,
+    ensureSpatialIndex,
+    loadGISSubsystem,
+    setGISSegmentSetback,
+    openGISDialog,
+    closeGISDialog,
+    SAMPLE_MUNICIPAL_GIS,
   };

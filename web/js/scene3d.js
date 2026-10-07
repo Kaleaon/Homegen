@@ -831,7 +831,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       ctr.set(10, 0, 10);
     }
 
-    // Ground plane: update in place
+    // Ground plane: update in place with heightmap displacement if available
     const gs = Math.max(size.x, size.z) * 6 + 60;
     if (!ground) {
       ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), plain('#93a07f', 1));
@@ -839,8 +839,60 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       ground.receiveShadow = true;
       scene.add(ground);
     }
-    ground.scale.set(gs, gs, 1);
-    ground.position.set(ctr.x, -(SLAB + 0.2) * S, ctr.z);
+
+    const grid = state.elevationGrid;
+    if (grid && grid.data && grid.width > 1 && grid.height > 1) {
+      const bounds = grid.bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
+      const worldWidth = Math.max(1, (bounds.maxX - bounds.minX) * S);
+      const worldDepth = Math.max(1, (bounds.maxY - bounds.minY) * S);
+      const centerX = ((bounds.minX + bounds.maxX) / 2) * S;
+      const centerZ = ((bounds.minY + bounds.maxY) / 2) * S;
+
+      const segX = Math.min(grid.width - 1, 128);
+      const segY = Math.min(grid.height - 1, 128);
+
+      if (
+        !ground.userData.isGridTerrain ||
+        ground.userData.segX !== segX ||
+        ground.userData.segY !== segY ||
+        ground.userData.w !== worldWidth ||
+        ground.userData.h !== worldDepth
+      ) {
+        ground.geometry.dispose();
+        ground.geometry = new THREE.PlaneGeometry(worldWidth, worldDepth, segX, segY);
+        ground.userData = { isGridTerrain: true, segX, segY, w: worldWidth, h: worldDepth };
+      }
+
+      const posAttr = ground.geometry.attributes.position;
+      const vertCount = posAttr.count;
+      const halfW = worldWidth / 2;
+      const halfH = worldDepth / 2;
+
+      for (let i = 0; i < vertCount; i++) {
+        const lx = posAttr.getX(i);
+        const ly = posAttr.getY(i);
+        const u = (lx + halfW) / worldWidth;
+        const v = (halfH - ly) / worldDepth;
+
+        let elev = grid.getElevationAt(u, v) * (grid.verticalScale ?? 1.0);
+        // Convert elevation in meters to 3D feet
+        const elevFeet = elev * 3.28084;
+        posAttr.setZ(i, elevFeet);
+      }
+      posAttr.needsUpdate = true;
+      ground.geometry.computeVertexNormals();
+
+      ground.scale.set(1, 1, 1);
+      ground.position.set(centerX, -(SLAB + 0.2) * S, centerZ);
+    } else {
+      if (ground.userData.isGridTerrain) {
+        ground.geometry.dispose();
+        ground.geometry = new THREE.PlaneGeometry(1, 1);
+        ground.userData = {};
+      }
+      ground.scale.set(gs, gs, 1);
+      ground.position.set(ctr.x, -(SLAB + 0.2) * S, ctr.z);
+    }
 
     // Sun light: update in place
     const r = Math.max(size.x, size.z) * 0.75 + 6;
@@ -1242,8 +1294,71 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     camera.updateProjectionMatrix();
     render();
   }
+  function get3DAttributionText() {
+    const state = getState ? getState() : null;
+    const parts = [];
+
+    // Ground plane map / background layer
+    if (state && state.background && state.background.visible !== false) {
+      const bg = state.background;
+      let bgAttr = bg.attributionText;
+      if (!bgAttr && bg.provider) {
+        bgAttr = `Ground Map © ${bg.provider}`;
+      } else if (!bgAttr && bg.isGeospatial) {
+        bgAttr = 'Geospatial Ground Map';
+      }
+      if (bgAttr && bg.licenseUrl && !bgAttr.includes(bg.licenseUrl)) {
+        bgAttr += ` (${bg.licenseUrl})`;
+      }
+      if (bgAttr) parts.push(bgAttr);
+    }
+
+    // HDRI environment
+    if (opts.env && opts.env !== 'studio') {
+      const hdriDef = HDRI_ENVS.find((e) => e.id === opts.env);
+      const hdriName = hdriDef ? hdriDef.name : opts.env;
+      parts.push(`HDRI Sky: ${hdriName} (CC0 Poly Haven)`);
+    }
+
+    // HD PBR textures
+    if (opts.hd) {
+      parts.push('HD Textures © Poly Haven (CC0)');
+    }
+
+    return parts.join(' | ');
+  }
+
+  function updateHudAttribution() {
+    if (typeof document === 'undefined') return;
+    const attrText = get3DAttributionText();
+    let hudBadge = canvas?.parentElement?.querySelector('.scene3d-hud-attribution');
+    if (attrText) {
+      if (!hudBadge && canvas?.parentElement) {
+        hudBadge = document.createElement('div');
+        hudBadge.className = 'scene3d-hud-attribution';
+        hudBadge.style.cssText =
+          'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
+        try {
+          if (getComputedStyle(canvas.parentElement).position === 'static') {
+            canvas.parentElement.style.position = 'relative';
+          }
+        } catch {
+          // ignore computed style check error in headless environments
+        }
+        canvas.parentElement.appendChild(hudBadge);
+      }
+      if (hudBadge) {
+        hudBadge.style.display = 'block';
+        hudBadge.textContent = attrText;
+      }
+    } else if (hudBadge) {
+      hudBadge.style.display = 'none';
+    }
+  }
+
   function render() {
     renderer.render(scene, camera);
+    updateHudAttribution();
   }
   function loop() {
     if (!active) return;
@@ -1273,6 +1388,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     scene,
     callbacks,
     walkKeys,
+    getAttributionText: get3DAttributionText,
+    updateHudAttribution,
     getCameraMode: () => cameraMode,
     setCameraMode,
     toggleCameraMode,
