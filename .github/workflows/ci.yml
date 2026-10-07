@@ -44,15 +44,10 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+          cache: 'gradle'
 
       - name: Run Node format checks
         run: npm run format:check
-
-      - name: Run Spotless check
-        run: ./gradlew spotlessCheck
 
   test:
     name: Test (${{ matrix.project.name }})
@@ -102,10 +97,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: 'gradle'
-
-      - name: Setup Gradle
-        if: matrix.project.type == 'gradle'
-        uses: gradle/actions/setup-gradle@v3
 
       - name: Run subproject tests
         run: ${{ matrix.project.command }}

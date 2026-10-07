@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -27,7 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,7 +53,6 @@ fun CatalogPanel(
 ) {
     var search by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(CatalogCategory.ALL) }
-    var viewMode by remember { mutableIntStateOf(0) } // 0 = list, 1 = grid
     var filterByStyle by remember(activeStyleTag) { mutableStateOf(activeStyleTag != null) }
 
     val entries = remember(search, selectedCategory, catalog, filterByStyle, activeStyleTag) {
