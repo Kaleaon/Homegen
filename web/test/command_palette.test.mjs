@@ -77,12 +77,34 @@ function createMockElement(id = '', tagName = 'DIV') {
     closest: () => null,
     querySelector: (selector) => {
       if (selector === 'li.selected') {
-        return element.selectedLi || null;
+        if (element.selectedLi) return element.selectedLi;
+        return { scrollIntoView: () => {} };
       }
       return null;
     },
     querySelectorAll: (selector) => {
       if (element.items) return element.items;
+      if (selector.includes('li[data-cmd-idx]')) {
+        const matches = [...element.innerHTML.matchAll(/data-cmd-idx="(\d+)"/g)];
+        return matches.map((m) => {
+          const idx = m[1];
+          const liListeners = {};
+          return {
+            dataset: { cmdIdx: idx },
+            addEventListener: (evt, fn) => {
+              if (!liListeners[evt]) liListeners[evt] = [];
+              liListeners[evt].push(fn);
+            },
+            dispatchEvent: (evt) => {
+              const type = typeof evt === 'string' ? evt : evt.type;
+              if (liListeners[type]) liListeners[type].forEach((fn) => fn(evt));
+            },
+            click: function () {
+              this.dispatchEvent('click');
+            },
+          };
+        });
+      }
       return [];
     },
   };
@@ -144,7 +166,7 @@ test('command palette query filtering and execution unit test', async () => {
   const cmdPalette = getEl('command-palette');
   const cmdSearch = getEl('cmd-search');
   const cmdList = getEl('cmd-list');
-  const shortcutOverlay = getEl('shortcut-overlay');
+  const _shortcutOverlay = getEl('shortcut-overlay');
 
   // Load app.js module (simulating browser execution)
   // We mock document.querySelector / addEventListener
@@ -156,7 +178,7 @@ test('command palette query filtering and execution unit test', async () => {
       const id = s.replace(/^#/, '');
       return getEl(id);
     },
-    querySelectorAll: (s) => [],
+    querySelectorAll: (_s) => [],
     addEventListener: (evt, fn) => {
       if (!documentListeners[evt]) documentListeners[evt] = [];
       documentListeners[evt].push(fn);
@@ -301,7 +323,7 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     return elements[id];
   };
 
-  const cmdPalette = getEl('command-palette');
+  const _cmdPalette = getEl('command-palette');
   const cmdSearch = getEl('cmd-search');
   const cmdList = getEl('cmd-list');
 
@@ -381,5 +403,148 @@ test('command palette manages aria-expanded and aria-activedescendant dynamicall
     cmdSearch.getAttribute('aria-activedescendant'),
     undefined,
     'closeCommandPalette must remove aria-activedescendant'
+  );
+});
+
+test('recent command execution persists in localStorage and prioritizes top ranking commands', async () => {
+  const elements = {};
+  const getEl = (id) => {
+    if (!elements[id]) elements[id] = createMockElement(id);
+    return elements[id];
+  };
+
+  const storageMap = new Map();
+  const mockLocalStorage = {
+    getItem: (key) => storageMap.get(key) || null,
+    setItem: (key, val) => storageMap.set(key, String(val)),
+    removeItem: (key) => storageMap.delete(key),
+    clear: () => storageMap.clear(),
+  };
+
+  const windowListeners = {};
+  global.window = {
+    addEventListener: (evt, fn) => {
+      if (!windowListeners[evt]) windowListeners[evt] = [];
+      windowListeners[evt].push(fn);
+    },
+    location: { href: '' },
+    navigator: { userAgent: 'node' },
+    localStorage: mockLocalStorage,
+    atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
+  };
+  Object.defineProperty(global, 'navigator', {
+    value: global.window.navigator,
+    configurable: true,
+    writable: true,
+  });
+  global.localStorage = mockLocalStorage;
+  global.document = {
+    activeElement: createMockElement('body', 'BODY'),
+    getElementById: (id) => getEl(id),
+    querySelector: (s) => getEl(s.replace(/^#/, '')),
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+  };
+
+  await import(`../js/app.js?t=${Date.now() + 10}`);
+
+  const homegen = global.window.__homegen;
+  assert.ok(homegen, '__homegen must be present');
+
+  // Clear previous recent history
+  homegen.clearRecentCommands();
+  assert.deepEqual(homegen.getRecentCommands(), [], 'Recent commands should initially be empty');
+
+  // Verify default list order before any command execution
+  homegen.openCommandPalette();
+  const cmdList = getEl('cmd-list');
+  const defaultFirstCmdName = homegen.COMMAND_REGISTRY[0].name;
+  assert.ok(
+    cmdList.innerHTML.includes(defaultFirstCmdName),
+    'Command list should display first command in registry by default'
+  );
+
+  // Execute a command (e.g. 'export-pdf') via recordCommandExecution or Enter key
+  const targetCmd1 = homegen.COMMAND_REGISTRY.find((c) => c.id === 'export-pdf');
+  homegen.recordCommandExecution(targetCmd1.id);
+
+  // Check state persistence
+  const recent1 = homegen.getRecentCommands();
+  assert.equal(recent1[0], 'export-pdf', 'export-pdf should be at index 0 of recent commands');
+  assert.equal(
+    mockLocalStorage.getItem('homegen_recent_commands'),
+    JSON.stringify(['export-pdf']),
+    'localStorage must persist recent commands JSON array'
+  );
+
+  // Render command palette list and verify export-pdf is prioritized at top
+  homegen.renderCommandList('');
+  assert.ok(
+    cmdList.innerHTML.indexOf('Export Scaled Vector PDF') <
+      cmdList.innerHTML.indexOf(defaultFirstCmdName),
+    'Recently executed command (Export Scaled Vector PDF) must be prioritized ahead of default first command'
+  );
+
+  // Execute second command (e.g. 'view-3d')
+  const targetCmd2 = homegen.COMMAND_REGISTRY.find((c) => c.id === 'view-3d');
+  homegen.recordCommandExecution(targetCmd2.id);
+
+  const recent2 = homegen.getRecentCommands();
+  assert.equal(recent2[0], 'view-3d', 'view-3d should now be most recent (index 0)');
+  assert.equal(recent2[1], 'export-pdf', 'export-pdf should be second most recent (index 1)');
+
+  homegen.renderCommandList('');
+  assert.ok(
+    cmdList.innerHTML.indexOf('3D View') < cmdList.innerHTML.indexOf('Export Scaled Vector PDF'),
+    'Most recent command (3D View) must appear before second most recent (Export Scaled Vector PDF)'
+  );
+
+  // Re-execute export-pdf to test recency re-ordering
+  homegen.recordCommandExecution('export-pdf');
+  const recent3 = homegen.getRecentCommands();
+  assert.equal(recent3[0], 'export-pdf', 'export-pdf should move back to index 0');
+  assert.equal(recent3[1], 'view-3d', 'view-3d should move to index 1');
+
+  // Test history size limit (maximum 5)
+  const testCmdIds = [
+    'tool-select',
+    'tool-eyedropper',
+    'tool-erase',
+    'view-2d',
+    'file-new',
+    'file-save',
+  ];
+  for (const cmdId of testCmdIds) {
+    homegen.recordCommandExecution(cmdId);
+  }
+
+  const recent4 = homegen.getRecentCommands();
+  assert.equal(recent4.length, 5, 'Recent command history must cap size at 5');
+  assert.equal(recent4[0], 'file-save', 'Most recently executed command must be first');
+  assert.equal(
+    recent4.includes('export-pdf'),
+    false,
+    'Oldest command beyond size 5 must be evicted'
+  );
+
+  // Test storage failure fallback to in-memory state
+  const failingStorage = {
+    getItem: () => {
+      throw new Error('Storage access blocked');
+    },
+    setItem: () => {
+      throw new Error('Storage write denied');
+    },
+  };
+  global.localStorage = failingStorage;
+  global.window.localStorage = failingStorage;
+
+  // Execute command despite failing localStorage
+  homegen.recordCommandExecution('view-photo');
+  assert.equal(
+    homegen.getRecentCommands()[0],
+    'view-photo',
+    'In-memory state fallback must handle storage failure gracefully'
   );
 });
