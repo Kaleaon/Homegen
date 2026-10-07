@@ -3050,7 +3050,7 @@ $('#file')?.addEventListener('change', async (e) => {
             e.target.value = '';
             return;
           }
-        } catch (err) {
+        } catch {
           // fall back to standard JSON deserialize
         }
       }
