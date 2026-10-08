@@ -60,7 +60,7 @@
   border: 1px solid var(--overlay-border);
   border-radius: var(--radius-full, 9999px);
   box-shadow: var(--overlay-shadow);
-  color: #ffffff;
+  color: var(--ktheme-text);
   backdrop-filter: blur(var(--overlay-blur));
   -webkit-backdrop-filter: blur(var(--overlay-blur));
   position: absolute;
@@ -111,9 +111,9 @@
 
 .branding-tabs .tab-btn.on,
 .branding-tabs .tab-btn[aria-selected='true'] {
-  background: var(--ktheme-accent-muted, rgba(79, 70, 229, 0.15));
-  border-color: var(--ktheme-accent, #6366f1);
-  color: #ffffff;
+  background: var(--ktheme-accent-muted, rgba(129, 140, 248, 0.15));
+  border-color: var(--ktheme-accent);
+  color: var(--ktheme-text);
 }
 
 .stamp-builder-grid {
@@ -124,7 +124,7 @@
 }
 
 .stamp-canvas-wrap {
-  background: #ffffff;
+  background: var(--ktheme-bg-surface);
   border: 1px solid var(--overlay-border);
   border-radius: var(--radius-sm, 6px);
   display: flex;
@@ -200,7 +200,7 @@
 .history-close-btn {
   background: transparent;
   border: none;
-  color: var(--ktheme-text-muted, #a09a8e);
+  color: var(--ktheme-text-muted);
   cursor: pointer;
   font-size: var(--font-size-md, 14px);
   padding: 2px 6px;
@@ -246,10 +246,10 @@
 }
 
 .history-item.active {
-  background: var(--ktheme-accent, #2f6f5e);
-  color: var(--ktheme-on-primary, #ffffff);
+  background: var(--ktheme-accent);
+  color: var(--ktheme-on-primary);
   font-weight: 600;
-  border-color: var(--ktheme-accent-hover, #4aa58c);
+  border-color: var(--ktheme-accent-hover);
 }
 
 .history-item-label {
@@ -289,7 +289,7 @@
 
 /* 9. GIS Segment Table Overlay Styles */
 .gis-empty-msg {
-  color: var(--ktheme-text-muted, var(--muted, #9ca3af));
+  color: var(--ktheme-text-muted, var(--muted));
   font-size: var(--font-size-sm, 13px);
   margin: 0;
 }
@@ -309,7 +309,7 @@
 .gis-table-head-row th {
   padding: 6px 4px;
   font-weight: 600;
-  color: var(--ktheme-text-muted, var(--muted, #9ca3af));
+  color: var(--ktheme-text-muted, var(--muted));
 }
 
 .gis-table-row {
