@@ -3573,28 +3573,29 @@ export function renderGISSegments() {
   if (!container) return;
   if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
     container.innerHTML =
-      '<p style="color: #666; font-size: 13px;">No GIS lot segments loaded yet. Click "Load Sample Municipal Lot" or upload a GeoJSON file.</p>';
+      '<p class="gis-empty-msg">No GIS lot segments loaded yet. Click "Load Sample Municipal Lot" or upload a GeoJSON file.</p>';
     return;
   }
 
-  let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+  let html = '<table class="gis-segment-table">';
   html +=
-    '<thead><tr style="border-bottom: 1px solid #ccc; text-align: left;"><th>Segment</th><th>Setback (in)</th></tr></thead><tbody>';
+    '<thead><tr class="gis-table-head-row"><th>Segment</th><th>Setback (in)</th></tr></thead><tbody>';
   for (const seg of doc.site.segments) {
-    html += `<tr style="border-bottom: 1px solid #eee;">
-      <td style="padding: 4px 0;">${seg.label || seg.id}</td>
-      <td style="padding: 4px 0;"><input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input" style="width: 70px; padding: 2px 4px;"> in</td>
+    html += `<tr class="gis-table-row">
+      <td class="gis-table-cell">${seg.label || seg.id}</td>
+      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input"></k-input> in</td>
     </tr>`;
   }
   html += '</tbody></table>';
   container.innerHTML = html;
 
   container.querySelectorAll('.gis-setback-input').forEach((input) => {
-    input.addEventListener('change', (e) => {
-      const segId = e.target.dataset.segId;
+    const handleSetbackChange = (e) => {
+      const segId = e.target.dataset.segId || e.target.getAttribute('data-seg-id');
       const val = parseFloat(e.target.value) || 0;
       setGISSegmentSetback(segId, val);
-    });
+    };
+    input.addEventListener('change', handleSetbackChange);
   });
 }
 $('#report')?.addEventListener('click', () =>
