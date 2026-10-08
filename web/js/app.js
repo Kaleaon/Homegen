@@ -62,7 +62,6 @@ import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
-  getSnappedPoint,
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
@@ -422,7 +421,10 @@ function pickAt(p) {
 /** Compute where an item lands for a pointer position. Returns {room, props, feedback} or null. */
 function placeItem(type, p, rot = ghostRot) {
   const def = ITEM_BY_ID[type];
-  const room = roomAt(p);
+  const snapRes = snappingBridge.computeSnap(p, p);
+  const targetP = snapRes && snapRes.snap ? snapRes.point : p;
+
+  const room = roomAt(targetP) || roomAt(p);
   if (!room) return null;
   const ir = interior(room);
 
@@ -438,23 +440,18 @@ function placeItem(type, p, rot = ghostRot) {
   const context = { edges, existingPolygons };
 
   if (def.mount === 'wall') {
-    const nw = nearestWall(p, 40, room);
+    const nw = nearestWall(targetP, 40, room);
     if (!nw) return null;
     const len = wallLength(room, nw.wall);
     const rawOffset = Math.max(8, Math.min(len - 8, nw.t));
-    const snappedPt = getSnappedPoint({
-      point: { x: rawOffset, y: 0 },
-      edges: [],
-      settings: interaction.gridSettings,
-      snapModes: interaction.snapModes,
-    }).point;
+    const offset = snapRes && snapRes.snap ? rawOffset : snap(rawOffset, 2);
     return {
       room,
-      props: { wall: nw.wall, offset: Math.max(8, Math.min(len - 8, snap(snappedPt.x, 2))) },
+      props: { wall: nw.wall, offset: Math.max(8, Math.min(len - 8, offset)) },
     };
   }
   if (def.mount === 'ceiling') {
-    const candPt = { x: p.x, y: p.y };
+    const candPt = { x: targetP.x, y: targetP.y };
     const entity = {
       position: candPt,
       rotation: 0,
@@ -476,7 +473,7 @@ function placeItem(type, p, rot = ghostRot) {
     for (const wall of WALLS) {
       const s = wallSeg(room, wall);
       const dist = Math.abs(
-        (p.x - s.ax - (s.nx * WT) / 2) * s.nx + (p.y - s.ay - (s.ny * WT) / 2) * s.ny
+        (targetP.x - s.ax - (s.nx * WT) / 2) * s.nx + (targetP.y - s.ay - (s.ny * WT) / 2) * s.ny
       );
       if (dist <= def.d / 2 + 10 && (!best || dist < best.dist)) best = { wall, dist };
     }
@@ -486,14 +483,11 @@ function placeItem(type, p, rot = ghostRot) {
       const itemLen = swap ? def.d : def.w;
       const span = horizontal ? ir.w : ir.h;
       const start = horizontal ? ir.x : ir.y;
-      const rawAlong = (horizontal ? p.x : p.y) - start - itemLen / 2;
-      const snappedPt = getSnappedPoint({
-        point: { x: rawAlong, y: 0 },
-        edges: [],
-        settings: interaction.gridSettings,
-        snapModes: interaction.snapModes,
-      }).point;
-      const along = Math.max(0, Math.min(span - itemLen, snap(snappedPt.x, 3)));
+      const rawAlong = (horizontal ? targetP.x : targetP.y) - start - itemLen / 2;
+      const along = Math.max(
+        0,
+        Math.min(span - itemLen, snapRes && snapRes.snap ? rawAlong : snap(rawAlong, 3))
+      );
       const props = M.backToWall(room, def, best.wall, along, 0);
       const candPoly = itemToPolygon({ ...props }, def);
       const validation = validatePlacement(candPoly, existingPolygons);
@@ -501,10 +495,10 @@ function placeItem(type, p, rot = ghostRot) {
     }
   }
 
-  const candidateItem = { x: p.x, y: p.y, rot };
+  const candidateItem = { x: targetP.x, y: targetP.y, rot };
   const candPoly = itemToPolygon(candidateItem, def);
-  const entity = { position: { x: p.x, y: p.y }, rotation: rot, polygon: candPoly };
-  const moveRes = interaction.moveEntity(entity, { x: p.x, y: p.y }, context);
+  const entity = { position: { x: targetP.x, y: targetP.y }, rotation: rot, polygon: candPoly };
+  const moveRes = interaction.moveEntity(entity, { x: targetP.x, y: targetP.y }, context);
   return {
     room,
     props: { x: moveRes.position.x, y: moveRes.position.y, rot },
@@ -1988,27 +1982,30 @@ function updatePreview() {
       if (pl.feedback) preview.feedback = pl.feedback;
     }
   } else if (tool.kind === 'opening') {
-    const nw = nearestWall(hover);
+    const snapRes = snappingBridge.computeSnap(hover, hover);
+    const targetP = snapRes && snapRes.snap ? snapRes.point : hover;
+    const nw = nearestWall(targetP);
     if (nw) {
       const def = OPENING_BY_ID[tool.id];
-      preview = tryPreview((n) =>
-        M.addOpening(
-          n,
-          roomOf(n, nw.room.id),
-          tool.id,
-          nw.wall,
-          Math.max(0, snap(nw.t - def.w / 2, 3))
-        )
-      );
+      const offset =
+        snapRes && snapRes.snap
+          ? Math.max(0, nw.t - def.w / 2)
+          : Math.max(0, snap(nw.t - def.w / 2, 3));
+      preview = tryPreview((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, offset));
     }
   } else if (tool.kind === 'roomkit') {
     const kit = ROOM_KIT_BY_ID[tool.id];
-    const rc = snapRect({
-      x: snap(hover.x, 6) - kit.w / 2,
-      y: snap(hover.y, 6) - kit.h / 2,
-      w: kit.w,
-      h: kit.h,
-    });
+    const snapRes = snappingBridge.computeSnap(hover, hover);
+    const targetP = snapRes && snapRes.snap ? snapRes.point : hover;
+    const rc =
+      snapRes && snapRes.snap
+        ? { x: targetP.x - kit.w / 2, y: targetP.y - kit.h / 2, w: kit.w, h: kit.h }
+        : snapRect({
+            x: snap(hover.x, 6) - kit.w / 2,
+            y: snap(hover.y, 6) - kit.h / 2,
+            w: kit.w,
+            h: kit.h,
+          });
     preview = tryPreview((n) => M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel));
   }
 }
@@ -2131,14 +2128,18 @@ canvas?.addEventListener('pointerdown', (e) => {
       }
       break;
     }
-    case 'room':
+    case 'room': {
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const startPt =
+        snapRes && snapRes.snap ? snapRes.point : { x: snap(p.x, 6), y: snap(p.y, 6) };
       drag = {
         kind: 'room-new',
-        x0: snap(p.x, 6),
-        y0: snap(p.y, 6),
-        rect: { x: snap(p.x, 6), y: snap(p.y, 6), w: 0, h: 0 },
+        x0: startPt.x,
+        y0: startPt.y,
+        rect: { x: startPt.x, y: startPt.y, w: 0, h: 0 },
       };
       break;
+    }
     case 'item': {
       const pl = placeItem(tool.id, p);
       if (!pl) {
@@ -2154,23 +2155,19 @@ canvas?.addEventListener('pointerdown', (e) => {
       break;
     }
     case 'opening': {
-      const nw = nearestWall(p);
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const targetP = snapRes && snapRes.snap ? snapRes.point : p;
+      const nw = nearestWall(targetP);
       if (!nw) {
         toast('Click on a wall.', true, 2000);
         break;
       }
       const def = OPENING_BY_ID[tool.id];
-      apply(
-        (n) =>
-          M.addOpening(
-            n,
-            roomOf(n, nw.room.id),
-            tool.id,
-            nw.wall,
-            Math.max(0, snap(nw.t - def.w / 2, 3))
-          ),
-        'Add Opening'
-      );
+      const offset =
+        snapRes && snapRes.snap
+          ? Math.max(0, nw.t - def.w / 2)
+          : Math.max(0, snap(nw.t - def.w / 2, 3));
+      apply((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, offset), 'Add Opening');
       break;
     }
     case 'eyedropper': {
@@ -2208,12 +2205,17 @@ canvas?.addEventListener('pointerdown', (e) => {
     }
     case 'roomkit': {
       const kit = ROOM_KIT_BY_ID[tool.id];
-      const rc = snapRect({
-        x: snap(p.x, 6) - kit.w / 2,
-        y: snap(p.y, 6) - kit.h / 2,
-        w: kit.w,
-        h: kit.h,
-      });
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const targetP = snapRes && snapRes.snap ? snapRes.point : p;
+      const rc =
+        snapRes && snapRes.snap
+          ? { x: targetP.x - kit.w / 2, y: targetP.y - kit.h / 2, w: kit.w, h: kit.h }
+          : snapRect({
+              x: snap(p.x, 6) - kit.w / 2,
+              y: snap(p.y, 6) - kit.h / 2,
+              w: kit.w,
+              h: kit.h,
+            });
       apply((n) => {
         const r = M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel);
         selection = r.id;
@@ -2297,6 +2299,7 @@ canvas?.addEventListener('pointermove', (e) => {
           }
         });
       } else {
+        snappingBridge.computeSnap(p, p);
         const it = M.findOwner(doc, drag.id).obj;
         const pl = placeItem(it.type, p, it.rot || 0);
         if (pl) {
@@ -2305,10 +2308,16 @@ canvas?.addEventListener('pointermove', (e) => {
         }
       }
     } else if (drag.kind === 'opening') {
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const targetP = snapRes && snapRes.snap ? snapRes.point : p;
       const { room, obj } = M.findOwner(doc, drag.id);
-      const nw = nearestWall(p, 40, room);
+      const nw = nearestWall(targetP, 40, room);
       if (nw) {
-        drag.target = { wall: nw.wall, offset: Math.max(0, snap(nw.t - obj.width / 2, 3)) };
+        const offset =
+          snapRes && snapRes.snap
+            ? Math.max(0, nw.t - obj.width / 2)
+            : Math.max(0, snap(nw.t - obj.width / 2, 3));
+        drag.target = { wall: nw.wall, offset };
         preview = tryPreview((n) => {
           const o = M.findOwner(n, drag.id).obj;
           Object.assign(o, drag.target);
@@ -2316,10 +2325,13 @@ canvas?.addEventListener('pointermove', (e) => {
       }
     } else if (drag.kind === 'room') {
       const r = roomOf(doc, drag.id);
-      const rc = snapRect(
-        { x: snap(p.x - drag.dx, 6), y: snap(p.y - drag.dy, 6), w: r.w, h: r.h },
-        r.id
-      );
+      const rawTarget = { x: p.x - drag.dx, y: p.y - drag.dy };
+      const otherRooms = levelRooms().filter((rm) => rm.id !== drag.id);
+      const snapRes = snappingBridge.computeSnap(rawTarget, rawTarget, otherRooms);
+      const rc =
+        snapRes && snapRes.snap
+          ? { x: snapRes.point.x, y: snapRes.point.y, w: r.w, h: r.h }
+          : snapRect({ x: snap(rawTarget.x, 6), y: snap(rawTarget.y, 6), w: r.w, h: r.h }, r.id);
       drag.target = rc;
       preview = tryPreview((n) => M.moveRoom(roomOf(n, drag.id), rc.x, rc.y));
     } else if (drag.kind === 'resize') {
@@ -2328,16 +2340,9 @@ canvas?.addEventListener('pointermove', (e) => {
       const cornerIdx = drag.corner % pts.length;
       const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
       const anchor = pts[prevIdx];
-      const levelRooms = doc.rooms.filter((rm) => (rm.level || 0) === curLevel && rm.id !== r.id);
-      const edges = extractRoomEdges(levelRooms);
+      const otherRooms = levelRooms().filter((rm) => rm.id !== r.id);
 
-      const snapRes = getSnappedPoint({
-        point: p,
-        anchor,
-        edges,
-        settings: interaction.gridSettings,
-        snapModes: interaction.snapModes,
-      });
+      const snapRes = snappingBridge.computeSnap(p, anchor, otherRooms);
 
       const newPt = snapRes.point;
       const newPts = pts.map((pt, i) => (i === cornerIdx ? { x: newPt.x, y: newPt.y } : { ...pt }));
@@ -2346,18 +2351,23 @@ canvas?.addEventListener('pointermove', (e) => {
         const bbox = getRoomBoundingBox(newPts);
         drag.target = { points: newPts, x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
         preview = tryPreview((n) => M.updateRoomPoints(roomOf(n, drag.id), newPts));
-        if (preview) preview.feedback = snapRes.snapFeedback;
+        if (preview) preview.feedback = snapRes.snap;
       }
     } else if (drag.kind === 'room-new') {
-      const x1 = snap(p.x, 6);
-      const y1 = snap(p.y, 6);
+      const snapRes = snappingBridge.computeSnap(p, { x: drag.x0, y: drag.y0 });
+      const cornerPt =
+        snapRes && snapRes.snap ? snapRes.point : { x: snap(p.x, 6), y: snap(p.y, 6) };
+      const x1 = cornerPt.x;
+      const y1 = cornerPt.y;
       drag.rect = {
         x: Math.min(drag.x0, x1),
         y: Math.min(drag.y0, y1),
         w: Math.abs(x1 - drag.x0),
         h: Math.abs(y1 - drag.y0),
       };
-      drag.rect = snapRect(drag.rect);
+      if (!snapRes || !snapRes.snap) {
+        drag.rect = snapRect(drag.rect);
+      }
 
       const candPoly = roomToPolygon(drag.rect);
       const existingRooms = doc.rooms.filter((r) => (r.level || 0) === curLevel).map(roomToPolygon);
