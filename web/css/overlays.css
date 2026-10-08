@@ -286,3 +286,44 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* 9. GIS Segment Table Overlay Styles */
+.gis-empty-msg {
+  color: var(--ktheme-text-muted, var(--muted, #9ca3af));
+  font-size: var(--font-size-sm, 13px);
+  margin: 0;
+}
+
+.gis-segment-table {
+  width: 100%;
+  font-size: var(--font-size-sm, 13px);
+  border-collapse: collapse;
+  color: var(--overlay-color);
+}
+
+.gis-table-head-row {
+  border-bottom: 1px solid var(--overlay-border);
+  text-align: left;
+}
+
+.gis-table-head-row th {
+  padding: 6px 4px;
+  font-weight: 600;
+  color: var(--ktheme-text-muted, var(--muted, #9ca3af));
+}
+
+.gis-table-row {
+  border-bottom: 1px solid var(--overlay-border);
+}
+
+.gis-table-cell {
+  padding: 6px 4px;
+  vertical-align: middle;
+}
+
+.gis-setback-input {
+  width: 80px;
+  display: inline-block;
+  min-height: 24px;
+  min-width: 24px;
+}
