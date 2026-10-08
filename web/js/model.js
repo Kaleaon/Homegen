@@ -205,6 +205,13 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
   return room;
 }
 
+export function addRoom(state, x, y, w, h, type = 'living', opts = {}) {
+  if (typeof x === 'string') {
+    return createRoom(state, x, y, w, h, type, opts);
+  }
+  return createRoom(state, type || 'living', x, y, w, h, opts);
+}
+
 export function addOpening(state, room, type, wall, offset, props = {}) {
   room = ensureRoomCopy(state, room);
   const def = OPENING_BY_ID[type] || {};

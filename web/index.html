@@ -56,6 +56,8 @@
       <button data-tool="select" class="on" title="Select / move (V)"><span aria-hidden="true">⬚</span> Select</button>
       <button data-tool="eyedropper" title="Sample finish (I)"><span aria-hidden="true">✒</span> Eyedropper</button>
       <button data-tool="erase" title="Delete things (X)"><span aria-hidden="true">⌫</span> Erase</button>
+      <button id="btn-open-add-room-dims" title="Add Room by Dimensions (Ctrl+Shift+R)"><span aria-hidden="true">➕</span> Add Room Dims</button>
+      <button id="btn-close-room" title="Close Room Polygon" hidden><span aria-hidden="true">📐</span> Close Room</button>
       <span id="snap-toggles" class="seg"></span>
       <span id="bg-toolbar" hidden>
         <span class="toolbar-sep">|</span>
@@ -538,6 +540,51 @@
     <ul id="cmd-list" role="listbox" aria-label="Commands"></ul>
   </div>
 </dialog>
+<dialog id="dlg-add-room-dims" aria-labelledby="dlg-add-room-dims-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-add-room-dims-title">Add Room by Dimensions</h2>
+    <button value="close" id="btn-add-room-dims-close" aria-label="Close direct room dimension modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Enter room type, dimensions, and positioning coordinates without dragging.</p>
+    <div class="row">
+      <label for="room-dims-type">Room Type</label>
+      <select id="room-dims-type">
+        <option value="living" selected>Living room</option>
+        <option value="bedroom">Bedroom</option>
+        <option value="kitchen">Kitchen</option>
+        <option value="dining">Dining room</option>
+        <option value="office">Office</option>
+        <option value="bathroom">Bathroom</option>
+        <option value="laundry">Laundry</option>
+        <option value="hallway">Hallway</option>
+        <option value="entry">Entry</option>
+        <option value="closet">Closet</option>
+        <option value="stairs">Stairs</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="room-dims-width">Width (inches)</label>
+      <input id="room-dims-width" type="number" min="24" step="6" value="144" />
+    </div>
+    <div class="row">
+      <label for="room-dims-depth">Depth (inches)</label>
+      <input id="room-dims-depth" type="number" min="24" step="6" value="144" />
+    </div>
+    <div class="row">
+      <label for="room-dims-x">Position X (inches)</label>
+      <input id="room-dims-x" type="number" step="6" value="0" />
+    </div>
+    <div class="row">
+      <label for="room-dims-y">Position Y (inches)</label>
+      <input id="room-dims-y" type="number" step="6" value="0" />
+    </div>
+    <div class="btns" style="margin-top:16px">
+      <button id="btn-add-room-dims-submit" class="primary" type="button">Add Room</button>
+      <button id="btn-add-room-dims-cancel" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="shortcut-overlay" aria-labelledby="shortcut-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
     <h2 id="shortcut-title">Keyboard Shortcuts</h2>
@@ -559,11 +606,13 @@
         <div class="shortcut-row"><span>Eyedropper Tool</span><span class="keys"><kbd>I</kbd></span></div>
         <div class="shortcut-row"><span>Erase Tool</span><span class="keys"><kbd>X</kbd></span></div>
         <div class="shortcut-row"><span>Rotate Selected Item</span><span class="keys"><kbd>R</kbd></span></div>
+        <div class="shortcut-row"><span>Add Room by Dimensions</span><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></span></div>
         <div class="shortcut-row"><span>Delete Selected</span><span class="keys"><kbd>Del</kbd> / <kbd>Backspace</kbd></span></div>
       </div>
       <div class="shortcut-group">
         <h3>Navigation &amp; Views</h3>
         <div class="shortcut-row"><span>Move Selected / Pan</span><span class="keys"><kbd>Arrow Keys</kbd></span></div>
+        <div class="shortcut-row"><span>Fine / Fast Nudge</span><span class="keys"><kbd>Alt</kbd> / <kbd>Shift</kbd> + <kbd>Arrows</kbd></span></div>
         <div class="shortcut-row"><span>Zoom In</span><span class="keys"><kbd>+</kbd></span></div>
         <div class="shortcut-row"><span>Zoom Out</span><span class="keys"><kbd>-</kbd></span></div>
       </div>
