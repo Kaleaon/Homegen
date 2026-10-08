@@ -86,4 +86,27 @@ class ProjectSerializerTest {
         assertEquals("furniture", decoded.scene.objects[3].type)
         assertEquals("fabric/gray", decoded.scene.objects[3].materialRef)
     }
+
+    @Test
+    fun `project serializer maps raw json buffer to spatial jni native pointer without dropping properties`() {
+        val serializer = ProjectSerializer()
+        val spatialData = SpatialData(
+            crs = "EPSG:4326",
+            lotBoundary = listOf(0.0, 0.0, 1000.0, 0.0, 1000.0, 800.0, 0.0, 800.0),
+            innerPoints = listOf(36.0, 36.0, 964.0, 36.0, 964.0, 764.0, 36.0, 764.0),
+        )
+        val buffer = serializer.encodeToBuffer(emptyList(), spatialData)
+
+        val (objects, spatialJni) = serializer.decodeBufferWithSpatial(buffer, buffer.capacity())
+        try {
+            assertTrue(objects.isEmpty())
+            val violations = spatialJni.querySetbackViolations(
+                doubleArrayOf(-10.0, -10.0, 10.0, -10.0, 10.0, 10.0, -10.0, 10.0),
+            )
+            assertTrue(violations.isNotEmpty())
+            assertEquals("setback-clearance", violations[0].type)
+        } finally {
+            spatialJni.close()
+        }
+    }
 }

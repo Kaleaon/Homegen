@@ -102,35 +102,98 @@ object MeshFactory {
      * Creates a flat plane at y=0, useful for floors and the grid.
      */
     fun createPlane(engine: Engine, width: Float, depth: Float, materialInstance: MaterialInstance): Int {
+        return createSubdividedPlane(engine, width, depth, 1, 1, materialInstance)
+    }
+
+    /**
+     * Creates a subdivided plane grid mesh for GPU heightmap vertex displacement.
+     */
+    fun createSubdividedPlane(
+        engine: Engine,
+        width: Float,
+        depth: Float,
+        subdivisionsX: Int = 32,
+        subdivisionsZ: Int = 32,
+        materialInstance: MaterialInstance,
+        heightmapData: FloatArray? = null,
+        verticalScale: Float = 1.0f,
+    ): Int {
+        val subX = Math.max(1, subdivisionsX)
+        val subZ = Math.max(1, subdivisionsZ)
+
+        val vertexCount = (subX + 1) * (subZ + 1)
+        val indexCount = subX * subZ * 6
+
+        val positions = FloatArray(vertexCount * 3)
+        val normals = FloatArray(vertexCount * 3)
+        val uvs = FloatArray(vertexCount * 2)
+
         val hw = width / 2f
         val hd = depth / 2f
 
-        val positions = floatArrayOf(
-            -hw, 0f, -hd,
-            hw, 0f, -hd,
-            hw, 0f, hd,
-            -hw, 0f, hd,
-        )
-        val normals = floatArrayOf(
-            0f, 1f, 0f,
-            0f, 1f, 0f,
-            0f, 1f, 0f,
-            0f, 1f, 0f,
-        )
-        val uvs = floatArrayOf(
-            0f,
-            0f,
-            width,
-            0f,
-            width,
-            depth,
-            0f,
-            depth,
-        )
-        val indices = shortArrayOf(0, 1, 2, 0, 2, 3)
+        var vIdx = 0
+        var uvIdx = 0
+
+        for (iz in 0..subZ) {
+            val v = iz.toFloat() / subZ
+            val z = -hd + v * depth
+            for (ix in 0..subX) {
+                val u = ix.toFloat() / subX
+                val x = -hw + u * width
+
+                var y = 0f
+                if (heightmapData != null && heightmapData.isNotEmpty()) {
+                    val hx = (u * (subX)).toInt().coerceIn(0, subX)
+                    val hz = (v * (subZ)).toInt().coerceIn(0, subZ)
+                    val dataIdx = (hz * (subX + 1) + hx).coerceIn(0, heightmapData.size - 1)
+                    y = heightmapData[dataIdx] * verticalScale
+                }
+
+                positions[vIdx * 3] = x
+                positions[vIdx * 3 + 1] = y
+                positions[vIdx * 3 + 2] = z
+
+                normals[vIdx * 3] = 0f
+                normals[vIdx * 3 + 1] = 1f
+                normals[vIdx * 3 + 2] = 0f
+
+                uvs[uvIdx * 2] = u
+                uvs[uvIdx * 2 + 1] = v
+
+                vIdx++
+                uvIdx++
+            }
+        }
+
+        val indices = IntArray(indexCount)
+        var iIdx = 0
+
+        for (iz in 0 until subZ) {
+            for (ix in 0 until subX) {
+                val v0 = iz * (subX + 1) + ix
+                val v1 = v0 + 1
+                val v2 = (iz + 1) * (subX + 1) + ix
+                val v3 = v2 + 1
+
+                indices[iIdx++] = v0
+                indices[iIdx++] = v2
+                indices[iIdx++] = v1
+
+                indices[iIdx++] = v1
+                indices[iIdx++] = v2
+                indices[iIdx++] = v3
+            }
+        }
+
+        val useIntIndices = vertexCount > 65535
+        val indexType = if (useIntIndices) {
+            IndexBuffer.Builder.IndexType.UINT
+        } else {
+            IndexBuffer.Builder.IndexType.USHORT
+        }
 
         val vertexBuffer = VertexBuffer.Builder()
-            .vertexCount(4)
+            .vertexCount(vertexCount)
             .bufferCount(3)
             .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 12)
             .attribute(VertexBuffer.VertexAttribute.TANGENTS, 1, VertexBuffer.AttributeType.FLOAT3, 0, 12)
@@ -142,16 +205,24 @@ object MeshFactory {
         vertexBuffer.setBufferAt(engine, 2, toFloatBuffer(uvs))
 
         val indexBuffer = IndexBuffer.Builder()
-            .indexCount(6)
-            .bufferType(IndexBuffer.Builder.IndexType.USHORT)
+            .indexCount(indexCount)
+            .bufferType(indexType)
             .build(engine)
 
-        indexBuffer.setBuffer(engine, toShortBuffer(indices))
+        if (useIntIndices) {
+            val buf = ByteBuffer.allocateDirect(indices.size * 4).order(ByteOrder.nativeOrder())
+            buf.asIntBuffer().put(indices)
+            buf.rewind()
+            indexBuffer.setBuffer(engine, buf)
+        } else {
+            val shortIndices = ShortArray(indexCount) { indices[it].toShort() }
+            indexBuffer.setBuffer(engine, toShortBuffer(shortIndices))
+        }
 
         val entity = EntityManager.get().create()
         RenderableManager.Builder(1)
-            .boundingBox(Box(0f, 0f, 0f, hw, 0.01f, hd))
-            .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vertexBuffer, indexBuffer, 0, 6)
+            .boundingBox(Box(0f, 0f, 0f, hw, 50f, hd))
+            .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vertexBuffer, indexBuffer, 0, indexCount)
             .material(0, materialInstance)
             .castShadows(false)
             .receiveShadows(true)

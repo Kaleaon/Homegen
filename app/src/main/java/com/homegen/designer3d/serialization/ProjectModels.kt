@@ -10,6 +10,35 @@ import kotlinx.serialization.Serializable
 data class ProjectFile(
     val schemaVersion: Int = 1,
     val scene: SceneData,
+    val spatial: SpatialData? = null,
+)
+
+@Serializable
+data class SpatialData(
+    val crs: String = "EPSG:4326",
+    val lotBoundary: List<Double> = emptyList(),
+    val innerPoints: List<Double> = emptyList(),
+    val segments: List<SetbackSegmentData> = emptyList(),
+    val layers: List<SpatialLayerData> = emptyList(),
+)
+
+@Serializable
+data class SetbackSegmentData(
+    val id: String,
+    val p1x: Double,
+    val p1y: Double,
+    val p2x: Double,
+    val p2y: Double,
+    val setback: Double = 36.0,
+    val label: String = "",
+)
+
+@Serializable
+data class SpatialLayerData(
+    val id: String,
+    val type: String,
+    val name: String = "",
+    val points: List<Double> = emptyList(),
 )
 
 @Serializable
