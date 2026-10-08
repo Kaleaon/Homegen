@@ -207,6 +207,16 @@ function toast(msg, err = false, ms = 4500) {
   }, ms);
 }
 
+let liveRegionTimeout = null;
+function announceToLiveRegion(msg) {
+  const liveEl = $('#plan-fallback-summary');
+  if (!liveEl) return;
+  if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
+  liveRegionTimeout = setTimeout(() => {
+    liveEl.textContent = msg;
+  }, 100);
+}
+
 function persist() {
   try {
     localStorage.setItem(STORE, M.serialize(doc));
@@ -671,6 +681,30 @@ function drawOverlay(c, _state) {
     c.restore();
   }
 
+  const sequentialPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (sequentialPts && sequentialPts.length > 0) {
+    c.save();
+    c.strokeStyle = '#2a7fff';
+    c.fillStyle = 'rgba(42, 127, 255, 0.2)';
+    c.lineWidth = 2 / view.scale;
+    c.beginPath();
+    c.moveTo(sequentialPts[0].x, sequentialPts[0].y);
+    for (let i = 1; i < sequentialPts.length; i++) {
+      c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+    }
+    if (hover) {
+      c.lineTo(hover.x, hover.y);
+    }
+    c.stroke();
+    for (const pt of sequentialPts) {
+      c.beginPath();
+      c.arc(pt.x, pt.y, 4 / view.scale, 0, Math.PI * 2);
+      c.fillStyle = '#2a7fff';
+      c.fill();
+    }
+    c.restore();
+  }
+
   if (!hover && !drag) return;
   const okColor = 'rgba(47,143,91,.5)';
   const badColor = 'rgba(196,59,59,.55)';
@@ -1083,6 +1117,37 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position Y (${room.y}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Width (${room.w}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Depth (${room.h}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+      </div>
       <div class="btns"><button id="i-del">Delete room</button></div>
 
       <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
@@ -1224,6 +1289,30 @@ function renderInspector() {
       select(null);
     });
 
+    el.querySelectorAll('.i-nudge-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget.dataset.target;
+        const step = parseFloat(e.currentTarget.dataset.step);
+        if (target === 'pos-x') {
+          const dir = step > 0 ? 'East' : 'West';
+          apply((n) => M.moveRoom(roomOf(n, room.id), room.x + step, room.y), 'Nudge Room Position X');
+          announceToLiveRegion(`${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`);
+        } else if (target === 'pos-y') {
+          const dir = step > 0 ? 'South' : 'North';
+          apply((n) => M.moveRoom(roomOf(n, room.id), room.x, room.y + step), 'Nudge Room Position Y');
+          announceToLiveRegion(`${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`);
+        } else if (target === 'width') {
+          const newW = Math.max(24, room.w + step);
+          apply((n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, newW, room.h), 'Nudge Room Width');
+          announceToLiveRegion(`${room.name} width adjusted to ${newW} inches.`);
+        } else if (target === 'depth') {
+          const newH = Math.max(24, room.h + step);
+          apply((n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, room.w, newH), 'Nudge Room Depth');
+          announceToLiveRegion(`${room.name} depth adjusted to ${newH} inches.`);
+        }
+      });
+    });
+
     $('#i-uv-wall')?.addEventListener('change', (e) => {
       window.__activeUVWall = e.target.value;
       renderInspector();
@@ -1351,6 +1440,23 @@ function renderInspector() {
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
       <button id="i-del">Delete</button></div>
+      <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position X</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-item-nudge-btn" data-dx="-1" data-dy="0" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="-1" data-dy="0" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="1" data-dy="0" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="1" data-dy="0" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position Y</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="-1" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="-1" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="1" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="1" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+      </div>
       ${
         kind === 'opening'
           ? formRow(
@@ -1466,6 +1572,15 @@ function renderInspector() {
       apply((n) => M.removeById(n, obj.id), 'Delete Element');
       select(null);
     });
+
+    el.querySelectorAll('.i-item-nudge-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const dx = parseInt(e.currentTarget.dataset.dx, 10);
+        const dy = parseInt(e.currentTarget.dataset.dy, 10);
+        const step = Math.abs(parseFloat(e.currentTarget.dataset.step));
+        moveSelectedSpatial(dx, dy, step);
+      });
+    });
   }
 }
 
@@ -1556,51 +1671,64 @@ function navigateSpatial(dir) {
   }
 }
 
-function moveSelectedSpatial(dx, dy) {
+function moveSelectedSpatial(dx, dy, customStep = null) {
   if (!selection) {
-    toast('Select an element to move using Shift+Arrow keys', true, 2000);
+    toast('Select an element to move using Arrow keys', true, 2000);
     return;
   }
   const hit = M.findOwner(doc, selection);
   if (!hit) return;
   const { room, kind, obj } = hit;
+  const dirName = dx > 0 ? 'East' : dx < 0 ? 'West' : dy > 0 ? 'South' : dy < 0 ? 'North' : '';
 
   if (kind === 'item') {
     const def = ITEM_BY_ID[obj.type];
     if (def.mount === 'floor' || def.mount === 'ceiling') {
-      const step = 6;
+      const step = customStep ?? 6;
       const targetP = { x: obj.x + dx * step, y: obj.y + dy * step };
       const pl = placeItem(obj.type, targetP, obj.rot || 0);
       if (pl) {
         const r = apply(moveItemMutation(selection, pl));
-        if (r.ok) toast(`Moved ${def.name} in ${pl.room.name}`, false, 1800);
+        if (r.ok) {
+          toast(`Moved ${def.name} in ${pl.room.name}`, false, 1800);
+          announceToLiveRegion(`${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+        }
       }
     } else if (def.mount === 'wall') {
-      const step = 6;
+      const step = customStep ?? 6;
       const deltaOffset = (dx !== 0 ? dx : dy) * step;
       const newOffset = Math.max(8, obj.offset + deltaOffset);
       const r = apply((n) => {
         const it = M.findOwner(n, selection).obj;
         it.offset = newOffset;
       });
-      if (r.ok) toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+      if (r.ok) {
+        toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+        announceToLiveRegion(`${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+      }
     }
   } else if (kind === 'opening') {
     const def = OPENING_BY_ID[obj.type];
-    const step = 6;
+    const step = customStep ?? 6;
     const deltaOffset = (dx !== 0 ? dx : dy) * step;
     const newOffset = Math.max(0, obj.offset + deltaOffset);
     const r = apply((n) => {
       const o = M.findOwner(n, selection).obj;
       o.offset = newOffset;
     });
-    if (r.ok) toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+    if (r.ok) {
+      toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+      announceToLiveRegion(`${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+    }
   } else if (kind === 'room') {
-    const step = 12;
+    const step = customStep ?? 6;
     const newX = room.x + dx * step;
     const newY = room.y + dy * step;
     const r = apply((n) => M.moveRoom(roomOf(n, room.id), newX, newY), 'Move Room');
-    if (r.ok) toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
+    if (r.ok) {
+      toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
+      announceToLiveRegion(`${room.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+    }
   }
 }
 
@@ -2381,8 +2509,87 @@ canvas?.addEventListener('pointermove', (e) => {
   redraw();
 });
 
-function moveItemTo(id, pl) {
-  return moveItemMutation(id, pl);
+function handleCloseRoom() {
+  if (!interaction.canCloseRoom || !interaction.canCloseRoom()) {
+    toast('At least 3 corners are required to close a room.', true);
+    return;
+  }
+  const closeRes = interaction.closeRoom({ existingRooms: levelRooms() });
+  if (closeRes.ok && closeRes.room?.corners) {
+    const pts = closeRes.room.corners;
+    const minX = Math.min(...pts.map((pt) => pt.x));
+    const maxX = Math.max(...pts.map((pt) => pt.x));
+    const minY = Math.min(...pts.map((pt) => pt.y));
+    const maxY = Math.max(...pts.map((pt) => pt.y));
+    const w = Math.max(24, maxX - minX);
+    const h = Math.max(24, maxY - minY);
+    const x = minX;
+    const y = minY;
+    const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
+    if (r.ok) {
+      announceToLiveRegion(`Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`);
+      interaction.resetRoomDrawing();
+      const btnClose = $('#btn-close-room');
+      if (btnClose) btnClose.hidden = true;
+      const hint = $('#tool-hint');
+      if (hint) hint.textContent = '';
+      redraw();
+    }
+  } else {
+    toast('Invalid room placement. Room corners overlap existing geometry or violate code constraints.', true);
+    announceToLiveRegion('Invalid room placement.');
+  }
+}
+
+function openAddRoomDimsModal() {
+  const dlg = $('#dlg-add-room-dims');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+function closeAddRoomDimsModal() {
+  const dlg = $('#dlg-add-room-dims');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    dlg.close();
+  } else {
+    dlg.removeAttribute('open');
+  }
+}
+
+function setupAddRoomDimsModal() {
+  const btnOpen = $('#btn-open-add-room-dims');
+  const btnSubmit = $('#btn-add-room-dims-submit');
+  const btnCancel = $('#btn-add-room-dims-cancel');
+  const btnClose = $('#btn-add-room-dims-close');
+
+  btnOpen?.addEventListener('click', openAddRoomDimsModal);
+  btnCancel?.addEventListener('click', closeAddRoomDimsModal);
+  btnClose?.addEventListener('click', closeAddRoomDimsModal);
+
+  btnSubmit?.addEventListener('click', () => {
+    const type = $('#room-dims-type')?.value || 'living';
+    const w = parseFloat($('#room-dims-width')?.value || '144');
+    const h = parseFloat($('#room-dims-depth')?.value || '144');
+    const x = parseFloat($('#room-dims-x')?.value || '0');
+    const y = parseFloat($('#room-dims-y')?.value || '0');
+
+    if (isNaN(w) || w <= 0 || isNaN(h) || h <= 0) {
+      toast('Please enter valid room dimensions (width and depth > 0).', true);
+      return;
+    }
+
+    const r = apply((n) => M.addRoom(n, x, y, w, h, type, { level: curLevel }), 'Add Room');
+    if (r.ok) {
+      const typeName = ROOM_TYPES[type]?.name || type;
+      announceToLiveRegion(`${typeName} room added at (${x}", ${y}") with dimensions ${w}" × ${h}".`);
+      closeAddRoomDimsModal();
+    }
+  });
 }
 
 canvas?.addEventListener('pointerup', () => {
@@ -2435,7 +2642,17 @@ canvas?.addEventListener('pointerup', () => {
         select(room.id);
       }, 'Add Room');
       if (!r.ok) select(null);
-    } else toast('Drag to size the room.', true, 1800);
+    } else {
+      const p = hover || { x: d.x0, y: d.y0 };
+      interaction.addRoomCorner(p, { existingRooms: levelRooms() });
+      const count = interaction.getCornerCount();
+      const hint = $('#tool-hint');
+      if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
+      const btnClose = $('#btn-close-room');
+      if (btnClose) btnClose.hidden = !interaction.canCloseRoom();
+      announceToLiveRegion(`Placed corner ${count} at (${Math.round(p.x)}", ${Math.round(p.y)}").`);
+      redraw();
+    }
     refresh();
     return;
   }
@@ -2488,6 +2705,10 @@ canvas?.addEventListener('pointerleave', () => {
   redraw();
 });
 canvas?.addEventListener('dblclick', (e) => {
+  if (tool.kind === 'room' && interaction.canCloseRoom && interaction.canCloseRoom()) {
+    handleCloseRoom();
+    return;
+  }
   const p = toWorld(e);
   const hitNode = complianceScene.hitTest(p, view);
   if (hitNode && (hitNode.type === 'dimensionLabel' || hitNode.type === 'constraintHandle')) {
@@ -3777,12 +3998,20 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  setupAddRoomDimsModal();
+  $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
   window.addEventListener('keydown', (e) => {
     if (document.activeElement?.closest('#tabs')) return;
 
     const k = e.key;
     const lk = k ? k.toLowerCase() : '';
+
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && lk === 'r') {
+      e.preventDefault();
+      openAddRoomDimsModal();
+      return;
+    }
 
     // Cmd+K or Ctrl+K triggers Command Palette (works globally)
     if ((e.ctrlKey || e.metaKey) && lk === 'k') {
@@ -3822,8 +4051,12 @@ if (typeof window !== 'undefined') {
         ArrowRight: [1, 0, 'right'],
       };
       const [dx, dy, dir] = map[k];
-      if (e.shiftKey) moveSelectedSpatial(dx, dy);
-      else navigateSpatial(dir);
+      const step = e.altKey ? 1 : e.shiftKey ? 12 : 6;
+      if (selection) {
+        moveSelectedSpatial(dx, dy, step);
+      } else {
+        navigateSpatial(dir);
+      }
       return;
     }
 
@@ -3835,6 +4068,11 @@ if (typeof window !== 'undefined') {
       $('#redo').click();
     } else if (lk === 'r') rotateSelected();
     else if (lk === 'escape') {
+      if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+      const btnClose = $('#btn-close-room');
+      if (btnClose) btnClose.hidden = true;
+      const hint = $('#tool-hint');
+      if (hint && tool.kind === 'room') hint.textContent = '';
       const historyPopover = $('#history-popover');
       if (historyPopover && !historyPopover.hidden) {
         historyPopover.hidden = true;

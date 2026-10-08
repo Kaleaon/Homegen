@@ -118,4 +118,20 @@ export class InteractionLayer {
     if (!context) throw new Error('closeRoom: context is required');
     return this.roomTool.closeRoom(context);
   }
+
+  getCornerCount() {
+    return this.roomTool.getCornerCount();
+  }
+
+  getRoomPoints() {
+    return this.roomTool.getPoints();
+  }
+
+  canCloseRoom() {
+    return this.roomTool.canClose();
+  }
+
+  resetRoomDrawing() {
+    this.roomTool.reset();
+  }
 }
