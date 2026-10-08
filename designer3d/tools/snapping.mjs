@@ -73,6 +73,28 @@ function snapToPerpendicular(point, anchor, edges, threshold) {
   return best;
 }
 
+function snapToAngle(point, anchor, settings) {
+  if (!anchor || (anchor.x === point.x && anchor.y === point.y)) return null;
+  const dx = point.x - anchor.x;
+  const dy = point.y - anchor.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist === 0) return null;
+
+  const rawAngle = Math.atan2(dy, dx);
+  const snapped = snapAngle(rawAngle, settings);
+  const alignedPoint = {
+    x: anchor.x + dist * Math.cos(snapped),
+    y: anchor.y + dist * Math.sin(snapped),
+  };
+  const snapDist = distance(point, alignedPoint);
+  return {
+    point: alignedPoint,
+    distance: snapDist,
+    type: 'angle',
+    angleDegrees: Math.round((snapped * 180) / Math.PI),
+  };
+}
+
 function chooseBestSnap(candidates, magneticThreshold) {
   return (
     candidates
@@ -104,6 +126,10 @@ export function getSnappedPoint({ point, anchor = point, edges = [], settings, s
 
   if (snapModes.isEnabled(SNAP_MODES.PERPENDICULAR)) {
     candidates.push(snapToPerpendicular(point, anchor, edges, settings.perpendicularThreshold));
+  }
+
+  if (snapModes.isEnabled(SNAP_MODES.ANGLE)) {
+    candidates.push(snapToAngle(point, anchor, settings));
   }
 
   const best = chooseBestSnap(candidates, settings.magneticThreshold);

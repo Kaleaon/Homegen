@@ -10,6 +10,7 @@ import com.homegen.designer3d.model.Staircase
 import com.homegen.designer3d.model.Transform
 import com.homegen.designer3d.model.Wall
 import com.homegen.designer3d.model.Window
+import com.homegen.spatial.SpatialCoreJni
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -18,6 +19,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.nio.ByteBuffer
 
 class ProjectSerializer(
     private val json: Json = Json {
@@ -61,11 +63,21 @@ class ProjectSerializer(
         }
     }
 
-    fun encode(objects: List<HomeObject>): String {
+    fun encode(objects: List<HomeObject>, spatialData: SpatialData? = null): String {
         val file = ProjectFile(
             scene = SceneData(objects = objects.map { it.toData() }),
+            spatial = spatialData,
         )
         return json.encodeToString(ProjectFile.serializer(), file)
+    }
+
+    fun encodeToBuffer(objects: List<HomeObject>, spatialData: SpatialData? = null): ByteBuffer {
+        val jsonStr = encode(objects, spatialData)
+        val bytes = jsonStr.toByteArray(Charsets.UTF_8)
+        val buffer = ByteBuffer.allocateDirect(bytes.size)
+        buffer.put(bytes)
+        buffer.rewind()
+        return buffer
     }
 
     fun decode(rawJson: String): List<HomeObject> {
@@ -74,6 +86,28 @@ class ProjectSerializer(
         val migrated = applyMigrations(raw, version)
         val file = json.decodeFromJsonElement(ProjectFile.serializer(), migrated)
         return file.scene.objects.map { it.toEntity() }
+    }
+
+    fun decodeWithSpatial(rawJson: String): Pair<List<HomeObject>, SpatialCoreJni> {
+        val bytes = rawJson.toByteArray(Charsets.UTF_8)
+        val buffer = ByteBuffer.allocateDirect(bytes.size)
+        buffer.put(bytes)
+        buffer.rewind()
+        return decodeBufferWithSpatial(buffer, bytes.size)
+    }
+
+    fun decodeBufferWithSpatial(buffer: ByteBuffer, length: Int): Pair<List<HomeObject>, SpatialCoreJni> {
+        val dup = buffer.duplicate()
+        val bytes = ByteArray(length)
+        dup.get(bytes, 0, length)
+        val rawJson = String(bytes, Charsets.UTF_8)
+
+        val objects = decode(rawJson)
+
+        val spatialJni = SpatialCoreJni()
+        spatialJni.loadJsonBuffer(buffer, length)
+
+        return objects to spatialJni
     }
 
     private fun applyMigrations(data: JsonObject, fromVersion: Int): JsonObject {

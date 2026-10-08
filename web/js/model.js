@@ -10,6 +10,8 @@ import {
   interior,
   wallPoint,
   footprint,
+  getRoomPoints,
+  getRoomBoundingBox,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
@@ -165,15 +167,26 @@ export function createDefaultWallUV() {
 }
 
 export function createRoom(state, type, x, y, w, h, opts = {}) {
+  const points =
+    opts.points || opts.corners || opts.vertices
+      ? opts.points || opts.corners || opts.vertices
+      : [
+          { x, y },
+          { x: x + w, y },
+          { x: x + w, y: y + h },
+          { x, y: y + h },
+        ];
+  const bbox = getRoomBoundingBox(points);
   const room = {
     id: nid(state, 'r'),
     type,
     name: ROOM_TYPES[type].name,
     level: opts.level ?? 0,
-    x,
-    y,
-    w,
-    h,
+    x: bbox.x,
+    y: bbox.y,
+    w: bbox.w,
+    h: bbox.h,
+    points,
     ceiling: opts.ceiling ?? 96,
     floor: opts.floor ?? 'floor_oak',
     cladding: opts.cladding ?? undefined,
@@ -182,6 +195,7 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
       E: opts.wallFinish ?? 'paint_white',
       S: opts.wallFinish ?? 'paint_white',
       W: opts.wallFinish ?? 'paint_white',
+      ...(opts.walls || {}),
     },
     wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
     openings: [],
@@ -257,6 +271,8 @@ export function moveRoom(room, nx, ny, state = null) {
   const dy = ny - room.y;
   room.x = nx;
   room.y = ny;
+  const pts = getRoomPoints(room);
+  room.points = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
   for (const it of room.items)
     if (it.x !== undefined) {
       it.x += dx;
@@ -266,11 +282,30 @@ export function moveRoom(room, nx, ny, state = null) {
 
 export function resizeRoom(room, x, y, w, h, state = null) {
   if (state) room = ensureRoomCopy(state, room);
-  // Floor/ceiling items keep world position; code engine rejects any that end up outside.
   room.x = x;
   room.y = y;
   room.w = w;
   room.h = h;
+  room.points = [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h },
+  ];
+  for (const o of room.openings) {
+    const len = wallLength(room, o.wall);
+    o.offset = Math.max(0, Math.min(o.offset, len - o.width));
+  }
+}
+
+export function updateRoomPoints(room, points, state = null) {
+  if (state) room = ensureRoomCopy(state, room);
+  room.points = points;
+  const bbox = getRoomBoundingBox(points);
+  room.x = bbox.x;
+  room.y = bbox.y;
+  room.w = bbox.w;
+  room.h = bbox.h;
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
     o.offset = Math.max(0, Math.min(o.offset, len - o.width));
@@ -505,6 +540,13 @@ export function deserialize(text) {
     r.items ||= [];
     r.level ||= 0;
     r.wallUV ||= {};
+    const pts = getRoomPoints(r);
+    r.points = pts;
+    const bbox = getRoomBoundingBox(pts);
+    r.x = bbox.x;
+    r.y = bbox.y;
+    r.w = bbox.w;
+    r.h = bbox.h;
     for (const w of WALLS) {
       r.wallUV[w] = getWallUV(r, w);
     }
