@@ -61,6 +61,13 @@
         <span class="toolbar-sep">|</span>
         <label class="toggle" for="bg-visible" title="Toggle blueprint visibility"><input type="checkbox" id="bg-visible" checked> Blueprint</label>
         <label for="bg-opacity" title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+        <select id="bg-map-preset" title="Geospatial Map Provider Preset">
+          <option value="">-- Map Preset --</option>
+          <option value="openstreetmap">OpenStreetMap</option>
+          <option value="carto-positron">CARTO Positron</option>
+          <option value="usgs-topo">USGS Topo</option>
+          <option value="copernicus-sentinel">Copernicus Sentinel</option>
+        </select>
         <button id="bg-lock-btn" title="Toggle blueprint position lock">🔓 Unlocked</button>
         <button id="bg-calibrate-btn" title="Calibrate scale with 2 points">📏 Calibrate</button>
         <button id="bg-remove-btn" title="Remove blueprint image">✕</button>
@@ -488,6 +495,16 @@
         <option value="EPSG:4326">EPSG:4326 (WGS84 Lat/Lon)</option>
         <option value="EPSG:3857">EPSG:3857 (Web Mercator)</option>
         <option value="EPSG:32610">EPSG:32610 (UTM Zone 10N)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="gis-map-preset">Geospatial Map Preset</label>
+      <select id="gis-map-preset">
+        <option value="">-- Select Map Provider Preset --</option>
+        <option value="openstreetmap">OpenStreetMap</option>
+        <option value="carto-positron">CARTO Positron</option>
+        <option value="usgs-topo">USGS Topo</option>
+        <option value="copernicus-sentinel">Copernicus Sentinel</option>
       </select>
     </div>
     <div class="btns" style="margin: 12px 0;">

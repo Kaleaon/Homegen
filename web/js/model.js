@@ -85,6 +85,110 @@ export function validateLogoSize(dataUrl, maxKb = 500) {
   return true;
 }
 
+function createMapPresetSvgDataUrl(name, primaryColor = '#e2e8f0', gridColor = '#cbd5e1') {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="${primaryColor}"/><path d="M0 100 H800 M0 200 H800 M0 300 H800 M0 400 H800 M0 500 H800 M100 0 V600 M200 0 V600 M300 0 V600 M400 0 V600 M500 0 V600 M600 0 V600 M700 0 V600" stroke="${gridColor}" stroke-width="1" stroke-dasharray="4 4"/><text x="400" y="300" font-family="sans-serif" font-size="22" font-weight="bold" fill="#475569" text-anchor="middle" dominant-baseline="middle">${name}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+export const MAP_PRESETS = {
+  openstreetmap: {
+    id: 'openstreetmap',
+    aliases: ['osm'],
+    name: 'OpenStreetMap',
+    provider: 'OpenStreetMap',
+    attributionText: '© OpenStreetMap contributors',
+    licenseUrl: 'https://www.openstreetmap.org/copyright',
+    isGeospatial: true,
+    description: 'Open community-mapped global topographic & road base layer',
+    dataUrl: createMapPresetSvgDataUrl('OpenStreetMap', '#f1f5f9', '#cbd5e1'),
+  },
+  'carto-positron': {
+    id: 'carto-positron',
+    aliases: ['carto', 'positron'],
+    name: 'CARTO Positron',
+    provider: 'CARTO',
+    attributionText: '© OpenStreetMap contributors, © CARTO',
+    licenseUrl: 'https://carto.com/attributions',
+    isGeospatial: true,
+    description: 'Light-toned minimalist basemap designed for architectural overlays',
+    dataUrl: createMapPresetSvgDataUrl('CARTO Positron', '#f8fafc', '#e2e8f0'),
+  },
+  'usgs-topo': {
+    id: 'usgs-topo',
+    aliases: ['usgs', 'usgs-quad'],
+    name: 'USGS Topo',
+    provider: 'USGS',
+    attributionText: 'Map Data © USGS Topo / U.S. Geological Survey',
+    licenseUrl: 'https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits',
+    isGeospatial: true,
+    description: 'Official U.S. Geological Survey national topographic map quadrangle data',
+    dataUrl: createMapPresetSvgDataUrl('USGS Topo', '#f0fdf4', '#bbf7d0'),
+  },
+  'copernicus-sentinel': {
+    id: 'copernicus-sentinel',
+    aliases: ['sentinel', 'copernicus'],
+    name: 'Copernicus Sentinel',
+    provider: 'Copernicus',
+    attributionText: 'Imagery © Copernicus Sentinel Data',
+    licenseUrl:
+      'https://sentinels.copernicus.eu/documents/247904/685211/Sentinel_Data_Legal_Notice.pdf',
+    isGeospatial: true,
+    description: 'European Space Agency Earth observation satellite multispectral imagery',
+    dataUrl: createMapPresetSvgDataUrl('Copernicus Sentinel', '#f0f9ff', '#bae6fd'),
+  },
+};
+
+export const GEOSPATIAL_MAP_PRESETS = MAP_PRESETS;
+
+export function getMapPreset(key) {
+  if (!key || typeof key !== 'string') return null;
+  const k = key.trim().toLowerCase();
+  if (MAP_PRESETS[k]) return MAP_PRESETS[k];
+  for (const preset of Object.values(MAP_PRESETS)) {
+    if (preset.id === k || (preset.aliases && preset.aliases.includes(k))) {
+      return preset;
+    }
+  }
+  return null;
+}
+
+export function applyMapPreset(state, presetKeyOrObj, opts = {}) {
+  if (!state) return null;
+  const preset =
+    typeof presetKeyOrObj === 'object' && presetKeyOrObj
+      ? presetKeyOrObj
+      : getMapPreset(presetKeyOrObj);
+
+  if (!preset) {
+    if (!presetKeyOrObj && state.background) {
+      state.background.presetKey = null;
+    }
+    return state.background || null;
+  }
+
+  const existing = state.background || {};
+  state.background = {
+    dataUrl: existing.dataUrl || preset.dataUrl,
+    x: existing.x ?? 0,
+    y: existing.y ?? 0,
+    scale: existing.scale ?? 1,
+    opacity: existing.opacity ?? 0.5,
+    visible: existing.visible ?? true,
+    locked: existing.locked ?? false,
+    width: existing.width || 800,
+    height: existing.height || 600,
+    attributionText: preset.attributionText,
+    provider: preset.provider,
+    licenseUrl: preset.licenseUrl,
+    logoUrl: preset.logoUrl || null,
+    isGeospatial: true,
+    presetKey: preset.id,
+    ...opts,
+  };
+
+  return state.background;
+}
+
 export function newState() {
   return {
     version: 2,
@@ -482,6 +586,8 @@ export function deserialize(text) {
     if (s.background.logoUrl !== undefined) s.background.logoUrl = s.background.logoUrl || null;
     if (s.background.isGeospatial !== undefined)
       s.background.isGeospatial = !!s.background.isGeospatial;
+    if (s.background.presetKey !== undefined)
+      s.background.presetKey = s.background.presetKey || null;
   } else {
     s.background = null;
   }
