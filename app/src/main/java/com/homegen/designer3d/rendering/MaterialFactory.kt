@@ -3,6 +3,8 @@ package com.homegen.designer3d.rendering
 import com.google.android.filament.Engine
 import com.google.android.filament.Material
 import com.google.android.filament.MaterialInstance
+import com.google.android.filament.Texture
+import com.google.android.filament.TextureSampler
 
 /**
  * Manages Filament materials and material instances for scene objects.
@@ -11,6 +13,48 @@ class MaterialFactory(private val engine: Engine) {
 
     private var defaultMaterial: Material? = null
     private val instanceCache = mutableMapOf<String, MaterialInstance>()
+
+    var isVertexTextureFetchSupported: Boolean = true
+
+    /**
+     * Creates a terrain material instance for GPU vertex heightmap displacement.
+     * Falls back to flat ground rendering if vertex texture fetch is unsupported on legacy GPU.
+     */
+    fun createTerrainInstance(
+        texture: Texture? = null,
+        verticalScale: Float = 1.0f,
+        minElevation: Float = 0f,
+        maxElevation: Float = 10f,
+        forceFlatFallback: Boolean = false,
+    ): MaterialInstance {
+        if (forceFlatFallback || !isVertexTextureFetchSupported) {
+            // Fallback to flat ground rendering
+            return createColorInstance(0.48f, 0.58f, 0.38f) // Terrain green
+        }
+
+        val instance = getDefaultMaterial().createInstance()
+        instance.setParameter("baseColor", 0.48f, 0.58f, 0.38f, 1.0f)
+        instance.setParameter("roughness", 0.8f)
+        instance.setParameter("metallic", 0.0f)
+
+        if (texture != null) {
+            val sampler = TextureSampler(
+                TextureSampler.MinFilter.LINEAR,
+                TextureSampler.MagFilter.LINEAR,
+                TextureSampler.WrapMode.CLAMP_TO_EDGE,
+            )
+            try {
+                instance.setParameter("elevationTexture", texture, sampler)
+                instance.setParameter("verticalScale", verticalScale)
+                instance.setParameter("minElevation", minElevation)
+                instance.setParameter("maxElevation", maxElevation)
+            } catch (e: Exception) {
+                // Ignore parameter missing errors on default material
+            }
+        }
+
+        return instance
+    }
 
     /**
      * Creates a default lit material programmatically using Filament's built-in capabilities.
