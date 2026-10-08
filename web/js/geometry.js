@@ -223,38 +223,228 @@ export const WT = 4.5; // wall thickness, rooms are measured centerline-to-cente
 export const GRID = 6;
 export const EPS = 0.5;
 export const WALLS = ['N', 'E', 'S', 'W'];
+export const LEGACY_WALL_NAMES = ['N', 'E', 'S', 'W'];
+export const LEGACY_WALL_MAP = { N: 0, E: 1, S: 2, W: 3, 0: 0, 1: 1, 2: 2, 3: 3 };
 export const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 export const lv = (r) => r.level || 0;
 
 export const snap = (v, g = GRID) => quantize(v, g);
 
-/** Wall segment of a room. `t` offsets run west->east (N/S) or north->south (E/W). */
-export function wallSeg(room, wall) {
-  const { x, y, w, h } = room;
-  switch (wall) {
-    case 'N':
-      return { ax: x, ay: y, dx: 1, dy: 0, nx: 0, ny: 1, len: w };
-    case 'S':
-      return { ax: x, ay: y + h, dx: 1, dy: 0, nx: 0, ny: -1, len: w };
-    case 'W':
-      return { ax: x, ay: y, dx: 0, dy: 1, nx: 1, ny: 0, len: h };
-    case 'E':
-      return { ax: x + w, ay: y, dx: 0, dy: 1, nx: -1, ny: 0, len: h };
-    default:
-      throw new Error(`bad wall ${wall}`);
+export function resolveWallIndex(wall) {
+  if (typeof wall === 'number') return wall;
+  if (LEGACY_WALL_MAP[wall] !== undefined) return LEGACY_WALL_MAP[wall];
+  const parsed = parseInt(wall, 10);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+export function getRoomPoints(room) {
+  if (!room) {
+    return [
+      { x: 0, y: 0 },
+      { x: 120, y: 0 },
+      { x: 120, y: 120 },
+      { x: 0, y: 120 },
+    ];
   }
+  const pts = room.points || room.corners || room.vertices;
+  if (Array.isArray(pts) && pts.length >= 3) {
+    if (pts.length === 4) {
+      const [p0, p1, p2, p3] = pts;
+      const isRect =
+        Math.abs(p0.y - p1.y) < 1e-4 &&
+        Math.abs(p1.x - p2.x) < 1e-4 &&
+        Math.abs(p2.y - p3.y) < 1e-4 &&
+        Math.abs(p3.x - p0.x) < 1e-4;
+      if (isRect) {
+        const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
+        const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
+        const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
+        const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
+        const bw = maxX - minX;
+        const bh = maxY - minY;
+        const rx = room.x ?? minX;
+        const ry = room.y ?? minY;
+        const rw = room.w ?? bw;
+        const rh = room.h ?? bh;
+        if (
+          Math.abs(rx - minX) > 1e-4 ||
+          Math.abs(ry - minY) > 1e-4 ||
+          Math.abs(rw - bw) > 1e-4 ||
+          Math.abs(rh - bh) > 1e-4
+        ) {
+          const newPts = [
+            { x: rx, y: ry },
+            { x: rx + rw, y: ry },
+            { x: rx + rw, y: ry + rh },
+            { x: rx, y: ry + rh },
+          ];
+          if (room.points) room.points = newPts;
+          if (room.corners) room.corners = newPts;
+          if (room.vertices) room.vertices = newPts;
+          return newPts;
+        }
+      }
+    }
+    return pts;
+  }
+  const x = room.x ?? 0;
+  const y = room.y ?? 0;
+  const w = room.w ?? 120;
+  const h = room.h ?? 120;
+  return [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h },
+  ];
 }
 
-export const wallLength = (room, wall) => (wall === 'N' || wall === 'S' ? room.w : room.h);
+export function getRoomBoundingBox(points) {
+  if (!points || points.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
 
-/** Clear interior rectangle (inside the wall faces). */
+export function polygonArea(points) {
+  if (!points || points.length < 3) return 0;
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+  return Math.abs(area) / 2;
+}
+
+export function polygonWinding(points) {
+  if (!points || points.length < 3) return 1;
+  let sum = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    sum += (points[j].x - points[i].x) * (points[j].y + points[i].y);
+  }
+  return sum >= 0 ? 1 : -1;
+}
+
+/** Wall segment of a room. `t` offsets run along the edge from start to end vertex. */
+export function wallSeg(room, wall) {
+  const points = getRoomPoints(room);
+  const idx = resolveWallIndex(wall) % points.length;
+
+  let p1, p2;
+  if (points.length === 4) {
+    if (idx === 0) {
+      p1 = points[0];
+      p2 = points[1];
+    } else if (idx === 1) {
+      p1 = points[1];
+      p2 = points[2];
+    } else if (idx === 2) {
+      p1 = points[3];
+      p2 = points[2];
+    } else {
+      p1 = points[0];
+      p2 = points[3];
+    }
+  } else {
+    p1 = points[idx];
+    p2 = points[(idx + 1) % points.length];
+  }
+
+  const vx = p2.x - p1.x;
+  const vy = p2.y - p1.y;
+  const len = Math.hypot(vx, vy);
+  if (len === 0) {
+    return { ax: p1.x, ay: p1.y, dx: 1, dy: 0, nx: 0, ny: 1, len: 0, index: idx };
+  }
+  const dx = vx / len;
+  const dy = vy / len;
+
+  let nx, ny;
+  if (points.length === 4) {
+    if (idx === 0) {
+      nx = 0;
+      ny = 1;
+    } else if (idx === 1) {
+      nx = -1;
+      ny = 0;
+    } else if (idx === 2) {
+      nx = 0;
+      ny = -1;
+    } else {
+      nx = 1;
+      ny = 0;
+    }
+  } else {
+    const winding = polygonWinding(points);
+    nx = winding > 0 ? dy : -dy;
+    ny = winding > 0 ? -dx : dx;
+  }
+
+  return { ax: p1.x, ay: p1.y, dx, dy, nx, ny, len, index: idx };
+}
+
+export const wallLength = (room, wall) => wallSeg(room, wall).len;
+
+export function interiorPolygon(room, wallThickness = WT) {
+  const pts = getRoomPoints(room);
+  const n = pts.length;
+  if (n < 3) return pts;
+
+  const segs = [];
+  for (let i = 0; i < n; i++) {
+    segs.push(wallSeg(room, i));
+  }
+
+  const offset = wallThickness / 2;
+  const shiftedLines = segs.map((s) => ({
+    px: s.ax + s.nx * offset,
+    py: s.ay + s.ny * offset,
+    dx: s.dx,
+    dy: s.dy,
+  }));
+
+  const innerPts = [];
+  for (let i = 0; i < n; i++) {
+    const prevIdx = (i - 1 + n) % n;
+    const line1 = shiftedLines[prevIdx];
+    const line2 = shiftedLines[i];
+
+    const denom = line1.dx * line2.dy - line1.dy * line2.dx;
+    if (Math.abs(denom) < 1e-6) {
+      innerPts.push({ x: line2.px, y: line2.py });
+    } else {
+      const s = ((line2.px - line1.px) * line2.dy - (line2.py - line1.py) * line2.dx) / denom;
+      innerPts.push({
+        x: line1.px + s * line1.dx,
+        y: line1.py + s * line1.dy,
+      });
+    }
+  }
+
+  return innerPts;
+}
+
+/** Clear interior bounding box or polygon. */
 export function interior(room) {
-  const i = WT / 2;
-  return { x: room.x + i, y: room.y + i, w: room.w - WT, h: room.h - WT };
+  const innerPts = interiorPolygon(room, WT);
+  const bbox = getRoomBoundingBox(innerPts);
+  return bbox;
 }
 
-export const floorAreaSqFt = (room) => (interior(room).w * interior(room).h) / 144;
+export const floorAreaSqFt = (room) => polygonArea(interiorPolygon(room)) / 144;
 
 export function overlapLen(a0, a1, b0, b1) {
   return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
@@ -273,8 +463,39 @@ export const rectInside = (inner, outer, eps = 0.01) =>
   inner.x + inner.w <= outer.x + outer.w + eps &&
   inner.y + inner.h <= outer.y + outer.h + eps;
 
+export function pointInPolygon(p, polygon) {
+  let inside = false;
+  const n = polygon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].x,
+      yi = polygon[i].y;
+    const xj = polygon[j].x,
+      yj = polygon[j].y;
+    const intersect = yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 /** Rooms may touch edge-to-edge but never overlap. */
-export const roomsOverlap = (a, b) => rectsOverlap(a, b, EPS);
+export function roomsOverlap(a, b) {
+  if (!a || !b) return false;
+  const polyA = getRoomPoints(a);
+  const polyB = getRoomPoints(b);
+  // Quick bounding box check
+  const boxA = getRoomBoundingBox(polyA);
+  const boxB = getRoomBoundingBox(polyB);
+  if (!rectsOverlap(boxA, boxB, EPS)) return false;
+
+  // Check vertex inside other polygon
+  for (const pt of polyA) {
+    if (pointInPolygon(pt, polyB)) return true;
+  }
+  for (const pt of polyB) {
+    if (pointInPolygon(pt, polyA)) return true;
+  }
+  return rectsOverlap(boxA, boxB, EPS);
+}
 
 /** World point of wall-offset `t` plus `depth` inches toward the room interior. */
 export function wallPoint(room, wall, t, depth = 0) {
@@ -285,24 +506,34 @@ export function wallPoint(room, wall, t, depth = 0) {
 /** Neighbouring rooms flush against `wall`, with their overlap interval in this wall's offset space. */
 export function wallNeighbors(rooms, room, wall) {
   const out = [];
+  const s1 = wallSeg(room, wall);
+  if (s1.len <= EPS) return out;
+
   for (const r of rooms) {
     if (r.id === room.id || lv(r) !== lv(room)) continue;
-    let from;
-    let to;
-    if (wall === 'N' && Math.abs(r.y + r.h - room.y) < EPS) {
-      from = Math.max(r.x, room.x) - room.x;
-      to = Math.min(r.x + r.w, room.x + room.w) - room.x;
-    } else if (wall === 'S' && Math.abs(r.y - (room.y + room.h)) < EPS) {
-      from = Math.max(r.x, room.x) - room.x;
-      to = Math.min(r.x + r.w, room.x + room.w) - room.x;
-    } else if (wall === 'W' && Math.abs(r.x + r.w - room.x) < EPS) {
-      from = Math.max(r.y, room.y) - room.y;
-      to = Math.min(r.y + r.h, room.y + room.h) - room.y;
-    } else if (wall === 'E' && Math.abs(r.x - (room.x + room.w)) < EPS) {
-      from = Math.max(r.y, room.y) - room.y;
-      to = Math.min(r.y + r.h, room.y + room.h) - room.y;
-    } else continue;
-    if (to - from > EPS) out.push({ room: r, from, to });
+    const rPts = getRoomPoints(r);
+    for (let j = 0; j < rPts.length; j++) {
+      const s2 = wallSeg(r, j);
+      if (s2.len <= EPS) continue;
+
+      // Check if walls are parallel and opposite normal direction
+      const dotDir = s1.dx * s2.dx + s1.dy * s2.dy;
+      const dotNorm = s1.nx * s2.nx + s1.ny * s2.ny;
+      if (Math.abs(dotNorm + 1) < 0.1 || Math.abs(dotNorm - 1) < 0.1) {
+        // Distance between wall lines
+        const perpDist = Math.abs((s2.ax - s1.ax) * s1.nx + (s2.ay - s1.ay) * s1.ny);
+        if (perpDist < WT + EPS) {
+          // Project s2 start and end onto s1 direction
+          const t2_start = (s2.ax - s1.ax) * s1.dx + (s2.ay - s1.ay) * s1.dy;
+          const t2_end = t2_start + s2.len * dotDir;
+          const from = Math.max(0, Math.min(t2_start, t2_end));
+          const to = Math.min(s1.len, Math.max(t2_start, t2_end));
+          if (to - from > EPS) {
+            out.push({ room: r, from, to });
+          }
+        }
+      }
+    }
   }
   return out;
 }
@@ -353,7 +584,6 @@ export function facing(rot) {
 export function fixtureZone(item, def, half, front) {
   const f = facing(item.rot);
   const depthTotal = def.d + front;
-  // Local zone: x in [-half, half], y in [-d/2, d/2+front] (y toward front). Convert to world AABB.
   const cx = item.x + f.x * (front / 2);
   const cy = item.y + f.y * (front / 2);
   const lateral = half * 2;
@@ -367,23 +597,20 @@ export function extractRoomEdges(rooms) {
   const edges = [];
   let index = 0;
   for (const r of rooms) {
-    for (const wall of WALLS) {
-      const s = wallSeg(r, wall);
+    const pts = getRoomPoints(r);
+    for (let i = 0; i < pts.length; i++) {
+      const s = wallSeg(r, i);
       const start = { x: s.ax, y: s.ay };
       const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
-      edges.push({ start, end, index: index++, roomId: r.id, wall });
+      const wall = pts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
+      edges.push({ start, end, index: index++, roomId: r.id, wall, edgeIndex: i });
     }
   }
   return edges;
 }
 
 export function roomToPolygon(room) {
-  return [
-    { x: room.x, y: room.y },
-    { x: room.x + room.w, y: room.y },
-    { x: room.x + room.w, y: room.y + room.h },
-    { x: room.x, y: room.y + room.h },
-  ];
+  return getRoomPoints(room);
 }
 
 export function itemToPolygon(item, def) {
