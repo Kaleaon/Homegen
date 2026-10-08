@@ -150,4 +150,3 @@ test('Direct consumption of SnappingBridge active snap points for item and openi
   assert.deepEqual(active.point, { x: 60, y: 0 });
   assert.deepEqual(active.indicator, { x: 60, y: 0 });
 });
-
