@@ -3,6 +3,7 @@ export const SNAP_MODES = Object.freeze({
   EDGE: 'edge',
   MIDPOINT: 'midpoint',
   PERPENDICULAR: 'perpendicular',
+  ANGLE: 'angle',
 });
 
 export class SnapModeState {
@@ -12,6 +13,7 @@ export class SnapModeState {
       [SNAP_MODES.EDGE]: true,
       [SNAP_MODES.MIDPOINT]: false,
       [SNAP_MODES.PERPENDICULAR]: false,
+      [SNAP_MODES.ANGLE]: true,
       ...initialState,
     };
   }

@@ -13,6 +13,9 @@ import {
   roomToPolygon,
   itemToPolygon,
   reproject,
+  getRoomPoints,
+  getRoomBoundingBox,
+  polygonArea,
 } from './geometry.js';
 import {
   ROOM_TYPES,
@@ -2321,17 +2324,30 @@ canvas?.addEventListener('pointermove', (e) => {
       preview = tryPreview((n) => M.moveRoom(roomOf(n, drag.id), rc.x, rc.y));
     } else if (drag.kind === 'resize') {
       const r = roomOf(doc, drag.id);
-      const sx = snap(p.x, 6);
-      const sy = snap(p.y, 6);
-      const right = drag.corner % 2 === 1;
-      const bottom = drag.corner >= 2;
-      const rawW = right ? Math.max(0, sx - r.x) : Math.max(0, r.x + r.w - sx);
-      const rawH = bottom ? Math.max(0, sy - r.y) : Math.max(0, r.y + r.h - sy);
-      const clamped = clampRoomDimensions(r, rawW, rawH);
-      const x0 = right ? r.x : r.x + r.w - clamped.w;
-      const y0 = bottom ? r.y : r.y + r.h - clamped.h;
-      drag.target = { x: x0, y: y0, w: clamped.w, h: clamped.h };
-      preview = tryPreview((n) => M.resizeRoom(roomOf(n, drag.id), x0, y0, clamped.w, clamped.h));
+      const pts = getRoomPoints(r);
+      const cornerIdx = drag.corner % pts.length;
+      const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
+      const anchor = pts[prevIdx];
+      const levelRooms = doc.rooms.filter((rm) => (rm.level || 0) === curLevel && rm.id !== r.id);
+      const edges = extractRoomEdges(levelRooms);
+
+      const snapRes = getSnappedPoint({
+        point: p,
+        anchor,
+        edges,
+        settings: interaction.gridSettings,
+        snapModes: interaction.snapModes,
+      });
+
+      const newPt = snapRes.point;
+      const newPts = pts.map((pt, i) => (i === cornerIdx ? { x: newPt.x, y: newPt.y } : { ...pt }));
+
+      if (polygonArea(newPts) > 10) {
+        const bbox = getRoomBoundingBox(newPts);
+        drag.target = { points: newPts, x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
+        preview = tryPreview((n) => M.updateRoomPoints(roomOf(n, drag.id), newPts));
+        if (preview) preview.feedback = snapRes.snapFeedback;
+      }
     } else if (drag.kind === 'room-new') {
       const x1 = snap(p.x, 6);
       const y1 = snap(p.y, 6);
@@ -2454,11 +2470,16 @@ canvas?.addEventListener('pointerup', () => {
     apply((n) => Object.assign(M.findOwner(n, d.id).obj, d.target), 'Move Opening');
   else if (d.kind === 'room')
     apply((n) => M.moveRoom(roomOf(n, d.id), d.target.x, d.target.y), 'Move Room');
-  else if (d.kind === 'resize')
-    apply(
-      (n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h),
-      'Resize Room'
-    );
+  else if (d.kind === 'resize') {
+    if (d.target && d.target.points) {
+      apply((n) => M.updateRoomPoints(roomOf(n, d.id), d.target.points), 'Resize Room Corner');
+    } else if (d.target) {
+      apply(
+        (n) => M.resizeRoom(roomOf(n, d.id), d.target.x, d.target.y, d.target.w, d.target.h),
+        'Resize Room'
+      );
+    }
+  }
 });
 
 canvas?.addEventListener('pointerleave', () => {
@@ -3084,7 +3105,7 @@ $('#file')?.addEventListener('change', async (e) => {
             e.target.value = '';
             return;
           }
-        } catch (err) {
+        } catch (_err) {
           // fall back to standard JSON deserialize
         }
       }

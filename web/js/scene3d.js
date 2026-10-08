@@ -12,6 +12,9 @@ import {
   interior,
   subtractInterval,
   lv,
+  getRoomPoints,
+  getRoomBoundingBox,
+  resolveWallIndex,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -117,10 +120,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       maxZ = -Infinity;
     if (curRooms.length > 0) {
       for (const r of curRooms) {
-        minX = Math.min(minX, r.x);
-        maxX = Math.max(maxX, r.x + r.w);
-        minZ = Math.min(minZ, r.y);
-        maxZ = Math.max(maxZ, r.y + r.h);
+        const bbox = getRoomBoundingBox(getRoomPoints(r));
+        minX = Math.min(minX, bbox.x);
+        maxX = Math.max(maxX, bbox.x + bbox.w);
+        minZ = Math.min(minZ, bbox.y);
+        maxZ = Math.max(maxZ, bbox.y + bbox.h);
       }
       const margin = 120; // 10 feet margin around active level rooms
       minX = (minX - margin) * S;
@@ -588,19 +592,32 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return a;
   };
 
+  function buildRoomShape(pts) {
+    const shape = new THREE.Shape();
+    if (!pts || pts.length < 3) return shape;
+    shape.moveTo(pts[0].x * S, pts[0].y * S);
+    for (let i = 1; i < pts.length; i++) {
+      shape.lineTo(pts[i].x * S, pts[i].y * S);
+    }
+    shape.closePath();
+    return shape;
+  }
+
   function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, faceIdx) {
     const s = wallSeg(room, wall);
-    const horizontal = s.dx === 1;
     const len = t1 - t0;
     const dep = d1 - d0;
     if (len <= 0.01 || y1 - y0 <= 0.01) return;
     const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
-    const m = boxMesh(horizontal ? len : dep, y1 - y0, horizontal ? dep : len, mats);
+    const m = boxMesh(len, y1 - y0, dep, mats);
     const along = (t0 + t1) / 2;
     const off = (d0 + d1) / 2;
     const cx = s.ax + s.dx * along + s.nx * off;
     const cy = s.ay + s.dy * along + s.ny * off;
     m.position.set(cx * S, (elev + (y0 + y1) / 2) * S, cy * S);
+    const m3 = new THREE.Matrix4();
+    m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
+    m.rotation.setFromRotationMatrix(m3);
     group.add(m);
   }
 
@@ -678,17 +695,23 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const slabKey = `${room.id}:slab`;
       activeKeys.add(slabKey);
       const ff = FLOOR_BY_ID[room.floor] || FLOOR_BY_ID.floor_oak;
-      const slabSig = JSON.stringify({ w: room.w, h: room.h, floor: room.floor, hd: opts.hd });
+      const pts = getRoomPoints(room);
+      const slabSig = JSON.stringify({ pts, floor: room.floor, hd: opts.hd });
       let slab = entityMap.get(slabKey);
       if (!slab || slab.userData.sig !== slabSig) {
         if (slab) disposeNode(slab);
-        const fm = finishMaterial(ff, room.w, room.h, room.floor, 0.55);
-        slab = boxMesh(room.w, SLAB, room.h, faceMats(plain('#b9b2a4', 0.95), 2, fm));
+        const fm = finishMaterial(ff, 12, 12, room.floor, 0.55);
+        const shape = buildRoomShape(pts);
+        const geom = new THREE.ExtrudeGeometry(shape, { depth: SLAB * S, bevelEnabled: false });
+        slab = new THREE.Mesh(geom, [fm, plain('#b9b2a4', 0.95)]);
+        slab.rotation.x = Math.PI / 2;
+        slab.castShadow = true;
+        slab.receiveShadow = true;
         slab.userData = { id: slabKey, entityType: 'slab', sig: slabSig };
         roomGroup.add(slab);
         entityMap.set(slabKey, slab);
       }
-      slab.position.set((room.x + room.w / 2) * S, (e - SLAB / 2) * S, (room.y + room.h / 2) * S);
+      slab.position.set(0, e * S, 0);
       box.expandByObject(slab);
 
       // Stairs (keyed by `${room.id}:stairs`)
@@ -696,11 +719,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
         const stairsKey = `${room.id}:stairs`;
         activeKeys.add(stairsKey);
         const stairsSig = JSON.stringify({
-          w: room.w,
-          h: room.h,
+          pts,
           ceiling: room.ceiling,
-          x: room.x,
-          y: room.y,
           e,
         });
         let stairsGroup = entityMap.get(stairsKey);
@@ -718,30 +738,26 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (opts.ceilings) {
         const ceilKey = `${room.id}:ceiling`;
         activeKeys.add(ceilKey);
-        const ceilSig = JSON.stringify({ w: room.w, h: room.h });
+        const ceilSig = JSON.stringify({ pts, ceiling: room.ceiling });
         let ceilMesh = entityMap.get(ceilKey);
         if (!ceilMesh || ceilMesh.userData.sig !== ceilSig) {
           if (ceilMesh) disposeNode(ceilMesh);
-          ceilMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(room.w * S, room.h * S),
-            plain('#f4f2ec', 0.95, { side: THREE.FrontSide })
-          );
+          const shape = buildRoomShape(pts);
+          const geom = new THREE.ShapeGeometry(shape);
+          ceilMesh = new THREE.Mesh(geom, plain('#f4f2ec', 0.95, { side: THREE.FrontSide }));
           ceilMesh.rotation.x = Math.PI / 2;
           ceilMesh.receiveShadow = true;
           ceilMesh.userData = { id: ceilKey, entityType: 'ceiling', sig: ceilSig };
           roomGroup.add(ceilMesh);
           entityMap.set(ceilKey, ceilMesh);
         }
-        ceilMesh.position.set(
-          (room.x + room.w / 2) * S,
-          (e + room.ceiling) * S,
-          (room.y + room.h / 2) * S
-        );
+        ceilMesh.position.set(0, (e + room.ceiling) * S, 0);
       }
 
       // Walls & Openings (keyed by `${room.id}:wall:${wall}`)
       if (showWalls) {
-        for (const wall of WALLS) {
+        const wallKeys = pts.length === 4 ? WALLS : pts.map((_, i) => i);
+        for (const wall of wallKeys) {
           const wallKey = `${room.id}:wall:${wall}`;
           activeKeys.add(wallKey);
           const ops = wallOpenings(state, room, wall);
@@ -751,12 +767,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             return isWindow ? resolveWindowStyle(o) : null;
           });
           const wallSig = JSON.stringify({
-            rx: room.x,
-            ry: room.y,
-            rw: room.w,
-            rh: room.h,
+            pts,
             ceiling: room.ceiling,
-            finish: room.walls[wall],
+            finish: room.walls[wall] || room.walls[resolveWallIndex(wall)],
             uv: getWallUV(room, wall),
             cladding: room.cladding || room.exteriorCladding,
             e,
@@ -948,14 +961,14 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
   function buildWall(group, state, room, wall, e, H) {
     const len = wallLength(room, wall);
-    const s = wallSeg(room, wall);
-    const fin = WALL_BY_ID[room.walls[wall]] || WALL_BY_ID.paint_white;
+    const finishId = room.walls[wall] || room.walls[resolveWallIndex(wall)];
+    const fin = WALL_BY_ID[finishId] || WALL_BY_ID.paint_white;
     const wallUV = getWallUV(room, wall);
     const base = plain('#efece4', 0.9);
-    const visMat = finishMaterial(fin, len, room.ceiling, room.walls[wall], 0.8, wallUV);
-    // interior face index in BoxGeometry order [+x,-x,+y,-y,+z,-z]
-    const face = s.nx === 1 ? 0 : s.nx === -1 ? 1 : s.ny === 1 ? 4 : 5;
-    const outFace = s.nx === 1 ? 1 : s.nx === -1 ? 0 : s.ny === 1 ? 5 : 4;
+    const visMat = finishMaterial(fin, len, room.ceiling, finishId, 0.8, wallUV);
+    // local +z face is face 4 (interior normal), local -z face is face 5 (exterior normal)
+    const face = 4;
+    const outFace = 5;
     const ops = wallOpenings(state, room, wall);
     const cuts = ops.map(({ o, from, to }) => {
       const d = OPENING_BY_ID[o.type];
@@ -1055,11 +1068,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       (elev + y) * S,
       (s.ay + s.dy * t + s.ny * depth) * S
     );
+    const m3 = new THREE.Matrix4();
+    m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
+    mesh.rotation.setFromRotationMatrix(m3);
     return mesh;
   }
   function wallAlignedBox(room, wall, along, h, thick, mat) {
-    const horizontal = wallSeg(room, wall).dx === 1;
-    return boxMesh(horizontal ? along : thick, h, horizontal ? thick : along, mat);
+    return boxMesh(along, h, thick, mat);
   }
   function addWindow(group, room, wall, o, d, e) {
     const og = buildWindow3DMesh({

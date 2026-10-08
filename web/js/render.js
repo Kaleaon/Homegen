@@ -2,12 +2,14 @@
 import {
   WT,
   WALLS,
+  LEGACY_WALL_NAMES,
   wallSeg,
   wallLength,
   wallPoint,
   interior,
   footprint,
   floorAreaSqFt,
+  getRoomPoints,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
@@ -584,7 +586,14 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
 function drawFloor(ctx, room, _opts) {
   const f = FLOOR_BY_ID[room.floor];
   ctx.fillStyle = f ? patternFor(ctx, f) : ROOM_TYPES[room.type].color;
-  ctx.fillRect(room.x, room.y, room.w, room.h);
+  const pts = getRoomPoints(room);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(pts[i].x, pts[i].y);
+  }
+  ctx.closePath();
+  ctx.fill();
   if (room.type === 'stairs') drawStairs(ctx, room);
 }
 
@@ -610,23 +619,23 @@ function drawStairs(ctx, room) {
 }
 
 function drawWalls(ctx, state, room, bad, _opts) {
-  for (const wall of WALLS) {
-    const s = wallSeg(room, wall);
-    const fin = WALL_BY_ID[room.walls[wall]];
-    // wall body: finish on the interior half, structure on the outside half
+  const pts = getRoomPoints(room);
+  for (let i = 0; i < pts.length; i++) {
+    const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
+    const s = wallSeg(room, i);
+    const finId =
+      (room.walls && (room.walls[wallKey] || room.walls[i] || room.walls[LEGACY_WALL_NAMES[i]])) ||
+      'paint_white';
+    const fin = WALL_BY_ID[finId];
     ctx.save();
     ctx.translate(s.ax, s.ay);
-    const horizontal = s.dx === 1;
+    ctx.rotate(Math.atan2(s.dy, s.dx));
     const len = s.len;
-    const rect = (t0, t1, d0, d1) =>
-      horizontal ? [t0, d0, t1 - t0, d1 - d0] : [d0, t0, d1 - d0, t1 - t0];
-    const side = horizontal ? s.ny : s.nx; // +1: interior is on +axis side
-    const inner = side > 0 ? [0, WT / 2] : [-WT / 2, 0];
-    const outer = side > 0 ? [-WT / 2, 0] : [0, WT / 2];
+
     ctx.fillStyle = getToken('--ktheme-border', '#3c3a38');
-    ctx.fillRect(...rect(-WT / 2, len + WT / 2, outer[0], outer[1]));
+    ctx.fillRect(-WT / 2, -WT / 2, len + WT, WT / 2);
     ctx.fillStyle = fin ? patternFor(ctx, fin) : '#ddd';
-    ctx.fillRect(...rect(-WT / 2, len + WT / 2, inner[0], inner[1]));
+    ctx.fillRect(-WT / 2, 0, len + WT, WT / 2);
     ctx.restore();
   }
   for (const room2 of [room])
@@ -635,27 +644,22 @@ function drawWalls(ctx, state, room, bad, _opts) {
 
 export function drawWindow2D(ctx, room, o, def, isBad) {
   const s = wallSeg(room, o.wall);
-  const horizontal = s.dx === 1;
   const th = WT + 0.6;
   const style = resolveWindowStyle(o) || resolveWindowStyle(def);
   const frameColor = isBad
     ? getToken('--ktheme-critical', '#d33')
     : style.frameColor || getToken('--ktheme-border', '#2d2a26');
 
+  ctx.save();
+  ctx.translate(s.ax + s.dx * (o.offset + o.width / 2), s.ay + s.dy * (o.offset + o.width / 2));
+  if (ctx.rotate) ctx.rotate(Math.atan2(s.dy, s.dx));
+
   ctx.fillStyle = 'rgba(120,180,230,.55)';
-  if (horizontal) {
-    ctx.fillRect(0, -1.2, o.width, 2.4);
-  } else {
-    ctx.fillRect(-1.2, 0, 2.4, o.width);
-  }
+  ctx.fillRect(-o.width / 2, -1.2, o.width, 2.4);
 
   ctx.strokeStyle = frameColor;
   ctx.lineWidth = 1.5;
-  if (horizontal) {
-    ctx.strokeRect(0, -th / 2, o.width, th);
-  } else {
-    ctx.strokeRect(-th / 2, 0, th, o.width);
-  }
+  ctx.strokeRect(-o.width / 2, -th / 2, o.width, th);
 
   // Casing trim indicator lines in 2D
   if (style.casing?.width) {
@@ -663,17 +667,10 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
     ctx.strokeStyle = frameColor;
     ctx.lineWidth = 0.8;
     ctx.beginPath();
-    if (horizontal) {
-      ctx.moveTo(-cw, -th / 2);
-      ctx.lineTo(o.width + cw, -th / 2);
-      ctx.moveTo(-cw, th / 2);
-      ctx.lineTo(o.width + cw, th / 2);
-    } else {
-      ctx.moveTo(-th / 2, -cw);
-      ctx.lineTo(-th / 2, o.width + cw);
-      ctx.moveTo(th / 2, -cw);
-      ctx.lineTo(th / 2, o.width + cw);
-    }
+    ctx.moveTo(-o.width / 2 - cw, -th / 2);
+    ctx.lineTo(o.width / 2 + cw, -th / 2);
+    ctx.moveTo(-o.width / 2 - cw, th / 2);
+    ctx.lineTo(o.width / 2 + cw, th / 2);
     ctx.stroke();
   }
 
@@ -688,42 +685,32 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
   if (cols > 1) {
     const colStep = o.width / cols;
     for (let i = 1; i < cols; i++) {
-      const pos = i * colStep;
-      if (horizontal) {
-        ctx.moveTo(pos, -th / 2);
-        ctx.lineTo(pos, th / 2);
-      } else {
-        ctx.moveTo(-th / 2, pos);
-        ctx.lineTo(th / 2, pos);
-      }
+      const pos = -o.width / 2 + i * colStep;
+      ctx.moveTo(pos, -th / 2);
+      ctx.lineTo(pos, th / 2);
     }
   }
 
   if (rows > 1 || def?.style === 'hung') {
-    if (horizontal) {
-      ctx.moveTo(0, 0);
-      ctx.lineTo(o.width, 0);
-    } else {
-      ctx.moveTo(0, 0);
-      ctx.lineTo(0, o.width);
-    }
+    ctx.moveTo(-o.width / 2, 0);
+    ctx.lineTo(o.width / 2, 0);
   }
 
   ctx.stroke();
+  ctx.restore();
 }
 
 function drawOpening(ctx, state, room, o, bad) {
   const def = OPENING_BY_ID[o.type];
   const a = wallPoint(room, o.wall, o.offset, 0);
   const s = wallSeg(room, o.wall);
-  const horizontal = s.dx === 1;
   ctx.save();
   ctx.translate(a.x, a.y);
+  ctx.rotate(Math.atan2(s.dy, s.dx));
   const th = WT + 0.6;
   // gap in wall
   ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
-  if (horizontal) ctx.fillRect(0, -th / 2, o.width, th);
-  else ctx.fillRect(-th / 2, 0, th, o.width);
+  ctx.fillRect(0, -th / 2, o.width, th);
   const isBad = bad.has(o.id);
   ctx.strokeStyle = isBad ? '#d33' : '#2d2a26';
   ctx.lineWidth = 1.2;
@@ -732,13 +719,10 @@ function drawOpening(ctx, state, room, o, bad) {
     drawWindow2D(ctx, room, o, def, isBad);
   } else {
     const dir = o.swing === 'out' ? -1 : 1;
-    const nx = s.nx * dir;
-    const ny = s.ny * dir;
-    // leaf (hinged at start) and swing arc
     const hx = 0;
     const hy = 0;
-    const lx = nx * o.width;
-    const ly = ny * o.width;
+    const lx = 0;
+    const ly = dir * o.width;
     ctx.beginPath();
     ctx.moveTo(hx, hy);
     ctx.lineTo(hx + lx, hy + ly);
@@ -746,10 +730,8 @@ function drawOpening(ctx, state, room, o, bad) {
     ctx.setLineDash([1.5, 1.5]);
     ctx.lineWidth = 0.7;
     ctx.beginPath();
-    const ex = s.dx * o.width;
-    const ey = s.dy * o.width;
     const ang0 = Math.atan2(ly, lx);
-    const ang1 = Math.atan2(ey, ex);
+    const ang1 = 0;
     let d = ang1 - ang0;
     while (d > Math.PI) d -= 2 * Math.PI;
     while (d < -Math.PI) d += 2 * Math.PI;
@@ -758,8 +740,7 @@ function drawOpening(ctx, state, room, o, bad) {
     ctx.setLineDash([]);
     if (def.exterior) {
       ctx.fillStyle = 'rgba(80,60,40,.5)';
-      if (horizontal) ctx.fillRect(0, -th / 2, o.width, th);
-      else ctx.fillRect(-th / 2, 0, th, o.width);
+      ctx.fillRect(0, -th / 2, o.width, th);
     }
   }
   ctx.restore();
@@ -996,6 +977,9 @@ export function drawItem(ctx, room, it, def, isBad, selected, ghost) {
 function drawLabel(ctx, room, view) {
   const ir = interior(room);
   const area = floorAreaSqFt(room);
+  const pts = getRoomPoints(room);
+  const cx = pts.reduce((sum, p) => sum + p.x, 0) / pts.length;
+  const cy = pts.reduce((sum, p) => sum + p.y, 0) / pts.length;
   ctx.save();
   ctx.fillStyle = 'rgba(30,30,30,.82)';
   ctx.textAlign = 'center';
@@ -1006,14 +990,14 @@ function drawLabel(ctx, room, view) {
     ctx.font = `600 ${fs}px ${sansFont}`;
     ctx.fillStyle = getToken('--ktheme-bg-surface', 'rgba(255,255,255,.7)');
     const label = `${room.name}`;
-    const sub = `${fmt(ir.w)} × ${fmt(ir.h)} · ${area.toFixed(0)} sf`;
+    const sub = `${area.toFixed(0)} sf`;
     const tw = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width * 0.85) + 6;
-    ctx.fillRect(room.x + room.w / 2 - tw / 2, room.y + room.h / 2 - fs * 1.1, tw, fs * 2.2);
+    ctx.fillRect(cx - tw / 2, cy - fs * 1.1, tw, fs * 2.2);
     ctx.fillStyle = getToken('--ktheme-text', 'rgba(30,30,30,.9)');
-    ctx.fillText(label, room.x + room.w / 2, room.y + room.h / 2 - fs * 0.4);
+    ctx.fillText(label, cx, cy - fs * 0.4);
     ctx.font = `${fs * 0.8}px ${sansFont}`;
     ctx.fillStyle = getToken('--ktheme-text-muted', 'rgba(30,30,30,.65)');
-    ctx.fillText(sub, room.x + room.w / 2, room.y + room.h / 2 + fs * 0.6);
+    ctx.fillText(sub, cx, cy + fs * 0.6);
   }
   ctx.restore();
 }
@@ -1067,7 +1051,12 @@ function drawSelection(ctx, state, selection, view) {
       if (room.id === id) {
         drawRing(() => {
           ctx.beginPath();
-          ctx.rect(room.x, room.y, room.w, room.h);
+          const pts = getRoomPoints(room);
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y);
+          }
+          ctx.closePath();
         });
         updateGroupBounds(room.x, room.y, room.w, room.h);
 
@@ -1143,12 +1132,10 @@ function drawSelection(ctx, state, selection, view) {
   }
 }
 
-export const handles = (r) => [
-  [r.x, r.y],
-  [r.x + r.w, r.y],
-  [r.x, r.y + r.h],
-  [r.x + r.w, r.y + r.h],
-];
+export const handles = (r) => {
+  const pts = getRoomPoints(r);
+  return pts.map((p) => [p.x, p.y]);
+};
 
 export function findDiffTarget(state, id) {
   if (!id) return null;
