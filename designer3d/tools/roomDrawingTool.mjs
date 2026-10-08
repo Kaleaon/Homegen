@@ -7,10 +7,28 @@ export class RoomDrawingTool {
     this.settings = settings;
     this.snapModes = snapModes;
     this.points = [];
+    this.bulges = [];
   }
 
   reset() {
     this.points = [];
+    this.bulges = [];
+  }
+
+  setEdgeBulge(index, bulge) {
+    if (index >= 0) {
+      this.bulges[index] = bulge;
+    }
+  }
+
+  getEdgeBulge(index) {
+    return this.bulges[index] || 0;
+  }
+
+  adjustBulge(index, delta) {
+    const current = this.getEdgeBulge(index);
+    this.setEdgeBulge(index, current + delta);
+    return this.getEdgeBulge(index);
   }
 
   /**
@@ -27,6 +45,10 @@ export class RoomDrawingTool {
     });
 
     this.points.push(point);
+    if (this.points.length > 1) {
+      const edgeIdx = this.points.length - 2;
+      this.bulges[edgeIdx] = context.bulge || this.bulges[edgeIdx] || 0;
+    }
 
     return {
       corner: point,
@@ -51,8 +73,12 @@ export class RoomDrawingTool {
 
     const candidate = [...this.points, point];
     const validation = validatePlacement(candidate, context.existingRooms || []);
+    const feedback = createPlacementFeedback(candidate, validation);
 
-    return createPlacementFeedback(candidate, validation);
+    return {
+      ...feedback,
+      bulges: [...this.bulges, context.bulge || 0],
+    };
   }
 
   closeRoom(context = {}) {
@@ -74,8 +100,14 @@ export class RoomDrawingTool {
       };
     }
 
+    const finalBulges = [];
+    for (let i = 0; i < closedPoints.length; i += 1) {
+      finalBulges.push(this.bulges[i] || 0);
+    }
+
     const room = {
       corners: closedPoints,
+      bulges: finalBulges,
       closed: true,
     };
 

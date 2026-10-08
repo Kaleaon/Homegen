@@ -15,6 +15,8 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
   resolveWallIndex,
+  getArcParameters,
+  pointOnArc,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -621,6 +623,140 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     group.add(m);
   }
 
+  function addCurvedWallBox(group, room, wall, bulge, t0, t1, y0, y1, d0, d1, elev, mat) {
+    const len = wallLength(room, wall);
+    const s = wallSeg(room, wall);
+    const start = { x: s.ax, y: s.ay };
+    const end = { x: s.ax + s.dx * len, y: s.ay + s.dy * len };
+    const arc = getArcParameters(start, end, bulge);
+
+    if (arc.isLinear || Math.abs(t1 - t0) <= 0.01 || Math.abs(y1 - y0) <= 0.01) {
+      addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat);
+      return;
+    }
+
+    const u0 = t0 / len;
+    const u1 = t1 / len;
+    const pieceArcLen = arc.arcLength * Math.abs(u1 - u0);
+
+    let camDist = 20;
+    if (camera && camera.position) {
+      const midPoint = pointOnArc(start, end, bulge, (u0 + u1) / 2);
+      camDist = Math.hypot(camera.position.x - midPoint.x * S, camera.position.z - midPoint.y * S);
+    }
+    const maxSegLen = Math.max(2, Math.min(12, camDist * 0.5));
+    const N = Math.max(8, Math.min(64, Math.ceil(pieceArcLen / maxSegLen)));
+
+    const numVertices = (N + 1) * 4;
+    const positions = new Float32Array(numVertices * 3);
+    const normals = new Float32Array(numVertices * 3);
+    const uvs = new Float32Array(numVertices * 2);
+
+    const tileInches = 24;
+    let vIdx = 0;
+    let uvIdx = 0;
+
+    for (let k = 0; k <= N; k++) {
+      const uk = u0 + (k / N) * (u1 - u0);
+      const pt = pointOnArc(start, end, bulge, uk);
+      const angle = arc.startAngle + uk * arc.sweepAngle;
+      const nx = Math.cos(angle);
+      const ny = Math.sin(angle);
+
+      const inX = pt.x + d0 * nx;
+      const inY = pt.y + d0 * ny;
+      const outX = pt.x + d1 * nx;
+      const outY = pt.y + d1 * ny;
+
+      const arcDist = uk * arc.arcLength;
+      const uVal = arcDist / tileInches;
+      const vVal0 = y0 / tileInches;
+      const vVal1 = y1 / tileInches;
+
+      // 0: inner bottom
+      positions[vIdx] = inX * S;
+      positions[vIdx + 1] = (elev + y0) * S;
+      positions[vIdx + 2] = inY * S;
+      normals[vIdx] = nx;
+      normals[vIdx + 1] = 0;
+      normals[vIdx + 2] = ny;
+      uvs[uvIdx] = uVal;
+      uvs[uvIdx + 1] = vVal0;
+
+      // 1: inner top
+      positions[vIdx + 3] = inX * S;
+      positions[vIdx + 4] = (elev + y1) * S;
+      positions[vIdx + 5] = inY * S;
+      normals[vIdx + 3] = nx;
+      normals[vIdx + 4] = 0;
+      normals[vIdx + 5] = ny;
+      uvs[uvIdx + 2] = uVal;
+      uvs[uvIdx + 3] = vVal1;
+
+      // 2: outer bottom
+      positions[vIdx + 6] = outX * S;
+      positions[vIdx + 7] = (elev + y0) * S;
+      positions[vIdx + 8] = outY * S;
+      normals[vIdx + 6] = -nx;
+      normals[vIdx + 7] = 0;
+      normals[vIdx + 8] = -ny;
+      uvs[uvIdx + 4] = uVal;
+      uvs[uvIdx + 5] = vVal0;
+
+      // 3: outer top
+      positions[vIdx + 9] = outX * S;
+      positions[vIdx + 10] = (elev + y1) * S;
+      positions[vIdx + 11] = outY * S;
+      normals[vIdx + 9] = -nx;
+      normals[vIdx + 10] = 0;
+      normals[vIdx + 11] = -ny;
+      uvs[uvIdx + 6] = uVal;
+      uvs[uvIdx + 7] = vVal1;
+
+      vIdx += 12;
+      uvIdx += 8;
+    }
+
+    const indices = [];
+    for (let k = 0; k < N; k++) {
+      const baseK = k * 4;
+      const nextK = (k + 1) * 4;
+
+      // Inner face
+      indices.push(baseK + 0, nextK + 0, nextK + 1);
+      indices.push(baseK + 0, nextK + 1, baseK + 1);
+
+      // Outer face
+      indices.push(baseK + 2, nextK + 3, nextK + 2);
+      indices.push(baseK + 2, baseK + 3, nextK + 3);
+
+      // Top face
+      indices.push(baseK + 1, nextK + 1, nextK + 3);
+      indices.push(baseK + 1, nextK + 3, baseK + 3);
+
+      // Bottom face
+      indices.push(baseK + 0, nextK + 2, nextK + 0);
+      indices.push(baseK + 0, baseK + 2, nextK + 2);
+    }
+
+    // Caps
+    indices.push(0, 1, 3, 0, 3, 2);
+    const last = N * 4;
+    indices.push(last + 0, last + 3, last + 1, last + 0, last + 2, last + 3);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geom.setIndex(indices);
+
+    const useMat = mat.vis || mat.base || mat;
+    const mesh = new THREE.Mesh(geom, useMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+
   /** Cut a wall span [a,b] into solid pieces around openings; calls piece(t0,t1,y0,y1) for each solid block. */
   function cutPieces(a, b, cuts, H, piece) {
     const inside = cuts.filter((c) => c.to > a && c.from < b).sort((x, y) => x.from - y.from);
@@ -975,9 +1111,25 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       return { from, to, sill: d.sill, head: d.sill + d.h, o, d };
     });
     const inner = { base, vis: visMat };
-    cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
-      addWallBox(group, room, wall, t0, t1, y0, y1, 0, WT / 2, e, inner, face)
-    );
+
+    const wallIndex = WALLS.indexOf(wall);
+    let bulge = 0;
+    if (room.bulges) {
+      if (typeof room.bulges[wall] === 'number') bulge = room.bulges[wall];
+      else if (Array.isArray(room.bulges) && typeof room.bulges[wallIndex] === 'number')
+        bulge = room.bulges[wallIndex];
+    }
+
+    if (bulge) {
+      cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
+        addCurvedWallBox(group, room, wall, bulge, t0, t1, y0, y1, 0, WT / 2, e, inner)
+      );
+    } else {
+      cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
+        addWallBox(group, room, wall, t0, t1, y0, y1, 0, WT / 2, e, inner, face)
+      );
+    }
+
     // exterior shell where nothing is behind the wall
     let ext = [[-WT / 2, len + WT / 2]];
     for (const n of wallNeighbors(state.rooms, room, wall))
@@ -990,23 +1142,34 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     extFinId = extFin.id || extFinId || 'cladding_siding_white';
 
     const sidingMat = finishMaterial(extFin, len, room.ceiling, extFinId, 0.85);
-    for (const [a, b] of ext)
-      cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
-        addWallBox(
-          group,
-          room,
-          wall,
-          t0,
-          t1,
-          y0,
-          y1,
-          -WT / 2,
-          0,
-          e,
-          { base: sidingMat, vis: sidingMat },
-          outFace
-        )
-      );
+    if (bulge) {
+      for (const [a, b] of ext)
+        cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
+          addCurvedWallBox(group, room, wall, bulge, t0, t1, y0, y1, -WT / 2, 0, e, {
+            base: sidingMat,
+            vis: sidingMat,
+          })
+        );
+    } else {
+      for (const [a, b] of ext)
+        cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
+          addWallBox(
+            group,
+            room,
+            wall,
+            t0,
+            t1,
+            y0,
+            y1,
+            -WT / 2,
+            0,
+            e,
+            { base: sidingMat, vis: sidingMat },
+            outFace
+          )
+        );
+    }
+
     // fill the thin cut-through strip for openings between rooms is intentionally left open
     for (const { o, d } of cuts) {
       if (!room.openings.includes(o)) continue; // draw each opening once, from its owner
@@ -1062,6 +1225,32 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   }
 
   function placeInWall(room, wall, t, y, depth, elev, mesh) {
+    const wallIndex = WALLS.indexOf(wall);
+    let bulge = 0;
+    if (room.bulges) {
+      if (typeof room.bulges[wall] === 'number') bulge = room.bulges[wall];
+      else if (Array.isArray(room.bulges) && typeof room.bulges[wallIndex] === 'number')
+        bulge = room.bulges[wallIndex];
+    }
+
+    if (bulge) {
+      const len = wallLength(room, wall);
+      const s = wallSeg(room, wall);
+      const start = { x: s.ax, y: s.ay };
+      const end = { x: s.ax + s.dx * len, y: s.ay + s.dy * len };
+      const arc = getArcParameters(start, end, bulge);
+      const u = t / len;
+      const pt = pointOnArc(start, end, bulge, u);
+      const angle = arc.startAngle + u * arc.sweepAngle;
+      const nx = Math.cos(angle);
+      const ny = Math.sin(angle);
+
+      mesh.position.set((pt.x + depth * nx) * S, (elev + y) * S, (pt.y + depth * ny) * S);
+      const tangentAngle = angle + (Math.PI / 2) * Math.sign(bulge);
+      mesh.rotation.y = -tangentAngle;
+      return mesh;
+    }
+
     const s = wallSeg(room, wall);
     mesh.position.set(
       (s.ax + s.dx * t + s.nx * depth) * S,

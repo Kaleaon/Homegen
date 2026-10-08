@@ -1,5 +1,14 @@
 import { quantize } from '../../designer3d/tools/gridSettings.mjs';
+import {
+  closestPointOnArc,
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  tessellateArc,
+} from '../../designer3d/tools/math2d.mjs';
 import proj4 from '#proj4';
+
+export { closestPointOnArc, arcPolygonEdges, getArcParameters, pointOnArc, tessellateArc };
 
 // Register common regional EPSG projection definitions
 if (proj4 && proj4.defs) {
@@ -597,13 +606,42 @@ export function extractRoomEdges(rooms) {
   const edges = [];
   let index = 0;
   for (const r of rooms) {
-    const pts = getRoomPoints(r);
-    for (let i = 0; i < pts.length; i++) {
-      const s = wallSeg(r, i);
-      const start = { x: s.ax, y: s.ay };
-      const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
-      const wall = pts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
-      edges.push({ start, end, index: index++, roomId: r.id, wall, edgeIndex: i });
+    const pts = r.points || r.corners || r.vertices;
+    if (Array.isArray(pts) && pts.length >= 2) {
+      const bulges = Array.isArray(r.bulges) ? r.bulges : [];
+      const numPts = pts.length;
+      for (let i = 0; i < numPts; i++) {
+        const next = (i + 1) % numPts;
+        if (i === numPts - 1 && r.closed === false) continue;
+        let bulge = bulges[i] || pts[i]?.bulge || 0;
+        const wall = pts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
+        if (!bulge && r.bulges && typeof r.bulges[wall] === 'number') {
+          bulge = r.bulges[wall];
+        }
+        edges.push({
+          start: pts[i],
+          end: pts[next],
+          bulge,
+          index: index++,
+          roomId: r.id,
+          wall,
+          edgeIndex: i,
+        });
+      }
+    } else {
+      const roomPts = getRoomPoints(r);
+      for (let i = 0; i < roomPts.length; i++) {
+        const s = wallSeg(r, i);
+        const start = { x: s.ax, y: s.ay };
+        const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+        const wall = roomPts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
+        let bulge = 0;
+        if (r.bulges) {
+          if (typeof r.bulges[wall] === 'number') bulge = r.bulges[wall];
+          else if (Array.isArray(r.bulges) && typeof r.bulges[i] === 'number') bulge = r.bulges[i];
+        }
+        edges.push({ start, end, bulge, index: index++, roomId: r.id, wall, edgeIndex: i });
+      }
     }
   }
   return edges;
