@@ -1,4 +1,5 @@
 import { validatePlacement } from './collision.mjs';
+import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
 
 /**
  * Format length in inches to feet/inches string (e.g. 144 -> 12' 0").
@@ -129,6 +130,26 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
   const isValid = dimValidation.isValid && collisionValid;
   const dimensionText = fmtDimensionText(newW, newH);
 
+  const resolveToken = typeof options.getToken === 'function' ? options.getToken : defaultGetToken;
+  const safeGetToken = (name, fallback) => {
+    if (typeof resolveToken === 'function') {
+      try {
+        return resolveToken(name, fallback) || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  };
+
+  const color = isValid
+    ? safeGetToken('--ktheme-info', '#2a7fff')
+    : safeGetToken('--ktheme-critical', '#f87171');
+
+  const handleColor = isValid
+    ? safeGetToken('--ktheme-on-primary', '#ffffff')
+    : safeGetToken('--ktheme-critical', '#f87171');
+
   return {
     rect,
     dimensionText,
@@ -137,8 +158,8 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
     violations: dimValidation.violations,
     handleIndex,
     feedback: {
-      color: isValid ? '#2a7fff' : '#f87171',
-      handleColor: isValid ? '#ffffff' : '#f87171',
+      color,
+      handleColor,
       dimensionText,
     },
   };
