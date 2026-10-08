@@ -85,34 +85,55 @@ function lintCssPlugin(options = {}) {
 lintCssPlugin.postcss = true;
 
 async function runLinter() {
-  const targetFile = process.argv[2]
-    ? path.resolve(process.cwd(), process.argv[2])
-    : fs.existsSync(path.resolve(webRoot, 'css/src/style.css'))
+  const args = process.argv.slice(2);
+  let targetFiles;
+
+  if (args.length > 0) {
+    targetFiles = args.map((arg) => path.resolve(process.cwd(), arg));
+  } else {
+    const defaultFile = fs.existsSync(path.resolve(webRoot, 'css/src/style.css'))
       ? path.resolve(webRoot, 'css/src/style.css')
       : path.resolve(webRoot, 'css/style.css');
-
-  console.log(`🔍 Running Ktheme CSS Token Linter on: ${targetFile}`);
-
-  if (!fs.existsSync(targetFile)) {
-    console.error(`❌ Target CSS file not found: ${targetFile}`);
-    process.exit(1);
+    targetFiles = [defaultFile];
   }
 
-  const cssContent = fs.readFileSync(targetFile, 'utf8');
-  let lintErrors = [];
+  let totalLintErrors = [];
 
-  await postcss([
-    lintCssPlugin({
-      onComplete: (errors) => {
-        lintErrors = errors;
-      },
-    }),
-  ]).process(cssContent, { from: targetFile });
+  for (const targetFile of targetFiles) {
+    console.log(`🔍 Running Ktheme CSS Token Linter on: ${targetFile}`);
 
-  if (lintErrors.length > 0) {
-    console.error(`\n❌ Token Compliance Linting Failed with ${lintErrors.length} error(s):\n`);
-    for (const err of lintErrors) {
-      console.error(`  [Line ${err.line}] ${err.selector} { ${err.prop}: ${err.value} }`);
+    if (!fs.existsSync(targetFile)) {
+      console.error(`❌ Target CSS file not found: ${targetFile}`);
+      process.exit(1);
+    }
+
+    const cssContent = fs.readFileSync(targetFile, 'utf8');
+    let lintErrors = [];
+
+    await postcss([
+      lintCssPlugin({
+        onComplete: (errors) => {
+          lintErrors = errors;
+        },
+      }),
+    ]).process(cssContent, { from: targetFile });
+
+    if (lintErrors.length > 0) {
+      totalLintErrors.push(
+        ...lintErrors.map((err) => ({
+          ...err,
+          file: targetFile,
+        }))
+      );
+    }
+  }
+
+  if (totalLintErrors.length > 0) {
+    console.error(
+      `\n❌ Token Compliance Linting Failed with ${totalLintErrors.length} error(s):\n`
+    );
+    for (const err of totalLintErrors) {
+      console.error(`  [${err.file}:${err.line}] ${err.selector} { ${err.prop}: ${err.value} }`);
       console.error(`    ↳ Error: ${err.message}`);
       console.error(`    ↳ Suggestion: ${err.suggestion}\n`);
     }

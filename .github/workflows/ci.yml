@@ -55,6 +55,9 @@ jobs:
       - name: Run Node lint checks
         run: npm run lint
 
+      - name: Run Node style lint checks
+        run: npm run lint:style
+
       - name: Run Node format checks
         run: npm run format:check
 
