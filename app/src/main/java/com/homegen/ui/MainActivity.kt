@@ -8,6 +8,7 @@ import com.homegen.designer3d.commands.CommandStack
 import com.homegen.designer3d.input.InteractionController
 import com.homegen.designer3d.rendering.FilamentSurfaceManager
 import com.ktheme.android.KthemeComposeTheme
+import com.ktheme.android.KthemeSystemBarAdapter
 
 class MainActivity : ComponentActivity() {
 
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KthemeComposeTheme {
+                KthemeSystemBarAdapter()
                 HomegenScreen(
                     surfaceManager = surfaceManager,
                     commandStack = commandStack,
