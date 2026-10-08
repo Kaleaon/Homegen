@@ -46,7 +46,10 @@ test('M.addRoom creates a new room in state for both argument signatures', () =>
 });
 
 test('RoomDrawingTool and InteractionLayer support sequential corner placement and close validation', () => {
-  const tool = new RoomDrawingTool(createGridSettings({ magneticThreshold: 12, unitSize: 1 }), new SnapModeState());
+  const tool = new RoomDrawingTool(
+    createGridSettings({ magneticThreshold: 12, unitSize: 1 }),
+    new SnapModeState()
+  );
   assert.equal(tool.getCornerCount(), 0);
   assert.equal(tool.canClose(), false);
 

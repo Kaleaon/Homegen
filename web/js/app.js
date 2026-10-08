@@ -1295,19 +1295,35 @@ function renderInspector() {
         const step = parseFloat(e.currentTarget.dataset.step);
         if (target === 'pos-x') {
           const dir = step > 0 ? 'East' : 'West';
-          apply((n) => M.moveRoom(roomOf(n, room.id), room.x + step, room.y), 'Nudge Room Position X');
-          announceToLiveRegion(`${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`);
+          apply(
+            (n) => M.moveRoom(roomOf(n, room.id), room.x + step, room.y),
+            'Nudge Room Position X'
+          );
+          announceToLiveRegion(
+            `${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`
+          );
         } else if (target === 'pos-y') {
           const dir = step > 0 ? 'South' : 'North';
-          apply((n) => M.moveRoom(roomOf(n, room.id), room.x, room.y + step), 'Nudge Room Position Y');
-          announceToLiveRegion(`${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`);
+          apply(
+            (n) => M.moveRoom(roomOf(n, room.id), room.x, room.y + step),
+            'Nudge Room Position Y'
+          );
+          announceToLiveRegion(
+            `${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`
+          );
         } else if (target === 'width') {
           const newW = Math.max(24, room.w + step);
-          apply((n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, newW, room.h), 'Nudge Room Width');
+          apply(
+            (n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, newW, room.h),
+            'Nudge Room Width'
+          );
           announceToLiveRegion(`${room.name} width adjusted to ${newW} inches.`);
         } else if (target === 'depth') {
           const newH = Math.max(24, room.h + step);
-          apply((n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, room.w, newH), 'Nudge Room Depth');
+          apply(
+            (n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, room.w, newH),
+            'Nudge Room Depth'
+          );
           announceToLiveRegion(`${room.name} depth adjusted to ${newH} inches.`);
         }
       });
@@ -1691,7 +1707,9 @@ function moveSelectedSpatial(dx, dy, customStep = null) {
         const r = apply(moveItemMutation(selection, pl));
         if (r.ok) {
           toast(`Moved ${def.name} in ${pl.room.name}`, false, 1800);
-          announceToLiveRegion(`${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+          announceToLiveRegion(
+            `${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+          );
         }
       }
     } else if (def.mount === 'wall') {
@@ -1704,7 +1722,9 @@ function moveSelectedSpatial(dx, dy, customStep = null) {
       });
       if (r.ok) {
         toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
-        announceToLiveRegion(`${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+        announceToLiveRegion(
+          `${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+        );
       }
     }
   } else if (kind === 'opening') {
@@ -1718,7 +1738,9 @@ function moveSelectedSpatial(dx, dy, customStep = null) {
     });
     if (r.ok) {
       toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
-      announceToLiveRegion(`${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+      announceToLiveRegion(
+        `${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+      );
     }
   } else if (kind === 'room') {
     const step = customStep ?? 6;
@@ -1727,7 +1749,9 @@ function moveSelectedSpatial(dx, dy, customStep = null) {
     const r = apply((n) => M.moveRoom(roomOf(n, room.id), newX, newY), 'Move Room');
     if (r.ok) {
       toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
-      announceToLiveRegion(`${room.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`);
+      announceToLiveRegion(
+        `${room.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+      );
     }
   }
 }
@@ -2509,6 +2533,10 @@ canvas?.addEventListener('pointermove', (e) => {
   redraw();
 });
 
+function moveItemTo(id, pl) {
+  return moveItemMutation(id, pl);
+}
+
 function handleCloseRoom() {
   if (!interaction.canCloseRoom || !interaction.canCloseRoom()) {
     toast('At least 3 corners are required to close a room.', true);
@@ -2527,7 +2555,9 @@ function handleCloseRoom() {
     const y = minY;
     const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
     if (r.ok) {
-      announceToLiveRegion(`Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`);
+      announceToLiveRegion(
+        `Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+      );
       interaction.resetRoomDrawing();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
@@ -2536,7 +2566,10 @@ function handleCloseRoom() {
       redraw();
     }
   } else {
-    toast('Invalid room placement. Room corners overlap existing geometry or violate code constraints.', true);
+    toast(
+      'Invalid room placement. Room corners overlap existing geometry or violate code constraints.',
+      true
+    );
     announceToLiveRegion('Invalid room placement.');
   }
 }
@@ -2586,7 +2619,9 @@ function setupAddRoomDimsModal() {
     const r = apply((n) => M.addRoom(n, x, y, w, h, type, { level: curLevel }), 'Add Room');
     if (r.ok) {
       const typeName = ROOM_TYPES[type]?.name || type;
-      announceToLiveRegion(`${typeName} room added at (${x}", ${y}") with dimensions ${w}" × ${h}".`);
+      announceToLiveRegion(
+        `${typeName} room added at (${x}", ${y}") with dimensions ${w}" × ${h}".`
+      );
       closeAddRoomDimsModal();
     }
   });
