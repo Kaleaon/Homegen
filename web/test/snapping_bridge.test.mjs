@@ -79,3 +79,15 @@ test('SnappingBridge responds to toolbar snap mode toggles', () => {
   snapRes = bridge.computeSnap({ x: 60, y: 0.2 });
   assert.equal(snapRes.snap?.type, 'midpoint');
 });
+
+test('buildToggleViewModel includes token declarations for UI snap toggles', async () => {
+  const { buildToggleViewModel } = await import('../../designer3d/tools/index.mjs');
+  const interaction = new InteractionLayer();
+  const vms = buildToggleViewModel(interaction);
+
+  assert.equal(vms.length, 4);
+  for (const vm of vms) {
+    assert.equal(vm.token, '--ktheme-accent');
+    assert.equal(vm.tokenHover, '--ktheme-accent-hover');
+  }
+});

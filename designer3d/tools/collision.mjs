@@ -1,4 +1,5 @@
 import { polygonEdges } from './math2d.mjs';
+import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
 
 function boundingBox(points) {
   const xs = points.map((p) => p.x);
@@ -69,12 +70,32 @@ export function validatePlacement(candidatePolygon, existingPolygons = []) {
   };
 }
 
-export function createPlacementFeedback(candidatePolygon, validation) {
+export function createPlacementFeedback(candidatePolygon, validation, options = {}) {
+  const resolveToken = typeof options.getToken === 'function' ? options.getToken : defaultGetToken;
+  const safeGetToken = (name, fallback) => {
+    if (typeof resolveToken === 'function') {
+      try {
+        return resolveToken(name, fallback) || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  };
+
+  const color = validation.valid
+    ? safeGetToken('--ktheme-success', '#4ade80')
+    : safeGetToken('--ktheme-critical', '#f87171');
+
+  const outline = validation.valid
+    ? safeGetToken('--ktheme-success', '#22c55e')
+    : safeGetToken('--ktheme-critical', '#ef4444');
+
+  const alpha = validation.valid ? 0.3 : 0.35;
+
   return {
     ghostPreview: candidatePolygon,
-    style: validation.valid
-      ? { color: '#4ade80', alpha: 0.3, outline: '#22c55e' }
-      : { color: '#f87171', alpha: 0.35, outline: '#ef4444' },
+    style: { color, alpha, outline },
     invalid: !validation.valid,
     reasons: validation.reasons,
   };

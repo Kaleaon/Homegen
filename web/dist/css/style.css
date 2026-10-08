@@ -670,6 +670,14 @@ ul.v .msg {
 .seg button:last-child {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
+#snap-toggles button.on {
+  background: var(--snap-accent, var(--ktheme-accent));
+  color: var(--ktheme-on-primary);
+  border-color: var(--snap-accent, var(--ktheme-accent));
+}
+#snap-toggles button:hover {
+  border-color: var(--snap-accent-hover, var(--snap-accent, var(--ktheme-accent-hover)));
+}
 #bar3d {
   display: flex;
   flex-wrap: wrap;

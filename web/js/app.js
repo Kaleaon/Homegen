@@ -220,10 +220,12 @@ function renderSnapToggles() {
   if (!container) return;
   const viewModels = buildToggleViewModel(interaction);
   container.innerHTML = viewModels
-    .map(
-      (vm) =>
-        `<button data-snap-id="${vm.id}" class="${vm.enabled ? 'on' : ''}" title="${esc(vm.description)}">${esc(vm.label)}</button>`
-    )
+    .map((vm) => {
+      const token = vm.token || '--ktheme-accent';
+      const tokenHover = vm.tokenHover || '--ktheme-accent-hover';
+      const styleAttr = `--snap-accent: var(${token}); --snap-accent-hover: var(${tokenHover});`;
+      return `<button data-snap-id="${vm.id}" class="${vm.enabled ? 'on' : ''}" style="${styleAttr}" title="${esc(vm.description)}">${esc(vm.label)}</button>`;
+    })
     .join('');
   container.querySelectorAll('button[data-snap-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
