@@ -13,6 +13,7 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
 } from './geometry.js';
+import { isRegisteredEPSG } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
@@ -60,7 +61,9 @@ export function defaultCRS() {
 export function isValidEPSGCode(code) {
   if (!code || typeof code !== 'string') return false;
   const trimmed = code.trim().toUpperCase();
-  return /^EPSG:\d+$/.test(trimmed);
+  const normalized = trimmed.startsWith('EPSG:') ? trimmed : `EPSG:${trimmed}`;
+  if (!/^EPSG:\d+$/.test(normalized)) return false;
+  return isRegisteredEPSG(normalized);
 }
 
 export function normalizeEPSGCode(code) {

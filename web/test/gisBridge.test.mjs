@@ -174,3 +174,43 @@ test('Requirement 4: ComplianceOverlayScene registers site layer nodes (gisLotLi
   assert.ok(easementNodes.length > 0, 'Compliance scene graph must contain gisEasement nodes');
   assert.ok(setbackNodes.length > 0, 'Compliance scene graph must contain gisSetbackBuffer nodes');
 });
+
+test('Requirement 4: projectGeoJSON transforms regional State Plane GeoJSON without NaN outputs', () => {
+  const ilGeoJSON = {
+    type: 'FeatureCollection',
+    crs: { properties: { name: 'EPSG:3435' } },
+    features: [
+      {
+        type: 'Feature',
+        id: 'parcel-3435',
+        properties: { name: 'Illinois Municipal Parcel', layer: 'lot' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [1100000, 1900000],
+              [1100500, 1900000],
+              [1100500, 1900500],
+              [1100000, 1900500],
+              [1100000, 1900000],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
+  const targetBounds = { x: 50, y: 50, w: 500, h: 500 };
+  const projected = projectGeoJSON(ilGeoJSON, targetBounds);
+
+  assert.equal(projected.features.length, 1);
+  const points = projected.features[0].points;
+  assert.equal(points.length, 5);
+
+  for (const pt of points) {
+    assert.ok(!isNaN(pt.x), `pt.x (${pt.x}) must not be NaN`);
+    assert.ok(!isNaN(pt.y), `pt.y (${pt.y}) must not be NaN`);
+    assert.ok(pt.x >= targetBounds.x - 1, `pt.x (${pt.x}) should be within target bounds`);
+    assert.ok(pt.y >= targetBounds.y - 1, `pt.y (${pt.y}) should be within target bounds`);
+  }
+});
