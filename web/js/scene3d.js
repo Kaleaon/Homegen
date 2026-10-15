@@ -1314,6 +1314,175 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return g;
   }
 
+  // ---------------------------------------------------------------- Raycasting & Visual Constraint Guide Overlays
+  const raycaster = new THREE.Raycaster();
+  const overlayGroup = new THREE.Group();
+  overlayGroup.renderOrder = 999;
+  scene.add(overlayGroup);
+
+  function raycastPointer(pointerX, pointerY) {
+    if (cameraMode === 'walk') return null; // Walkthrough controls disable object interaction raycasting
+    const rect = canvas.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const nx = ((pointerX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((pointerY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+
+    const candidates = [];
+    for (const node of entityMap.values()) {
+      if (node && node.visible !== false) {
+        candidates.push(node);
+      }
+    }
+    if (ground && ground.visible !== false) {
+      candidates.push(ground);
+    }
+
+    const hits = raycaster.intersectObjects(candidates, true);
+    if (!hits || hits.length === 0) return null;
+
+    const hit = hits[0];
+    const faceNormal = hit.face
+      ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+      : new THREE.Vector3(0, 1, 0);
+
+    return {
+      point3D: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+      pointInches: { x: hit.point.x * 12, y: hit.point.y * 12, z: hit.point.z * 12 },
+      normal: { x: faceNormal.x, y: faceNormal.y, z: faceNormal.z },
+      distance: hit.distance,
+      object: hit.object,
+      userData: hit.object.userData || hit.object.parent?.userData || {},
+    };
+  }
+
+  function getScene3DGeometryContext() {
+    const state = getState();
+    const cur = getLevel();
+    const elev = levelElevations(state);
+    const rooms = state.rooms.filter((r) => lv(r) === cur);
+    const vertices = [];
+    const edges = [];
+
+    for (const room of rooms) {
+      const e = elev[lv(room)];
+      const pts = getRoomPoints(room);
+      for (let i = 0; i < pts.length; i++) {
+        const p1 = pts[i];
+        const p2 = pts[(i + 1) % pts.length];
+
+        const vBottom1 = { x: p1.x, y: e, z: p1.y, id: `${room.id}:v:${i}:bottom` };
+        const vTop1 = { x: p1.x, y: e + room.ceiling, z: p1.y, id: `${room.id}:v:${i}:top` };
+        vertices.push(vBottom1, vTop1);
+
+        // Bottom edge
+        edges.push({
+          start: { x: p1.x, y: e, z: p1.y },
+          end: { x: p2.x, y: e, z: p2.y },
+          index: i,
+        });
+        // Top edge
+        edges.push({
+          start: { x: p1.x, y: e + room.ceiling, z: p1.y },
+          end: { x: p2.x, y: e + room.ceiling, z: p2.y },
+          index: i + 100,
+        });
+        // Vertical corner edge
+        edges.push({ start: vBottom1, end: vTop1, index: i + 200 });
+      }
+
+      for (const it of room.items || []) {
+        vertices.push({ x: it.x, y: e, z: it.y, id: it.id, label: it.type });
+      }
+    }
+
+    return { vertices, edges };
+  }
+
+  function setSnapOverlay3D(snapResult) {
+    clearSnapOverlay3D();
+    if (!snapResult || !snapResult.point) return;
+
+    const ptFeet = {
+      x: snapResult.point.x * S,
+      y: snapResult.point.y * S,
+      z: snapResult.point.z * S,
+    };
+
+    // 1. Target Indicator Ring/Sphere
+    const sphereGeom = new THREE.SphereGeometry(0.35, 16, 16);
+    const sphereMat = new THREE.MeshBasicMaterial({
+      color: '#22c55e',
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const indicator = new THREE.Mesh(sphereGeom, sphereMat);
+    indicator.position.set(ptFeet.x, ptFeet.y, ptFeet.z);
+    overlayGroup.add(indicator);
+
+    // 2. Surface Normal Vector Arrow
+    if (snapResult.normal) {
+      const normVec = new THREE.Vector3(
+        snapResult.normal.x,
+        snapResult.normal.y,
+        snapResult.normal.z
+      ).normalize();
+      const endPt = new THREE.Vector3(ptFeet.x, ptFeet.y, ptFeet.z).addScaledVector(normVec, 1.8);
+      const lineGeom = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(ptFeet.x, ptFeet.y, ptFeet.z),
+        endPt,
+      ]);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: '#3b82f6',
+        depthTest: false,
+        depthWrite: false,
+      });
+      const normLine = new THREE.Line(lineGeom, lineMat);
+      overlayGroup.add(normLine);
+    }
+
+    // 3. Constraint Line Guides (for perpendicular, edge, midpoint, or angle snap)
+    if (snapResult.snap && snapResult.snap.type) {
+      const snapType = snapResult.snap.type;
+      let lineColor = '#eab308'; // yellow
+      if (snapType === 'perpendicular') lineColor = '#a855f7'; // purple
+      if (snapType === 'vertex') lineColor = '#ef4444'; // red
+
+      if (snapResult.snap.guideLines && snapResult.snap.guideLines.length > 0) {
+        for (const g of snapResult.snap.guideLines) {
+          const pts = [
+            new THREE.Vector3(g.start.x * S, g.start.y * S, g.start.z * S),
+            new THREE.Vector3(g.end.x * S, g.end.y * S, g.end.z * S),
+          ];
+          const lineGeom = new THREE.BufferGeometry().setFromPoints(pts);
+          const lineMat = new THREE.LineBasicMaterial({
+            color: lineColor,
+            depthTest: false,
+            depthWrite: false,
+          });
+          overlayGroup.add(new THREE.Line(lineGeom, lineMat));
+        }
+      }
+    }
+
+    render();
+  }
+
+  function clearSnapOverlay3D() {
+    while (overlayGroup.children.length > 0) {
+      const child = overlayGroup.children.pop();
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+        else child.material.dispose();
+      }
+    }
+    render();
+  }
+
   // ---------------------------------------------------------------- loop & API
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -1422,6 +1591,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     walkKeys,
     getAttributionText: get3DAttributionText,
     updateHudAttribution,
+    raycastPointer,
+    getScene3DGeometryContext,
+    setSnapOverlay3D,
+    clearSnapOverlay3D,
     getCameraMode: () => cameraMode,
     setCameraMode,
     toggleCameraMode,
