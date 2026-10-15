@@ -219,14 +219,56 @@ function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
   const viewModels = buildToggleViewModel(interaction);
-  container.innerHTML = viewModels
-    .map(
-      (vm) =>
-        `<button data-snap-id="${vm.id}" class="${vm.enabled ? 'on' : ''}" title="${esc(vm.description)}">${esc(vm.label)}</button>`
-    )
-    .join('');
-  container.querySelectorAll('button[data-snap-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+  const activeCount = viewModels.filter((vm) => vm.enabled).length;
+
+  const basicItems = viewModels.filter((vm) => (vm.category || 'basic') === 'basic');
+  const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
+
+  const existingPopover = container.querySelector('k-popover');
+  const wasOpen = existingPopover ? existingPopover.open : false;
+
+  const renderGroup = (items) =>
+    items
+      .map(
+        (vm) => `
+        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} data-snap-id="${vm.id}" title="${esc(vm.description)}">
+          <span>${esc(vm.label)}</span>
+          <span class="snap-status">${vm.enabled ? 'ON' : 'OFF'}</span>
+        </k-button>
+      `
+      )
+      .join('');
+
+  container.innerHTML = `
+    <k-popover id="snap-popover">
+      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} title="Snapping modes (${activeCount} enabled)">
+        <span aria-hidden="true">🧲</span> Snapping <span class="snap-badge badge">${activeCount}</span>
+      </k-button>
+      <div class="snap-popover-menu">
+        <div class="snap-category">
+          <div class="snap-category-title">Basic Drafting Snaps</div>
+          <div class="snap-category-items">
+            ${renderGroup(basicItems)}
+          </div>
+        </div>
+        <div class="snap-category">
+          <div class="snap-category-title">Precision CAD Snaps</div>
+          <div class="snap-category-items">
+            ${renderGroup(advancedItems)}
+          </div>
+        </div>
+      </div>
+    </k-popover>
+  `;
+
+  const newPopover = container.querySelector('k-popover');
+  if (newPopover && wasOpen) {
+    newPopover.open = true;
+  }
+
+  container.querySelectorAll('[data-snap-id]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const id = btn.dataset.snapId;
       const vm = viewModels.find((x) => x.id === id);
       if (vm) {

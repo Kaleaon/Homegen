@@ -18,11 +18,12 @@ if (typeof customElements === 'undefined') {
 // Import custom elements definition
 await import('../js/k-components.js');
 
-test('customElements registers <k-button>, <k-input>, <k-tab>, <k-card>', () => {
+test('customElements registers <k-button>, <k-input>, <k-tab>, <k-card>, <k-popover>', () => {
   assert.ok(customElements.get('k-button'), 'k-button element registered');
   assert.ok(customElements.get('k-input'), 'k-input element registered');
   assert.ok(customElements.get('k-tab'), 'k-tab element registered');
   assert.ok(customElements.get('k-card'), 'k-card element registered');
+  assert.ok(customElements.get('k-popover'), 'k-popover element registered');
 });
 
 test('index.html uses <k-input> and <k-button> for header controls and <k-tab> for tabs', () => {
@@ -121,6 +122,7 @@ test('shadow DOM components inherit document-level Ktheme tokens without :host s
     { name: 'k-input', cls: customElements.get('k-input') },
     { name: 'k-tab', cls: customElements.get('k-tab') },
     { name: 'k-card', cls: customElements.get('k-card') },
+    { name: 'k-popover', cls: customElements.get('k-popover') },
   ];
 
   for (const { name, cls } of components) {
