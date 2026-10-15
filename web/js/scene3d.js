@@ -16,7 +16,7 @@ import {
   getRoomBoundingBox,
   resolveWallIndex,
 } from './geometry.js';
-import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { OPENING_BY_ID, OPENINGS, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import {
@@ -26,7 +26,12 @@ import {
   polyHavenHdriUrl,
   MaterialPreloader,
 } from './resources.js';
-import { getCladdingMaterial, getPresetRevision, resolveWindowStyle } from './presetRegistry.js';
+import {
+  getCladdingMaterial,
+  getPresetRevision,
+  resolveWindowStyle,
+  resolveWallAssembly,
+} from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
@@ -766,12 +771,23 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const isWindow = o.kind === 'window' || OPENING_BY_ID[o.type]?.kind === 'window';
             return isWindow ? resolveWindowStyle(o) : null;
           });
+          const finishId = room.walls[wall] || room.walls[resolveWallIndex(wall)];
+          let extFinId = room.cladding || room.exteriorCladding;
+          if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
+            extFinId = room.walls[wall];
+          }
+          const wallAssembly = resolveWallAssembly(
+            finishId,
+            extFinId,
+            room.wallAssemblyOverrides?.[wall]
+          );
           const wallSig = JSON.stringify({
             pts,
             ceiling: room.ceiling,
-            finish: room.walls[wall] || room.walls[resolveWallIndex(wall)],
+            finish: finishId,
+            cladding: extFinId,
+            assembly: wallAssembly,
             uv: getWallUV(room, wall),
-            cladding: room.cladding || room.exteriorCladding,
             e,
             wallH,
             wallOpt: opts.walls,
@@ -827,10 +843,18 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const s = wallSeg(room, it.wall);
             const t = it.offset;
             const y = def.shape === 'switch' ? 48 : 16;
+            const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
+            const extFinId = room.cladding || room.exteriorCladding;
+            const wAssembly = resolveWallAssembly(
+              finishId,
+              extFinId,
+              room.wallAssemblyOverrides?.[it.wall]
+            );
+            const itemDepthOff = wAssembly.totalThickness / 2 + 0.3;
             itemNode.position.set(
-              (s.ax + s.dx * t + s.nx * (WT / 2 + 0.3)) * S,
+              (s.ax + s.dx * t + s.nx * itemDepthOff) * S,
               (e + y) * S,
-              (s.ay + s.dy * t + s.ny * (WT / 2 + 0.3)) * S
+              (s.ay + s.dy * t + s.ny * itemDepthOff) * S
             );
           } else if (def && def.mount === 'ceiling') {
             itemNode.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
@@ -966,22 +990,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const wallUV = getWallUV(room, wall);
     const base = plain('#efece4', 0.9);
     const visMat = finishMaterial(fin, len, room.ceiling, finishId, 0.8, wallUV);
-    // local +z face is face 4 (interior normal), local -z face is face 5 (exterior normal)
-    const face = 4;
-    const outFace = 5;
-    const ops = wallOpenings(state, room, wall);
-    const cuts = ops.map(({ o, from, to }) => {
-      const d = OPENING_BY_ID[o.type];
-      return { from, to, sill: d.sill, head: d.sill + d.h, o, d };
-    });
-    const inner = { base, vis: visMat };
-    cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
-      addWallBox(group, room, wall, t0, t1, y0, y1, 0, WT / 2, e, inner, face)
-    );
-    // exterior shell where nothing is behind the wall
-    let ext = [[-WT / 2, len + WT / 2]];
-    for (const n of wallNeighbors(state.rooms, room, wall))
-      ext = subtractInterval(ext, [n.from, n.to]);
+
     let extFinId = room.cladding || room.exteriorCladding;
     if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
       extFinId = room.walls[wall];
@@ -990,31 +999,105 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     extFinId = extFin.id || extFinId || 'cladding_siding_white';
 
     const sidingMat = finishMaterial(extFin, len, room.ceiling, extFinId, 0.85);
-    for (const [a, b] of ext)
-      cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
-        addWallBox(
-          group,
-          room,
-          wall,
-          t0,
-          t1,
-          y0,
-          y1,
-          -WT / 2,
-          0,
-          e,
-          { base: sidingMat, vis: sidingMat },
-          outFace
-        )
+
+    const wallOverrides = room.wallAssemblyOverrides?.[wall];
+    const assembly = resolveWallAssembly(finishId, extFinId, wallOverrides);
+    const wallThick = assembly.totalThickness;
+
+    // local +z face is face 4 (interior normal), local -z face is face 5 (exterior normal)
+    const face = 4;
+    const outFace = 5;
+    const ops = wallOpenings(state, room, wall);
+    const cuts = ops.map(({ o, from, to }) => {
+      const d = OPENING_BY_ID[o.type] || OPENINGS[0];
+      return { from, to, sill: d.sill, head: d.sill + d.h, o, d };
+    });
+
+    // Exterior shell interval calculation (where nothing is behind the wall)
+    let ext = [[-wallThick / 2, len + wallThick / 2]];
+    for (const n of wallNeighbors(state.rooms, room, wall))
+      ext = subtractInterval(ext, [n.from, n.to]);
+
+    // Construct physical 3D box meshes for each layer in assembly with co-planar depth boundaries
+    let currDepth = wallThick / 2;
+
+    // 1. Gypsum / Interior finish layer
+    const gypsumD1 = currDepth;
+    const gypsumD0 = gypsumD1 - assembly.gypsumThickness;
+    currDepth = gypsumD0;
+    if (assembly.gypsumThickness > 0) {
+      const inner = { base, vis: visMat };
+      cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
+        addWallBox(group, room, wall, t0, t1, y0, y1, gypsumD0, gypsumD1, e, inner, face)
       );
-    // fill the thin cut-through strip for openings between rooms is intentionally left open
+    }
+
+    // 2. Stud framing layer
+    const studD1 = currDepth;
+    const studD0 = studD1 - assembly.studDepth;
+    currDepth = studD0;
+    if (assembly.studDepth > 0) {
+      const studMat = plain('#c2a679', 0.7);
+      cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
+        addWallBox(group, room, wall, t0, t1, y0, y1, studD0, studD1, e, studMat)
+      );
+    }
+
+    // 3. Sheathing layer
+    const sheathingD1 = currDepth;
+    const sheathingD0 = sheathingD1 - assembly.sheathingThickness;
+    currDepth = sheathingD0;
+    if (assembly.sheathingThickness > 0) {
+      const sheathingMat = plain('#b89768', 0.8);
+      for (const [a, b] of ext)
+        cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
+          addWallBox(group, room, wall, t0, t1, y0, y1, sheathingD0, sheathingD1, e, sheathingMat)
+        );
+    }
+
+    // 4. Air gap / cavity layer
+    const airGapD1 = currDepth;
+    const airGapD0 = airGapD1 - assembly.airGapThickness;
+    currDepth = airGapD0;
+    if (assembly.airGapThickness > 0) {
+      const airGapMat = plain('#2a2a2a', 0.9);
+      for (const [a, b] of ext)
+        cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
+          addWallBox(group, room, wall, t0, t1, y0, y1, airGapD0, airGapD1, e, airGapMat)
+        );
+    }
+
+    // 5. Exterior cladding layer
+    const claddingD1 = currDepth;
+    const claddingD0 = -wallThick / 2;
+    if (assembly.claddingThickness > 0) {
+      for (const [a, b] of ext)
+        cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
+          addWallBox(
+            group,
+            room,
+            wall,
+            t0,
+            t1,
+            y0,
+            y1,
+            claddingD0,
+            claddingD1,
+            e,
+            { base: sidingMat, vis: sidingMat },
+            outFace
+          )
+        );
+    }
+
+    // Fill openings (windows and doors) passing resolved assembly thickness
     for (const { o, d } of cuts) {
       if (!room.openings.includes(o)) continue; // draw each opening once, from its owner
       const info = openingInfo(state, room, o);
       const og =
         d.kind === 'window'
-          ? addWindow(group, room, wall, o, d, e)
-          : addDoor(group, room, wall, o, d, e, info.kind === 'exterior');
+          ? addWindow(group, room, wall, o, d, e, wallThick)
+          : addDoor(group, room, wall, o, d, e, info.kind === 'exterior', wallThick);
       if (og) entityMap.set(o.id, og);
     }
   }
@@ -1076,7 +1159,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   function wallAlignedBox(room, wall, along, h, thick, mat) {
     return boxMesh(along, h, thick, mat);
   }
-  function addWindow(group, room, wall, o, d, e) {
+  function addWindow(group, room, wall, o, d, e, wallThickness = WT) {
     const og = buildWindow3DMesh({
       room,
       wall,
@@ -1084,7 +1167,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       definition: d,
       elevation: e,
       scale: S,
-      wallThickness: WT,
+      wallThickness: wallThickness,
       getFrameMaterial,
       glassMaterial: glassMat,
       wallAlignedBox,
@@ -1094,13 +1177,20 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return og;
   }
   const doorMat = plain('#a9825a', 0.55);
-  function addDoor(group, room, wall, o, d, e, exterior) {
+  function addDoor(group, room, wall, o, d, e, exterior, wallThickness = WT) {
     const og = new THREE.Group();
     og.userData = { id: o.id, entityType: 'opening' };
     const s = wallSeg(room, wall);
     const dir = o.swing === 'out' ? -1 : 1;
-    const head = wallAlignedBox(room, wall, o.width + 3, 2, WT + 1, defaultFrameMat);
+    const head = wallAlignedBox(room, wall, o.width + 3, 2, wallThickness + 1, defaultFrameMat);
     og.add(placeInWall(room, wall, o.offset + o.width / 2, d.h + 1, 0, e, head));
+
+    // Side jamb assemblies matching resolved wall assembly depth
+    const jambW = 1.5;
+    const leftJamb = wallAlignedBox(room, wall, jambW, d.h, wallThickness + 0.5, defaultFrameMat);
+    const rightJamb = wallAlignedBox(room, wall, jambW, d.h, wallThickness + 0.5, defaultFrameMat);
+    og.add(placeInWall(room, wall, o.offset - jambW / 2, d.h / 2, 0, e, leftJamb));
+    og.add(placeInWall(room, wall, o.offset + o.width + jambW / 2, d.h / 2, 0, e, rightJamb));
     if (exterior || d.pocket) {
       const slabDoor = wallAlignedBox(
         room,
