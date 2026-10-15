@@ -12,6 +12,7 @@ import {
   footprint,
   getRoomPoints,
   getRoomBoundingBox,
+  computeGeoBounds,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
@@ -482,6 +483,23 @@ export function deserialize(text) {
     if (s.background.logoUrl !== undefined) s.background.logoUrl = s.background.logoUrl || null;
     if (s.background.isGeospatial !== undefined)
       s.background.isGeospatial = !!s.background.isGeospatial;
+
+    if (s.background.affineMatrix && Array.isArray(s.background.affineMatrix)) {
+      s.background.x = s.background.affineMatrix[4];
+      s.background.y = s.background.affineMatrix[5];
+      s.background.scale = Math.hypot(s.background.affineMatrix[0], s.background.affineMatrix[1]);
+
+      if (!s.background.geoBounds || typeof s.background.geoBounds !== 'object') {
+        const w = s.background.width || 1000;
+        const h = s.background.height || 1000;
+        s.background.geoBounds = computeGeoBounds(
+          s.background.affineMatrix,
+          w,
+          h,
+          s.background.worldfileCRS || 'PLAN'
+        );
+      }
+    }
   } else {
     s.background = null;
   }

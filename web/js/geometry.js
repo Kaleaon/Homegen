@@ -218,6 +218,214 @@ export function reproject(coords, sourceCRS = 'EPSG:4326', targetCRS = 'PLAN') {
   return coords;
 }
 
+/**
+ * Parses ESRI Worldfile content (.tfw, .pgw, .wld, etc.)
+ * Worldfile parameters in order:
+ * Line 1: A - pixel size in X direction / X scale
+ * Line 2: D - rotation about Y axis / row rotation / skew Y
+ * Line 3: B - rotation about X axis / column rotation / skew X
+ * Line 4: E - pixel size in Y direction / Y scale (typically negative)
+ * Line 5: C - X coordinate of top-left pixel center (translation X)
+ * Line 6: F - Y coordinate of top-left pixel center (translation Y)
+ *
+ * @param {string|number[]|object} input Worldfile string, array, or object
+ * @returns {number[]|null} [A, D, B, E, C, F] or null if invalid
+ */
+export function parseWorldfile(input) {
+  if (!input) return null;
+  if (Array.isArray(input)) {
+    if (input.length >= 6 && input.slice(0, 6).every(Number.isFinite)) {
+      return input.slice(0, 6).map(Number);
+    }
+    return null;
+  }
+  if (typeof input === 'object') {
+    const a = input.A ?? input.a ?? input.m11;
+    const d = input.D ?? input.d ?? input.m12;
+    const b = input.B ?? input.b ?? input.m21;
+    const e = input.E ?? input.e ?? input.m22;
+    const c = input.C ?? input.c ?? input.m31;
+    const f = input.F ?? input.f ?? input.m32;
+    const arr = [a, d, b, e, c, f].map(Number);
+    if (arr.every(Number.isFinite)) return arr;
+    return null;
+  }
+  if (typeof input === 'string') {
+    const nums = input
+      .trim()
+      .split(/[\s,]+/)
+      .map((s) => parseFloat(s))
+      .filter((n) => Number.isFinite(n));
+    if (nums.length >= 6) {
+      return nums.slice(0, 6);
+    }
+  }
+  return null;
+}
+
+/**
+ * Solves 2x3 affine matrix [a, b, c, d, e, f] from 3 source control points and 3 target points.
+ *
+ * x_target = a * x_src + c * y_src + e
+ * y_target = b * x_src + d * y_src + f
+ *
+ * Detects collinear source points and throws an Error.
+ *
+ * @param {{x: number, y: number}[]} srcPts 3 source control points (e.g. image pixels)
+ * @param {{x: number, y: number}[]} dstPts 3 target points (e.g. ground or PLAN coordinates)
+ * @returns {number[]} 6-element affine matrix array [a, b, c, d, e, f]
+ */
+export function solveAffineTransform(srcPts, dstPts) {
+  if (!Array.isArray(srcPts) || !Array.isArray(dstPts) || srcPts.length < 3 || dstPts.length < 3) {
+    throw new Error('3 control point pairs are required for affine calibration');
+  }
+
+  const x1 = srcPts[0].x,
+    y1 = srcPts[0].y;
+  const x2 = srcPts[1].x,
+    y2 = srcPts[1].y;
+  const x3 = srcPts[2].x,
+    y3 = srcPts[2].y;
+
+  const u1 = dstPts[0].x,
+    v1 = dstPts[0].y;
+  const u2 = dstPts[1].x,
+    v2 = dstPts[1].y;
+  const u3 = dstPts[2].x,
+    v3 = dstPts[2].y;
+
+  // Determinant = 2 * signed area of triangle (srcPts)
+  const det = x1 * (y2 - y3) - y1 * (x2 - x3) + (x2 * y3 - x3 * y2);
+
+  if (Math.abs(det) < 1e-9) {
+    throw new Error('Collinear control points detected. Singular matrix inversion prevented.');
+  }
+
+  // Inverse matrix components M^(-1) = adj(M) / det
+  const inv11 = (y2 - y3) / det;
+  const inv12 = (y3 - y1) / det;
+  const inv13 = (y1 - y2) / det;
+
+  const inv21 = (x3 - x2) / det;
+  const inv22 = (x1 - x3) / det;
+  const inv23 = (x2 - x1) / det;
+
+  const inv31 = (x2 * y3 - x3 * y2) / det;
+  const inv32 = (x3 * y1 - x1 * y3) / det;
+  const inv33 = (x1 * y2 - x2 * y1) / det;
+
+  // u = a*x + c*y + e
+  const a = inv11 * u1 + inv12 * u2 + inv13 * u3;
+  const c = inv21 * u1 + inv22 * u2 + inv23 * u3;
+  const e = inv31 * u1 + inv32 * u2 + inv33 * u3;
+
+  // v = b*x + d*y + f
+  const b = inv11 * v1 + inv12 * v2 + inv13 * v3;
+  const d = inv21 * v1 + inv22 * v2 + inv23 * v3;
+  const f = inv31 * v1 + inv32 * v2 + inv33 * v3;
+
+  return [a, b, c, d, e, f];
+}
+
+/**
+ * Computes geographic bounding box (EPSG:4326) for image bounds transformed by affine matrix.
+ *
+ * @param {number[]} matrix 2x3 affine matrix [a, b, c, d, e, f]
+ * @param {number} width Image width
+ * @param {number} height Image height
+ * @param {string} sourceCRS CRS of the transformed matrix points (default 'PLAN')
+ * @returns {object} { minLon, minLat, maxLon, maxLat, west, south, east, north }
+ */
+export function computeGeoBounds(matrix, width, height, sourceCRS = 'PLAN') {
+  if (!Array.isArray(matrix) || matrix.length < 6) {
+    matrix = [1, 0, 0, 1, 0, 0];
+  }
+  const [a, b, c, d, e, f] = matrix.map(Number);
+  const w = width || 100;
+  const h = height || 100;
+
+  const corners = [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ];
+
+  let minLon = Infinity,
+    minLat = Infinity,
+    maxLon = -Infinity,
+    maxLat = -Infinity;
+
+  for (const p of corners) {
+    const tx = a * p.x + c * p.y + e;
+    const ty = b * p.x + d * p.y + f;
+    const geo = reproject([tx, ty], sourceCRS, 'EPSG:4326');
+    const lon = Array.isArray(geo) ? geo[0] : (geo.x ?? geo.longitude ?? 0);
+    const lat = Array.isArray(geo) ? geo[1] : (geo.y ?? geo.latitude ?? 0);
+
+    if (lon < minLon) minLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lon > maxLon) maxLon = lon;
+    if (lat > maxLat) maxLat = lat;
+  }
+
+  return {
+    minLon,
+    minLat,
+    maxLon,
+    maxLat,
+    west: minLon,
+    south: minLat,
+    east: maxLon,
+    north: maxLat,
+    minX: minLon,
+    minY: minLat,
+    maxX: maxLon,
+    maxY: maxLat,
+  };
+}
+
+/**
+ * Converts Worldfile parameters [A, D, B, E, C, F] from worldfile CRS to target CRS (default 'PLAN').
+ *
+ * @param {number[]} worldfileParams [A, D, B, E, C, F]
+ * @param {string} sourceCRS Worldfile CRS (e.g. 'EPSG:4326', 'EPSG:3857', 'EPSG:2227')
+ * @param {string} targetCRS Target CRS (default 'PLAN')
+ * @returns {number[]} 2x3 affine matrix [a, b, c, d, e, f] in target CRS
+ */
+export function worldfileToAffineMatrix(
+  worldfileParams,
+  sourceCRS = 'EPSG:4326',
+  targetCRS = 'PLAN'
+) {
+  const parsed = parseWorldfile(worldfileParams);
+  if (!parsed) return [1, 0, 0, 1, 0, 0];
+
+  const [A, D, B, E, C, F] = parsed;
+
+  if (sourceCRS === targetCRS || sourceCRS === 'PLAN') {
+    return [A, D, B, E, C, F];
+  }
+
+  // Sample 3 points in pixel space: P0(0,0), P1(1,0), P2(0,1)
+  const g0 = [C, F];
+  const g1 = [C + A, F + D];
+  const g2 = [C + B, F + E];
+
+  const p0 = reproject(g0, sourceCRS, targetCRS);
+  const p1 = reproject(g1, sourceCRS, targetCRS);
+  const p2 = reproject(g2, sourceCRS, targetCRS);
+
+  const e = p0[0];
+  const f = p0[1];
+  const a = p1[0] - p0[0];
+  const b = p1[1] - p0[1];
+  const c = p2[0] - p0[0];
+  const d = p2[1] - p0[1];
+
+  return [a, b, c, d, e, f];
+}
+
 // Geometry helpers. All units are inches; +x is east, +y is south (screen coordinates).
 export const WT = 4.5; // wall thickness, rooms are measured centerline-to-centerline
 export const GRID = 6;
