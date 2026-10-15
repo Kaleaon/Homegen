@@ -9,13 +9,15 @@ import {
   OPPOSITE,
   wallLength,
   interior,
+  interiorPolygonData,
+  polygonContainsRect,
+  polygonContainsZone,
   floorAreaSqFt,
   wallPoint,
   wallNeighbors,
   neighborShift,
   roomsOverlap,
   rectsOverlap,
-  rectInside,
   footprint,
   fixtureZone,
   subtractInterval,
@@ -600,10 +602,12 @@ export function evaluate(state, options = {}) {
 
     const t = ROOM_TYPES[room.type];
     const ir = interior(room);
+    const polyData = interiorPolygonData(room);
+    const innerPoly = polyData.points;
+    const minDim = polyData.minWidth;
     const area = floorAreaSqFt(room);
     const R = (rule, ref, sev, blocking, target, msg, extra) =>
       add(rule, ref, sev, blocking, target, `${room.name}: ${msg}`, { roomId: room.id, ...extra });
-    const minDim = Math.min(ir.w, ir.h);
 
     // Size (R304)
     if (t.habitable && room.type !== 'kitchen') {
@@ -790,7 +794,7 @@ export function evaluate(state, options = {}) {
           roomId: room.id,
           itemId: it.id,
         });
-      if (!rectInside(fp, ir)) {
+      if (!polygonContainsRect(innerPoly, fp)) {
         I('item-bounds', 'Geometry', 'error', true, 'extends outside the room.');
         continue;
       }
@@ -805,7 +809,7 @@ export function evaluate(state, options = {}) {
       if (def.clearance) {
         const zone = fixtureZone(it, def, 15, 21);
         const bad =
-          !rectInside(zone, ir) ||
+          !polygonContainsZone(innerPoly, zone) ||
           floor.some(
             (o) =>
               o.id !== it.id &&
@@ -853,7 +857,7 @@ export function evaluate(state, options = {}) {
             I('wall-item-overlap', 'Geometry', 'error', true, 'overlaps another wall device.');
       } else if (
         def.mount === 'ceiling' &&
-        !rectInside({ x: it.x - 4, y: it.y - 4, w: 8, h: 8 }, ir)
+        !polygonContainsRect(innerPoly, { x: it.x - 4, y: it.y - 4, w: 8, h: 8 })
       )
         I('item-bounds', 'Geometry', 'error', true, 'extends outside the room.');
     }
