@@ -69,6 +69,7 @@ import {
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
+import { exportDXF } from './dxfExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
@@ -3272,6 +3273,49 @@ $('#csv-generate')?.addEventListener('click', () => {
   }
 });
 
+// ------------------------------------------------------------- DXF CAD Export
+$('#export-dxf')?.addEventListener('click', (e) => {
+  if (!doc.rooms || doc.rooms.length === 0) {
+    toast('Cannot export DXF: add at least one room first.', true);
+    return;
+  }
+  const returnFocusEl = e.currentTarget || document.activeElement;
+  const dlg = $('#dxf-export');
+  if (dlg) {
+    const lvlSelect = $('#dxf-level');
+    if (lvlSelect) {
+      lvlSelect.innerHTML = '<option value="all" selected>All Levels</option>';
+      for (let i = 0; i < (doc.levels || 1); i++) {
+        lvlSelect.innerHTML += `<option value="${i}">Level ${i + 1}</option>`;
+      }
+    }
+    dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
+  }
+});
+
+$('#dxf-cancel')?.addEventListener('click', () => {
+  $('#dxf-export')?.close();
+});
+
+$('#dxf-generate')?.addEventListener('click', () => {
+  try {
+    const units = $('#dxf-units')?.value || 'inches';
+    const levelVal = $('#dxf-level')?.value || 'all';
+    const level = levelVal === 'all' ? 'all' : Number(levelVal);
+
+    const dxfText = exportDXF(doc, { units, level });
+    const sanitizedName = (doc.name || 'plan').trim().replace(/\W+/g, '_') || 'plan';
+    const fileName = `${sanitizedName}.dxf`;
+    download(fileName, dxfText, 'image/vnd.dxf');
+    $('#dxf-export')?.close();
+    toast('Exported DXF CAD Exchange file.');
+  } catch (err) {
+    toast(`Failed to export DXF: ${err.message}`, true);
+  }
+});
+
 // ------------------------------------------------------------- Interactive Branding & Stamp Builder UI
 let workingBranding = M.defaultBranding();
 
@@ -4397,6 +4441,13 @@ const COMMAND_REGISTRY = [
     category: 'Export',
     shortcut: '',
     action: () => $('#export-csv')?.click(),
+  },
+  {
+    id: 'export-dxf',
+    name: 'Export DXF CAD Exchange Format',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#export-dxf')?.click(),
   },
   {
     id: 'export-report',
