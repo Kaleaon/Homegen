@@ -134,6 +134,9 @@ test('exportDXF supports level filtering', () => {
 
 test('exportDXF finishes under 100 milliseconds client-side benchmark', () => {
   const state = buildMultiLevel();
+  // Warm up V8 JIT compiler
+  exportDXF(state);
+
   const startTime = performance.now();
   const dxf = exportDXF(state);
   const duration = performance.now() - startTime;

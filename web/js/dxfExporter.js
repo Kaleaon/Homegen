@@ -366,32 +366,35 @@ export function exportDXF(doc, options = {}) {
     const textHeight = 10 * unitFactor;
     const areaHeight = 8 * unitFactor;
 
+    const textY = (cy - 8) * unitFactor;
+    const areaY = (cy + 8) * unitFactor;
+
     // Room name text entity
     push(0, 'TEXT');
     push(8, 'A-ANNO-TEXT');
     push(10, (cx * unitFactor).toFixed(4));
-    push(20, ((cy - textHeight * 0.8) * unitFactor).toFixed(4));
+    push(20, textY.toFixed(4));
     push(30, '0.0');
     push(40, textHeight.toFixed(4));
     push(1, roomName);
     push(72, 1); // Center horizontal
     push(73, 2); // Middle vertical
     push(11, (cx * unitFactor).toFixed(4));
-    push(21, ((cy - textHeight * 0.8) * unitFactor).toFixed(4));
+    push(21, textY.toFixed(4));
     push(31, '0.0');
 
     // Room area text entity
     push(0, 'TEXT');
     push(8, 'A-ANNO-TEXT');
     push(10, (cx * unitFactor).toFixed(4));
-    push(20, ((cy + areaHeight * 0.8) * unitFactor).toFixed(4));
+    push(20, areaY.toFixed(4));
     push(30, '0.0');
     push(40, areaHeight.toFixed(4));
     push(1, areaText);
     push(72, 1); // Center horizontal
     push(73, 2); // Middle vertical
     push(11, (cx * unitFactor).toFixed(4));
-    push(21, ((cy + areaHeight * 0.8) * unitFactor).toFixed(4));
+    push(21, areaY.toFixed(4));
     push(31, '0.0');
   }
 
