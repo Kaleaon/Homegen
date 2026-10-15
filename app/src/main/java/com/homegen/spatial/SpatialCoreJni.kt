@@ -23,6 +23,15 @@ class SpatialCoreJni : AutoCloseable {
     // Fallback state if native is absent
     private var fallbackLotBoundary: List<Point2D> = emptyList()
     private var fallbackInnerBuildable: List<Point2D> = emptyList()
+    private var fallbackCrs: String = "EPSG:4326"
+
+    val crs: String
+        get() {
+            if (isNativeLoaded && nativeHandle != 0L) {
+                return nativeGetCrs(nativeHandle)
+            }
+            return fallbackCrs
+        }
 
     init {
         if (isNativeLoaded) {
@@ -67,6 +76,7 @@ class SpatialCoreJni : AutoCloseable {
     }
 
     private fun loadJsonStringFallback(jsonStr: String): Boolean {
+        fallbackCrs = extractCrsFallback(jsonStr)
         val lotPts = extractNumbersFallback(jsonStr, "lotBoundary")
         if (lotPts.size >= 6) {
             val pts = mutableListOf<Point2D>()
@@ -177,6 +187,8 @@ class SpatialCoreJni : AutoCloseable {
 
         @JvmStatic private external fun nativeDestroyEngine(handle: Long)
 
+        @JvmStatic private external fun nativeGetCrs(handle: Long): String
+
         @JvmStatic private external fun nativeLoadJsonBuffer(handle: Long, directBuffer: ByteBuffer, length: Int): Boolean
 
         @JvmStatic private external fun nativeLoadJsonString(handle: Long, jsonStr: String): Boolean
@@ -187,14 +199,67 @@ class SpatialCoreJni : AutoCloseable {
 
         @JvmStatic private external fun nativeComputeVariableBuffers(flatSegmentData: DoubleArray): DoubleArray
 
+        private fun isGeographicCrs(crs: String): Boolean {
+            val upper = crs.uppercase()
+            return upper == "EPSG:4326" || upper == "4326" || upper.contains("EPSG::4326") || upper.contains("EPSG:4326")
+        }
+
         private fun projectCoordinatesFallback(crs: String, lon: Double, lat: Double): Pair<Double, Double> {
-            if (crs == "EPSG:3857") {
+            if (!isGeographicCrs(crs)) {
                 return lon to lat
             }
             val rad = lat * PI / 180.0
             val px = lon * 111319.49
             val py = ln(tan(PI / 4.0 + rad / 2.0)) * 6378137.0
             return px to py
+        }
+
+        private fun extractCrsFallback(content: String): String {
+            val lower = content.lowercase()
+
+            val urnPos = lower.indexOf("urn:ogc:def:crs:epsg:")
+            if (urnPos != -1) {
+                var idx = urnPos + "urn:ogc:def:crs:epsg:".length
+                while (idx < content.length && content[idx] == ':') idx++
+                val sb = StringBuilder()
+                while (idx < content.length && content[idx].isDigit()) {
+                    sb.append(content[idx++])
+                }
+                if (sb.isNotEmpty()) {
+                    return "EPSG:$sb"
+                }
+            }
+
+            val epsgPos = lower.indexOf("epsg:")
+            if (epsgPos != -1) {
+                var idx = epsgPos + "epsg:".length
+                while (idx < content.length && content[idx] == ':') idx++
+                val sb = StringBuilder()
+                while (idx < content.length && content[idx].isDigit()) {
+                    sb.append(content[idx++])
+                }
+                if (sb.isNotEmpty()) {
+                    return "EPSG:$sb"
+                }
+            }
+
+            val crsKeyPos = lower.indexOf("\"crs\"")
+            if (crsKeyPos != -1) {
+                val codePos = lower.indexOf("\"code\"", crsKeyPos)
+                if (codePos != -1 && codePos - crsKeyPos < 200) {
+                    var idx = codePos + "\"code\"".length
+                    while (idx < content.length && (content[idx].isWhitespace() || content[idx] == ':' || content[idx] == '"')) idx++
+                    val sb = StringBuilder()
+                    while (idx < content.length && content[idx].isDigit()) {
+                        sb.append(content[idx++])
+                    }
+                    if (sb.isNotEmpty()) {
+                        return "EPSG:$sb"
+                    }
+                }
+            }
+
+            return "EPSG:4326"
         }
 
         private fun computeVariableBuffersFallback(flatSegmentData: DoubleArray): DoubleArray {
