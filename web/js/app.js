@@ -16,6 +16,10 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
   polygonArea,
+  parseWorldfile,
+  solveAffineTransform,
+  computeGeoBounds,
+  worldfileToAffineMatrix,
 } from './geometry.js';
 import {
   ROOM_TYPES,
@@ -3934,12 +3938,63 @@ function applyCalibration(p1, p2, distPx, valStr) {
   bg.scale = (bg.scale || 1) * factor;
   bg.x = p1.x - (p1.x - (bg.x || 0)) * factor;
   bg.y = p1.y - (p1.y - (bg.y || 0)) * factor;
+
+  if (Array.isArray(bg.affineMatrix) && bg.affineMatrix.length >= 6) {
+    const [a, b, c, d, e, f] = bg.affineMatrix;
+    bg.affineMatrix = [
+      a * factor,
+      b * factor,
+      c * factor,
+      d * factor,
+      p1.x - (p1.x - e) * factor,
+      p1.y - (p1.y - f) * factor,
+    ];
+  } else {
+    bg.affineMatrix = [bg.scale, 0, 0, bg.scale, bg.x, bg.y];
+  }
+  bg.geoBounds = computeGeoBounds(bg.affineMatrix, bg.width || 1000, bg.height || 1000, 'PLAN');
+
   hist.push(doc, 'Calibrate Blueprint');
   persist();
   calibPoints = [];
   setTool({ kind: 'select' });
   refresh();
   toast(`Blueprint scale calibrated (${fmtLen(targetInches)}).`);
+}
+
+function apply3PointCalibration(srcPts, dstPts) {
+  if (!doc.background) return false;
+  try {
+    const dstPlanPts = (dstPts || []).map((p) => {
+      if (p.crs && p.crs !== 'PLAN') {
+        const re = reproject([p.x, p.y], p.crs, 'PLAN');
+        return { x: re[0], y: re[1] };
+      }
+      return p;
+    });
+
+    const matrix = solveAffineTransform(srcPts, dstPlanPts);
+    const bg = doc.background;
+    bg.affineMatrix = matrix;
+    bg.x = matrix[4];
+    bg.y = matrix[5];
+    bg.scale = Math.hypot(matrix[0], matrix[1]);
+    bg.geoBounds = computeGeoBounds(matrix, bg.width || 1000, bg.height || 1000, 'PLAN');
+
+    hist.push(doc, 'Calibrate Blueprint (3-Point)');
+    persist();
+    calibPoints = [];
+    setTool({ kind: 'select' });
+    refresh();
+    toast('Blueprint calibrated using 3-point affine matrix.');
+    return true;
+  } catch (_err) {
+    calibPoints = [];
+    setTool({ kind: 'select' });
+    redraw();
+    toast('Collinear control points detected. Calibration failed.', true);
+    return false;
+  }
 }
 
 function setBackgroundAttribution(attr = {}) {
@@ -3976,30 +4031,56 @@ function handleBlueprintImport(file, meta = {}) {
         cctx.drawImage(img, 0, 0, w, h);
         finalDataUrl = cv.toDataURL('image/jpeg', 0.85);
       }
+
+      const worldfileRaw =
+        meta.worldfile ||
+        meta.worldfileText ||
+        meta.tfw ||
+        meta.wld ||
+        meta.worldfileContent ||
+        null;
+      const parsedWld = parseWorldfile(worldfileRaw);
+      let affineMatrix;
+      let sourceCRS = meta.crs || meta.sourceCRS || meta.epsg || doc.crs?.epsg || 'EPSG:4326';
+
+      if (parsedWld) {
+        affineMatrix = worldfileToAffineMatrix(parsedWld, sourceCRS, 'PLAN');
+      } else if (Array.isArray(meta.affineMatrix) && meta.affineMatrix.length >= 6) {
+        affineMatrix = meta.affineMatrix.slice(0, 6).map(Number);
+      } else {
+        affineMatrix = [1, 0, 0, 1, 0, 0];
+      }
+
+      const geoBounds =
+        meta.geoBounds && typeof meta.geoBounds === 'object'
+          ? meta.geoBounds
+          : computeGeoBounds(affineMatrix, w, h, 'PLAN');
+
       doc.background = {
         dataUrl: finalDataUrl,
-        x: 0,
-        y: 0,
-        scale: 1,
-        opacity: 0.5,
-        visible: true,
-        locked: false,
+        x: affineMatrix[4],
+        y: affineMatrix[5],
+        scale: Math.hypot(affineMatrix[0], affineMatrix[1]),
+        affineMatrix,
+        geoBounds,
+        worldfileCRS: sourceCRS,
+        opacity: meta.opacity ?? 0.5,
+        visible: meta.visible !== false,
+        locked: !!meta.locked,
         width: w,
         height: h,
         attributionText: meta.attributionText || null,
         provider: meta.provider || null,
         licenseUrl: meta.licenseUrl || null,
         logoUrl: meta.logoUrl || null,
-        isGeospatial: !!meta.isGeospatial,
+        isGeospatial: !!meta.isGeospatial || !!parsedWld,
       };
       hist.push(doc, 'Import Blueprint');
       persist();
       calibPoints = [];
-      setTool({ kind: 'calibrate' });
+      setTool({ kind: 'select' });
       refresh();
-      toast(
-        'Blueprint image imported. Click 2 points on a known dimension line to calibrate scale.'
-      );
+      toast('Blueprint image imported with spatial metadata.');
     };
     img.onerror = () => toast('Failed to load blueprint image.', true);
     img.src = dataUrl;
@@ -4696,7 +4777,12 @@ if (typeof window !== 'undefined')
     interaction,
     generatePDF,
     applyCalibration,
+    apply3PointCalibration,
     handleBlueprintImport,
+    solveAffineTransform,
+    parseWorldfile,
+    computeGeoBounds,
+    worldfileToAffineMatrix,
     setBackgroundAttribution,
     renderCompliance,
     renderViolationItem,
