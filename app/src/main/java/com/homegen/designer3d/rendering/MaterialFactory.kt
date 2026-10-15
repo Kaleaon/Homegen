@@ -112,6 +112,50 @@ class MaterialFactory(private val engine: Engine) {
         return createColorInstance(r, g, b, alpha)
     }
 
+    /**
+     * Creates a door material instance supporting door panel base color, frame color override,
+     * and hardware metallic and roughness values when syncing 3D state to Android/Filament.
+     */
+    fun createDoorInstance(
+        panelColorHex: String? = null,
+        frameColorHex: String? = null,
+        metallic: Float = 0.0f,
+        roughness: Float = 0.5f,
+    ): MaterialInstance {
+        val key = "door_${panelColorHex}_${frameColorHex}_${metallic}_$roughness"
+        instanceCache[key]?.let { return it }
+
+        val instance = getDefaultMaterial().createInstance()
+        val (pr, pg, pb) = parseHexColor(panelColorHex) ?: Triple(0.60f, 0.45f, 0.30f)
+        val (fr, fg, fb) = parseHexColor(frameColorHex) ?: Triple(pr, pg, pb)
+
+        try {
+            instance.setParameter("baseColor", pr, pg, pb, 1.0f)
+            instance.setParameter("frameColorOverride", fr, fg, fb, 1.0f)
+            instance.setParameter("metallic", metallic)
+            instance.setParameter("roughness", roughness)
+        } catch (e: Exception) {
+            // Ignore missing parameter errors on default materials
+        }
+
+        instanceCache[key] = instance
+        return instance
+    }
+
+    private fun parseHexColor(hex: String?): Triple<Float, Float, Float>? {
+        if (hex.isNullOrBlank() || !hex.startsWith("#")) return null
+        val clean = hex.removePrefix("#")
+        if (clean.length != 6 && clean.length != 8) return null
+        return try {
+            val r = clean.substring(0, 2).toInt(16) / 255.0f
+            val g = clean.substring(2, 4).toInt(16) / 255.0f
+            val b = clean.substring(4, 6).toInt(16) / 255.0f
+            Triple(r, g, b)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun destroy() {
         instanceCache.values.forEach { engine.destroyMaterialInstance(it) }
         instanceCache.clear()

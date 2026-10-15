@@ -247,3 +247,62 @@ test('Deserializing legacy plan without new fields falls back cleanly without er
     api.show();
   }, 'Legacy plan renders in 3D view without error using safe fallbacks');
 });
+
+test('Catalog door definitions specify preset keys', () => {
+  const doors = OPENINGS.filter((o) => o.kind === 'door');
+  assert.ok(doors.length > 0, 'Catalog contains door definitions');
+
+  for (const doorDef of doors) {
+    assert.ok(doorDef.presetKey, `Door ${doorDef.id} must specify presetKey`);
+  }
+});
+
+test('3D Scene delegates door rendering to buildDoor3DMesh and constructs multi-component geometry', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'entry', 0, 0, 144, 144);
+  const d = m.addOpening(state, room, 'door_entry_36', 'N', 36, {
+    presetKey: 'craftsman_2panel',
+  });
+
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+  api.show();
+
+  const openingNode = api.entityMap.get(d.id);
+  assert.ok(openingNode, 'Door opening node created in 3D scene');
+  // Head jamb, side jambs, stop trim, casing trims, pivot leaf with hardware
+  assert.ok(
+    openingNode.children.length >= 4,
+    'Door group contains jambs, casing, and leaf pivot children'
+  );
+});
+
+test('Wall signature invalidates cached wall group when door opening style properties change', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'bedroom', 0, 0, 144, 144);
+  const d = m.addOpening(state, room, 'door_interior_30', 'N', 36);
+
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+  api.show();
+
+  const wallKey = `${room.id}:wall:N`;
+  const wallGroup1 = api.entityMap.get(wallKey);
+
+  d.panelStyle = 'panel_6';
+  d.hardwareFinish = 'matte_black';
+  api.update();
+
+  const wallGroup2 = api.entityMap.get(wallKey);
+  assert.notStrictEqual(
+    wallGroup2,
+    wallGroup1,
+    'Wall signature updated and invalidated cached mesh when door panel style changed'
+  );
+});
