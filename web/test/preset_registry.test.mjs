@@ -5,11 +5,16 @@ import * as m from '../js/model.js';
 import { createScene3D } from '../js/scene3d.js';
 import {
   WINDOW_PRESETS,
+  DOOR_PRESETS,
   getWindowPreset,
+  getDoorPresets,
+  getDoorPreset,
   getCladdingMaterial,
   registerWindowPreset,
+  registerDoorPreset,
   registerCladdingMaterial,
   resolveWindowStyle,
+  resolveDoorStyle,
   applyBuildingPreset,
   applyCladdingMaterial,
   clearPresetCaches,
@@ -348,4 +353,64 @@ test('applyCladdingMaterial applies exterior cladding across room, level, and pl
   applyCladdingMaterial(state, 'wall_brick', { scope: 'plan' });
   assert.strictEqual(room1.cladding, 'wall_brick');
   assert.strictEqual(room2.cladding, 'wall_brick');
+});
+
+test('Material and Preset Registry exports DOOR_PRESETS and resolveDoorStyle', () => {
+  const allDoorPresets = getDoorPresets();
+  assert.ok(allDoorPresets.modern_flush, 'getDoorPresets returns modern_flush');
+
+  assert.ok(DOOR_PRESETS.modern_flush, 'modern_flush preset exists');
+  assert.strictEqual(DOOR_PRESETS.modern_flush.panelStyle, 'flush');
+
+  assert.ok(DOOR_PRESETS.colonial_6panel, 'colonial_6panel preset exists');
+  assert.strictEqual(DOOR_PRESETS.colonial_6panel.panelStyle, 'panel_6');
+
+  assert.ok(DOOR_PRESETS.craftsman_2panel, 'craftsman_2panel preset exists');
+  assert.strictEqual(DOOR_PRESETS.craftsman_2panel.panelStyle, 'panel_2');
+
+  assert.ok(DOOR_PRESETS.french_glass, 'french_glass preset exists');
+  assert.strictEqual(DOOR_PRESETS.french_glass.panelStyle, 'french');
+
+  const resolved = resolveDoorStyle({ presetKey: 'craftsman_2panel' });
+  assert.strictEqual(resolved.panelStyle, 'panel_2');
+  assert.strictEqual(resolved.hardwareFinish, 'oil_rubbed_bronze');
+});
+
+test('Door preset resolution falls back cleanly for missing or invalid keys', () => {
+  const invalidDoor = getDoorPreset('invalid_preset_xyz');
+  assert.strictEqual(invalidDoor.key, 'standard_default');
+
+  const resolvedNull = resolveDoorStyle(null);
+  assert.strictEqual(resolvedNull.presetKey, 'standard_default');
+  assert.strictEqual(resolvedNull.panelStyle, 'flush');
+});
+
+test('Dynamic registration allows adding custom door presets', () => {
+  const customDoor = registerDoorPreset('custom_mahogany_arch', {
+    name: 'Mahogany Arch',
+    panelStyle: 'panel_2',
+    finishColor: '#3d2314',
+    hardwareFinish: 'brass',
+  });
+
+  assert.strictEqual(customDoor.key, 'custom_mahogany_arch');
+  const fetched = getDoorPreset('custom_mahogany_arch');
+  assert.strictEqual(fetched.finishColor, '#3d2314');
+
+  const resolved = resolveDoorStyle({ presetKey: 'custom_mahogany_arch' });
+  assert.strictEqual(resolved.finishColor, '#3d2314');
+  assert.strictEqual(resolved.hardwareFinish, 'brass');
+});
+
+test('applyBuildingPreset propagates door preset keys to doors across plan', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'living', 0, 0, 144, 144);
+  const d1 = m.addOpening(state, room, 'door_interior_30', 'N', 36);
+
+  applyBuildingPreset(state, 'craftsman', { scope: 'plan' });
+  assert.strictEqual(d1.presetKey, 'craftsman_2panel');
+
+  const style = resolveDoorStyle(d1);
+  assert.strictEqual(style.panelStyle, 'panel_2');
+  assert.strictEqual(style.hardwareFinish, 'oil_rubbed_bronze');
 });
