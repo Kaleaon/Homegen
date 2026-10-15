@@ -1,6 +1,7 @@
 import { getSnappedPoint, snapAngle } from '../snapping.mjs';
 import { SnapModeState, SNAP_MODES } from '../snapModes.mjs';
 import { createGridSettings } from '../gridSettings.mjs';
+import { SNAP_TOGGLE_DEFINITIONS } from '../uiSnapToggles.mjs';
 
 describe('snapAngle', () => {
   const settings = createGridSettings({ angleSnapDegrees: 15 });
@@ -136,5 +137,21 @@ describe('getSnappedPoint', () => {
 
     // Edge snap should win (distance ~0.05) vs grid (distance ~0.14)
     expect(result.snap.type).toBe('edge');
+  });
+});
+
+describe('SNAP_TOGGLE_DEFINITIONS', () => {
+  test('includes category classifications for all snap modes', () => {
+    expect(SNAP_TOGGLE_DEFINITIONS).toHaveLength(4);
+
+    const grid = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'grid');
+    const edge = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'edge');
+    const midpoint = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'midpoint');
+    const perpendicular = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'perpendicular');
+
+    expect(grid.category).toBe('basic');
+    expect(edge.category).toBe('basic');
+    expect(midpoint.category).toBe('advanced');
+    expect(perpendicular.category).toBe('advanced');
   });
 });

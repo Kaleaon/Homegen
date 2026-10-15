@@ -560,10 +560,174 @@ export class KCard extends BaseElement {
   }
 }
 
+/**
+ * <k-popover>
+ */
+export class KPopover extends BaseElement {
+  static get observedAttributes() {
+    return ['open'];
+  }
+
+  constructor() {
+    super();
+    this._onDocumentClick = this._onDocumentClick.bind(this);
+    this._onDocumentKeyDown = this._onDocumentKeyDown.bind(this);
+    this._onTriggerClick = this._onTriggerClick.bind(this);
+
+    if (typeof this.attachShadow === 'function') {
+      this.attachShadow({ mode: 'open' });
+      this.shadowRoot.innerHTML = `
+      <style>
+        ${KTHEME_STYLES}
+        :host {
+          display: inline-block;
+          position: relative;
+          box-sizing: border-box;
+        }
+        :host([hidden]) {
+          display: none !important;
+        }
+        .popover-panel {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 0;
+          z-index: 1000;
+          background: var(--ktheme-bg-surface, var(--panel, #fffdf9));
+          border: 1px solid var(--ktheme-border, var(--line, #ded8cb));
+          border-radius: var(--radius-sm, 6px);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+          padding: 10px 12px;
+          min-width: 220px;
+          display: none;
+          color: var(--ktheme-text, var(--ink, #2b2824));
+          box-sizing: border-box;
+        }
+        :host([open]) .popover-panel {
+          display: block;
+        }
+      </style>
+      <div part="trigger" class="trigger-wrapper">
+        <slot name="trigger"></slot>
+      </div>
+      <div part="panel" class="popover-panel" role="region" aria-label="Popover panel">
+        <slot></slot>
+      </div>
+    `;
+      this._triggerSlot = this.shadowRoot.querySelector('slot[name="trigger"]');
+    }
+  }
+
+  connectedCallback() {
+    if (this._triggerSlot) {
+      this._triggerSlot.addEventListener('click', this._onTriggerClick);
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('pointerdown', this._onDocumentClick, true);
+      document.addEventListener('keydown', this._onDocumentKeyDown, true);
+    }
+    this._syncAttributes();
+  }
+
+  disconnectedCallback() {
+    if (this._triggerSlot) {
+      this._triggerSlot.removeEventListener('click', this._onTriggerClick);
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('pointerdown', this._onDocumentClick, true);
+      document.removeEventListener('keydown', this._onDocumentKeyDown, true);
+    }
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (oldValue === newValue) return;
+    this._syncAttributes();
+  }
+
+  _getTriggerElement() {
+    if (this._triggerSlot && typeof this._triggerSlot.assignedElements === 'function') {
+      const elems = this._triggerSlot.assignedElements({ flatten: true });
+      if (elems && elems.length > 0) return elems[0];
+    }
+    if (typeof this.querySelector === 'function') {
+      return this.querySelector('[slot="trigger"]') || this;
+    }
+    return this;
+  }
+
+  _syncAttributes() {
+    const isOpen = this.hasAttribute('open');
+    const trigger = this._getTriggerElement();
+    if (trigger && typeof trigger.setAttribute === 'function') {
+      trigger.setAttribute('aria-expanded', String(isOpen));
+      trigger.setAttribute('aria-haspopup', 'true');
+    }
+    if (typeof this.setAttribute === 'function' && this !== trigger) {
+      this.setAttribute('aria-expanded', String(isOpen));
+      this.setAttribute('aria-haspopup', 'true');
+    }
+  }
+
+  _onTriggerClick(e) {
+    if (typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
+    this.open = !this.open;
+  }
+
+  _onDocumentClick(e) {
+    if (!this.open) return;
+    if (typeof e.composedPath === 'function') {
+      const path = e.composedPath();
+      if (path && path.includes(this)) return;
+    } else if (this.contains && this.contains(e.target)) {
+      return;
+    }
+    this.open = false;
+  }
+
+  _onDocumentKeyDown(e) {
+    if (!this.open) return;
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      this.open = false;
+      const trigger = this._getTriggerElement();
+      if (trigger && typeof trigger.focus === 'function') {
+        trigger.focus();
+      }
+    }
+  }
+
+  get open() {
+    return typeof this.hasAttribute === 'function' ? this.hasAttribute('open') : false;
+  }
+
+  set open(val) {
+    const bool = Boolean(val);
+    const wasOpen = this.open;
+    reflectBooleanAttr(this, 'open', bool);
+    this._syncAttributes();
+    if (wasOpen !== bool && typeof this.dispatchEvent === 'function') {
+      this.dispatchEvent(
+        new CustomEvent('toggle', {
+          bubbles: true,
+          composed: true,
+          detail: { open: bool },
+        })
+      );
+    }
+  }
+
+  toggle() {
+    this.open = !this.open;
+  }
+}
+
 // Register Custom Elements
 if (typeof customElements !== 'undefined') {
   if (!customElements.get('k-button')) customElements.define('k-button', KButton);
   if (!customElements.get('k-input')) customElements.define('k-input', KInput);
   if (!customElements.get('k-tab')) customElements.define('k-tab', KTab);
   if (!customElements.get('k-card')) customElements.define('k-card', KCard);
+  if (!customElements.get('k-popover')) customElements.define('k-popover', KPopover);
 }

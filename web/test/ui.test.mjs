@@ -162,3 +162,33 @@ test('PDF generation error handler toasts fallback engine errors', () => {
   assert.equal(toastMsg, 'Failed to export PDF: Cannot export PDF: add at least one room first.');
   assert.equal(toastIsErr, true);
 });
+
+test('renderSnapToggles popover menu renders unified k-button trigger with badge and categorized sections', async () => {
+  const { buildToggleViewModel } = await import('../../designer3d/tools/index.mjs');
+
+  const mockInteraction = {
+    getSnapModeState: () => ({
+      grid: true,
+      edge: true,
+      midpoint: false,
+      perpendicular: false,
+    }),
+    toggleSnapMode: (_id, _val) => {},
+  };
+
+  const viewModels = buildToggleViewModel(mockInteraction);
+  const activeCount = viewModels.filter((vm) => vm.enabled).length;
+  assert.equal(activeCount, 2);
+
+  const basicItems = viewModels.filter((vm) => (vm.category || 'basic') === 'basic');
+  const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
+
+  assert.equal(basicItems.length, 2);
+  assert.equal(advancedItems.length, 2);
+
+  const basicIds = basicItems.map((x) => x.id);
+  const advancedIds = advancedItems.map((x) => x.id);
+
+  assert.deepEqual(basicIds, ['grid', 'edge']);
+  assert.deepEqual(advancedIds, ['midpoint', 'perpendicular']);
+});
