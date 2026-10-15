@@ -68,4 +68,32 @@ export class TransformGizmo {
       },
     };
   }
+
+  stepMove(entity, dxInches, dyInches) {
+    if (!entity) throw new Error('TransformGizmo.stepMove: entity required');
+    const currentPos =
+      entity.position ||
+      (typeof entity.x === 'number' ? { x: entity.x, y: entity.y } : { x: 0, y: 0 });
+    const newPoint = { x: currentPos.x + dxInches, y: currentPos.y + dyInches };
+    return this.move(entity, newPoint);
+  }
+
+  stepRotate(entity, deltaDegrees) {
+    if (!entity) throw new Error('TransformGizmo.stepRotate: entity required');
+    const currentRad =
+      ((entity.rotation !== undefined ? entity.rotation : entity.rot) || 0) * (Math.PI / 180);
+    const deltaRad = (deltaDegrees * Math.PI) / 180;
+    return this.rotate(entity, currentRad + deltaRad);
+  }
+
+  stepScale(entity, scaleFactor) {
+    if (!entity) throw new Error('TransformGizmo.stepScale: entity required');
+    const currentScale = entity.scale?.x || 1.0;
+    const newScale = Math.max(0.1, currentScale * scaleFactor);
+    return {
+      ...entity,
+      scale: { x: newScale, y: newScale, z: newScale },
+      interaction: { type: 'scale', factor: scaleFactor },
+    };
+  }
 }

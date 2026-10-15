@@ -9,6 +9,7 @@ import { getSnappedPoint, snapAngle } from './snapping.mjs';
 import {
   getConstraintHandles,
   resizeRoomWithConstraints,
+  stepResize,
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
@@ -31,6 +32,7 @@ export {
   snapAngle,
   getConstraintHandles,
   resizeRoomWithConstraints,
+  stepResize,
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
