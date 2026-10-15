@@ -137,10 +137,17 @@ test('exportDXF finishes under 100 milliseconds client-side benchmark', () => {
   // Warm up V8 JIT compiler
   exportDXF(state);
 
+  const iterations = 10;
   const startTime = performance.now();
-  const dxf = exportDXF(state);
-  const duration = performance.now() - startTime;
+  let dxf = '';
+  for (let i = 0; i < iterations; i++) {
+    dxf = exportDXF(state);
+  }
+  const avgDuration = (performance.now() - startTime) / iterations;
 
   assert.ok(dxf.length > 0, 'Must output non-empty DXF content');
-  assert.ok(duration < 100, `exportDXF must run under 100ms (took ${duration.toFixed(2)}ms)`);
+  assert.ok(
+    avgDuration < 100,
+    `exportDXF average execution time (${avgDuration.toFixed(2)}ms) must be under 100ms`
+  );
 });
