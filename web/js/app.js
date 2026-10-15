@@ -3869,6 +3869,8 @@ if (typeof window !== 'undefined') {
     },
     toast,
     setLevel,
+    interaction,
+    snappingBridge,
   });
 
   function toggleHistoryPopover() {

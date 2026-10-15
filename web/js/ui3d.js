@@ -9,11 +9,20 @@ import {
   hordeWidth,
   toWebpDataUrl,
 } from './photoreal.js';
+import { getSnappedPoint3D } from '../../designer3d/tools/index.mjs';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'homegen.horde.key';
 
-export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLevel }) {
+export function initView3D({
+  getDoc,
+  getLevel,
+  getSelectedRoomId,
+  toast,
+  setLevel,
+  interaction,
+  _snappingBridge,
+}) {
   let api = null;
   let mode = '2d';
   let abort = null;
@@ -133,6 +142,41 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   let isDraggingMouse = false;
   let lastMouseX = 0;
   let lastMouseY = 0;
+
+  v3.addEventListener('pointermove', (e) => {
+    if (!api || mode !== '3d') return;
+    if (api.getCameraMode() === 'walk') {
+      api.clearSnapOverlay3D();
+      return;
+    }
+
+    const rayHit = api.raycastPointer(e.clientX, e.clientY);
+    if (!rayHit) {
+      api.clearSnapOverlay3D();
+      return;
+    }
+
+    const context = api.getScene3DGeometryContext();
+    const snapModes = interaction ? interaction.snapModes : null;
+    const settings = interaction
+      ? interaction.gridSettings
+      : { unitSize: 6, magneticThreshold: 12 };
+
+    const snapRes = getSnappedPoint3D({
+      point: rayHit.pointInches,
+      normal: rayHit.normal,
+      vertices: context.vertices,
+      edges: context.edges,
+      settings,
+      snapModes,
+    });
+
+    api.setSnapOverlay3D(snapRes);
+  });
+
+  v3.addEventListener('pointerleave', () => {
+    if (api) api.clearSnapOverlay3D();
+  });
 
   v3.addEventListener('mousedown', (e) => {
     if (!api || mode !== '3d' || api.getCameraMode() !== 'walk') return;
