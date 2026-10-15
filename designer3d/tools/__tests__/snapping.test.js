@@ -155,4 +155,3 @@ describe('SNAP_TOGGLE_DEFINITIONS', () => {
     expect(perpendicular.category).toBe('advanced');
   });
 });
-
