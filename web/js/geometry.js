@@ -1,35 +1,32 @@
 import { quantize } from '../../designer3d/tools/gridSettings.mjs';
 import proj4 from '#proj4';
+import { registerAllEPSG, isRegisteredEPSG } from './epsgRegistry.js';
 
-// Register common regional EPSG projection definitions
+// Register pre-compiled EPSG projection definitions
 if (proj4 && proj4.defs) {
-  proj4.defs(
-    'EPSG:2225',
-    '+proj=lcc +lat_0=39.33333333333333 +lon_0=-122 +lat_1=41.66666666666666 +lat_2=40 +x_0=2000000.0001016 +y_0=500000.0001016 +datum=NAD83 +units=us-ft +no_defs'
-  );
-  proj4.defs(
-    'EPSG:2227',
-    '+proj=lcc +lat_0=36.5 +lon_0=-120.5 +lat_1=38.43333333333333 +lat_2=37.06666666666667 +x_0=2000000.0001016 +y_0=500000.0001016 +datum=NAD83 +units=us-ft +no_defs'
-  );
-  proj4.defs(
-    'EPSG:2228',
-    '+proj=lcc +lat_0=35.33333333333333 +lon_0=-119 +lat_1=37.25 +lat_2=36 +x_0=2000000.0001016 +y_0=500000.0001016 +datum=NAD83 +units=us-ft +no_defs'
-  );
-  proj4.defs(
-    'EPSG:2229',
-    '+proj=lcc +lat_0=33.5 +lon_0=-118 +lat_1=35 +lat_2=34.03333333333333 +x_0=2000000.0001016 +y_0=500000.0001016 +datum=NAD83 +units=us-ft +no_defs'
-  );
-  proj4.defs(
-    'EPSG:2230',
-    '+proj=lcc +lat_0=32.16666666666666 +lon_0=-116.25 +lat_1=33.88333333333333 +lat_2=32.78333333333333 +x_0=2000000.0001016 +y_0=500000.0001016 +datum=NAD83 +units=us-ft +no_defs'
-  );
-  proj4.defs(
-    'EPSG:2263',
-    '+proj=lcc +lat_0=40.16666666666666 +lon_0=-74 +lat_1=41.03333333333333 +lat_2=40.66666666666666 +x_0=300000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs'
-  );
-  proj4.defs('EPSG:26910', '+proj=utm +zone=10 +datum=NAD83 +units=m +no_defs');
-  proj4.defs('EPSG:26911', '+proj=utm +zone=11 +datum=NAD83 +units=m +no_defs');
-  proj4.defs('EPSG:26918', '+proj=utm +zone=18 +datum=NAD83 +units=m +no_defs');
+  registerAllEPSG(proj4);
+}
+
+function safeProj4(sDef, tDef, pt) {
+  try {
+    if (sDef.startsWith('EPSG:') && !isRegisteredEPSG(sDef)) {
+      console.warn(`[Geometry] Unsupported EPSG projection code "${sDef}". Falling back safely.`);
+      return [pt[0], pt[1]];
+    }
+    if (tDef.startsWith('EPSG:') && !isRegisteredEPSG(tDef)) {
+      console.warn(`[Geometry] Unsupported EPSG projection code "${tDef}". Falling back safely.`);
+      return [pt[0], pt[1]];
+    }
+    const res = proj4(sDef, tDef, pt);
+    if (!res || isNaN(res[0]) || isNaN(res[1])) {
+      console.warn(`[Geometry] Reprojection returned invalid coordinates for ${sDef} -> ${tDef}`);
+      return [pt[0], pt[1]];
+    }
+    return res;
+  } catch (err) {
+    console.warn(`[Geometry] Safe reprojection caught error (${sDef} -> ${tDef}): ${err.message}`);
+    return [pt[0], pt[1]];
+  }
 }
 
 class SpatialCache {
@@ -179,14 +176,14 @@ export function reproject(coords, sourceCRS = 'EPSG:4326', targetCRS = 'PLAN') {
     if (sDef === 'PLAN') {
       // Plan inches to projected meters (EPSG:3857) relative to origin
       const originLonLat = getPlanOrigin(sourceCRS);
-      const originMeters = proj4('EPSG:4326', 'EPSG:3857', originLonLat);
+      const originMeters = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
       const xMeters = originMeters[0] + coords[0] * INCH_TO_METER;
       const yMeters = originMeters[1] - coords[1] * INCH_TO_METER;
 
       if (tDef === 'EPSG:3857') {
         resPt = [xMeters, yMeters];
       } else {
-        resPt = proj4('EPSG:3857', tDef, [xMeters, yMeters]);
+        resPt = safeProj4('EPSG:3857', tDef, [xMeters, yMeters]);
       }
     } else if (tDef === 'PLAN') {
       // Source CRS to Plan inches relative to origin
@@ -194,17 +191,17 @@ export function reproject(coords, sourceCRS = 'EPSG:4326', targetCRS = 'PLAN') {
       if (sDef === 'EPSG:3857') {
         srcMeters = [coords[0], coords[1]];
       } else {
-        srcMeters = proj4(sDef, 'EPSG:3857', [coords[0], coords[1]]);
+        srcMeters = safeProj4(sDef, 'EPSG:3857', [coords[0], coords[1]]);
       }
       const originLonLat = getPlanOrigin(targetCRS);
-      const originMeters = proj4('EPSG:4326', 'EPSG:3857', originLonLat);
+      const originMeters = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
 
       const xInches = (srcMeters[0] - originMeters[0]) / INCH_TO_METER;
       const yInches = -(srcMeters[1] - originMeters[1]) / INCH_TO_METER;
       resPt = [xInches, yInches];
     } else {
       // Standard CRS to CRS conversion via proj4
-      resPt = proj4(sDef, tDef, [coords[0], coords[1]]);
+      resPt = safeProj4(sDef, tDef, [coords[0], coords[1]]);
     }
 
     if (coords.length > 2) {
