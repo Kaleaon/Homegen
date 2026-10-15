@@ -32,9 +32,25 @@ import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
 import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
+import {
+  TransformGizmo,
+  getConstraintHandles,
+  stepResize,
+  fmtDimensionText,
+  fmtLenInches,
+  createGridSettings,
+} from '../../designer3d/tools/index.mjs';
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
+
+export function announce3DStateChange(message) {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const liveEl = document.getElementById('view3d-a11y-live');
+  if (liveEl) {
+    liveEl.textContent = message;
+  }
+}
 
 export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
@@ -70,6 +86,26 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   controls.maxPolarAngle = Math.PI * 0.499;
   const world = new THREE.Group();
   scene.add(world);
+
+  const gizmoSettings = createGridSettings({ unitSize: 6, angleSnapDegrees: 15 });
+  const gizmoSnapModes = { isEnabled: () => false };
+  const transformGizmo = new TransformGizmo(gizmoSettings, gizmoSnapModes);
+
+  let selectedEntity = null;
+  let transformMode = 'none';
+
+  const focusBoxGeom = new THREE.BoxGeometry(1, 1, 1);
+  const focusWireGeom = new THREE.EdgesGeometry(focusBoxGeom);
+  const focusMat = new THREE.LineBasicMaterial({
+    color: 0x00f0ff,
+    linewidth: 2,
+    depthTest: false,
+    transparent: true,
+  });
+  const focusOverlay = new THREE.LineSegments(focusWireGeom, focusMat);
+  focusOverlay.renderOrder = 999;
+  focusOverlay.visible = false;
+  scene.add(focusOverlay);
 
   let cameraMode = 'orbit'; // 'orbit' | 'walk'
   let yaw = 0;
@@ -944,6 +980,183 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       frame();
       framed = true;
     }
+    updateFocusOverlay(selectedEntity);
+    render();
+  }
+
+  function updateFocusOverlay(entity) {
+    if (!entity) {
+      focusOverlay.visible = false;
+      return;
+    }
+    if (entity.type === 'item') {
+      const node = entityMap.get(entity.id);
+      if (node) {
+        const box3 = new THREE.Box3().setFromObject(node);
+        const size = box3.getSize(new THREE.Vector3());
+        const center = box3.getCenter(new THREE.Vector3());
+        focusOverlay.position.copy(center);
+        focusOverlay.scale.set(
+          Math.max(0.2, size.x + 0.1),
+          Math.max(0.2, size.y + 0.1),
+          Math.max(0.2, size.z + 0.1)
+        );
+        focusOverlay.visible = true;
+      } else {
+        focusOverlay.visible = false;
+      }
+    } else if (entity.type === 'handle') {
+      const state = getState();
+      const elev = levelElevations(state);
+      const e = elev[lv(entity.room)] || 0;
+      const handles = getConstraintHandles(entity.room);
+      const h = handles.find((handle) => handle.id === entity.handleId);
+      if (h) {
+        focusOverlay.position.set(h.x * S, (e + 12) * S, h.y * S);
+        focusOverlay.scale.set(1.5, 1.5, 1.5);
+        focusOverlay.visible = true;
+      } else {
+        focusOverlay.visible = false;
+      }
+    }
+  }
+
+  function getSelectableEntities() {
+    const state = getState();
+    const cur = getLevel();
+    const levelRooms = ((state && state.rooms) || []).filter((r) => lv(r) === cur);
+    const entities = [];
+
+    for (const room of levelRooms) {
+      const handles = getConstraintHandles(room);
+      for (const h of handles) {
+        entities.push({
+          type: 'handle',
+          id: `${room.id}:handle:${h.id}`,
+          room,
+          handleId: h.id,
+          handleName: h.name,
+          label: `${room.name} ${h.name} Handle`,
+        });
+      }
+      for (const item of room.items || []) {
+        const def = ITEM_BY_ID[item.type];
+        const itemName = def?.name || item.type || 'Item';
+        entities.push({
+          type: 'item',
+          id: item.id,
+          room,
+          item,
+          label: itemName,
+        });
+      }
+    }
+    return entities;
+  }
+
+  function cycle3DSelection(dir = 1) {
+    const entities = getSelectableEntities();
+    if (!entities.length) {
+      clear3DSelection();
+      announce3DStateChange('No 3D objects available on this floor.');
+      return null;
+    }
+
+    let currentIndex = -1;
+    if (selectedEntity) {
+      currentIndex = entities.findIndex((e) => e.id === selectedEntity.id);
+    }
+
+    const nextIndex =
+      currentIndex < 0
+        ? dir < 0
+          ? entities.length - 1
+          : 0
+        : (currentIndex + dir + entities.length) % entities.length;
+
+    selectedEntity = entities[nextIndex];
+    transformMode = selectedEntity.type === 'item' ? 'move' : 'resize';
+    updateFocusOverlay(selectedEntity);
+
+    if (selectedEntity.type === 'item') {
+      const posX = fmtLenInches(selectedEntity.item.x);
+      const posZ = fmtLenInches(selectedEntity.item.y);
+      announce3DStateChange(`Selected ${selectedEntity.label}, Position: X ${posX}, Z ${posZ}`);
+    } else if (selectedEntity.type === 'handle') {
+      const sizeText = fmtDimensionText(selectedEntity.room.w, selectedEntity.room.h);
+      announce3DStateChange(`Selected ${selectedEntity.label}, Size ${sizeText}`);
+    }
+    render();
+    return selectedEntity;
+  }
+
+  function set3DTransformMode(mode) {
+    if (!selectedEntity) return;
+    if (['move', 'rotate', 'scale'].includes(mode)) {
+      transformMode = mode;
+      const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
+      announce3DStateChange(`${modeLabel} mode active. Use Arrow keys to adjust.`);
+    }
+  }
+
+  function stepTransformSelected(dx = 0, dy = 0, options = {}) {
+    if (!selectedEntity) return false;
+
+    if (selectedEntity.type === 'item') {
+      const item = selectedEntity.item;
+      if (transformMode === 'rotate') {
+        const deltaDeg = dx !== 0 ? (dx > 0 ? 15 : -15) : dy !== 0 ? (dy > 0 ? 15 : -15) : 15;
+        const result = transformGizmo.stepRotate(item, deltaDeg);
+        const newRot = Math.round(((result.rotation * 180) / Math.PI) % 360);
+        item.rot = newRot < 0 ? newRot + 360 : newRot;
+        reconcile();
+        updateFocusOverlay(selectedEntity);
+        announce3DStateChange(`Rotated ${selectedEntity.label} to ${item.rot}°`);
+      } else if (transformMode === 'scale') {
+        const factor = dy < 0 || dx > 0 ? 1.1 : 0.9;
+        const result = transformGizmo.stepScale(item, factor);
+        item.scale = result.scale.x;
+        reconcile();
+        updateFocusOverlay(selectedEntity);
+        announce3DStateChange(`Scaled ${selectedEntity.label}`);
+      } else {
+        // Move mode
+        const result = transformGizmo.stepMove(item, dx, dy);
+        item.x = Math.round(result.position.x);
+        item.y = Math.round(result.position.y);
+        reconcile();
+        updateFocusOverlay(selectedEntity);
+
+        const dirName = dx > 0 ? 'right' : dx < 0 ? 'left' : dy > 0 ? 'down' : 'up';
+        const posX = fmtLenInches(item.x);
+        const posZ = fmtLenInches(item.y);
+        announce3DStateChange(`Moved ${selectedEntity.label} ${dirName} to X ${posX}, Z ${posZ}`);
+      }
+      return true;
+    } else if (selectedEntity.type === 'handle') {
+      const room = selectedEntity.room;
+      const res = stepResize(room, selectedEntity.handleId, dx, dy, options);
+      room.x = res.rect.x;
+      room.y = res.rect.y;
+      room.w = res.rect.w;
+      room.h = res.rect.h;
+      reconcile();
+      updateFocusOverlay(selectedEntity);
+      const statusText = res.isValid ? 'Valid' : 'Invalid';
+      announce3DStateChange(
+        `${room.name} resized to ${res.dimensionText} (${Math.round(res.areaSqFt)} sq ft, ${statusText})`
+      );
+      return true;
+    }
+    return false;
+  }
+
+  function clear3DSelection() {
+    if (!selectedEntity) return;
+    selectedEntity = null;
+    transformMode = 'none';
+    updateFocusOverlay(null);
+    announce3DStateChange('Deselected 3D object.');
     render();
   }
 
@@ -1414,6 +1627,14 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     entityMap,
     hdBase,
     preloader,
+    announce3DStateChange,
+    cycle3DSelection,
+    getSelected3DEntity: () => selectedEntity,
+    getTransformMode: () => transformMode,
+    set3DTransformMode,
+    stepTransformSelected,
+    clear3DSelection,
+    updateFocusOverlay,
     async preloadMaterials(finishIds) {
       return preloader.preload(finishIds || Object.keys(HD_MATERIALS));
     },

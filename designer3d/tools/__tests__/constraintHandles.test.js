@@ -2,6 +2,7 @@ import { InteractionLayer } from '../interactionLayer.mjs';
 import {
   getConstraintHandles,
   resizeRoomWithConstraints,
+  stepResize,
   validateRoomDimensions,
   fmtDimensionText,
 } from '../constraintHandles.mjs';
@@ -96,5 +97,14 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
 
   test('fmtDimensionText formats inches into feet and inches', () => {
     expect(fmtDimensionText(144, 126)).toBe('12\' 0" × 10\' 6"');
+  });
+
+  test('stepResize adjusts room dimensions in step increments', () => {
+    const res = stepResize(room, 'se', 0, 12);
+    expect(res.rect.w).toBe(144);
+    expect(res.rect.h).toBe(132); // 120 + 12 = 132 (11 ft)
+    expect(res.areaSqFt).toBe(132);
+    expect(res.isValid).toBe(true);
+    expect(res.dimensionText).toBe('12\' 0" × 11\' 0"');
   });
 });
