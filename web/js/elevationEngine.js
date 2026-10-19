@@ -1,3 +1,5 @@
+import { globalCadWorkerClient } from './cadWorkerClient.js';
+
 /**
  * Client-side Elevation Engine
  * Standardizes heightmaps, Google Maps Elevation API JSON responses, and GeoTIFF datasets.
@@ -696,134 +698,21 @@ function getEdgePoint(x, y, edge, v0, v1, v2, v3, z, width, height, bounds) {
 
 /**
  * Asynchronous Marching Squares contour generation.
- * Runs non-blockingly using Worker or async time-slicing.
+ * Offloads to CAD Web Worker pipeline or falls back synchronously.
  */
 export async function computeContoursAsync(grid, intervalOverride = null) {
   if (!grid) return [];
 
-  // If Web Worker and Blob are available, run in background worker
-  if (
-    typeof Worker !== 'undefined' &&
-    typeof Blob !== 'undefined' &&
-    typeof URL !== 'undefined' &&
-    URL.createObjectURL
-  ) {
-    try {
-      const workerCode = `
-        self.onmessage = function(e) {
-          const { gridData, width, height, minElevation, maxElevation, bounds, interval } = e.data;
-          const grid = {
-            width,
-            height,
-            data: gridData,
-            minElevation,
-            maxElevation,
-            bounds,
-            contourInterval: interval
-          };
-
-          const MARCHING_SQUARES_LOOKUP = ${JSON.stringify(MARCHING_SQUARES_LOOKUP)};
-
-          function getEdgePoint(x, y, edge, v0, v1, v2, v3, z, width, height, bounds) {
-            let cellX1 = x, cellY1 = y, cellX2 = x, cellY2 = y;
-            let val1 = v0, val2 = v1;
-            switch (edge) {
-              case 0: cellX1 = x; cellY1 = y; val1 = v0; cellX2 = x + 1; cellY2 = y; val2 = v1; break;
-              case 1: cellX1 = x + 1; cellY1 = y; val1 = v1; cellX2 = x + 1; cellY2 = y + 1; val2 = v2; break;
-              case 2: cellX1 = x; cellY1 = y + 1; val1 = v3; cellX2 = x + 1; cellY2 = y + 1; val2 = v2; break;
-              case 3: cellX1 = x; cellY1 = y; val1 = v0; cellX2 = x; cellY2 = y + 1; val2 = v3; break;
-            }
-            let t = 0.5;
-            if (Math.abs(val2 - val1) > 1e-6) {
-              t = (z - val1) / (val2 - val1);
-              t = Math.max(0, Math.min(1, t));
-            }
-            const gx = cellX1 + t * (cellX2 - cellX1);
-            const gy = cellY1 + t * (cellY2 - cellY1);
-            const wx = bounds.minX + (gx / (width - 1)) * (bounds.maxX - bounds.minX);
-            const wy = bounds.minY + (gy / (height - 1)) * (bounds.maxY - bounds.minY);
-            return { x: wx, y: wy };
-          }
-
-          const startLevel = Math.ceil(minElevation / interval) * interval;
-          const contours = [];
-          for (let z = startLevel; z <= maxElevation; z += interval) {
-            const levelVal = Number(z.toFixed(2));
-            const lines = [];
-            for (let y = 0; y < height - 1; y++) {
-              for (let x = 0; x < width - 1; x++) {
-                const i0 = y * width + x;
-                const i1 = y * width + (x + 1);
-                const i2 = (y + 1) * width + (x + 1);
-                const i3 = (y + 1) * width + x;
-                const v0 = gridData[i0];
-                const v1 = gridData[i1];
-                const v2 = gridData[i2];
-                const v3 = gridData[i3];
-
-                let index = 0;
-                if (v0 >= levelVal) index |= 8;
-                if (v1 >= levelVal) index |= 4;
-                if (v2 >= levelVal) index |= 2;
-                if (v3 >= levelVal) index |= 1;
-
-                if (index === 0 || index === 15) continue;
-                const edges = MARCHING_SQUARES_LOOKUP[index];
-                for (let k = 0; k < edges.length; k++) {
-                  const e = edges[k];
-                  const pA = getEdgePoint(x, y, e[0], v0, v1, v2, v3, levelVal, width, height, bounds);
-                  const pB = getEdgePoint(x, y, e[1], v0, v1, v2, v3, levelVal, width, height, bounds);
-                  lines.push({ x1: pA.x, y1: pA.y, x2: pB.x, y2: pB.y });
-                }
-              }
-            }
-            if (lines.length > 0) {
-              contours.push({ elevation: levelVal, lines });
-            }
-          }
-
-          self.postMessage(contours);
-        };
-      `;
-
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(workerUrl);
-
-      return new Promise((res) => {
-        worker.onmessage = (evt) => {
-          URL.revokeObjectURL(workerUrl);
-          worker.terminate();
-          res(evt.data);
-        };
-        worker.onerror = () => {
-          URL.revokeObjectURL(workerUrl);
-          worker.terminate();
-          // Fallback to sync
-          res(computeMarchingSquares(grid, intervalOverride));
-        };
-        const interval = intervalOverride || grid.contourInterval || 1.0;
-        worker.postMessage({
-          gridData: grid.data,
-          width: grid.width,
-          height: grid.height,
-          minElevation: grid.minElevation,
-          maxElevation: grid.maxElevation,
-          bounds: grid.bounds,
-          interval,
-        });
-      });
-    } catch {
-      // Fallback
+  try {
+    const contours = await globalCadWorkerClient.computeIsolinesAsync(grid, intervalOverride);
+    if (Array.isArray(contours) && contours.length > 0) {
+      return contours;
     }
+  } catch {
+    // Fall back
   }
 
-  // Fallback: microtask async resolution
-  return new Promise((res) => {
-    setTimeout(() => {
-      res(computeMarchingSquares(grid, intervalOverride));
-    }, 0);
-  });
+  return computeMarchingSquares(grid, intervalOverride);
 }
 
 /**

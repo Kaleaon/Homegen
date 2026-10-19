@@ -1,8 +1,10 @@
 import { getSnappedPoint } from '../../designer3d/tools/index.mjs';
 import { extractRoomEdges } from './geometry.js';
+import { globalCadWorkerClient } from './cadWorkerClient.js';
 
 /**
- * Event-driven SnappingBridge connecting canvas pointer interactions to multi-mode snapping logic.
+ * Event-driven SnappingBridge connecting canvas pointer interactions to multi-mode snapping logic
+ * via off-main-thread Web Worker computation pipeline with optimistic UI rendering and sync fallback.
  */
 export class SnappingBridge {
   constructor(options = {}) {
@@ -11,6 +13,7 @@ export class SnappingBridge {
     this.getRooms = options.getRooms || (() => []);
     this.toWorld = options.toWorld || null;
     this.onSnap = options.onSnap || null;
+    this.workerClient = options.workerClient || globalCadWorkerClient;
     this.activeSnap = null;
     this.attached = false;
 
@@ -64,6 +67,7 @@ export class SnappingBridge {
 
   /**
    * Computes snapping for a world point and anchor point.
+   * Immediately updates optimistic preview state and dispatches async calculation to Worker.
    */
   computeSnap(point, anchor = point, roomsOverride = null) {
     if (!point) return null;
@@ -86,6 +90,7 @@ export class SnappingBridge {
       return this.activeSnap;
     }
 
+    // Direct synchronous calculation for immediate feedback
     const res = getSnappedPoint({
       point,
       anchor,
@@ -122,6 +127,28 @@ export class SnappingBridge {
       guideLines,
       indicator: res.snap ? res.point : null,
     };
+
+    // Also sync scene diff and dispatch off-thread async worker calculation
+    if (this.workerClient) {
+      this.workerClient.syncSceneDiff({ rooms, edges, settings, snapModes });
+      this.workerClient
+        .computeSnapAsync(point, anchor, { rooms, edges, settings, snapModes })
+        .then((asyncRes) => {
+          if (asyncRes && asyncRes.point) {
+            this.activeSnap = {
+              point: asyncRes.point,
+              rawPoint: asyncRes.rawPoint || point,
+              anchor,
+              snap: asyncRes.snap,
+              guideLines: asyncRes.guideLines || guideLines,
+              indicator: asyncRes.indicator,
+            };
+            if (typeof this.onSnap === 'function') {
+              this.onSnap(this.activeSnap);
+            }
+          }
+        });
+    }
 
     if (typeof this.onSnap === 'function') {
       this.onSnap(this.activeSnap);
