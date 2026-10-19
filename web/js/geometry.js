@@ -398,25 +398,37 @@ export function wallSeg(room, wall) {
 
 export const wallLength = (room, wall) => wallSeg(room, wall).len;
 
-export function interiorPolygon(room, wallThickness = WT) {
-  const pts = getRoomPoints(room);
+export function polygonOffset(pts, distance) {
+  if (!pts || pts.length < 3) return pts;
   const n = pts.length;
-  if (n < 3) return pts;
-
   const segs = [];
+  const winding = polygonWinding(pts);
+
   for (let i = 0; i < n; i++) {
-    segs.push(wallSeg(room, i));
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % n];
+    const vx = p2.x - p1.x;
+    const vy = p2.y - p1.y;
+    const len = Math.hypot(vx, vy);
+    if (len === 0) {
+      segs.push({ ax: p1.x, ay: p1.y, dx: 1, dy: 0, nx: 0, ny: 1 });
+      continue;
+    }
+    const dx = vx / len;
+    const dy = vy / len;
+    const nx = winding > 0 ? dy : -dy;
+    const ny = winding > 0 ? -dx : dx;
+    segs.push({ ax: p1.x, ay: p1.y, dx, dy, nx, ny });
   }
 
-  const offset = wallThickness / 2;
   const shiftedLines = segs.map((s) => ({
-    px: s.ax + s.nx * offset,
-    py: s.ay + s.ny * offset,
+    px: s.ax + s.nx * distance,
+    py: s.ay + s.ny * distance,
     dx: s.dx,
     dy: s.dy,
   }));
 
-  const innerPts = [];
+  const outPts = [];
   for (let i = 0; i < n; i++) {
     const prevIdx = (i - 1 + n) % n;
     const line1 = shiftedLines[prevIdx];
@@ -424,17 +436,27 @@ export function interiorPolygon(room, wallThickness = WT) {
 
     const denom = line1.dx * line2.dy - line1.dy * line2.dx;
     if (Math.abs(denom) < 1e-6) {
-      innerPts.push({ x: line2.px, y: line2.py });
+      outPts.push({ x: line2.px, y: line2.py });
     } else {
       const s = ((line2.px - line1.px) * line2.dy - (line2.py - line1.py) * line2.dx) / denom;
-      innerPts.push({
+      outPts.push({
         x: line1.px + s * line1.dx,
         y: line1.py + s * line1.dy,
       });
     }
   }
 
-  return innerPts;
+  return outPts;
+}
+
+export function outerPolygon(room, wallThickness = WT) {
+  const pts = getRoomPoints(room);
+  return polygonOffset(pts, -wallThickness / 2);
+}
+
+export function interiorPolygon(room, wallThickness = WT) {
+  const pts = getRoomPoints(room);
+  return polygonOffset(pts, wallThickness / 2);
 }
 
 /** Clear interior bounding box or polygon. */
@@ -536,6 +558,22 @@ export function wallNeighbors(rooms, room, wall) {
     }
   }
   return out;
+}
+
+/**
+ * 2D CSG boolean subtraction for exterior cladding vs interior partition walls.
+ * Returns 1D/2D contour interval ranges along wall segment `wall` of `room`
+ * where exterior cladding is exposed (not covered by adjacent room footprints).
+ */
+export function csgExteriorCladdingIntervals(rooms, room, wall, wallThickness = WT) {
+  const s = wallSeg(room, wall);
+  const len = s.len;
+  let ext = [[-wallThickness / 2, len + wallThickness / 2]];
+  const nbrs = wallNeighbors(rooms, room, wall);
+  for (const n of nbrs) {
+    ext = subtractInterval(ext, [n.from, n.to]);
+  }
+  return { intervals: ext, neighbors: nbrs };
 }
 
 /** Offset translation from neighbour `r2`'s wall space into `room`'s wall space. */
