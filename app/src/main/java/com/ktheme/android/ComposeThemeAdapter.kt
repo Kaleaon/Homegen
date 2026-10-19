@@ -40,7 +40,7 @@ data class KthemeLayout(
     val surfaces: String = "compose",
     val actions: String = "theme-effect",
     val player: String = "docked",
-    val shadow: String = "theme-effect"
+    val shadow: String = "theme-effect",
 )
 
 val LocalKthemeLayout = staticCompositionLocalOf { KthemeLayout() }
@@ -66,7 +66,7 @@ fun Theme.toKthemeLayout(): KthemeLayout {
             surfaces = "lcars",
             actions = "filled-text",
             player = "docked-text",
-            shadow = "none"
+            shadow = "none",
         )
         layoutId.contains("terminal") -> KthemeLayout(
             id = "terminal",
@@ -85,7 +85,7 @@ fun Theme.toKthemeLayout(): KthemeLayout {
             contentCase = "uppercase",
             navigationCase = "uppercase",
             surfaces = "box",
-            shadow = "none"
+            shadow = "none",
         )
         layoutId.contains("tile") || layoutId.contains("metro") -> KthemeLayout(
             id = "tiles",
@@ -102,7 +102,7 @@ fun Theme.toKthemeLayout(): KthemeLayout {
             typographyBody = "Open Sans",
             navigationCase = "lowercase",
             surfaces = "flat",
-            actions = "accent-tile"
+            actions = "accent-tile",
         )
         layoutId.contains("glass") || layoutId.contains("aero") || layoutId.contains("frutiger") -> KthemeLayout(
             id = "glass",
@@ -117,7 +117,7 @@ fun Theme.toKthemeLayout(): KthemeLayout {
             cornerIconDp = 12,
             cornerArtworkDp = 22,
             typographyBody = "Nunito Sans",
-            surfaces = "soft"
+            surfaces = "soft",
         )
         layoutId.contains("rule") -> KthemeLayout(
             id = "rules",
@@ -135,7 +135,7 @@ fun Theme.toKthemeLayout(): KthemeLayout {
             contentCase = "uppercase",
             navigationCase = "uppercase",
             surfaces = "rule",
-            shadow = "none"
+            shadow = "none",
         )
         layoutId.contains("press") || layoutId.contains("paper") -> KthemeLayout(
             id = "press",
@@ -152,7 +152,7 @@ fun Theme.toKthemeLayout(): KthemeLayout {
             typographyBody = "Source Serif 4 + Jost",
             surfaces = "quiet",
             actions = "quiet-solid",
-            shadow = "none"
+            shadow = "none",
         )
         else -> KthemeLayout()
     }
