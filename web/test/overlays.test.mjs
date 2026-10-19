@@ -130,3 +130,44 @@ test('style.css defines .diff-close-btn with 24x24px minimum target size and cen
     '.diff-close-btn must use justify-content: center'
   );
 });
+
+test('overlays.css defines tokenized GIS lot setback table styles', () => {
+  const cssPath = path.join(__dirname, '../css/overlays.css');
+  const css = fs.readFileSync(cssPath, 'utf8');
+
+  assert.ok(css.includes('.gis-empty-msg'), 'overlays.css must define .gis-empty-msg');
+  assert.ok(css.includes('.gis-segment-table'), 'overlays.css must define .gis-segment-table');
+  assert.ok(css.includes('.gis-table-head-row'), 'overlays.css must define .gis-table-head-row');
+  assert.ok(css.includes('.gis-table-row'), 'overlays.css must define .gis-table-row');
+  assert.ok(css.includes('.gis-table-cell'), 'overlays.css must define .gis-table-cell');
+  assert.ok(css.includes('.gis-setback-input'), 'overlays.css must define .gis-setback-input');
+});
+
+test('renderGISSegments in app.js uses <k-input type="number"> and contains zero hardcoded inline style attributes or color hex strings', () => {
+  const appJsPath = path.join(__dirname, '../js/app.js');
+  const appJs = fs.readFileSync(appJsPath, 'utf8');
+
+  // Extract renderGISSegments function block
+  const fnMatch = appJs.match(/export function renderGISSegments\(\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(fnMatch, 'renderGISSegments function found in app.js');
+  const fnCode = fnMatch[1];
+
+  // Verify k-input usage
+  assert.match(
+    fnCode,
+    /<k-input type="number" min="0" max="360" value="\${seg\.setback \?\? 36}" data-seg-id="\${seg\.id}" class="gis-setback-input"><\/k-input>/,
+    'renderGISSegments renders setback inputs using <k-input>'
+  );
+
+  // Verify zero hardcoded inline style attributes
+  assert.ok(
+    !fnCode.includes('style='),
+    'renderGISSegments must contain zero style= inline attributes'
+  );
+
+  // Verify zero hardcoded hex color strings
+  assert.ok(
+    !/#([0-9a-fA-F]{3}){1,2}\b/.test(fnCode),
+    'renderGISSegments must contain zero hardcoded hex color strings'
+  );
+});

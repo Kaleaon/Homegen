@@ -1,6 +1,6 @@
 /**
  * Ktheme Web Components Wrapper for UI Controls
- * Defines <k-button>, <k-tab>, <k-card>, <k-input>
+ * Defines <k-button>, <k-tab>, <k-card>, <k-input>, <k-select>
  */
 
 const KTHEME_STYLES = `
@@ -560,10 +560,181 @@ export class KCard extends BaseElement {
   }
 }
 
+/**
+ * <k-select>
+ */
+export class KSelect extends BaseElement {
+  static get observedAttributes() {
+    return ['value', 'disabled', 'aria-label', 'aria-labelledby', 'name'];
+  }
+
+  constructor() {
+    super();
+    if (typeof this.attachShadow === 'function') {
+      this.attachShadow({ mode: 'open' });
+      this.shadowRoot.innerHTML = `
+      <style>
+        ${KTHEME_STYLES}
+        :host {
+          display: inline-block;
+          box-sizing: border-box;
+          min-width: 24px;
+          min-height: 24px;
+        }
+        :host([hidden]) {
+          display: none !important;
+        }
+        select {
+          font: inherit;
+          color: var(--ktheme-text, var(--ink, #2b2824));
+          background: var(--ktheme-bg-surface, var(--panel, #fffdf9));
+          border: 1px solid var(--ktheme-border, var(--line, #ded8cb));
+          border-radius: var(--radius-sm, 6px);
+          padding: 4px 8px;
+          width: 100%;
+          min-height: 24px;
+          min-width: 24px;
+          box-sizing: border-box;
+          outline: none;
+          transition: border-color 0.15s, background 0.15s, color 0.15s;
+          cursor: pointer;
+        }
+        select:hover,
+        select:focus {
+          border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
+        }
+        select:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        :focus:not(:focus-visible),
+        select:focus:not(:focus-visible) {
+          outline: none;
+        }
+        :host(:focus-visible) select,
+        select:focus-visible {
+          outline: var(--focus-ring-width) solid var(--focus-ring-color);
+          outline-offset: var(--focus-ring-offset);
+          position: relative;
+          z-index: 1;
+        }
+      </style>
+      <select part="select"><slot></slot></select>
+    `;
+      this._select = this.shadowRoot.querySelector('select');
+      this._slot = this.shadowRoot.querySelector('slot');
+
+      const syncOptionsAndValue = () => {
+        this._syncChildOptions();
+        this._syncAttributes();
+      };
+
+      if (this._slot) {
+        this._slot.addEventListener('slotchange', syncOptionsAndValue);
+      }
+
+      this._select.addEventListener('change', () => {
+        this.setAttribute('value', this._select.value);
+        this.dispatchEvent(
+          new CustomEvent('change', {
+            bubbles: true,
+            composed: true,
+            detail: { value: this._select.value },
+          })
+        );
+      });
+    }
+  }
+
+  connectedCallback() {
+    this._syncChildOptions();
+    this._syncAttributes();
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (oldValue === newValue) return;
+    this._syncAttributes();
+  }
+
+  _syncChildOptions() {
+    if (!this._select) return;
+    const lightOptions = Array.from(this.querySelectorAll('option'));
+    if (lightOptions.length > 0) {
+      if (this._select.options.length !== lightOptions.length) {
+        this._select.innerHTML = '';
+        for (const opt of lightOptions) {
+          const clone = opt.cloneNode(true);
+          this._select.appendChild(clone);
+        }
+      }
+    }
+  }
+
+  _syncAttributes() {
+    if (!this._select) return;
+    const attrs = ['aria-label', 'aria-labelledby', 'name'];
+    for (const a of attrs) {
+      if (this.hasAttribute(a)) {
+        this._select.setAttribute(a, this.getAttribute(a));
+      } else {
+        this._select.removeAttribute(a);
+      }
+    }
+    this._select.disabled = this.hasAttribute('disabled');
+    if (this.hasAttribute('value')) {
+      const val = this.getAttribute('value');
+      if (this._select.value !== val) {
+        this._select.value = val;
+      }
+    }
+  }
+
+  get value() {
+    if (this._select && this._select.options.length > 0) {
+      return this._select.value;
+    }
+    return this.getAttribute('value') || '';
+  }
+
+  set value(val) {
+    const strVal = val == null ? '' : String(val);
+    this.setAttribute('value', strVal);
+    if (this._select) {
+      this._select.value = strVal;
+    }
+  }
+
+  get disabled() {
+    return this.hasAttribute('disabled');
+  }
+
+  set disabled(val) {
+    reflectBooleanAttr(this, 'disabled', val);
+    this._syncAttributes();
+  }
+
+  focus(options) {
+    if (this._select) {
+      this._select.focus(options);
+    } else if (typeof super.focus === 'function') {
+      super.focus(options);
+    }
+  }
+
+  blur() {
+    if (this._select) {
+      this._select.blur();
+    } else if (typeof super.blur === 'function') {
+      super.blur();
+    }
+  }
+}
+
 // Register Custom Elements
 if (typeof customElements !== 'undefined') {
   if (!customElements.get('k-button')) customElements.define('k-button', KButton);
   if (!customElements.get('k-input')) customElements.define('k-input', KInput);
+  if (!customElements.get('k-select')) customElements.define('k-select', KSelect);
   if (!customElements.get('k-tab')) customElements.define('k-tab', KTab);
   if (!customElements.get('k-card')) customElements.define('k-card', KCard);
 }

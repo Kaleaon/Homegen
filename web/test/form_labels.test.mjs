@@ -21,8 +21,8 @@ test('formRow helper function generates row markup with explicit label for attri
 });
 
 test('index.html Photoreal modal (#photo) labels have explicit for attributes matching input/select IDs', () => {
-  assert.match(htmlContent, /<label for="p-room">Room<\/label>\s*<select id="p-room">/);
-  assert.match(htmlContent, /<label for="p-style">Style<\/label>\s*<select id="p-style">/);
+  assert.match(htmlContent, /<label for="p-room">Room<\/label>\s*<k-select id="p-room">/);
+  assert.match(htmlContent, /<label for="p-style">Style<\/label>\s*<k-select id="p-style">/);
   assert.match(htmlContent, /<label for="p-prompt">Prompt<\/label>\s*<textarea id="p-prompt"/);
   assert.match(htmlContent, /<label for="p-key">Horde key<\/label>\s*<input id="p-key"/);
 });
