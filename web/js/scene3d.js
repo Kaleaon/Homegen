@@ -603,6 +603,31 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return shape;
   }
 
+  function addCornerMiterFiller(group, pCorner, n1, n2, d0, d1, y0, y1, elev, material) {
+    const p1_d0 = { x: pCorner.x + n1.x * d0, y: pCorner.y + n1.y * d0 };
+    const p2_d0 = { x: pCorner.x + n2.x * d0, y: pCorner.y + n2.y * d0 };
+    const p2_d1 = { x: pCorner.x + n2.x * d1, y: pCorner.y + n2.y * d1 };
+    const p1_d1 = { x: pCorner.x + n1.x * d1, y: pCorner.y + n1.y * d1 };
+
+    const shape = new THREE.Shape();
+    shape.moveTo(p1_d0.x * S, -p1_d0.y * S);
+    shape.lineTo(p2_d0.x * S, -p2_d0.y * S);
+    shape.lineTo(p2_d1.x * S, -p2_d1.y * S);
+    shape.lineTo(p1_d1.x * S, -p1_d1.y * S);
+    shape.closePath();
+
+    const height = (y1 - y0) * S;
+    if (height <= 0.001) return;
+
+    const extrudeSettings = { depth: height, bevelEnabled: false };
+    const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geom.rotateX(Math.PI / 2);
+    const visMat = material.vis || material.base || material;
+    const mesh = new THREE.Mesh(geom, visMat);
+    mesh.position.y = (elev + y0) * S;
+    group.add(mesh);
+  }
+
   function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, faceIdx) {
     const s = wallSeg(room, wall);
     const len = t1 - t0;
@@ -619,6 +644,50 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
     m.rotation.setFromRotationMatrix(m3);
     group.add(m);
+
+    const idx = resolveWallIndex(wall);
+    const pts = getRoomPoints(room);
+    const N = pts.length;
+    if (N >= 3) {
+      const prevWall = (idx - 1 + N) % N;
+      const nextWall = (idx + 1) % N;
+      const sPrev = wallSeg(room, prevWall);
+      const sNext = wallSeg(room, nextWall);
+
+      const dotStart = sPrev.dx * s.dx + sPrev.dy * s.dy;
+      if (t0 <= 0.5 && Math.abs(dotStart) > 1e-3 && Math.abs(dotStart) < 0.999) {
+        const pStart = { x: s.ax, y: s.ay };
+        addCornerMiterFiller(
+          group,
+          pStart,
+          { x: sPrev.nx, y: sPrev.ny },
+          { x: s.nx, y: s.ny },
+          d0,
+          d1,
+          y0,
+          y1,
+          elev,
+          mat
+        );
+      }
+
+      const dotEnd = s.dx * sNext.dx + s.dy * sNext.dy;
+      if (t1 >= s.len - 0.5 && Math.abs(dotEnd) > 1e-3 && Math.abs(dotEnd) < 0.999) {
+        const pEnd = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+        addCornerMiterFiller(
+          group,
+          pEnd,
+          { x: s.nx, y: s.ny },
+          { x: sNext.nx, y: sNext.ny },
+          d0,
+          d1,
+          y0,
+          y1,
+          elev,
+          mat
+        );
+      }
+    }
   }
 
   /** Cut a wall span [a,b] into solid pieces around openings; calls piece(t0,t1,y0,y1) for each solid block. */
@@ -1115,7 +1184,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       return og;
     }
     const ang = (80 * Math.PI) / 180;
-    const sn = { x: s.nx * dir, y: s.ny * dir };
     const leaf = boxMesh(o.width - 1, d.h - 1, 1.75, doorMat);
     const pivot = new THREE.Group();
     const hx = s.ax + s.dx * o.offset;
@@ -1123,12 +1191,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     pivot.position.set(hx * S, (e + (d.h - 1) / 2) * S, hy * S);
     leaf.position.set(((o.width - 1) / 2) * S, 0, 0);
     pivot.add(leaf);
+    const cross = s.dx * (s.ny * dir) - s.dy * (s.nx * dir);
+    const swingSign = cross >= 0 ? 1 : -1;
     const alongAng = Math.atan2(s.dy, s.dx);
-    const normAng = Math.atan2(sn.y, sn.x);
-    let delta = normAng - alongAng;
-    while (delta > Math.PI) delta -= 2 * Math.PI;
-    while (delta < -Math.PI) delta += 2 * Math.PI;
-    pivot.rotation.y = -(alongAng + Math.sign(delta) * ang);
+    pivot.rotation.y = -alongAng + swingSign * ang;
     og.add(pivot);
     group.add(og);
     return og;
@@ -1418,6 +1484,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       return preloader.preload(finishIds || Object.keys(HD_MATERIALS));
     },
     scene,
+    world,
     callbacks,
     walkKeys,
     getAttributionText: get3DAttributionText,

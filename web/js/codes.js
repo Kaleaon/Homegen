@@ -6,13 +6,13 @@ import {
   WT,
   EPS,
   WALLS,
-  OPPOSITE,
   wallLength,
   interior,
   floorAreaSqFt,
   wallPoint,
+  wallSeg,
+  resolveWallIndex,
   wallNeighbors,
-  neighborShift,
   roomsOverlap,
   rectsOverlap,
   rectInside,
@@ -35,16 +35,28 @@ const EGRESS = { minW: 20, minH: 24, minArea: 5.7 * 144, maxSill: 44 };
 
 /** Openings visible on `room`'s wall, including doors owned by a neighbouring room, in this wall's offset space. */
 export function wallOpenings(state, room, wall) {
+  const wallIdx = resolveWallIndex(wall);
   const out = room.openings
-    .filter((o) => o.wall === wall)
+    .filter((o) => o.wall === wall || resolveWallIndex(o.wall) === wallIdx)
     .map((o) => ({ o, owner: room, from: o.offset, to: o.offset + o.width }));
+  const s1 = wallSeg(room, wall);
+  if (s1.len <= EPS) return out;
+
   for (const n of wallNeighbors(state.rooms, room, wall)) {
-    const shift = neighborShift(room, n.room, wall);
+    const nWallIdx = n.wall !== undefined ? n.wall : n.neighborWall;
     for (const o of n.room.openings) {
-      if (o.wall !== OPPOSITE[wall]) continue;
-      const from = o.offset + shift;
-      const to = from + o.width;
-      if (to > n.from + EPS && from < n.to - EPS) out.push({ o, owner: n.room, from, to });
+      if (nWallIdx !== undefined && resolveWallIndex(o.wall) !== resolveWallIndex(nWallIdx)) {
+        continue;
+      }
+      const p1 = wallPoint(n.room, o.wall, o.offset, 0);
+      const p2 = wallPoint(n.room, o.wall, o.offset + o.width, 0);
+      const t1 = (p1.x - s1.ax) * s1.dx + (p1.y - s1.ay) * s1.dy;
+      const t2 = (p2.x - s1.ax) * s1.dx + (p2.y - s1.ay) * s1.dy;
+      const from = Math.min(t1, t2);
+      const to = Math.max(t1, t2);
+      if (to > n.from + EPS && from < n.to - EPS) {
+        out.push({ o, owner: n.room, from, to });
+      }
     }
   }
   return out;
