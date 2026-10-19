@@ -137,4 +137,49 @@ describe('getSnappedPoint', () => {
     // Edge snap should win (distance ~0.05) vs grid (distance ~0.14)
     expect(result.snap.type).toBe('edge');
   });
+
+  test('snaps to arc edge and arc midpoint when bulge is non-zero', () => {
+    const settings = createGridSettings({
+      magneticThreshold: 1.0,
+      edgeThreshold: 1.0,
+      midpointThreshold: 1.0,
+    });
+    const snapModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+      [SNAP_MODES.MIDPOINT]: true,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+
+    // Semicircle arc edge (bulge = 1) from (0,0) to (10,0), apex at (5,5)
+    const edges = [{ start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bulge: 1, index: 0 }];
+
+    // Test arc edge snap near apex
+    const resultEdge = getSnappedPoint({
+      point: { x: 5, y: 5.2 },
+      edges,
+      settings,
+      snapModes,
+    });
+    expect(resultEdge.point.x).toBeCloseTo(5);
+    expect(resultEdge.point.y).toBeCloseTo(5);
+    expect(['edge', 'midpoint']).toContain(resultEdge.snap.type);
+
+    // Test arc edge snap at t = 0.25
+    const snapModesEdgeOnly = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+      [SNAP_MODES.MIDPOINT]: false,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+    const resultEdgeOnly = getSnappedPoint({
+      point: { x: 5, y: 5.2 },
+      edges,
+      settings,
+      snapModes: snapModesEdgeOnly,
+    });
+    expect(resultEdgeOnly.point.x).toBeCloseTo(5);
+    expect(resultEdgeOnly.point.y).toBeCloseTo(5);
+    expect(resultEdgeOnly.snap.type).toBe('edge');
+  });
 });

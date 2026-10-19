@@ -1,6 +1,16 @@
 import { quantize } from './gridSettings.mjs';
 import { SNAP_MODES } from './snapModes.mjs';
-import { closestPointOnSegment, distance, add, sub, normalize, dot, multiply } from './math2d.mjs';
+import {
+  closestPointOnArc,
+  pointOnArc,
+  getArcParameters,
+  distance,
+  add,
+  sub,
+  normalize,
+  dot,
+  multiply,
+} from './math2d.mjs';
 
 function snapToGrid(point, settings) {
   return {
@@ -12,8 +22,10 @@ function snapToGrid(point, settings) {
 function snapToEdge(point, edges, threshold) {
   let best = null;
   for (const edge of edges) {
-    const candidate = closestPointOnSegment(point, edge.start, edge.end);
-    const score = distance(point, candidate.point);
+    const bulge = edge.bulge || 0;
+    const candidate = closestPointOnArc(point, edge.start, edge.end, bulge);
+    const score =
+      candidate.distance !== undefined ? candidate.distance : distance(point, candidate.point);
     if (score <= threshold && (!best || score < best.distance)) {
       best = {
         point: candidate.point,
@@ -29,10 +41,8 @@ function snapToEdge(point, edges, threshold) {
 function snapToMidpoint(point, edges, threshold) {
   let best = null;
   for (const edge of edges) {
-    const midpoint = {
-      x: (edge.start.x + edge.end.x) / 2,
-      y: (edge.start.y + edge.end.y) / 2,
-    };
+    const bulge = edge.bulge || 0;
+    const midpoint = pointOnArc(edge.start, edge.end, bulge, 0.5);
     const score = distance(point, midpoint);
     if (score <= threshold && (!best || score < best.distance)) {
       best = {
@@ -49,6 +59,29 @@ function snapToMidpoint(point, edges, threshold) {
 function snapToPerpendicular(point, anchor, edges, threshold) {
   let best = null;
   for (const edge of edges) {
+    const bulge = edge.bulge || 0;
+    if (bulge) {
+      const arc = getArcParameters(edge.start, edge.end, bulge);
+      if (!arc.isLinear) {
+        // Line through anchor perpendicular to arc circle pass through center
+        const dirToAnchor = normalize(sub(anchor, arc.center));
+        if (dirToAnchor.x !== 0 || dirToAnchor.y !== 0) {
+          const arcPoint1 = add(arc.center, multiply(dirToAnchor, arc.radius));
+          const candidate = closestPointOnArc(arcPoint1, edge.start, edge.end, bulge);
+          const snapDistance = distance(point, candidate.point);
+          if (snapDistance <= threshold && (!best || snapDistance < best.distance)) {
+            best = {
+              point: candidate.point,
+              distance: snapDistance,
+              type: 'perpendicular',
+              edgeIndex: edge.index,
+            };
+          }
+          continue;
+        }
+      }
+    }
+
     const edgeVec = sub(edge.end, edge.start);
     const edgeDir = normalize(edgeVec);
     if (edgeDir.x === 0 && edgeDir.y === 0) {
