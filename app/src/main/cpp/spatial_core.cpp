@@ -19,8 +19,20 @@ void SpatialEngine::clear() {
     segments_.clear();
 }
 
+static bool isGeographicCrs(const std::string& crs) {
+    std::string upperCrs = crs;
+    std::transform(upperCrs.begin(), upperCrs.end(), upperCrs.begin(), [](unsigned char c) { return std::toupper(c); });
+    if (upperCrs == "EPSG:4326" || upperCrs == "4326") {
+        return true;
+    }
+    if (upperCrs.find("EPSG::4326") != std::string::npos || upperCrs.find("EPSG:4326") != std::string::npos) {
+        return true;
+    }
+    return false;
+}
+
 Point2D SpatialEngine::projectCoordinates(const std::string& crs, double lon, double lat) {
-    if (crs == "EPSG:3857") {
+    if (!isGeographicCrs(crs)) {
         return {lon, lat};
     }
     // EPSG:4326 to Mercator projection meters
@@ -168,18 +180,66 @@ static std::vector<double> extractNumbers(const std::string& str, const std::str
     return nums;
 }
 
+static std::string extractCrsFromJson(const std::string& content) {
+    std::string lower = content;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    // 1. Search for URN pattern: urn:ogc:def:crs:epsg::[0-9]+ or urn:ogc:def:crs:epsg:[0-9]+
+    std::size_t urnPos = lower.find("urn:ogc:def:crs:epsg:");
+    if (urnPos != std::string::npos) {
+        std::size_t idx = urnPos + std::strlen("urn:ogc:def:crs:epsg:");
+        while (idx < content.length() && content[idx] == ':') idx++;
+        std::string code;
+        while (idx < content.length() && std::isdigit(static_cast<unsigned char>(content[idx]))) {
+            code += content[idx++];
+        }
+        if (!code.empty()) {
+            return "EPSG:" + code;
+        }
+    }
+
+    // 2. Search for epsg: digits or epsg:: digits
+    std::size_t epsgPos = lower.find("epsg:");
+    if (epsgPos != std::string::npos) {
+        std::size_t idx = epsgPos + 5;
+        while (idx < content.length() && content[idx] == ':') idx++;
+        std::string code;
+        while (idx < content.length() && std::isdigit(static_cast<unsigned char>(content[idx]))) {
+            code += content[idx++];
+        }
+        if (!code.empty()) {
+            return "EPSG:" + code;
+        }
+    }
+
+    // 3. Search for "crs" property with "code"
+    std::size_t crsKeyPos = lower.find("\"crs\"");
+    if (crsKeyPos != std::string::npos) {
+        std::size_t codePos = lower.find("\"code\"", crsKeyPos);
+        if (codePos != std::string::npos && codePos - crsKeyPos < 200) {
+            std::size_t idx = codePos + 6;
+            while (idx < content.length() && (std::isspace(static_cast<unsigned char>(content[idx])) || content[idx] == ':' || content[idx] == '"')) idx++;
+            std::string code;
+            while (idx < content.length() && std::isdigit(static_cast<unsigned char>(content[idx]))) {
+                code += content[idx++];
+            }
+            if (!code.empty()) {
+                return "EPSG:" + code;
+            }
+        }
+    }
+
+    return "EPSG:4326";
+}
+
 bool SpatialEngine::loadJsonBuffer(const char* jsonStr, size_t length) {
     clear();
     if (!jsonStr || length == 0) return false;
 
     std::string content(jsonStr, length);
 
-    // Extract CRS if present
-    if (content.find("EPSG:3857") != std::string::npos) {
-        crs_ = "EPSG:3857";
-    } else {
-        crs_ = "EPSG:4326";
-    }
+    // Extract CRS
+    crs_ = extractCrsFromJson(content);
 
     // Extract lotBoundary coordinates if present
     std::vector<double> flatLot = extractNumbers(content, "lotBoundary");
@@ -270,6 +330,13 @@ Java_com_homegen_spatial_SpatialCoreJni_nativeDestroyEngine(JNIEnv* env, jclass 
         auto* engine = reinterpret_cast<homegen::SpatialEngine*>(handle);
         delete engine;
     }
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_homegen_spatial_SpatialCoreJni_nativeGetCrs(JNIEnv* env, jclass clazz, jlong handle) {
+    if (handle == 0) return env->NewStringUTF("EPSG:4326");
+    auto* engine = reinterpret_cast<homegen::SpatialEngine*>(handle);
+    return env->NewStringUTF(engine->getCrs().c_str());
 }
 
 JNIEXPORT jboolean JNICALL

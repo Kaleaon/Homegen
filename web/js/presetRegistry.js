@@ -53,6 +53,90 @@ export const WINDOW_PRESETS = {
 };
 
 /**
+ * Curated door style presets defining panel style, finish, frame material/color, hardware finish, and casing trim.
+ */
+export const DOOR_PRESETS = {
+  modern_flush: {
+    key: 'modern_flush',
+    name: 'Modern Flush',
+    panelStyle: 'flush',
+    finishColor: '#2b2b2b',
+    finishMaterial: 'paint',
+    frameMaterial: 'aluminum',
+    frameColor: '#1a1a1a',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'matte_black',
+    glass: { enabled: false },
+    casing: { width: 1.5, depth: 0.5 },
+  },
+  colonial_6panel: {
+    key: 'colonial_6panel',
+    name: 'Colonial 6-Panel',
+    panelStyle: 'panel_6',
+    finishColor: '#ffffff',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#ffffff',
+    hardwareStyle: 'knob',
+    hardwareFinish: 'brass',
+    glass: { enabled: false },
+    casing: { width: 2.5, depth: 0.75 },
+  },
+  craftsman_2panel: {
+    key: 'craftsman_2panel',
+    name: 'Craftsman 2-Panel',
+    panelStyle: 'panel_2',
+    finishColor: '#4a3728',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#4a3728',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'oil_rubbed_bronze',
+    glass: { enabled: false },
+    casing: { width: 3.5, depth: 1.0 },
+  },
+  french_glass: {
+    key: 'french_glass',
+    name: 'French Glass',
+    panelStyle: 'french',
+    finishColor: '#ffffff',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#ffffff',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'brushed_nickel',
+    glass: { enabled: true, cols: 3, rows: 5 },
+    casing: { width: 2.5, depth: 0.75 },
+  },
+  industrial_steel: {
+    key: 'industrial_steel',
+    name: 'Industrial Steel',
+    panelStyle: 'flush',
+    finishColor: '#3a2e2b',
+    finishMaterial: 'steel',
+    frameMaterial: 'steel',
+    frameColor: '#3a2e2b',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'matte_black',
+    glass: { enabled: false },
+    casing: { width: 2.0, depth: 0.5 },
+  },
+  standard_default: {
+    key: 'standard_default',
+    name: 'Standard Default',
+    panelStyle: 'flush',
+    finishColor: '#a9825a',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#f3f1ea',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'brushed_nickel',
+    glass: { enabled: false },
+    casing: { width: 2.0, depth: 0.75 },
+  },
+};
+
+/**
  * Exterior cladding material registry maps.
  */
 export const CLADDING_PRESETS = {
@@ -64,6 +148,10 @@ export const CLADDING_PRESETS = {
     c2: '#d8d2c3',
     exterior: true,
     cladding: true,
+    layerThickness: 0.75,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.75,
   },
   wall_brick: {
     id: 'wall_brick',
@@ -73,6 +161,10 @@ export const CLADDING_PRESETS = {
     c2: '#d9c2b0',
     exterior: true,
     cladding: true,
+    layerThickness: 1.0,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.75,
   },
   cladding_siding_white: {
     id: 'cladding_siding_white',
@@ -82,6 +174,10 @@ export const CLADDING_PRESETS = {
     c2: '#c5bfb1',
     exterior: true,
     cladding: true,
+    layerThickness: 0.75,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.75,
   },
   cladding_siding_gray: {
     id: 'cladding_siding_gray',
@@ -91,6 +187,10 @@ export const CLADDING_PRESETS = {
     c2: '#707882',
     exterior: true,
     cladding: true,
+    layerThickness: 0.75,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.75,
   },
   cladding_siding_blue: {
     id: 'cladding_siding_blue',
@@ -100,6 +200,10 @@ export const CLADDING_PRESETS = {
     c2: '#344955',
     exterior: true,
     cladding: true,
+    layerThickness: 0.75,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.75,
   },
   cladding_stone: {
     id: 'cladding_stone',
@@ -109,6 +213,10 @@ export const CLADDING_PRESETS = {
     c2: '#6b655c',
     exterior: true,
     cladding: true,
+    layerThickness: 1.0,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.75,
   },
   cladding_stucco: {
     id: 'cladding_stucco',
@@ -117,6 +225,10 @@ export const CLADDING_PRESETS = {
     c1: '#e8e2d5',
     exterior: true,
     cladding: true,
+    layerThickness: 0.5,
+    studDepth: 5.5,
+    sheathingThickness: 0.5,
+    claddingOffset: 0.5,
   },
 };
 
@@ -129,28 +241,33 @@ export const BUILDING_PRESETS = {
     name: 'Modern Farmhouse',
     claddingKey: 'cladding_board_batten',
     windowPresetKey: 'modern_black',
+    doorPresetKey: 'craftsman_2panel',
   },
   colonial_white: {
     key: 'colonial_white',
     name: 'Colonial White',
     claddingKey: 'cladding_siding_white',
     windowPresetKey: 'colonial_white',
+    doorPresetKey: 'colonial_6panel',
   },
   craftsman: {
     key: 'craftsman',
     name: 'Craftsman',
     claddingKey: 'cladding_stone',
     windowPresetKey: 'craftsman_wood',
+    doorPresetKey: 'craftsman_2panel',
   },
   industrial: {
     key: 'industrial',
     name: 'Industrial',
     claddingKey: 'wall_brick',
     windowPresetKey: 'industrial_bronze',
+    doorPresetKey: 'industrial_steel',
   },
 };
 
 const registeredWindowPresets = new Map(Object.entries(WINDOW_PRESETS));
+const registeredDoorPresets = new Map(Object.entries(DOOR_PRESETS));
 const registeredCladdingMaterials = new Map(Object.entries(CLADDING_PRESETS));
 
 // Global revision counter for dynamic preset updates
@@ -177,6 +294,17 @@ export function incrementPresetRevision() {
 export function getWindowPresets() {
   const result = {};
   for (const [key, val] of registeredWindowPresets.entries()) {
+    result[key] = val;
+  }
+  return result;
+}
+
+/**
+ * Returns all registered door presets as an object map.
+ */
+export function getDoorPresets() {
+  const result = {};
+  for (const [key, val] of registeredDoorPresets.entries()) {
     result[key] = val;
   }
   return result;
@@ -214,6 +342,16 @@ export function getWindowPreset(presetKey) {
 }
 
 /**
+ * Retrieve door style preset by key, falling back safely to standard_default on invalid keys.
+ */
+export function getDoorPreset(presetKey) {
+  if (presetKey && registeredDoorPresets.has(presetKey)) {
+    return registeredDoorPresets.get(presetKey);
+  }
+  return DOOR_PRESETS.standard_default;
+}
+
+/**
  * Register a new window style preset dynamically without modifying core scene loops.
  */
 export function registerWindowPreset(key, presetSpec) {
@@ -229,6 +367,30 @@ export function registerWindowPreset(key, presetSpec) {
     ...presetSpec,
   };
   registeredWindowPresets.set(key, spec);
+  incrementPresetRevision();
+  return spec;
+}
+
+/**
+ * Register a new door style preset dynamically without modifying core scene loops.
+ */
+export function registerDoorPreset(key, presetSpec) {
+  if (!key || typeof presetSpec !== 'object') return;
+  const spec = {
+    key,
+    name: presetSpec.name || key,
+    panelStyle: presetSpec.panelStyle || 'flush',
+    finishColor: presetSpec.finishColor || '#a9825a',
+    finishMaterial: presetSpec.finishMaterial || 'wood',
+    frameMaterial: presetSpec.frameMaterial || 'wood',
+    frameColor: presetSpec.frameColor || '#f3f1ea',
+    hardwareStyle: presetSpec.hardwareStyle || 'lever',
+    hardwareFinish: presetSpec.hardwareFinish || 'brushed_nickel',
+    glass: presetSpec.glass ? { ...presetSpec.glass } : { enabled: false },
+    casing: presetSpec.casing ? { ...presetSpec.casing } : { width: 2.0, depth: 0.75 },
+    ...presetSpec,
+  };
+  registeredDoorPresets.set(key, spec);
   incrementPresetRevision();
   return spec;
 }
@@ -283,6 +445,100 @@ export function registerCladdingMaterial(key, finishSpec) {
 }
 
 /**
+ * Resolve multi-layer wall assembly specification from interior finish ID,
+ * exterior cladding ID, and optional overrides.
+ * Returns an assembly object containing layer specifications and total calculated assembly thickness.
+ */
+export function resolveWallAssembly(finishId, claddingId, overrides = {}) {
+  const intFin = WALL_BY_ID[finishId] || WALL_BY_ID.paint_white;
+  const extFin = claddingId ? getCladdingMaterial(claddingId) : null;
+
+  const isExterior = Boolean(extFin || intFin?.exterior);
+
+  // Layer dimensions with safe default fallbacks
+  const gypsumThickness =
+    overrides.gypsumThickness ??
+    overrides.layerThickness ??
+    intFin?.gypsumThickness ??
+    intFin?.layerThickness ??
+    0.5;
+
+  const studDepth =
+    overrides.studDepth ?? extFin?.studDepth ?? intFin?.studDepth ?? (isExterior ? 5.5 : 3.5);
+
+  const sheathingThickness =
+    overrides.sheathingThickness ??
+    extFin?.sheathingThickness ??
+    intFin?.sheathingThickness ??
+    (isExterior ? 0.5 : 0);
+
+  const airGapThickness =
+    overrides.airGapThickness ??
+    overrides.claddingOffset ??
+    extFin?.claddingOffset ??
+    extFin?.airGapThickness ??
+    intFin?.claddingOffset ??
+    (isExterior ? 0.75 : 0);
+
+  const claddingThickness =
+    overrides.claddingThickness ??
+    extFin?.layerThickness ??
+    extFin?.claddingThickness ??
+    (extFin ? 0.75 : intFin?.exterior ? intFin?.layerThickness || 0.75 : 0);
+
+  const layers = [
+    {
+      type: 'gypsum',
+      name: 'Gypsum Board',
+      thickness: gypsumThickness,
+      color: intFin?.c1 || '#f4f1ea',
+    },
+    { type: 'stud', name: 'Stud Framing', thickness: studDepth, color: '#c2a679' },
+  ];
+
+  if (sheathingThickness > 0) {
+    layers.push({
+      type: 'sheathing',
+      name: 'Sheathing',
+      thickness: sheathingThickness,
+      color: '#b89768',
+    });
+  }
+  if (airGapThickness > 0) {
+    layers.push({
+      type: 'air_gap',
+      name: 'Air Gap / Cavity',
+      thickness: airGapThickness,
+      color: '#2a2a2a',
+    });
+  }
+  if (claddingThickness > 0) {
+    layers.push({
+      type: 'cladding',
+      name: extFin?.name || intFin?.name || 'Exterior Cladding',
+      thickness: claddingThickness,
+      color: extFin?.c1 || intFin?.c1 || '#d9d3c5',
+      materialId: extFin?.id || finishId,
+    });
+  }
+
+  const totalThickness = layers.reduce((sum, l) => sum + l.thickness, 0);
+
+  return {
+    finishId,
+    claddingId,
+    isExterior,
+    gypsumThickness,
+    studDepth,
+    sheathingThickness,
+    airGapThickness,
+    claddingThickness,
+    totalThickness,
+    layers,
+  };
+}
+
+/**
  * Retrieve building design preset by key.
  */
 export function getBuildingPreset(presetKey) {
@@ -308,9 +564,81 @@ export function applyBuildingPreset(state, presetKey, { room, level = 0, scope =
     for (const o of r.openings) {
       if (o.kind === 'window') {
         o.presetKey = bPreset.windowPresetKey;
+      } else if (o.kind === 'door' || o.door) {
+        if (bPreset.doorPresetKey) o.presetKey = bPreset.doorPresetKey;
       }
     }
   }
+}
+
+/**
+ * Resolve effective door style attributes for an opening or catalog definition,
+ * merging preset specifications with any explicit instance property overrides.
+ */
+export function resolveDoorStyle(openingOrDef) {
+  if (!openingOrDef) return { ...DOOR_PRESETS.standard_default, presetKey: 'standard_default' };
+
+  const presetKey = openingOrDef.presetKey || openingOrDef.preset || null;
+  const preset = getDoorPreset(presetKey);
+
+  const panelStyle = openingOrDef.panelStyle || preset.panelStyle || 'flush';
+  const finishColor = openingOrDef.finishColor || preset.finishColor || '#a9825a';
+  const finishMaterial = openingOrDef.finishMaterial || preset.finishMaterial || 'wood';
+
+  let frameMaterial = preset.frameMaterial;
+  if (
+    openingOrDef.frameMaterial &&
+    openingOrDef.frameMaterial !== preset.frameMaterial &&
+    openingOrDef.frameMaterial !== 'wood'
+  ) {
+    frameMaterial = openingOrDef.frameMaterial;
+  }
+
+  let frameColor = preset.frameColor;
+  if (
+    openingOrDef.frameColor &&
+    openingOrDef.frameColor !== preset.frameColor &&
+    openingOrDef.frameColor !== '#f3f1ea'
+  ) {
+    frameColor = openingOrDef.frameColor;
+  }
+
+  const hardwareStyle = openingOrDef.hardwareStyle || preset.hardwareStyle || 'lever';
+  const hardwareFinish = openingOrDef.hardwareFinish || preset.hardwareFinish || 'brushed_nickel';
+
+  let casing = preset.casing;
+  if (openingOrDef.casing && typeof openingOrDef.casing === 'object') {
+    casing = {
+      width: openingOrDef.casing.width ?? preset.casing.width,
+      depth: openingOrDef.casing.depth ?? preset.casing.depth,
+    };
+  }
+
+  let glass = preset.glass;
+  if (openingOrDef.glass !== undefined) {
+    if (typeof openingOrDef.glass === 'boolean') {
+      glass = { enabled: openingOrDef.glass, cols: 3, rows: 4 };
+    } else if (typeof openingOrDef.glass === 'object') {
+      glass = {
+        ...preset.glass,
+        ...openingOrDef.glass,
+        enabled: openingOrDef.glass.enabled ?? true,
+      };
+    }
+  }
+
+  return {
+    presetKey: preset.key,
+    panelStyle,
+    finishColor,
+    finishMaterial,
+    frameMaterial,
+    frameColor,
+    hardwareStyle,
+    hardwareFinish,
+    casing,
+    glass,
+  };
 }
 
 /**

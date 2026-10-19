@@ -281,3 +281,29 @@ test('Welcome Wizard Dialog Markup - ARIA accessibility and choice buttons', () 
   );
   assert.match(htmlContent, /id="welcome-btn-blank"/, '#welcome-btn-blank button must exist');
 });
+
+test('OnboardingTour Popover - Renders buttons using <k-button> custom elements with primary variant', () => {
+  const tourJsPath = path.resolve(webRoot, 'js/onboardingTour.js');
+  const tourJsContent = fs.readFileSync(tourJsPath, 'utf8');
+
+  assert.match(
+    tourJsContent,
+    /<k-button [^>]*class="spotlight-close"[^>]*>✕<\/k-button>/,
+    'Close button uses <k-button>'
+  );
+  assert.match(
+    tourJsContent,
+    /<k-button [^>]*class="spotlight-btn spotlight-btn-skip"[^>]*>Skip<\/k-button>/,
+    'Skip button uses <k-button>'
+  );
+  assert.match(
+    tourJsContent,
+    /<k-button [^>]*class="spotlight-btn spotlight-btn-back"[^>]*>Back<\/k-button>/,
+    'Back button uses <k-button>'
+  );
+  assert.match(
+    tourJsContent,
+    /<k-button [^>]*class="spotlight-btn spotlight-btn-next"[^>]*primary[^>]*>Next<\/k-button>/,
+    'Next button uses <k-button> with primary attribute'
+  );
+});

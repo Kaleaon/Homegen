@@ -154,3 +154,46 @@ test('GeoJSON Feature Collection Import & Export Workflows', () => {
     'Imported room height should match 180 inches within grid snap'
   );
 });
+
+test('Offline EPSG Registry and Validation Boundary Guardrails', () => {
+  // Test 1: Illinois NAD83 State Plane EPSG:3435 validation and reprojection
+  assert.ok(M.isValidEPSGCode('EPSG:3435'), 'EPSG:3435 must be valid in offline registry');
+  const ilCoord = [1100000, 1900000]; // Illinois East US Ft coordinates
+  const ilLonLat = reproject(ilCoord, 'EPSG:3435', 'EPSG:4326');
+  assert.ok(!isNaN(ilLonLat[0]) && !isNaN(ilLonLat[1]), 'Reprojected coordinates must not be NaN');
+  assert.ok(
+    ilLonLat[0] < -80 && ilLonLat[0] > -92,
+    'Illinois longitude should be within US bounds'
+  );
+  assert.ok(ilLonLat[1] > 36 && ilLonLat[1] < 43, 'Illinois latitude should be within US bounds');
+
+  // Test 2: UTM Zones 1-60 coverage
+  assert.ok(M.isValidEPSGCode('EPSG:26901'), 'NAD83 UTM Zone 1N must be registered');
+  assert.ok(M.isValidEPSGCode('EPSG:26960'), 'NAD83 UTM Zone 60N must be registered');
+  assert.ok(M.isValidEPSGCode('EPSG:32633'), 'WGS84 UTM Zone 33N must be registered');
+  assert.ok(M.isValidEPSGCode('EPSG:32719'), 'WGS84 UTM Zone 19S must be registered');
+
+  // Test 3: Unregistered/invalid EPSG code safety boundary
+  assert.equal(M.isValidEPSGCode('EPSG:99999'), false, 'EPSG:99999 must not be valid');
+  assert.equal(M.isValidEPSGCode('INVALID_CODE'), false, 'Non-EPSG string must not be valid');
+
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+
+  try {
+    const rawCoords = [123.45, 678.9];
+    const safeResult = reproject(rawCoords, 'EPSG:99999', 'EPSG:4326');
+    assert.deepEqual(
+      safeResult,
+      rawCoords,
+      'Unrecognized EPSG code must safely fall back without throwing'
+    );
+    assert.ok(
+      warnings.some((w) => w.includes('EPSG:99999')),
+      'Advisory warning must be logged for unsupported EPSG code'
+    );
+  } finally {
+    console.warn = origWarn;
+  }
+});

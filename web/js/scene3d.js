@@ -10,13 +10,15 @@ import {
   wallLength,
   wallNeighbors,
   interior,
-  subtractInterval,
+  csgExteriorCladdingIntervals,
   lv,
   getRoomPoints,
   getRoomBoundingBox,
   resolveWallIndex,
+  getArcParameters,
+  pointOnArc,
 } from './geometry.js';
-import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { OPENING_BY_ID, OPENINGS, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import {
@@ -26,15 +28,38 @@ import {
   polyHavenHdriUrl,
   MaterialPreloader,
 } from './resources.js';
-import { getCladdingMaterial, getPresetRevision, resolveWindowStyle } from './presetRegistry.js';
+import {
+  getCladdingMaterial,
+  getPresetRevision,
+  resolveWindowStyle,
+  resolveDoorStyle,
+  resolveWallAssembly,
+} from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
+import { buildDoor3DMesh } from './doorBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
 import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
+import {
+  TransformGizmo,
+  getConstraintHandles,
+  stepResize,
+  fmtDimensionText,
+  fmtLenInches,
+  createGridSettings,
+} from '../../designer3d/tools/index.mjs';
 
 const S = 1 / 12;
 const SLAB = 10; // floor structure thickness, inches
+
+export function announce3DStateChange(message) {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const liveEl = document.getElementById('view3d-a11y-live');
+  if (liveEl) {
+    liveEl.textContent = message;
+  }
+}
 
 export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
@@ -70,6 +95,26 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   controls.maxPolarAngle = Math.PI * 0.499;
   const world = new THREE.Group();
   scene.add(world);
+
+  const gizmoSettings = createGridSettings({ unitSize: 6, angleSnapDegrees: 15 });
+  const gizmoSnapModes = { isEnabled: () => false };
+  const transformGizmo = new TransformGizmo(gizmoSettings, gizmoSnapModes);
+
+  let selectedEntity = null;
+  let transformMode = 'none';
+
+  const focusBoxGeom = new THREE.BoxGeometry(1, 1, 1);
+  const focusWireGeom = new THREE.EdgesGeometry(focusBoxGeom);
+  const focusMat = new THREE.LineBasicMaterial({
+    color: 0x00f0ff,
+    linewidth: 2,
+    depthTest: false,
+    transparent: true,
+  });
+  const focusOverlay = new THREE.LineSegments(focusWireGeom, focusMat);
+  focusOverlay.renderOrder = 999;
+  focusOverlay.visible = false;
+  scene.add(focusOverlay);
 
   let cameraMode = 'orbit'; // 'orbit' | 'walk'
   let yaw = 0;
@@ -586,11 +631,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
-  const faceMats = (base, face, visible) => {
-    const a = Array(6).fill(base);
-    a[face] = visible;
-    return a;
-  };
 
   function buildRoomShape(pts) {
     const shape = new THREE.Shape();
@@ -603,22 +643,535 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return shape;
   }
 
+  function createTriangulatedSlabGeometry(room, e) {
+    const pts = getRoomPoints(room);
+    const mesh = room.floorMesh;
+    const n = pts.length;
+    if (!mesh || !Array.isArray(mesh.VertexZArray) || mesh.VertexZArray.length !== n) {
+      const shape = buildRoomShape(pts);
+      return new THREE.ExtrudeGeometry(shape, { depth: SLAB * S, bevelEnabled: false });
+    }
+
+    const geom = new THREE.BufferGeometry();
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+
+    // Top vertices
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const zOffset = mesh.VertexZArray[i] || 0;
+      positions.push(p.x * S, (e + zOffset) * S, p.y * S);
+      uvs.push(p.x * S, p.y * S);
+    }
+
+    // Bottom vertices
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const zOffset = mesh.VertexZArray[i] || 0;
+      positions.push(p.x * S, (e + zOffset - SLAB) * S, p.y * S);
+      uvs.push(p.x * S, p.y * S);
+    }
+
+    // Top face triangles
+    const topTris = mesh.triangles || [];
+    if (topTris.length > 0) {
+      for (const tri of topTris) {
+        indices.push(tri[0], tri[1], tri[2]);
+      }
+    } else {
+      for (let i = 1; i < n - 1; i++) {
+        indices.push(0, i, i + 1);
+      }
+    }
+
+    // Bottom face triangles (reversed winding)
+    if (topTris.length > 0) {
+      for (const tri of topTris) {
+        indices.push(n + tri[0], n + tri[2], n + tri[1]);
+      }
+    } else {
+      for (let i = 1; i < n - 1; i++) {
+        indices.push(n + 0, n + i + 1, n + i);
+      }
+    }
+
+    // Side face quads
+    for (let i = 0; i < n; i++) {
+      const next = (i + 1) % n;
+      const topA = i;
+      const topB = next;
+      const botA = n + i;
+      const botB = n + next;
+      indices.push(topA, botA, topB);
+      indices.push(topB, botA, botB);
+    }
+
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    return geom;
+  }
+
+  function addCornerMiterFiller(group, pCorner, n1, n2, d0, d1, y0, y1, elev, material) {
+    const p1_d0 = { x: pCorner.x + n1.x * d0, y: pCorner.y + n1.y * d0 };
+    const p2_d0 = { x: pCorner.x + n2.x * d0, y: pCorner.y + n2.y * d0 };
+    const p2_d1 = { x: pCorner.x + n2.x * d1, y: pCorner.y + n2.y * d1 };
+    const p1_d1 = { x: pCorner.x + n1.x * d1, y: pCorner.y + n1.y * d1 };
+
+    const shape = new THREE.Shape();
+    shape.moveTo(p1_d0.x * S, -p1_d0.y * S);
+    shape.lineTo(p2_d0.x * S, -p2_d0.y * S);
+    shape.lineTo(p2_d1.x * S, -p2_d1.y * S);
+    shape.lineTo(p1_d1.x * S, -p1_d1.y * S);
+    shape.closePath();
+
+    const height = (y1 - y0) * S;
+    if (height <= 0.001) return;
+
+    const extrudeSettings = { depth: height, bevelEnabled: false };
+    const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geom.rotateX(Math.PI / 2);
+    const visMat = Array.isArray(material) ? material[0] : (material.vis || material.base || material);
+    const mesh = new THREE.Mesh(geom, visMat);
+    mesh.position.y = (elev + y0) * S;
+    group.add(mesh);
+  }
+
+  function createWallExtrusionMesh(len, y0, y1, depth, cuts, mat) {
+    if (len <= 0.01 || y1 - y0 <= 0.01) return null;
+    const shape = new THREE.Shape();
+    shape.moveTo(0, y0 * S);
+    shape.lineTo(len * S, y0 * S);
+    shape.lineTo(len * S, y1 * S);
+    shape.lineTo(0, y1 * S);
+    shape.closePath();
+
+    for (const c of cuts) {
+      const f = Math.max(0, c.from);
+      const t = Math.min(len, c.to);
+      if (t - f <= 0.01) continue;
+      const sill = Math.max(y0, c.sill);
+      const head = Math.min(y1, c.head);
+      if (head - sill <= 0.01) continue;
+
+      const hole = new THREE.Path();
+      hole.moveTo(f * S, sill * S);
+      hole.lineTo(t * S, sill * S);
+      hole.lineTo(t * S, head * S);
+      hole.lineTo(f * S, head * S);
+      hole.closePath();
+
+      shape.holes.push(hole);
+    }
+
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: depth * S, bevelEnabled: false });
+    const useMat = Array.isArray(mat) ? mat[0] : (mat.vis || mat.base || mat);
+    const mesh = new THREE.Mesh(geom, useMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function addExtrudedWallSegment(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, cuts = []) {
+    const s = wallSeg(room, wall);
+    const len = t1 - t0;
+    const dep = d1 - d0;
+    if (len <= 0.01 || y1 - y0 <= 0.01) return;
+
+    const localCuts = cuts
+      .filter((c) => c.to > t0 && c.from < t1)
+      .map((c) => ({
+        ...c,
+        from: Math.max(0, c.from - t0),
+        to: Math.min(len, c.to - t0),
+      }));
+
+    const mesh = createWallExtrusionMesh(len, y0, y1, dep, localCuts, mat);
+    if (!mesh) return;
+
+    const m4 = new THREE.Matrix4();
+    m4.set(
+      s.dx,
+      0,
+      s.nx,
+      (s.ax + s.dx * t0 + s.nx * d0) * S,
+      0,
+      1,
+      0,
+      (elev + y0) * S,
+      s.dy,
+      0,
+      s.ny,
+      (s.ay + s.dy * t0 + s.ny * d0) * S,
+      0,
+      0,
+      0,
+      1
+    );
+
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(m4);
+    mesh.matrixWorldNeedsUpdate = true;
+    group.add(mesh);
+
+    const idx = resolveWallIndex(wall);
+    const pts = getRoomPoints(room);
+    const N = pts.length;
+    if (N >= 3) {
+      const prevWall = (idx - 1 + N) % N;
+      const nextWall = (idx + 1) % N;
+      const sPrev = wallSeg(room, prevWall);
+      const sNext = wallSeg(room, nextWall);
+
+      const dotStart = sPrev.dx * s.dx + sPrev.dy * s.dy;
+      if (t0 <= 0.5 && Math.abs(dotStart) > 1e-3 && Math.abs(dotStart) < 0.999) {
+        const pStart = { x: s.ax, y: s.ay };
+        addCornerMiterFiller(
+          group,
+          pStart,
+          { x: sPrev.nx, y: sPrev.ny },
+          { x: s.nx, y: s.ny },
+          d0,
+          d1,
+          y0,
+          y1,
+          elev,
+          mat
+        );
+      }
+
+      const dotEnd = s.dx * sNext.dx + s.dy * sNext.dy;
+      if (t1 >= s.len - 0.5 && Math.abs(dotEnd) > 1e-3 && Math.abs(dotEnd) < 0.999) {
+        const pEnd = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+        addCornerMiterFiller(
+          group,
+          pEnd,
+          { x: s.nx, y: s.ny },
+          { x: sNext.nx, y: sNext.ny },
+          d0,
+          d1,
+          y0,
+          y1,
+          elev,
+          mat
+        );
+      }
+    }
+  }
+
   function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, faceIdx) {
     const s = wallSeg(room, wall);
     const len = t1 - t0;
     const dep = d1 - d0;
     if (len <= 0.01 || y1 - y0 <= 0.01) return;
+
+    const pts = getRoomPoints(room);
+    const wallIdx = resolveWallIndex(wall);
+    const totalLen = wallLength(room, wall) || 1;
+    const n = pts.length;
+    const i0 = typeof wallIdx === 'number' ? wallIdx % n : 0;
+    const i1 = (i0 + 1) % n;
+
+    const fZ0 = room.floorMesh?.VertexZArray?.[i0] || 0;
+    const fZ1 = room.floorMesh?.VertexZArray?.[i1] || 0;
+    const cZ0 = room.ceilingMesh?.VertexZArray?.[i0] || room.ceiling || 96;
+    const cZ1 = room.ceilingMesh?.VertexZArray?.[i1] || room.ceiling || 96;
+
+    const isSloped = fZ0 !== fZ1 || cZ0 !== cZ1;
+
+    if (!isSloped) {
+      const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
+      const m = boxMesh(len, y1 - y0, dep, mats);
+      const along = (t0 + t1) / 2;
+      const off = (d0 + d1) / 2;
+      const cx = s.ax + s.dx * along + s.nx * off;
+      const cy = s.ay + s.dy * along + s.ny * off;
+      m.position.set(cx * S, (elev + (y0 + y1) / 2) * S, cy * S);
+      const m3 = new THREE.Matrix4();
+      m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
+      m.rotation.setFromRotationMatrix(m3);
+      group.add(m);
+      return;
+    }
+
+    const fT0 = fZ0 + (fZ1 - fZ0) * (t0 / totalLen);
+    const fT1 = fZ0 + (fZ1 - fZ0) * (t1 / totalLen);
+    const cT0 = cZ0 + (cZ1 - cZ0) * (t0 / totalLen);
+    const cT1 = cZ0 + (cZ1 - cZ0) * (t1 / totalLen);
+
+    const b0 = elev + y0 + fT0;
+    const b1 = elev + y0 + fT1;
+    const tH0 = elev + Math.min(y1, cT0);
+    const tH1 = elev + Math.min(y1, cT1);
+
+    const geom = new THREE.BufferGeometry();
+    const along0 = t0;
+    const along1 = t1;
+    const off0 = d0;
+    const off1 = d1;
+
+    const p000 = {
+      x: s.ax + s.dx * along0 + s.nx * off0,
+      y: b0,
+      z: s.ay + s.dy * along0 + s.ny * off0,
+    };
+    const p100 = {
+      x: s.ax + s.dx * along1 + s.nx * off0,
+      y: b1,
+      z: s.ay + s.dy * along1 + s.ny * off0,
+    };
+    const p110 = {
+      x: s.ax + s.dx * along1 + s.nx * off0,
+      y: tH1,
+      z: s.ay + s.dy * along1 + s.ny * off0,
+    };
+    const p010 = {
+      x: s.ax + s.dx * along0 + s.nx * off0,
+      y: tH0,
+      z: s.ay + s.dy * along0 + s.ny * off0,
+    };
+
+    const p001 = {
+      x: s.ax + s.dx * along0 + s.nx * off1,
+      y: b0,
+      z: s.ay + s.dy * along0 + s.ny * off1,
+    };
+    const p101 = {
+      x: s.ax + s.dx * along1 + s.nx * off1,
+      y: b1,
+      z: s.ay + s.dy * along1 + s.ny * off1,
+    };
+    const p111 = {
+      x: s.ax + s.dx * along1 + s.nx * off1,
+      y: tH1,
+      z: s.ay + s.dy * along1 + s.ny * off1,
+    };
+    const p011 = {
+      x: s.ax + s.dx * along0 + s.nx * off1,
+      y: tH0,
+      z: s.ay + s.dy * along0 + s.ny * off1,
+    };
+
+    const pos = [
+      p000.x * S,
+      p000.y * S,
+      p000.z * S,
+      p100.x * S,
+      p100.y * S,
+      p100.z * S,
+      p110.x * S,
+      p110.y * S,
+      p110.z * S,
+      p010.x * S,
+      p010.y * S,
+      p010.z * S,
+      p001.x * S,
+      p001.y * S,
+      p001.z * S,
+      p101.x * S,
+      p101.y * S,
+      p101.z * S,
+      p111.x * S,
+      p111.y * S,
+      p111.z * S,
+      p011.x * S,
+      p011.y * S,
+      p011.z * S,
+    ];
+    const idx = [
+      0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1,
+      2, 6, 1, 6, 5,
+    ];
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geom.setIndex(idx);
+    geom.computeVertexNormals();
+
     const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
-    const m = boxMesh(len, y1 - y0, dep, mats);
-    const along = (t0 + t1) / 2;
-    const off = (d0 + d1) / 2;
-    const cx = s.ax + s.dx * along + s.nx * off;
-    const cy = s.ay + s.dy * along + s.ny * off;
-    m.position.set(cx * S, (elev + (y0 + y1) / 2) * S, cy * S);
-    const m3 = new THREE.Matrix4();
-    m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
-    m.rotation.setFromRotationMatrix(m3);
+    const m = new THREE.Mesh(geom, mats);
+    m.castShadow = true;
+    m.receiveShadow = true;
     group.add(m);
+
+    const idx = resolveWallIndex(wall);
+    const pts = getRoomPoints(room);
+    const N = pts.length;
+    if (N >= 3) {
+      const prevWall = (idx - 1 + N) % N;
+      const nextWall = (idx + 1) % N;
+      const sPrev = wallSeg(room, prevWall);
+      const sNext = wallSeg(room, nextWall);
+
+      const dotStart = sPrev.dx * s.dx + sPrev.dy * s.dy;
+      if (t0 <= 0.5 && Math.abs(dotStart) > 1e-3 && Math.abs(dotStart) < 0.999) {
+        const pStart = { x: s.ax, y: s.ay };
+        addCornerMiterFiller(
+          group,
+          pStart,
+          { x: sPrev.nx, y: sPrev.ny },
+          { x: s.nx, y: s.ny },
+          d0,
+          d1,
+          y0,
+          y1,
+          elev,
+          mat
+        );
+      }
+
+      const dotEnd = s.dx * sNext.dx + s.dy * sNext.dy;
+      if (t1 >= s.len - 0.5 && Math.abs(dotEnd) > 1e-3 && Math.abs(dotEnd) < 0.999) {
+        const pEnd = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+        addCornerMiterFiller(
+          group,
+          pEnd,
+          { x: s.nx, y: s.ny },
+          { x: sNext.nx, y: sNext.ny },
+          d0,
+          d1,
+          y0,
+          y1,
+          elev,
+          mat
+        );
+      }
+    }
+  }
+
+  function addCurvedWallBox(group, room, wall, bulge, t0, t1, y0, y1, d0, d1, elev, mat) {
+    const len = wallLength(room, wall);
+    const s = wallSeg(room, wall);
+    const start = { x: s.ax, y: s.ay };
+    const end = { x: s.ax + s.dx * len, y: s.ay + s.dy * len };
+    const arc = getArcParameters(start, end, bulge);
+
+    if (arc.isLinear || Math.abs(t1 - t0) <= 0.01 || Math.abs(y1 - y0) <= 0.01) {
+      addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat);
+      return;
+    }
+
+    const u0 = t0 / len;
+    const u1 = t1 / len;
+    const pieceArcLen = arc.arcLength * Math.abs(u1 - u0);
+
+    let camDist = 20;
+    if (camera && camera.position) {
+      const midPoint = pointOnArc(start, end, bulge, (u0 + u1) / 2);
+      camDist = Math.hypot(camera.position.x - midPoint.x * S, camera.position.z - midPoint.y * S);
+    }
+    const maxSegLen = Math.max(2, Math.min(12, camDist * 0.5));
+    const N = Math.max(8, Math.min(64, Math.ceil(pieceArcLen / maxSegLen)));
+
+    const numVertices = (N + 1) * 4;
+    const positions = new Float32Array(numVertices * 3);
+    const normals = new Float32Array(numVertices * 3);
+    const uvs = new Float32Array(numVertices * 2);
+
+    const tileInches = 24;
+    let vIdx = 0;
+    let uvIdx = 0;
+
+    for (let k = 0; k <= N; k++) {
+      const uk = u0 + (k / N) * (u1 - u0);
+      const pt = pointOnArc(start, end, bulge, uk);
+      const angle = arc.startAngle + uk * arc.sweepAngle;
+      const nx = Math.cos(angle);
+      const ny = Math.sin(angle);
+
+      const inX = pt.x + d0 * nx;
+      const inY = pt.y + d0 * ny;
+      const outX = pt.x + d1 * nx;
+      const outY = pt.y + d1 * ny;
+
+      const arcDist = uk * arc.arcLength;
+      const uVal = arcDist / tileInches;
+      const vVal0 = y0 / tileInches;
+      const vVal1 = y1 / tileInches;
+
+      // 0: inner bottom
+      positions[vIdx] = inX * S;
+      positions[vIdx + 1] = (elev + y0) * S;
+      positions[vIdx + 2] = inY * S;
+      normals[vIdx] = nx;
+      normals[vIdx + 1] = 0;
+      normals[vIdx + 2] = ny;
+      uvs[uvIdx] = uVal;
+      uvs[uvIdx + 1] = vVal0;
+
+      // 1: inner top
+      positions[vIdx + 3] = inX * S;
+      positions[vIdx + 4] = (elev + y1) * S;
+      positions[vIdx + 5] = inY * S;
+      normals[vIdx + 3] = nx;
+      normals[vIdx + 4] = 0;
+      normals[vIdx + 5] = ny;
+      uvs[uvIdx + 2] = uVal;
+      uvs[uvIdx + 3] = vVal1;
+
+      // 2: outer bottom
+      positions[vIdx + 6] = outX * S;
+      positions[vIdx + 7] = (elev + y0) * S;
+      positions[vIdx + 8] = outY * S;
+      normals[vIdx + 6] = -nx;
+      normals[vIdx + 7] = 0;
+      normals[vIdx + 8] = -ny;
+      uvs[uvIdx + 4] = uVal;
+      uvs[uvIdx + 5] = vVal0;
+
+      // 3: outer top
+      positions[vIdx + 9] = outX * S;
+      positions[vIdx + 10] = (elev + y1) * S;
+      positions[vIdx + 11] = outY * S;
+      normals[vIdx + 9] = -nx;
+      normals[vIdx + 10] = 0;
+      normals[vIdx + 11] = -ny;
+      uvs[uvIdx + 6] = uVal;
+      uvs[uvIdx + 7] = vVal1;
+
+      vIdx += 12;
+      uvIdx += 8;
+    }
+
+    const indices = [];
+    for (let k = 0; k < N; k++) {
+      const baseK = k * 4;
+      const nextK = (k + 1) * 4;
+
+      // Inner face
+      indices.push(baseK + 0, nextK + 0, nextK + 1);
+      indices.push(baseK + 0, nextK + 1, baseK + 1);
+
+      // Outer face
+      indices.push(baseK + 2, nextK + 3, nextK + 2);
+      indices.push(baseK + 2, baseK + 3, nextK + 3);
+
+      // Top face
+      indices.push(baseK + 1, nextK + 1, nextK + 3);
+      indices.push(baseK + 1, nextK + 3, baseK + 3);
+
+      // Bottom face
+      indices.push(baseK + 0, nextK + 2, nextK + 0);
+      indices.push(baseK + 0, baseK + 2, nextK + 2);
+    }
+
+    // Caps
+    indices.push(0, 1, 3, 0, 3, 2);
+    const last = N * 4;
+    indices.push(last + 0, last + 3, last + 1, last + 0, last + 2, last + 3);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geom.setIndex(indices);
+
+    const useMat = mat.vis || mat.base || mat;
+    const mesh = new THREE.Mesh(geom, useMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
   }
 
   /** Cut a wall span [a,b] into solid pieces around openings; calls piece(t0,t1,y0,y1) for each solid block. */
@@ -696,22 +1249,33 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       activeKeys.add(slabKey);
       const ff = FLOOR_BY_ID[room.floor] || FLOOR_BY_ID.floor_oak;
       const pts = getRoomPoints(room);
-      const slabSig = JSON.stringify({ pts, floor: room.floor, hd: opts.hd });
+      const hasFloorMesh = room.floorMesh && Array.isArray(room.floorMesh.VertexZArray);
+      const slabSig = JSON.stringify({
+        pts,
+        floor: room.floor,
+        hd: opts.hd,
+        z: room.floorMesh?.VertexZArray,
+      });
       let slab = entityMap.get(slabKey);
       if (!slab || slab.userData.sig !== slabSig) {
         if (slab) disposeNode(slab);
         const fm = finishMaterial(ff, 12, 12, room.floor, 0.55);
-        const shape = buildRoomShape(pts);
-        const geom = new THREE.ExtrudeGeometry(shape, { depth: SLAB * S, bevelEnabled: false });
+        const geom = createTriangulatedSlabGeometry(room, e);
         slab = new THREE.Mesh(geom, [fm, plain('#b9b2a4', 0.95)]);
-        slab.rotation.x = Math.PI / 2;
+        if (!hasFloorMesh) {
+          slab.rotation.x = Math.PI / 2;
+        }
         slab.castShadow = true;
         slab.receiveShadow = true;
         slab.userData = { id: slabKey, entityType: 'slab', sig: slabSig };
         roomGroup.add(slab);
         entityMap.set(slabKey, slab);
       }
-      slab.position.set(0, e * S, 0);
+      if (hasFloorMesh) {
+        slab.position.set(0, 0, 0);
+      } else {
+        slab.position.set(0, e * S, 0);
+      }
       box.expandByObject(slab);
 
       // Stairs (keyed by `${room.id}:stairs`)
@@ -766,12 +1330,27 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const isWindow = o.kind === 'window' || OPENING_BY_ID[o.type]?.kind === 'window';
             return isWindow ? resolveWindowStyle(o) : null;
           });
+          const doorStyles = ops.map(({ o }) => {
+            const isDoor = o.kind === 'door' || OPENING_BY_ID[o.type]?.kind === 'door';
+            return isDoor ? resolveDoorStyle(o) : null;
+          });
+          const finishId = room.walls[wall] || room.walls[resolveWallIndex(wall)];
+          let extFinId = room.cladding || room.exteriorCladding;
+          if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
+            extFinId = room.walls[wall];
+          }
+          const wallAssembly = resolveWallAssembly(
+            finishId,
+            extFinId,
+            room.wallAssemblyOverrides?.[wall]
+          );
           const wallSig = JSON.stringify({
             pts,
             ceiling: room.ceiling,
-            finish: room.walls[wall] || room.walls[resolveWallIndex(wall)],
+            finish: finishId,
+            cladding: extFinId,
+            assembly: wallAssembly,
             uv: getWallUV(room, wall),
-            cladding: room.cladding || room.exteriorCladding,
             e,
             wallH,
             wallOpt: opts.walls,
@@ -779,6 +1358,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             cur,
             ops,
             winStyles,
+            doorStyles,
             presetRev: getPresetRevision(),
             nbrs,
           });
@@ -827,10 +1407,18 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const s = wallSeg(room, it.wall);
             const t = it.offset;
             const y = def.shape === 'switch' ? 48 : 16;
+            const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
+            const extFinId = room.cladding || room.exteriorCladding;
+            const wAssembly = resolveWallAssembly(
+              finishId,
+              extFinId,
+              room.wallAssemblyOverrides?.[it.wall]
+            );
+            const itemDepthOff = wAssembly.totalThickness / 2 + 0.3;
             itemNode.position.set(
-              (s.ax + s.dx * t + s.nx * (WT / 2 + 0.3)) * S,
+              (s.ax + s.dx * t + s.nx * itemDepthOff) * S,
               (e + y) * S,
-              (s.ay + s.dy * t + s.ny * (WT / 2 + 0.3)) * S
+              (s.ay + s.dy * t + s.ny * itemDepthOff) * S
             );
           } else if (def && def.mount === 'ceiling') {
             itemNode.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
@@ -944,6 +1532,183 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       frame();
       framed = true;
     }
+    updateFocusOverlay(selectedEntity);
+    render();
+  }
+
+  function updateFocusOverlay(entity) {
+    if (!entity) {
+      focusOverlay.visible = false;
+      return;
+    }
+    if (entity.type === 'item') {
+      const node = entityMap.get(entity.id);
+      if (node) {
+        const box3 = new THREE.Box3().setFromObject(node);
+        const size = box3.getSize(new THREE.Vector3());
+        const center = box3.getCenter(new THREE.Vector3());
+        focusOverlay.position.copy(center);
+        focusOverlay.scale.set(
+          Math.max(0.2, size.x + 0.1),
+          Math.max(0.2, size.y + 0.1),
+          Math.max(0.2, size.z + 0.1)
+        );
+        focusOverlay.visible = true;
+      } else {
+        focusOverlay.visible = false;
+      }
+    } else if (entity.type === 'handle') {
+      const state = getState();
+      const elev = levelElevations(state);
+      const e = elev[lv(entity.room)] || 0;
+      const handles = getConstraintHandles(entity.room);
+      const h = handles.find((handle) => handle.id === entity.handleId);
+      if (h) {
+        focusOverlay.position.set(h.x * S, (e + 12) * S, h.y * S);
+        focusOverlay.scale.set(1.5, 1.5, 1.5);
+        focusOverlay.visible = true;
+      } else {
+        focusOverlay.visible = false;
+      }
+    }
+  }
+
+  function getSelectableEntities() {
+    const state = getState();
+    const cur = getLevel();
+    const levelRooms = ((state && state.rooms) || []).filter((r) => lv(r) === cur);
+    const entities = [];
+
+    for (const room of levelRooms) {
+      const handles = getConstraintHandles(room);
+      for (const h of handles) {
+        entities.push({
+          type: 'handle',
+          id: `${room.id}:handle:${h.id}`,
+          room,
+          handleId: h.id,
+          handleName: h.name,
+          label: `${room.name} ${h.name} Handle`,
+        });
+      }
+      for (const item of room.items || []) {
+        const def = ITEM_BY_ID[item.type];
+        const itemName = def?.name || item.type || 'Item';
+        entities.push({
+          type: 'item',
+          id: item.id,
+          room,
+          item,
+          label: itemName,
+        });
+      }
+    }
+    return entities;
+  }
+
+  function cycle3DSelection(dir = 1) {
+    const entities = getSelectableEntities();
+    if (!entities.length) {
+      clear3DSelection();
+      announce3DStateChange('No 3D objects available on this floor.');
+      return null;
+    }
+
+    let currentIndex = -1;
+    if (selectedEntity) {
+      currentIndex = entities.findIndex((e) => e.id === selectedEntity.id);
+    }
+
+    const nextIndex =
+      currentIndex < 0
+        ? dir < 0
+          ? entities.length - 1
+          : 0
+        : (currentIndex + dir + entities.length) % entities.length;
+
+    selectedEntity = entities[nextIndex];
+    transformMode = selectedEntity.type === 'item' ? 'move' : 'resize';
+    updateFocusOverlay(selectedEntity);
+
+    if (selectedEntity.type === 'item') {
+      const posX = fmtLenInches(selectedEntity.item.x);
+      const posZ = fmtLenInches(selectedEntity.item.y);
+      announce3DStateChange(`Selected ${selectedEntity.label}, Position: X ${posX}, Z ${posZ}`);
+    } else if (selectedEntity.type === 'handle') {
+      const sizeText = fmtDimensionText(selectedEntity.room.w, selectedEntity.room.h);
+      announce3DStateChange(`Selected ${selectedEntity.label}, Size ${sizeText}`);
+    }
+    render();
+    return selectedEntity;
+  }
+
+  function set3DTransformMode(mode) {
+    if (!selectedEntity) return;
+    if (['move', 'rotate', 'scale'].includes(mode)) {
+      transformMode = mode;
+      const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
+      announce3DStateChange(`${modeLabel} mode active. Use Arrow keys to adjust.`);
+    }
+  }
+
+  function stepTransformSelected(dx = 0, dy = 0, options = {}) {
+    if (!selectedEntity) return false;
+
+    if (selectedEntity.type === 'item') {
+      const item = selectedEntity.item;
+      if (transformMode === 'rotate') {
+        const deltaDeg = dx !== 0 ? (dx > 0 ? 15 : -15) : dy !== 0 ? (dy > 0 ? 15 : -15) : 15;
+        const result = transformGizmo.stepRotate(item, deltaDeg);
+        const newRot = Math.round(((result.rotation * 180) / Math.PI) % 360);
+        item.rot = newRot < 0 ? newRot + 360 : newRot;
+        reconcile();
+        updateFocusOverlay(selectedEntity);
+        announce3DStateChange(`Rotated ${selectedEntity.label} to ${item.rot}°`);
+      } else if (transformMode === 'scale') {
+        const factor = dy < 0 || dx > 0 ? 1.1 : 0.9;
+        const result = transformGizmo.stepScale(item, factor);
+        item.scale = result.scale.x;
+        reconcile();
+        updateFocusOverlay(selectedEntity);
+        announce3DStateChange(`Scaled ${selectedEntity.label}`);
+      } else {
+        // Move mode
+        const result = transformGizmo.stepMove(item, dx, dy);
+        item.x = Math.round(result.position.x);
+        item.y = Math.round(result.position.y);
+        reconcile();
+        updateFocusOverlay(selectedEntity);
+
+        const dirName = dx > 0 ? 'right' : dx < 0 ? 'left' : dy > 0 ? 'down' : 'up';
+        const posX = fmtLenInches(item.x);
+        const posZ = fmtLenInches(item.y);
+        announce3DStateChange(`Moved ${selectedEntity.label} ${dirName} to X ${posX}, Z ${posZ}`);
+      }
+      return true;
+    } else if (selectedEntity.type === 'handle') {
+      const room = selectedEntity.room;
+      const res = stepResize(room, selectedEntity.handleId, dx, dy, options);
+      room.x = res.rect.x;
+      room.y = res.rect.y;
+      room.w = res.rect.w;
+      room.h = res.rect.h;
+      reconcile();
+      updateFocusOverlay(selectedEntity);
+      const statusText = res.isValid ? 'Valid' : 'Invalid';
+      announce3DStateChange(
+        `${room.name} resized to ${res.dimensionText} (${Math.round(res.areaSqFt)} sq ft, ${statusText})`
+      );
+      return true;
+    }
+    return false;
+  }
+
+  function clear3DSelection() {
+    if (!selectedEntity) return;
+    selectedEntity = null;
+    transformMode = 'none';
+    updateFocusOverlay(null);
+    announce3DStateChange('Deselected 3D object.');
     render();
   }
 
@@ -966,55 +1731,126 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const wallUV = getWallUV(room, wall);
     const base = plain('#efece4', 0.9);
     const visMat = finishMaterial(fin, len, room.ceiling, finishId, 0.8, wallUV);
-    // local +z face is face 4 (interior normal), local -z face is face 5 (exterior normal)
-    const face = 4;
-    const outFace = 5;
     const ops = wallOpenings(state, room, wall);
     const cuts = ops.map(({ o, from, to }) => {
-      const d = OPENING_BY_ID[o.type];
-      return { from, to, sill: d.sill, head: d.sill + d.h, o, d };
+      const d = OPENING_BY_ID[o.type] || { sill: 0, h: 80, w: o.width || 32 };
+      return { from, to, sill: d.sill ?? 0, head: (d.sill ?? 0) + (d.h ?? 80), o, d };
     });
-    const inner = { base, vis: visMat };
-    cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
-      addWallBox(group, room, wall, t0, t1, y0, y1, 0, WT / 2, e, inner, face)
-    );
-    // exterior shell where nothing is behind the wall
-    let ext = [[-WT / 2, len + WT / 2]];
-    for (const n of wallNeighbors(state.rooms, room, wall))
-      ext = subtractInterval(ext, [n.from, n.to]);
+
     let extFinId = room.cladding || room.exteriorCladding;
     if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
       extFinId = room.walls[wall];
     }
     const extFin = getCladdingMaterial(extFinId);
     extFinId = extFin.id || extFinId || 'cladding_siding_white';
-
     const sidingMat = finishMaterial(extFin, len, room.ceiling, extFinId, 0.85);
-    for (const [a, b] of ext)
-      cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
-        addWallBox(
-          group,
-          room,
-          wall,
-          t0,
-          t1,
-          y0,
-          y1,
-          -WT / 2,
-          0,
-          e,
-          { base: sidingMat, vis: sidingMat },
-          outFace
-        )
+
+    const wallOverrides = room.wallAssemblyOverrides?.[wall];
+    const assembly = resolveWallAssembly(finishId, extFinId, wallOverrides);
+    const wallThick = assembly.totalThickness;
+
+    const wallIndex = WALLS.indexOf(wall);
+    let bulge = 0;
+    if (room.bulges) {
+      if (typeof room.bulges[wall] === 'number') bulge = room.bulges[wall];
+      else if (Array.isArray(room.bulges) && typeof room.bulges[wallIndex] === 'number')
+        bulge = room.bulges[wallIndex];
+    }
+
+    // Exterior shell interval calculation (where nothing is behind the wall)
+    let ext;
+    if (typeof csgExteriorCladdingIntervals === 'function') {
+      const { intervals } = csgExteriorCladdingIntervals(state.rooms, room, wall, wallThick);
+      if (intervals && intervals.length > 0) ext = intervals;
+    }
+    if (!ext) {
+      ext = [[-wallThick / 2, len + wallThick / 2]];
+      for (const n of wallNeighbors(state.rooms, room, wall))
+        ext = subtractInterval(ext, [n.from, n.to]);
+    }
+
+    if (bulge) {
+      const inner = { base, vis: visMat };
+      cutPieces(0, len, cuts, H, (t0, t1, y0, y1) =>
+        addCurvedWallBox(group, room, wall, bulge, t0, t1, y0, y1, 0, wallThick / 2, e, inner)
       );
-    // fill the thin cut-through strip for openings between rooms is intentionally left open
+      for (const [a, b] of ext)
+        cutPieces(a, b, cuts, H, (t0, t1, y0, y1) =>
+          addCurvedWallBox(group, room, wall, bulge, t0, t1, y0, y1, -wallThick / 2, 0, e, {
+            base: sidingMat,
+            vis: sidingMat,
+          })
+        );
+    } else {
+      // Construct physical 3D extruded meshes for each layer in assembly with co-planar depth boundaries
+      let currDepth = wallThick / 2;
+
+      // 1. Gypsum / Interior finish layer
+      const gypsumD1 = currDepth;
+      const gypsumD0 = gypsumD1 - assembly.gypsumThickness;
+      currDepth = gypsumD0;
+      if (assembly.gypsumThickness > 0) {
+        const inner = { base, vis: visMat };
+        addExtrudedWallSegment(group, room, wall, 0, len, 0, H, gypsumD0, gypsumD1, e, inner, cuts);
+      }
+
+      // 2. Stud framing layer
+      const studD1 = currDepth;
+      const studD0 = studD1 - assembly.studDepth;
+      currDepth = studD0;
+      if (assembly.studDepth > 0) {
+        const studMat = plain('#c2a679', 0.7);
+        addExtrudedWallSegment(group, room, wall, 0, len, 0, H, studD0, studD1, e, studMat, cuts);
+      }
+
+      // 3. Sheathing layer
+      const sheathingD1 = currDepth;
+      const sheathingD0 = sheathingD1 - assembly.sheathingThickness;
+      currDepth = sheathingD0;
+      if (assembly.sheathingThickness > 0) {
+        const sheathingMat = plain('#b89768', 0.8);
+        for (const [a, b] of ext)
+          addExtrudedWallSegment(group, room, wall, a, b, 0, H, sheathingD0, sheathingD1, e, sheathingMat, cuts);
+      }
+
+      // 4. Air gap / cavity layer
+      const airGapD1 = currDepth;
+      const airGapD0 = airGapD1 - assembly.airGapThickness;
+      currDepth = airGapD0;
+      if (assembly.airGapThickness > 0) {
+        const airGapMat = plain('#2a2a2a', 0.9);
+        for (const [a, b] of ext)
+          addExtrudedWallSegment(group, room, wall, a, b, 0, H, airGapD0, airGapD1, e, airGapMat, cuts);
+      }
+
+      // 5. Exterior cladding layer
+      const claddingD1 = currDepth;
+      const claddingD0 = -wallThick / 2;
+      if (assembly.claddingThickness > 0) {
+        for (const [a, b] of ext)
+          addExtrudedWallSegment(
+            group,
+            room,
+            wall,
+            a,
+            b,
+            0,
+            H,
+            claddingD0,
+            claddingD1,
+            e,
+            { base: sidingMat, vis: sidingMat },
+            cuts
+          );
+      }
+    }
     for (const { o, d } of cuts) {
-      if (!room.openings.includes(o)) continue; // draw each opening once, from its owner
+      if (!room.openings.some((x) => x.id === o.id)) continue; // draw each opening once, from its owner
       const info = openingInfo(state, room, o);
       const og =
         d.kind === 'window'
-          ? addWindow(group, room, wall, o, d, e)
-          : addDoor(group, room, wall, o, d, e, info.kind === 'exterior');
+          ? addWindow(group, room, wall, o, d, e, wallThick)
+          : addDoor(group, room, wall, o, d, e, info.kind === 'exterior', wallThick);
       if (og) entityMap.set(o.id, og);
     }
   }
@@ -1032,7 +1868,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     reflectivity: 0.9,
     side: THREE.DoubleSide,
   });
-  const defaultFrameMat = plain('#f3f1ea', 0.6);
 
   function getFrameMaterial(matType, colorHex) {
     const key = `frame:${matType}:${colorHex}`;
@@ -1061,7 +1896,65 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return m;
   }
 
+  function getHardwareMaterial(finish) {
+    const key = `hardware:${finish}`;
+    if (matCache.has(key)) return matCache.get(key);
+    let color = '#c0c0c0';
+    let roughness = 0.4;
+    let metalness = 0.7;
+    if (finish === 'matte_black') {
+      color = '#1a1a1a';
+      roughness = 0.6;
+      metalness = 0.2;
+    } else if (finish === 'brass') {
+      color = '#d4af37';
+      roughness = 0.3;
+      metalness = 0.9;
+    } else if (finish === 'brushed_nickel') {
+      color = '#c0c0c0';
+      roughness = 0.4;
+      metalness = 0.7;
+    } else if (finish === 'oil_rubbed_bronze') {
+      color = '#3b2f2f';
+      roughness = 0.5;
+      metalness = 0.6;
+    }
+    const m = new THREE.MeshStandardMaterial({
+      color,
+      roughness,
+      metalness,
+    });
+    matCache.set(key, m);
+    return m;
+  }
+
   function placeInWall(room, wall, t, y, depth, elev, mesh) {
+    const wallIndex = WALLS.indexOf(wall);
+    let bulge = 0;
+    if (room.bulges) {
+      if (typeof room.bulges[wall] === 'number') bulge = room.bulges[wall];
+      else if (Array.isArray(room.bulges) && typeof room.bulges[wallIndex] === 'number')
+        bulge = room.bulges[wallIndex];
+    }
+
+    if (bulge) {
+      const len = wallLength(room, wall);
+      const s = wallSeg(room, wall);
+      const start = { x: s.ax, y: s.ay };
+      const end = { x: s.ax + s.dx * len, y: s.ay + s.dy * len };
+      const arc = getArcParameters(start, end, bulge);
+      const u = t / len;
+      const pt = pointOnArc(start, end, bulge, u);
+      const angle = arc.startAngle + u * arc.sweepAngle;
+      const nx = Math.cos(angle);
+      const ny = Math.sin(angle);
+
+      mesh.position.set((pt.x + depth * nx) * S, (elev + y) * S, (pt.y + depth * ny) * S);
+      const tangentAngle = angle + (Math.PI / 2) * Math.sign(bulge);
+      mesh.rotation.y = -tangentAngle;
+      return mesh;
+    }
+
     const s = wallSeg(room, wall);
     mesh.position.set(
       (s.ax + s.dx * t + s.nx * depth) * S,
@@ -1076,7 +1969,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   function wallAlignedBox(room, wall, along, h, thick, mat) {
     return boxMesh(along, h, thick, mat);
   }
-  function addWindow(group, room, wall, o, d, e) {
+  function addWindow(group, room, wall, o, d, e, wallThickness = WT) {
     const og = buildWindow3DMesh({
       room,
       wall,
@@ -1084,7 +1977,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       definition: d,
       elevation: e,
       scale: S,
-      wallThickness: WT,
+      wallThickness: wallThickness,
       getFrameMaterial,
       glassMaterial: glassMat,
       wallAlignedBox,
@@ -1093,43 +1986,21 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     group.add(og);
     return og;
   }
-  const doorMat = plain('#a9825a', 0.55);
-  function addDoor(group, room, wall, o, d, e, exterior) {
-    const og = new THREE.Group();
-    og.userData = { id: o.id, entityType: 'opening' };
-    const s = wallSeg(room, wall);
-    const dir = o.swing === 'out' ? -1 : 1;
-    const head = wallAlignedBox(room, wall, o.width + 3, 2, WT + 1, defaultFrameMat);
-    og.add(placeInWall(room, wall, o.offset + o.width / 2, d.h + 1, 0, e, head));
-    if (exterior || d.pocket) {
-      const slabDoor = wallAlignedBox(
-        room,
-        wall,
-        o.width - 1,
-        d.h - 1,
-        1.75,
-        d.glass ? glassMat : doorMat
-      );
-      og.add(placeInWall(room, wall, o.offset + o.width / 2, (d.h - 1) / 2, 0, e, slabDoor));
-      group.add(og);
-      return og;
-    }
-    const ang = (80 * Math.PI) / 180;
-    const sn = { x: s.nx * dir, y: s.ny * dir };
-    const leaf = boxMesh(o.width - 1, d.h - 1, 1.75, doorMat);
-    const pivot = new THREE.Group();
-    const hx = s.ax + s.dx * o.offset;
-    const hy = s.ay + s.dy * o.offset;
-    pivot.position.set(hx * S, (e + (d.h - 1) / 2) * S, hy * S);
-    leaf.position.set(((o.width - 1) / 2) * S, 0, 0);
-    pivot.add(leaf);
-    const alongAng = Math.atan2(s.dy, s.dx);
-    const normAng = Math.atan2(sn.y, sn.x);
-    let delta = normAng - alongAng;
-    while (delta > Math.PI) delta -= 2 * Math.PI;
-    while (delta < -Math.PI) delta += 2 * Math.PI;
-    pivot.rotation.y = -(alongAng + Math.sign(delta) * ang);
-    og.add(pivot);
+  function addDoor(group, room, wall, o, d, e, exterior, wallThickness = WT) {
+    const og = buildDoor3DMesh({
+      room,
+      wall,
+      opening: o,
+      definition: d,
+      elevation: e,
+      scale: S,
+      wallThickness: wallThickness,
+      getFrameMaterial,
+      getHardwareMaterial,
+      glassMaterial: glassMat,
+      wallAlignedBox,
+      placeInWall,
+    });
     group.add(og);
     return og;
   }
@@ -1314,6 +2185,175 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return g;
   }
 
+  // ---------------------------------------------------------------- Raycasting & Visual Constraint Guide Overlays
+  const raycaster = new THREE.Raycaster();
+  const overlayGroup = new THREE.Group();
+  overlayGroup.renderOrder = 999;
+  scene.add(overlayGroup);
+
+  function raycastPointer(pointerX, pointerY) {
+    if (cameraMode === 'walk') return null; // Walkthrough controls disable object interaction raycasting
+    const rect = canvas.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const nx = ((pointerX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((pointerY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+
+    const candidates = [];
+    for (const node of entityMap.values()) {
+      if (node && node.visible !== false) {
+        candidates.push(node);
+      }
+    }
+    if (ground && ground.visible !== false) {
+      candidates.push(ground);
+    }
+
+    const hits = raycaster.intersectObjects(candidates, true);
+    if (!hits || hits.length === 0) return null;
+
+    const hit = hits[0];
+    const faceNormal = hit.face
+      ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+      : new THREE.Vector3(0, 1, 0);
+
+    return {
+      point3D: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+      pointInches: { x: hit.point.x * 12, y: hit.point.y * 12, z: hit.point.z * 12 },
+      normal: { x: faceNormal.x, y: faceNormal.y, z: faceNormal.z },
+      distance: hit.distance,
+      object: hit.object,
+      userData: hit.object.userData || hit.object.parent?.userData || {},
+    };
+  }
+
+  function getScene3DGeometryContext() {
+    const state = getState();
+    const cur = getLevel();
+    const elev = levelElevations(state);
+    const rooms = state.rooms.filter((r) => lv(r) === cur);
+    const vertices = [];
+    const edges = [];
+
+    for (const room of rooms) {
+      const e = elev[lv(room)];
+      const pts = getRoomPoints(room);
+      for (let i = 0; i < pts.length; i++) {
+        const p1 = pts[i];
+        const p2 = pts[(i + 1) % pts.length];
+
+        const vBottom1 = { x: p1.x, y: e, z: p1.y, id: `${room.id}:v:${i}:bottom` };
+        const vTop1 = { x: p1.x, y: e + room.ceiling, z: p1.y, id: `${room.id}:v:${i}:top` };
+        vertices.push(vBottom1, vTop1);
+
+        // Bottom edge
+        edges.push({
+          start: { x: p1.x, y: e, z: p1.y },
+          end: { x: p2.x, y: e, z: p2.y },
+          index: i,
+        });
+        // Top edge
+        edges.push({
+          start: { x: p1.x, y: e + room.ceiling, z: p1.y },
+          end: { x: p2.x, y: e + room.ceiling, z: p2.y },
+          index: i + 100,
+        });
+        // Vertical corner edge
+        edges.push({ start: vBottom1, end: vTop1, index: i + 200 });
+      }
+
+      for (const it of room.items || []) {
+        vertices.push({ x: it.x, y: e, z: it.y, id: it.id, label: it.type });
+      }
+    }
+
+    return { vertices, edges };
+  }
+
+  function setSnapOverlay3D(snapResult) {
+    clearSnapOverlay3D();
+    if (!snapResult || !snapResult.point) return;
+
+    const ptFeet = {
+      x: snapResult.point.x * S,
+      y: snapResult.point.y * S,
+      z: snapResult.point.z * S,
+    };
+
+    // 1. Target Indicator Ring/Sphere
+    const sphereGeom = new THREE.SphereGeometry(0.35, 16, 16);
+    const sphereMat = new THREE.MeshBasicMaterial({
+      color: '#22c55e',
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const indicator = new THREE.Mesh(sphereGeom, sphereMat);
+    indicator.position.set(ptFeet.x, ptFeet.y, ptFeet.z);
+    overlayGroup.add(indicator);
+
+    // 2. Surface Normal Vector Arrow
+    if (snapResult.normal) {
+      const normVec = new THREE.Vector3(
+        snapResult.normal.x,
+        snapResult.normal.y,
+        snapResult.normal.z
+      ).normalize();
+      const endPt = new THREE.Vector3(ptFeet.x, ptFeet.y, ptFeet.z).addScaledVector(normVec, 1.8);
+      const lineGeom = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(ptFeet.x, ptFeet.y, ptFeet.z),
+        endPt,
+      ]);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: '#3b82f6',
+        depthTest: false,
+        depthWrite: false,
+      });
+      const normLine = new THREE.Line(lineGeom, lineMat);
+      overlayGroup.add(normLine);
+    }
+
+    // 3. Constraint Line Guides (for perpendicular, edge, midpoint, or angle snap)
+    if (snapResult.snap && snapResult.snap.type) {
+      const snapType = snapResult.snap.type;
+      let lineColor = '#eab308'; // yellow
+      if (snapType === 'perpendicular') lineColor = '#a855f7'; // purple
+      if (snapType === 'vertex') lineColor = '#ef4444'; // red
+
+      if (snapResult.snap.guideLines && snapResult.snap.guideLines.length > 0) {
+        for (const g of snapResult.snap.guideLines) {
+          const pts = [
+            new THREE.Vector3(g.start.x * S, g.start.y * S, g.start.z * S),
+            new THREE.Vector3(g.end.x * S, g.end.y * S, g.end.z * S),
+          ];
+          const lineGeom = new THREE.BufferGeometry().setFromPoints(pts);
+          const lineMat = new THREE.LineBasicMaterial({
+            color: lineColor,
+            depthTest: false,
+            depthWrite: false,
+          });
+          overlayGroup.add(new THREE.Line(lineGeom, lineMat));
+        }
+      }
+    }
+
+    render();
+  }
+
+  function clearSnapOverlay3D() {
+    while (overlayGroup.children.length > 0) {
+      const child = overlayGroup.children.pop();
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+        else child.material.dispose();
+      }
+    }
+    render();
+  }
+
   // ---------------------------------------------------------------- loop & API
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -1414,14 +2454,27 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     entityMap,
     hdBase,
     preloader,
+    announce3DStateChange,
+    cycle3DSelection,
+    getSelected3DEntity: () => selectedEntity,
+    getTransformMode: () => transformMode,
+    set3DTransformMode,
+    stepTransformSelected,
+    clear3DSelection,
+    updateFocusOverlay,
     async preloadMaterials(finishIds) {
       return preloader.preload(finishIds || Object.keys(HD_MATERIALS));
     },
     scene,
+    world,
     callbacks,
     walkKeys,
     getAttributionText: get3DAttributionText,
     updateHudAttribution,
+    raycastPointer,
+    getScene3DGeometryContext,
+    setSnapOverlay3D,
+    clearSnapOverlay3D,
     getCameraMode: () => cameraMode,
     setCameraMode,
     toggleCameraMode,

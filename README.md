@@ -47,7 +47,7 @@ Release publishing is automated via GitHub Actions on semantic version git tags 
 
 Pushing a version tag triggers `.github/workflows/release.yml`, which:
 
-1. **Enforces Token Guardrails**: The workflow specifies `permissions: read-all` globally, restricting `contents: write` strictly to the release publishing job.
+1. **Enforces Token Guardrails**: The workflow splits execution into a read-only `build` job (`permissions: contents: read`) and a `publish` job with minimal write permissions (`id-token: write`, `attestations: write`, `contents: write`) for provenance attestations and release creation.
 2. **Builds & Packages All Modules**:
    - Web application zipped into `homegen-web.zip`.
    - `designer3d/tools` library packaged via `npm pack` into `homegen-designer3d-tools-<version>.tgz`.

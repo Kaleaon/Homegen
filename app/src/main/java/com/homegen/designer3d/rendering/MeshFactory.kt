@@ -185,6 +185,10 @@ object MeshFactory {
             }
         }
 
+        if (heightmapData != null && heightmapData.isNotEmpty()) {
+            recalculateNormals(positions, indices, normals)
+        }
+
         val useIntIndices = vertexCount > 65535
         val indexType = if (useIntIndices) {
             IndexBuffer.Builder.IndexType.UINT
@@ -225,6 +229,137 @@ object MeshFactory {
             .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vertexBuffer, indexBuffer, 0, indexCount)
             .material(0, materialInstance)
             .castShadows(false)
+            .receiveShadows(true)
+            .build(engine, entity)
+
+        return entity
+    }
+
+    fun recalculateNormals(positions: FloatArray, indices: IntArray, normals: FloatArray) {
+        normals.fill(0f)
+        val triangleCount = indices.size / 3
+        for (i in 0 until triangleCount) {
+            val i0 = indices[i * 3]
+            val i1 = indices[i * 3 + 1]
+            val i2 = indices[i * 3 + 2]
+
+            val ax = positions[i0 * 3]
+            val ay = positions[i0 * 3 + 1]
+            val az = positions[i0 * 3 + 2]
+
+            val bx = positions[i1 * 3]
+            val by = positions[i1 * 3 + 1]
+            val bz = positions[i1 * 3 + 2]
+
+            val cx = positions[i2 * 3]
+            val cy = positions[i2 * 3 + 1]
+            val cz = positions[i2 * 3 + 2]
+
+            val abx = bx - ax
+            val aby = by - ay
+            val abz = bz - az
+
+            val acx = cx - ax
+            val acy = cy - ay
+            val acz = cz - az
+
+            var nx = aby * acz - abz * acy
+            var ny = abz * acx - abx * acz
+            var nz = abx * acy - aby * acx
+
+            val len = Math.sqrt((nx * nx + ny * ny + nz * nz).toDouble()).toFloat()
+            if (len > 1e-6f) {
+                nx /= len
+                ny /= len
+                nz /= len
+            }
+
+            normals[i0 * 3] += nx
+            normals[i0 * 3 + 1] += ny
+            normals[i0 * 3 + 2] += nz
+
+            normals[i1 * 3] += nx
+            normals[i1 * 3 + 1] += ny
+            normals[i1 * 3 + 2] += nz
+
+            normals[i2 * 3] += nx
+            normals[i2 * 3 + 1] += ny
+            normals[i2 * 3 + 2] += nz
+        }
+
+        val vertexCount = positions.size / 3
+        for (v in 0 until vertexCount) {
+            val nx = normals[v * 3]
+            val ny = normals[v * 3 + 1]
+            val nz = normals[v * 3 + 2]
+            val len = Math.sqrt((nx * nx + ny * ny + nz * nz).toDouble()).toFloat()
+            if (len > 1e-6f) {
+                normals[v * 3] = nx / len
+                normals[v * 3 + 1] = ny / len
+                normals[v * 3 + 2] = nz / len
+            } else {
+                normals[v * 3] = 0f
+                normals[v * 3 + 1] = 1f
+                normals[v * 3 + 2] = 0f
+            }
+        }
+    }
+
+    fun createDynamicIndexedMesh(
+        engine: Engine,
+        positions: FloatArray,
+        indices: IntArray,
+        uvs: FloatArray? = null,
+        materialInstance: MaterialInstance,
+    ): Int {
+        val vertexCount = positions.size / 3
+        val indexCount = indices.size
+        val normals = FloatArray(positions.size)
+
+        recalculateNormals(positions, indices, normals)
+
+        val texCoords = uvs ?: FloatArray(vertexCount * 2)
+
+        val useIntIndices = vertexCount > 65535
+        val indexType = if (useIntIndices) {
+            IndexBuffer.Builder.IndexType.UINT
+        } else {
+            IndexBuffer.Builder.IndexType.USHORT
+        }
+
+        val vertexBuffer = VertexBuffer.Builder()
+            .vertexCount(vertexCount)
+            .bufferCount(3)
+            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 12)
+            .attribute(VertexBuffer.VertexAttribute.TANGENTS, 1, VertexBuffer.AttributeType.FLOAT3, 0, 12)
+            .attribute(VertexBuffer.VertexAttribute.UV0, 2, VertexBuffer.AttributeType.FLOAT2, 0, 8)
+            .build(engine)
+
+        vertexBuffer.setBufferAt(engine, 0, toFloatBuffer(positions))
+        vertexBuffer.setBufferAt(engine, 1, toFloatBuffer(normals))
+        vertexBuffer.setBufferAt(engine, 2, toFloatBuffer(texCoords))
+
+        val indexBuffer = IndexBuffer.Builder()
+            .indexCount(indexCount)
+            .bufferType(indexType)
+            .build(engine)
+
+        if (useIntIndices) {
+            val buf = ByteBuffer.allocateDirect(indices.size * 4).order(ByteOrder.nativeOrder())
+            buf.asIntBuffer().put(indices)
+            buf.rewind()
+            indexBuffer.setBuffer(engine, buf)
+        } else {
+            val shortIndices = ShortArray(indexCount) { indices[it].toShort() }
+            indexBuffer.setBuffer(engine, toShortBuffer(shortIndices))
+        }
+
+        val entity = EntityManager.get().create()
+        RenderableManager.Builder(1)
+            .boundingBox(Box(0f, 0f, 0f, 100f, 100f, 100f))
+            .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vertexBuffer, indexBuffer, 0, indexCount)
+            .material(0, materialInstance)
+            .castShadows(true)
             .receiveShadows(true)
             .build(engine, entity)
 

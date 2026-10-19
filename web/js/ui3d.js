@@ -9,11 +9,20 @@ import {
   hordeWidth,
   toWebpDataUrl,
 } from './photoreal.js';
+import { getSnappedPoint3D } from '../../designer3d/tools/index.mjs';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'homegen.horde.key';
 
-export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLevel }) {
+export function initView3D({
+  getDoc,
+  getLevel,
+  getSelectedRoomId,
+  toast,
+  setLevel,
+  interaction,
+  _snappingBridge,
+}) {
   let api = null;
   let mode = '2d';
   let abort = null;
@@ -134,6 +143,41 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
   let lastMouseX = 0;
   let lastMouseY = 0;
 
+  v3.addEventListener('pointermove', (e) => {
+    if (!api || mode !== '3d') return;
+    if (api.getCameraMode() === 'walk') {
+      api.clearSnapOverlay3D();
+      return;
+    }
+
+    const rayHit = api.raycastPointer(e.clientX, e.clientY);
+    if (!rayHit) {
+      api.clearSnapOverlay3D();
+      return;
+    }
+
+    const context = api.getScene3DGeometryContext();
+    const snapModes = interaction ? interaction.snapModes : null;
+    const settings = interaction
+      ? interaction.gridSettings
+      : { unitSize: 6, magneticThreshold: 12 };
+
+    const snapRes = getSnappedPoint3D({
+      point: rayHit.pointInches,
+      normal: rayHit.normal,
+      vertices: context.vertices,
+      edges: context.edges,
+      settings,
+      snapModes,
+    });
+
+    api.setSnapOverlay3D(snapRes);
+  });
+
+  v3.addEventListener('pointerleave', () => {
+    if (api) api.clearSnapOverlay3D();
+  });
+
   v3.addEventListener('mousedown', (e) => {
     if (!api || mode !== '3d' || api.getCameraMode() !== 'walk') return;
     if (e.button !== 0) return;
@@ -157,11 +201,68 @@ export function initView3D({ getDoc, getLevel, getSelectedRoomId, toast, setLeve
 
   v3.addEventListener('keydown', (e) => {
     if (!api || mode !== '3d') return;
-    const camMode = api.getCameraMode();
     const k = e.key;
+    const lower = k.toLowerCase();
 
+    // 1. Tab / Shift + Tab: Cycle object/handle selection in 3D canvas
+    if (k === 'Tab') {
+      e.preventDefault();
+      api.cycle3DSelection(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    // 2. Escape: Deselect 3D object if selected, or exit walkthrough
+    if (k === 'Escape') {
+      if (api.getSelected3DEntity()) {
+        e.preventDefault();
+        api.clear3DSelection();
+        return;
+      }
+      if (api.getCameraMode() === 'walk') {
+        e.preventDefault();
+        api.setCameraMode('orbit');
+        toast('Switched to Orbit mode', false, 2000);
+        return;
+      }
+    }
+
+    // 3. If an object/handle is selected:
+    const selEntity = api.getSelected3DEntity();
+    if (selEntity) {
+      if (lower === 'g') {
+        e.preventDefault();
+        api.set3DTransformMode('move');
+        return;
+      }
+      if (lower === 'r') {
+        e.preventDefault();
+        api.set3DTransformMode('rotate');
+        return;
+      }
+      if (lower === 's') {
+        e.preventDefault();
+        api.set3DTransformMode('scale');
+        return;
+      }
+
+      if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+        e.preventDefault();
+        const step = e.shiftKey ? 12 : 6;
+        let dx = 0;
+        let dy = 0;
+        if (k === 'ArrowLeft') dx = -step;
+        if (k === 'ArrowRight') dx = step;
+        if (k === 'ArrowUp') dy = -step;
+        if (k === 'ArrowDown') dy = step;
+
+        api.stepTransformSelected(dx, dy, { shiftKey: e.shiftKey });
+        return;
+      }
+    }
+
+    // 4. Default camera navigation when no object is selected:
+    const camMode = api.getCameraMode();
     if (camMode === 'walk') {
-      const lower = k.toLowerCase();
       if (lower === 'w' || k === 'ArrowUp') {
         e.preventDefault();
         api.walkKeys.forward = true;

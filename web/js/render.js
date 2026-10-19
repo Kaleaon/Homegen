@@ -10,6 +10,7 @@ import {
   footprint,
   floorAreaSqFt,
   getRoomPoints,
+  reproject,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
@@ -138,21 +139,63 @@ function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, op
   if (!img || !img.complete || !img.naturalWidth) return;
   ctx.save();
   ctx.globalAlpha = bg.opacity ?? 0.5;
-  const w = (bg.width || img.naturalWidth) * (bg.scale ?? 1);
-  const h = (bg.height || img.naturalHeight) * (bg.scale ?? 1);
+  const imgW = bg.width || img.naturalWidth;
+  const imgH = bg.height || img.naturalHeight;
+  const w = imgW * (bg.scale ?? 1);
+  const h = imgH * (bg.scale ?? 1);
 
   if (bg.quadmesh || bg.mesh) {
     drawQuadmeshWarpedImage(ctx, img, bg.quadmesh || bg.mesh);
-  } else if (bg.matrix || bg.transform) {
-    const m = bg.matrix || bg.transform;
-    if (Array.isArray(m) && m.length >= 6) {
-      ctx.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
-      ctx.drawImage(img, 0, 0, bg.width || img.naturalWidth, bg.height || img.naturalHeight);
+  } else {
+    let m = bg.affineMatrix || bg.matrix || bg.transform;
+    if (!m || !Array.isArray(m) || m.length < 6) {
+      const scale = bg.scale ?? 1;
+      const x = bg.x ?? 0;
+      const y = bg.y ?? 0;
+      m = [scale, 0, 0, scale, x, y];
+    }
+
+    const [a, b, c, d, e, f] = m.map(Number);
+    const isFiniteMatrix = [a, b, c, d, e, f].every(Number.isFinite);
+    const det = a * d - b * c;
+    const isNonDegenerate = Math.abs(det) >= 1e-12;
+
+    if (isFiniteMatrix && isNonDegenerate) {
+      const targetCRS = opts.activeCRS || opts.crs || 'PLAN';
+      const sourceCRS = bg.worldfileCRS || bg.sourceCRS || bg.crs || 'PLAN';
+
+      let effA = a,
+        effB = b,
+        effC = c,
+        effD = d,
+        effE = e,
+        effF = f;
+
+      if (sourceCRS !== targetCRS && sourceCRS !== 'PLAN') {
+        try {
+          const p0 = reproject([e, f], sourceCRS, targetCRS);
+          const p1 = reproject([a + e, b + f], sourceCRS, targetCRS);
+          const p2 = reproject([c + e, d + f], sourceCRS, targetCRS);
+
+          if (p0 && p1 && p2 && Array.isArray(p0) && Array.isArray(p1) && Array.isArray(p2)) {
+            effE = p0[0];
+            effF = p0[1];
+            effA = p1[0] - p0[0];
+            effB = p1[1] - p0[1];
+            effC = p2[0] - p0[0];
+            effD = p2[1] - p0[1];
+          }
+        } catch (_err) {
+          // Keep original effA..effF on reprojection fault
+        }
+      }
+
+      ctx.transform(effA, effB, effC, effD, effE, effF);
+      ctx.drawImage(img, 0, 0, imgW, imgH);
     } else {
+      // Fallback to standard 2D translation if affine matrix values are invalid or degenerate
       ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
     }
-  } else {
-    ctx.drawImage(img, bg.x ?? 0, bg.y ?? 0, w, h);
   }
 
   ctx.restore();
@@ -1359,6 +1402,9 @@ export function drawSnapGuides(ctx, snapResult, view) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
       else if (g.type === 'perpendicular')
         ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else if (g.type === 'angle_reference')
+        ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else if (g.type === 'angle') ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
       else ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
 
       ctx.beginPath();

@@ -1,4 +1,5 @@
 import { validatePlacement } from './collision.mjs';
+import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
 
 /**
  * Format length in inches to feet/inches string (e.g. 144 -> 12' 0").
@@ -17,13 +18,47 @@ export function fmtDimensionText(w, h) {
 }
 
 /**
- * Get 4 corner constraint handles for a room rectangle.
+ * Get constraint handles for a room polygon (all N vertices).
  */
 export function getConstraintHandles(room, _options = {}) {
-  const x = room.x || 0;
-  const y = room.y || 0;
-  const w = room.w || 0;
-  const h = room.h || 0;
+  const pts = room?.points || room?.corners || room?.vertices;
+  if (Array.isArray(pts) && pts.length >= 3) {
+    if (pts.length === 4) {
+      return [
+        { id: 'nw', index: 0, x: pts[0].x, y: pts[0].y, cursor: 'nwse-resize', name: 'Top-Left' },
+        { id: 'ne', index: 1, x: pts[1].x, y: pts[1].y, cursor: 'nesw-resize', name: 'Top-Right' },
+        {
+          id: 'sw',
+          index: 2,
+          x: pts[3].x,
+          y: pts[3].y,
+          cursor: 'nesw-resize',
+          name: 'Bottom-Left',
+        },
+        {
+          id: 'se',
+          index: 3,
+          x: pts[2].x,
+          y: pts[2].y,
+          cursor: 'nwse-resize',
+          name: 'Bottom-Right',
+        },
+      ];
+    }
+    return pts.map((p, i) => ({
+      id: `v_${i}`,
+      index: i,
+      x: p.x,
+      y: p.y,
+      cursor: 'crosshair',
+      name: `Vertex ${i + 1}`,
+    }));
+  }
+
+  const x = room?.x || 0;
+  const y = room?.y || 0;
+  const w = room?.w || 0;
+  const h = room?.h || 0;
 
   return [
     { id: 'nw', index: 0, x, y, cursor: 'nwse-resize', name: 'Top-Left' },
@@ -36,10 +71,10 @@ export function getConstraintHandles(room, _options = {}) {
 /**
  * Validates room dimensions against IRC building code rules & constraints.
  */
-export function validateRoomDimensions(roomType, w, h) {
+export function validateRoomDimensions(roomType, w, h, options = {}) {
   const violations = [];
-  const minDim = Math.min(w, h);
-  const areaSqFt = (w * h) / 144;
+  const minDim = options.clearSpan !== undefined ? options.clearSpan : Math.min(w, h);
+  const areaSqFt = options.areaSqFt !== undefined ? options.areaSqFt : (w * h) / 144;
 
   // Minimum dimension general check (36 inches)
   if (w < 36 || h < 36) {
@@ -129,6 +164,26 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
   const isValid = dimValidation.isValid && collisionValid;
   const dimensionText = fmtDimensionText(newW, newH);
 
+  const resolveToken = typeof options.getToken === 'function' ? options.getToken : defaultGetToken;
+  const safeGetToken = (name, fallback) => {
+    if (typeof resolveToken === 'function') {
+      try {
+        return resolveToken(name, fallback) || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  };
+
+  const color = isValid
+    ? safeGetToken('--ktheme-info', '#2a7fff')
+    : safeGetToken('--ktheme-critical', '#f87171');
+
+  const handleColor = isValid
+    ? safeGetToken('--ktheme-on-primary', '#ffffff')
+    : safeGetToken('--ktheme-critical', '#f87171');
+
   return {
     rect,
     dimensionText,
@@ -137,9 +192,33 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
     violations: dimValidation.violations,
     handleIndex,
     feedback: {
-      color: isValid ? '#2a7fff' : '#f87171',
-      handleColor: isValid ? '#ffffff' : '#f87171',
+      color,
+      handleColor,
       dimensionText,
     },
   };
+}
+
+/**
+ * Step-based resizing of room using constraint handles in 6-inch increments.
+ */
+export function stepResize(room, handleIndexOrId, dx = 0, dy = 0, options = {}) {
+  const handles = getConstraintHandles(room);
+  const handleIndex =
+    typeof handleIndexOrId === 'number'
+      ? handleIndexOrId
+      : ['nw', 'ne', 'sw', 'se'].indexOf(handleIndexOrId);
+
+  const handle = handles[handleIndex] || handles.find((h) => h.id === handleIndexOrId);
+  if (!handle) throw new Error(`Invalid handle: ${handleIndexOrId}`);
+
+  const pointerPoint = {
+    x: handle.x + dx,
+    y: handle.y + dy,
+  };
+
+  return resizeRoomWithConstraints(room, handleIndex, pointerPoint, {
+    snap: false,
+    ...options,
+  });
 }

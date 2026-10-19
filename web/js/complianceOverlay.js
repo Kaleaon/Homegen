@@ -2,11 +2,16 @@
 import {
   wallPoint,
   interior,
+  interiorPolygonData,
+  polygonContainsZone,
+  getRoomPoints,
   footprint,
   fixtureZone,
   rectsOverlap,
-  rectInside,
   floorAreaSqFt,
+  getRoomPoints,
+  getRoomClearSpan,
+  polygonCentroid,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
@@ -83,13 +88,15 @@ export class ComplianceOverlayScene {
     if (!state || !Array.isArray(state.rooms)) return;
 
     for (const room of state.rooms) {
+      const polyData = interiorPolygonData(room);
       const roomInterior = interior(room);
       const roomEntry = {
         room,
+        polyData,
         interior: roomInterior,
         isSleeping: !!ROOM_TYPES[room.type]?.sleeping,
         isHabitable: !!ROOM_TYPES[room.type]?.habitable && room.type !== 'kitchen',
-        minDim: Math.min(room.w, room.h),
+        minDim: getRoomClearSpan(room),
         areaSqFt: floorAreaSqFt(room),
       };
       this.roomIndex.set(room.id, roomEntry);
@@ -280,7 +287,8 @@ export class ComplianceOverlayScene {
     // 2. Compile fixture clearance zone nodes
     for (const room of levelRooms) {
       const roomEntry = this.roomIndex.get(room.id);
-      const ir = roomEntry ? roomEntry.interior : interior(room);
+      const polyData = roomEntry ? roomEntry.polyData : interiorPolygonData(room);
+      const innerPoly = polyData.points;
 
       for (const it of room.items) {
         const itemEntry = this.itemIndex.get(it.id);
@@ -293,7 +301,7 @@ export class ComplianceOverlayScene {
           def.fixture
         ) {
           const zone = fixtureZone(it, def, 15, 21);
-          const insideRoom = rectInside(zone, ir);
+          const insideRoom = polygonContainsZone(innerPoly, zone);
 
           const candidates = this.querySpatialGrid(zone, room.id);
           let overlapsOther = false;
@@ -445,29 +453,26 @@ export class ComplianceOverlayScene {
         }
       }
 
-      // Corner handles
-      const cornerCoords = [
-        { id: 'nw', x: room.x, y: room.y, index: 0 },
-        { id: 'ne', x: room.x + room.w, y: room.y, index: 1 },
-        { id: 'sw', x: room.x, y: room.y + room.h, index: 2 },
-        { id: 'se', x: room.x + room.w, y: room.y + room.h, index: 3 },
-      ];
-
-      for (const c of cornerCoords) {
+      // N-vertex constraint handles
+      const pts = getRoomPoints(room);
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const handleId =
+          pts.length === 4 ? (i === 0 ? 'nw' : i === 1 ? 'ne' : i === 2 ? 'se' : 'sw') : `v_${i}`;
         nextNodes.push(
           new SpatialOverlayNode(
-            `node:handle:${room.id}:${c.id}`,
+            `node:handle:${room.id}:${handleId}`,
             'constraintHandle',
             {
-              x: c.x,
-              y: c.y,
+              x: p.x,
+              y: p.y,
               w: 8,
               h: 8,
             },
             {
               roomId: room.id,
-              handleIndex: c.index,
-              handleId: c.id,
+              handleIndex: i,
+              handleId,
               isSelected,
               isValid,
               color: isValid
@@ -480,22 +485,29 @@ export class ComplianceOverlayScene {
         );
       }
 
-      // Live dimension label node
-      const dimText = `${fmt(room.w)} × ${fmt(room.h)}`;
+      // Live dimension label node centered at interior polygon centroid
+      const centroid = polygonCentroid(pts);
+      const clearSpan = getRoomClearSpan(room);
+      const minDimVal = clearSpan;
+      const dimText =
+        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} clear`;
       nextNodes.push(
         new SpatialOverlayNode(
           `node:dimension:${room.id}`,
           'dimensionLabel',
           {
-            x: room.x + room.w / 2,
-            y: room.y + room.h + 16,
+            x: centroid.x,
+            y: centroid.y,
             w: 100,
             h: 20,
           },
           {
             roomId: room.id,
             dimensionText: dimText,
+            clearSpan,
             areaSqFt,
+            minWidth: minDimVal,
+            minDim: minDimVal,
             isValid,
             isSelected,
             violations: dimViolations,

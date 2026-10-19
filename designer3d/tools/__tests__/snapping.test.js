@@ -1,6 +1,7 @@
 import { getSnappedPoint, snapAngle } from '../snapping.mjs';
 import { SnapModeState, SNAP_MODES } from '../snapModes.mjs';
 import { createGridSettings } from '../gridSettings.mjs';
+import { SNAP_TOGGLE_DEFINITIONS } from '../uiSnapToggles.mjs';
 
 describe('snapAngle', () => {
   const settings = createGridSettings({ angleSnapDegrees: 15 });
@@ -14,6 +15,22 @@ describe('snapAngle', () => {
 
   test('zero angle stays zero', () => {
     expect(snapAngle(0, settings)).toBe(0);
+  });
+
+  test('operates continuously across the 180-degree branch cut without sign flip anomalies', () => {
+    const posNear180 = (179.9 * Math.PI) / 180;
+    const negNear180 = (-179.9 * Math.PI) / 180;
+
+    const snappedPos = snapAngle(posNear180, settings);
+    const snappedNeg = snapAngle(negNear180, settings);
+
+    // Both should quantize to Math.PI / -Math.PI radians (which point to identical direction vector)
+    expect(Math.abs(snappedPos)).toBeCloseTo(Math.PI, 5);
+    expect(Math.abs(snappedNeg)).toBeCloseTo(Math.PI, 5);
+
+    // Corresponding direction vectors should be identical
+    expect(Math.cos(snappedPos)).toBeCloseTo(Math.cos(snappedNeg), 5);
+    expect(Math.sin(snappedPos)).toBeCloseTo(Math.sin(snappedNeg), 5);
   });
 });
 
@@ -136,5 +153,174 @@ describe('getSnappedPoint', () => {
 
     // Edge snap should win (distance ~0.05) vs grid (distance ~0.14)
     expect(result.snap.type).toBe('edge');
+  });
+
+  test('snaps to arc edge and arc midpoint when bulge is non-zero', () => {
+    const settings = createGridSettings({
+      magneticThreshold: 1.0,
+      edgeThreshold: 1.0,
+      midpointThreshold: 1.0,
+    });
+    const snapModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+      [SNAP_MODES.MIDPOINT]: true,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+
+    // Semicircle arc edge (bulge = 1) from (0,0) to (10,0), apex at (5,5)
+    const edges = [{ start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bulge: 1, index: 0 }];
+
+    // Test arc edge snap near apex
+    const resultEdge = getSnappedPoint({
+      point: { x: 5, y: 5.2 },
+      edges,
+      settings,
+      snapModes,
+    });
+    expect(resultEdge.point.x).toBeCloseTo(5);
+    expect(resultEdge.point.y).toBeCloseTo(5);
+    expect(['edge', 'midpoint']).toContain(resultEdge.snap.type);
+
+    // Test arc edge snap at t = 0.25
+    const snapModesEdgeOnly = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+      [SNAP_MODES.MIDPOINT]: false,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+    const resultEdgeOnly = getSnappedPoint({
+      point: { x: 5, y: 5.2 },
+      edges,
+      settings,
+      snapModes: snapModesEdgeOnly,
+    });
+    expect(resultEdgeOnly.point.x).toBeCloseTo(5);
+    expect(resultEdgeOnly.point.y).toBeCloseTo(5);
+    expect(resultEdgeOnly.snap.type).toBe('edge');
+  });
+
+  test('snaps relative to non-cardinal angled wall edges (0°, 90°, step increment)', () => {
+    const settings = createGridSettings({
+      angleSnapDegrees: 15,
+      magneticThreshold: 2.0,
+    });
+    const snapModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: false,
+      [SNAP_MODES.MIDPOINT]: false,
+      [SNAP_MODES.PERPENDICULAR]: false,
+      [SNAP_MODES.ANGLE]: true,
+    });
+
+    const wallAngle = 23.5 * (Math.PI / 180); // 23.5° wall
+    const wallLength = 10;
+    const edge = {
+      start: { x: 0, y: 0 },
+      end: { x: wallLength * Math.cos(wallAngle), y: wallLength * Math.sin(wallAngle) },
+      index: 42,
+    };
+
+    const anchor = { x: 5, y: 5 };
+    const dist = 10;
+
+    // 1. Parallel (0° offset relative to 23.5° wall)
+    const rawPointParallel = {
+      x: anchor.x + dist * Math.cos(wallAngle + 0.01),
+      y: anchor.y + dist * Math.sin(wallAngle + 0.01),
+    };
+    const resParallel = getSnappedPoint({
+      point: rawPointParallel,
+      anchor,
+      edges: [edge],
+      settings,
+      snapModes,
+    });
+
+    expect(resParallel.snap).not.toBeNull();
+    expect(resParallel.snap.type).toBe('angle');
+    expect(resParallel.snap.edgeIndex).toBe(42);
+    expect(resParallel.snap.angleDegrees).toBe(24); // Math.round(23.5) = 24
+    expect(resParallel.point.x).toBeCloseTo(anchor.x + dist * Math.cos(wallAngle), 4);
+    expect(resParallel.point.y).toBeCloseTo(anchor.y + dist * Math.sin(wallAngle), 4);
+
+    // 2. Perpendicular (90° offset relative to 23.5° wall => 113.5°)
+    const perpAngle = wallAngle + (90 * Math.PI) / 180;
+    const rawPointPerp = {
+      x: anchor.x + dist * Math.cos(perpAngle - 0.01),
+      y: anchor.y + dist * Math.sin(perpAngle - 0.01),
+    };
+    const resPerp = getSnappedPoint({
+      point: rawPointPerp,
+      anchor,
+      edges: [edge],
+      settings,
+      snapModes,
+    });
+
+    expect(resPerp.snap).not.toBeNull();
+    expect(resPerp.snap.type).toBe('angle');
+    expect(resPerp.snap.edgeIndex).toBe(42);
+    expect(resPerp.snap.angleDegrees).toBe(114); // Math.round(113.5) = 114
+    expect(resPerp.point.x).toBeCloseTo(anchor.x + dist * Math.cos(perpAngle), 4);
+    expect(resPerp.point.y).toBeCloseTo(anchor.y + dist * Math.sin(perpAngle), 4);
+
+    // 3. Step Increment (15° offset relative to 23.5° wall => 38.5°)
+    const stepAngle = wallAngle + (15 * Math.PI) / 180;
+    const rawPointStep = {
+      x: anchor.x + dist * Math.cos(stepAngle + 0.005),
+      y: anchor.y + dist * Math.sin(stepAngle + 0.005),
+    };
+    const resStep = getSnappedPoint({
+      point: rawPointStep,
+      anchor,
+      edges: [edge],
+      settings,
+      snapModes,
+    });
+
+    expect(resStep.snap).not.toBeNull();
+    expect(resStep.snap.type).toBe('angle');
+    expect(resStep.snap.edgeIndex).toBe(42);
+    expect(resStep.snap.angleDegrees).toBe(39); // Math.round(38.5) = 39
+    expect(resStep.point.x).toBeCloseTo(anchor.x + dist * Math.cos(stepAngle), 4);
+    expect(resStep.point.y).toBeCloseTo(anchor.y + dist * Math.sin(stepAngle), 4);
+  });
+
+  test('ignores degenerate zero-length edge segments when evaluating relative angles', () => {
+    const settings = createGridSettings({ angleSnapDegrees: 15, magneticThreshold: 2.0 });
+    const snapModes = new SnapModeState({ [SNAP_MODES.GRID]: false, [SNAP_MODES.ANGLE]: true });
+
+    const degenerateEdge = { start: { x: 5, y: 5 }, end: { x: 5, y: 5 }, index: 99 };
+    const anchor = { x: 0, y: 0 };
+    const point = { x: 10, y: 0.1 }; // Near 0° global
+
+    const res = getSnappedPoint({
+      point,
+      anchor,
+      edges: [degenerateEdge],
+      settings,
+      snapModes,
+    });
+
+    expect(res.snap).not.toBeNull();
+    expect(res.snap.type).toBe('angle');
+    expect(res.snap.edgeIndex).toBeUndefined(); // Snapped to global 0° reference, degenerate edge ignored
+  });
+});
+
+describe('SNAP_TOGGLE_DEFINITIONS', () => {
+  test('includes category classifications for all snap modes', () => {
+    expect(SNAP_TOGGLE_DEFINITIONS).toHaveLength(4);
+
+    const grid = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'grid');
+    const edge = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'edge');
+    const midpoint = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'midpoint');
+    const perpendicular = SNAP_TOGGLE_DEFINITIONS.find((d) => d.id === 'perpendicular');
+
+    expect(grid.category).toBe('basic');
+    expect(edge.category).toBe('basic');
+    expect(midpoint.category).toBe('advanced');
+    expect(perpendicular.category).toBe('advanced');
   });
 });

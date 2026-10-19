@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "prepare": "husky",
-    "lint": "npm --prefix web run lint && npm --prefix designer3d/tools run lint",
+    "lint": "npm --prefix web run lint && npm --prefix web run lint:css && npm --prefix designer3d/tools run lint",
+    "lint:style": "npm --prefix web run lint:css",
     "format": "npm --prefix web run format && npm --prefix designer3d/tools run format",
     "format:check": "npm --prefix web run format:check && npm --prefix designer3d/tools run format:check && npm run format:kotlin",
     "format:kotlin": "./gradlew spotlessCheck"
   },
   "devDependencies": {
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0"
   }
 }

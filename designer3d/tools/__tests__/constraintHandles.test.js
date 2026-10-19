@@ -2,6 +2,7 @@ import { InteractionLayer } from '../interactionLayer.mjs';
 import {
   getConstraintHandles,
   resizeRoomWithConstraints,
+  stepResize,
   validateRoomDimensions,
   fmtDimensionText,
 } from '../constraintHandles.mjs';
@@ -81,8 +82,35 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(res.rect.w).toBe(72);
     expect(res.rect.h).toBe(72);
     expect(res.areaSqFt).toBe(36);
-    expect(res.feedback.color).toBe('#f87171');
+    expect(res.feedback.color).toBe('#e84040'); // resolved --ktheme-critical token
     expect(res.violations.some((v) => v.includes('70 sq ft'))).toBe(true);
+  });
+
+  test('resizeRoomWithConstraints respects custom options.getToken resolver', () => {
+    const customGetToken = (name, fallback) => {
+      if (name === '--ktheme-info') return '#0000ff';
+      if (name === '--ktheme-critical') return '#ff0000';
+      if (name === '--ktheme-on-primary') return '#ffff00';
+      return fallback;
+    };
+
+    const validRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 180, y: 144 },
+      { getToken: customGetToken }
+    );
+    expect(validRes.feedback.color).toBe('#0000ff');
+    expect(validRes.feedback.handleColor).toBe('#ffff00');
+
+    const invalidRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 72, y: 72 },
+      { getToken: customGetToken }
+    );
+    expect(invalidRes.feedback.color).toBe('#ff0000');
+    expect(invalidRes.feedback.handleColor).toBe('#ff0000');
   });
 
   test('validateRoomDimensions checks kitchen minimum dimension requirement', () => {
@@ -96,5 +124,50 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
 
   test('fmtDimensionText formats inches into feet and inches', () => {
     expect(fmtDimensionText(144, 126)).toBe('12\' 0" × 10\' 6"');
+  });
+
+  test('getConstraintHandles creates handle nodes for all N vertices of non-rectangular polygon room', () => {
+    const polygonRoom = {
+      id: 'poly_room',
+      name: 'L-Room',
+      type: 'living',
+      points: [
+        { x: 0, y: 0 },
+        { x: 240, y: 0 },
+        { x: 240, y: 120 },
+        { x: 120, y: 120 },
+        { x: 120, y: 240 },
+        { x: 0, y: 240 },
+      ],
+    };
+
+    const handles = getConstraintHandles(polygonRoom);
+    expect(handles).toHaveLength(6);
+    expect(handles[0]).toEqual({
+      id: 'v_0',
+      index: 0,
+      x: 0,
+      y: 0,
+      cursor: 'crosshair',
+      name: 'Vertex 1',
+    });
+    expect(handles[3]).toEqual({
+      id: 'v_3',
+      index: 3,
+      x: 120,
+      y: 120,
+      cursor: 'crosshair',
+      name: 'Vertex 4',
+    });
+  });
+
+  test('stepResize adjusts room dimensions in step increments', () => {
+    const res = stepResize(room, 'se', 0, 12);
+    expect(res.rect.w).toBe(144);
+    expect(res.rect.h).toBe(132); // 120 + 12 = 132 (11 ft)
+    expect(res.areaSqFt).toBe(132);
+    expect(res.isValid).toBe(true);
+    expect(res.dimensionText).toBe('12\' 0" × 11\' 0"');
+  });
   });
 });

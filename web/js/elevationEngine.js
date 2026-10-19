@@ -1,3 +1,5 @@
+import { globalCadWorkerClient } from './cadWorkerClient.js';
+
 /**
  * Client-side Elevation Engine
  * Standardizes heightmaps, Google Maps Elevation API JSON responses, and GeoTIFF datasets.
@@ -17,22 +19,47 @@ export class ElevationGrid {
     verticalScale = 1.0,
     visible = true,
   } = {}) {
-    this.width = width;
-    this.height = height;
-    if (data instanceof Float32Array) {
-      this.data = data;
-    } else if (Array.isArray(data)) {
-      this.data = new Float32Array(data);
-    } else if (data && typeof data === 'object') {
-      this.data = new Float32Array(Object.values(data));
-    } else if (width > 0 && height > 0) {
-      this.data = new Float32Array(width * height);
-    } else {
-      this.data = new Float32Array(0);
+    let capWidth = width;
+    let capHeight = height;
+    if (width * height > 10000) {
+      const aspect = width / height || 1;
+      capHeight = Math.floor(Math.sqrt(10000 / aspect));
+      capWidth = Math.floor(capHeight * aspect);
     }
+    this.width = capWidth;
+    this.height = capHeight;
+    this.maxVertexCap = 10000;
+
+    let rawData;
+    if (data instanceof Float32Array) {
+      rawData = data;
+    } else if (Array.isArray(data)) {
+      rawData = new Float32Array(data);
+    } else if (data && typeof data === 'object') {
+      rawData = new Float32Array(Object.values(data));
+    } else if (capWidth > 0 && capHeight > 0) {
+      rawData = new Float32Array(capWidth * capHeight);
+    } else {
+      rawData = new Float32Array(0);
+    }
+
+    if (width !== capWidth || height !== capHeight) {
+      this.data = new Float32Array(capWidth * capHeight);
+      for (let y = 0; y < capHeight; y++) {
+        for (let x = 0; x < capWidth; x++) {
+          const u = x / Math.max(1, capWidth - 1);
+          const v = y / Math.max(1, capHeight - 1);
+          const origX = Math.floor(u * (width - 1));
+          const origY = Math.floor(v * (height - 1));
+          this.data[y * capWidth + x] = rawData[origY * width + origX] || 0;
+        }
+      }
+    } else {
+      this.data = rawData;
+    }
+
     this.minElevation = minElevation;
     this.maxElevation = maxElevation;
-    // World bounds in plan inches: defaults to -600" to +600" (100ft x 100ft area)
     this.bounds = bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
     this.contourInterval = Math.max(0.1, contourInterval);
     this.verticalScale = verticalScale;
@@ -75,6 +102,128 @@ export class ElevationGrid {
     const bottom = v01 * (1 - tx) + v11 * tx;
     return top * (1 - ty) + bottom * ty;
   }
+
+  toVolumetricMesh(baseElevation = -50) {
+    const { width, height, data, bounds, verticalScale } = this;
+    if (width <= 0 || height <= 0 || !data || data.length === 0) {
+      return { vertices: [], triangles: [], vertexCount: 0 };
+    }
+
+    const vertices = [];
+    const triangles = [];
+
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        const wz = (data[y * width + x] || 0) * verticalScale;
+        vertices.push({ x: wx, y: wy, z: wz });
+      }
+    }
+
+    const offset = width * height;
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        vertices.push({ x: wx, y: wy, z: baseElevation });
+      }
+    }
+
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const i0 = y * width + x;
+        const i1 = y * width + (x + 1);
+        const i2 = (y + 1) * width + x;
+        const i3 = (y + 1) * width + (x + 1);
+        triangles.push([i0, i1, i2]);
+        triangles.push([i1, i3, i2]);
+      }
+    }
+
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const i0 = offset + y * width + x;
+        const i1 = offset + y * width + (x + 1);
+        const i2 = offset + (y + 1) * width + x;
+        const i3 = offset + (y + 1) * width + (x + 1);
+        triangles.push([i0, i2, i1]);
+        triangles.push([i1, i2, i3]);
+      }
+    }
+
+    return {
+      vertices,
+      triangles,
+      vertexCount: vertices.length,
+      bounds,
+    };
+  }
+
+  executeFoundationCut(foundationPolygon, padElevation = 0) {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!this.data || this.width <= 0 || this.height <= 0 || !Array.isArray(foundationPolygon)) {
+      return { grid: this, mesh: this.toVolumetricMesh(), executionTimeMs: 0 };
+    }
+
+    const { width, height, bounds, data } = this;
+    let minE = Infinity;
+    let maxE = -Infinity;
+
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        const idx = y * width + x;
+
+        if (pointInPolygon({ x: wx, y: wy }, foundationPolygon)) {
+          data[idx] = Math.min(data[idx], padElevation);
+        }
+
+        const currentVal = data[idx];
+        if (currentVal < minE) minE = currentVal;
+        if (currentVal > maxE) maxE = currentVal;
+      }
+    }
+
+    this.minElevation = minE === Infinity ? 0 : minE;
+    this.maxElevation = maxE === -Infinity ? padElevation : maxE;
+
+    const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const executionTimeMs = t1 - t0;
+
+    return {
+      grid: this,
+      mesh: this.toVolumetricMesh(),
+      executionTimeMs,
+    };
+  }
+
+  subtractCSGVolume(polygon, targetElevation) {
+    return this.executeFoundationCut(polygon, targetElevation);
+  }
+}
+
+function pointInPolygon(p, poly) {
+  let inside = false;
+  const px = p.x;
+  const py = p.y;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 /**
@@ -192,6 +341,24 @@ export function parseImageHeightmap(imageInput, options = {}) {
 }
 
 /**
+ * Helper to extract double precision float arrays from DataView for GeoTIFF tags.
+ */
+function readDoubleArray(view, offset, count, littleEndian) {
+  if (!count || offset <= 0 || offset + count * 8 > view.byteLength) {
+    return null;
+  }
+  try {
+    const arr = new Float64Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = view.getFloat64(offset + i * 8, littleEndian);
+    }
+    return arr;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
 export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
@@ -212,17 +379,32 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
               imgHeight = 0,
               stripOffset = 0,
               bitsPerSample = 8;
+            let modelPixelScale = null;
+            let modelTiepoint = null;
+            let modelTransformation = null;
+
             for (let i = 0; i < numEntries; i++) {
               const entryOffset = firstIFD + 2 + i * 12;
               if (entryOffset + 12 > arrayBuffer.byteLength) break;
               const tag = view.getUint16(entryOffset, littleEndian);
+              const type = view.getUint16(entryOffset + 2, littleEndian);
+              const count = view.getUint32(entryOffset + 4, littleEndian);
               const val = view.getUint32(entryOffset + 8, littleEndian);
+
               if (tag === 256)
                 imgWidth = val; // ImageWidth
               else if (tag === 257)
                 imgHeight = val; // ImageLength
               else if (tag === 258) bitsPerSample = val & 0xffff;
-              else if (tag === 273) stripOffset = val; // StripOffsets
+              else if (tag === 273)
+                stripOffset = val; // StripOffsets
+              else if (tag === 33550 && type === 12) {
+                modelPixelScale = readDoubleArray(view, val, count, littleEndian);
+              } else if (tag === 33922 && type === 12) {
+                modelTiepoint = readDoubleArray(view, val, count, littleEndian);
+              } else if (tag === 34264 && type === 12) {
+                modelTransformation = readDoubleArray(view, val, count, littleEndian);
+              }
             }
             if (imgWidth > 0 && imgHeight > 0 && stripOffset > 0) {
               const total = imgWidth * imgHeight;
@@ -246,13 +428,66 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                   if (elev < minE) minE = elev;
                   if (elev > maxE) maxE = elev;
                 }
+
+                let computedBounds = null;
+                if (
+                  modelTiepoint &&
+                  modelTiepoint.length >= 6 &&
+                  modelPixelScale &&
+                  modelPixelScale.length >= 2
+                ) {
+                  const scaleX = modelPixelScale[0];
+                  const scaleY = modelPixelScale[1];
+                  const tieI = modelTiepoint[0];
+                  const tieJ = modelTiepoint[1];
+                  const tieX = modelTiepoint[3];
+                  const tieY = modelTiepoint[4];
+
+                  if (
+                    scaleX > 0 &&
+                    scaleY > 0 &&
+                    !isNaN(scaleX) &&
+                    !isNaN(scaleY) &&
+                    !isNaN(tieX) &&
+                    !isNaN(tieY)
+                  ) {
+                    const xOrigin = tieX - tieI * scaleX;
+                    const yOrigin = tieY + tieJ * scaleY;
+                    computedBounds = {
+                      minX: xOrigin,
+                      maxX: xOrigin + imgWidth * scaleX,
+                      minY: yOrigin - imgHeight * scaleY,
+                      maxY: yOrigin,
+                    };
+                  }
+                } else if (modelTransformation && modelTransformation.length >= 16) {
+                  const m = modelTransformation;
+                  const x00 = m[3];
+                  const y00 = m[7];
+                  const xW0 = m[0] * imgWidth + m[3];
+                  const yW0 = m[4] * imgWidth + m[7];
+                  const x0H = m[1] * imgHeight + m[3];
+                  const y0H = m[5] * imgHeight + m[7];
+                  const xWH = m[0] * imgWidth + m[1] * imgHeight + m[3];
+                  const yWH = m[4] * imgWidth + m[5] * imgHeight + m[7];
+
+                  const minX = Math.min(x00, xW0, x0H, xWH);
+                  const maxX = Math.max(x00, xW0, x0H, xWH);
+                  const minY = Math.min(y00, yW0, y0H, yWH);
+                  const maxY = Math.max(y00, yW0, y0H, yWH);
+
+                  if (!isNaN(minX) && !isNaN(maxX) && !isNaN(minY) && !isNaN(maxY)) {
+                    computedBounds = { minX, maxX, minY, maxY };
+                  }
+                }
+
                 return new ElevationGrid({
                   width: imgWidth,
                   height: imgHeight,
                   data,
                   minElevation: minE,
                   maxElevation: maxE,
-                  bounds: options.bounds,
+                  bounds: options.bounds ?? computedBounds ?? undefined,
                   contourInterval: options.contourInterval ?? 1.0,
                 });
               }
@@ -463,134 +698,21 @@ function getEdgePoint(x, y, edge, v0, v1, v2, v3, z, width, height, bounds) {
 
 /**
  * Asynchronous Marching Squares contour generation.
- * Runs non-blockingly using Worker or async time-slicing.
+ * Offloads to CAD Web Worker pipeline or falls back synchronously.
  */
 export async function computeContoursAsync(grid, intervalOverride = null) {
   if (!grid) return [];
 
-  // If Web Worker and Blob are available, run in background worker
-  if (
-    typeof Worker !== 'undefined' &&
-    typeof Blob !== 'undefined' &&
-    typeof URL !== 'undefined' &&
-    URL.createObjectURL
-  ) {
-    try {
-      const workerCode = `
-        self.onmessage = function(e) {
-          const { gridData, width, height, minElevation, maxElevation, bounds, interval } = e.data;
-          const grid = {
-            width,
-            height,
-            data: gridData,
-            minElevation,
-            maxElevation,
-            bounds,
-            contourInterval: interval
-          };
-
-          const MARCHING_SQUARES_LOOKUP = ${JSON.stringify(MARCHING_SQUARES_LOOKUP)};
-
-          function getEdgePoint(x, y, edge, v0, v1, v2, v3, z, width, height, bounds) {
-            let cellX1 = x, cellY1 = y, cellX2 = x, cellY2 = y;
-            let val1 = v0, val2 = v1;
-            switch (edge) {
-              case 0: cellX1 = x; cellY1 = y; val1 = v0; cellX2 = x + 1; cellY2 = y; val2 = v1; break;
-              case 1: cellX1 = x + 1; cellY1 = y; val1 = v1; cellX2 = x + 1; cellY2 = y + 1; val2 = v2; break;
-              case 2: cellX1 = x; cellY1 = y + 1; val1 = v3; cellX2 = x + 1; cellY2 = y + 1; val2 = v2; break;
-              case 3: cellX1 = x; cellY1 = y; val1 = v0; cellX2 = x; cellY2 = y + 1; val2 = v3; break;
-            }
-            let t = 0.5;
-            if (Math.abs(val2 - val1) > 1e-6) {
-              t = (z - val1) / (val2 - val1);
-              t = Math.max(0, Math.min(1, t));
-            }
-            const gx = cellX1 + t * (cellX2 - cellX1);
-            const gy = cellY1 + t * (cellY2 - cellY1);
-            const wx = bounds.minX + (gx / (width - 1)) * (bounds.maxX - bounds.minX);
-            const wy = bounds.minY + (gy / (height - 1)) * (bounds.maxY - bounds.minY);
-            return { x: wx, y: wy };
-          }
-
-          const startLevel = Math.ceil(minElevation / interval) * interval;
-          const contours = [];
-          for (let z = startLevel; z <= maxElevation; z += interval) {
-            const levelVal = Number(z.toFixed(2));
-            const lines = [];
-            for (let y = 0; y < height - 1; y++) {
-              for (let x = 0; x < width - 1; x++) {
-                const i0 = y * width + x;
-                const i1 = y * width + (x + 1);
-                const i2 = (y + 1) * width + (x + 1);
-                const i3 = (y + 1) * width + x;
-                const v0 = gridData[i0];
-                const v1 = gridData[i1];
-                const v2 = gridData[i2];
-                const v3 = gridData[i3];
-
-                let index = 0;
-                if (v0 >= levelVal) index |= 8;
-                if (v1 >= levelVal) index |= 4;
-                if (v2 >= levelVal) index |= 2;
-                if (v3 >= levelVal) index |= 1;
-
-                if (index === 0 || index === 15) continue;
-                const edges = MARCHING_SQUARES_LOOKUP[index];
-                for (let k = 0; k < edges.length; k++) {
-                  const e = edges[k];
-                  const pA = getEdgePoint(x, y, e[0], v0, v1, v2, v3, levelVal, width, height, bounds);
-                  const pB = getEdgePoint(x, y, e[1], v0, v1, v2, v3, levelVal, width, height, bounds);
-                  lines.push({ x1: pA.x, y1: pA.y, x2: pB.x, y2: pB.y });
-                }
-              }
-            }
-            if (lines.length > 0) {
-              contours.push({ elevation: levelVal, lines });
-            }
-          }
-
-          self.postMessage(contours);
-        };
-      `;
-
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(workerUrl);
-
-      return new Promise((res) => {
-        worker.onmessage = (evt) => {
-          URL.revokeObjectURL(workerUrl);
-          worker.terminate();
-          res(evt.data);
-        };
-        worker.onerror = () => {
-          URL.revokeObjectURL(workerUrl);
-          worker.terminate();
-          // Fallback to sync
-          res(computeMarchingSquares(grid, intervalOverride));
-        };
-        const interval = intervalOverride || grid.contourInterval || 1.0;
-        worker.postMessage({
-          gridData: grid.data,
-          width: grid.width,
-          height: grid.height,
-          minElevation: grid.minElevation,
-          maxElevation: grid.maxElevation,
-          bounds: grid.bounds,
-          interval,
-        });
-      });
-    } catch {
-      // Fallback
+  try {
+    const contours = await globalCadWorkerClient.computeIsolinesAsync(grid, intervalOverride);
+    if (Array.isArray(contours) && contours.length > 0) {
+      return contours;
     }
+  } catch {
+    // Fall back
   }
 
-  // Fallback: microtask async resolution
-  return new Promise((res) => {
-    setTimeout(() => {
-      res(computeMarchingSquares(grid, intervalOverride));
-    }, 0);
-  });
+  return computeMarchingSquares(grid, intervalOverride);
 }
 
 /**

@@ -8,13 +8,11 @@ on:
 permissions: read-all
 
 jobs:
-  release:
-    name: Publish GitHub Release
+  build:
+    name: Build Release Artifacts
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
-      attestations: write
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -74,6 +72,28 @@ jobs:
           done
           cat checksums.txt
 
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts/
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
+
+    steps:
+      - name: Download Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts
+
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v2
         with:
@@ -84,3 +104,4 @@ jobs:
         with:
           files: release-artifacts/*
           generate_release_notes: true
+

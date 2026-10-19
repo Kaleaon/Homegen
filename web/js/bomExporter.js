@@ -7,7 +7,7 @@ import {
   ROOM_TYPES,
   openingMetrics,
 } from './catalog.js';
-import { interior, floorAreaSqFt } from './geometry.js';
+import { interior, interiorPolygon, polygonPerimeter, floorAreaSqFt } from './geometry.js';
 
 /**
  * Escapes a single CSV field value per RFC 4180 standards.
@@ -260,8 +260,7 @@ export function generateBOMCSV(docState, options = {}) {
       const wallId = r.wallFinish || 'paint_white';
       const wallDef = WALL_BY_ID[wallId] || {};
 
-      const ir = interior(r);
-      const perimeterInches = 2 * (ir.w + ir.h);
+      const perimeterInches = polygonPerimeter(interiorPolygon(r));
       const ceilingHeightInches = r.ceilingHeight || 96;
       const grossWallAreaSqIn = perimeterInches * ceilingHeightInches;
 

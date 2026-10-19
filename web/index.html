@@ -32,6 +32,7 @@
   <k-button id="print-btn">Print Sheet</k-button>
   <k-button id="export-pdf">Export PDF</k-button>
   <k-button id="export-csv" title="Export Bill of Materials schedule to CSV">Export CSV</k-button>
+  <k-button id="export-dxf" title="Export DXF CAD Exchange Format">Export DXF</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="gis-btn">GIS Site</k-button>
   <k-button id="report">Code report</k-button>
@@ -56,11 +57,20 @@
       <button data-tool="select" class="on" title="Select / move (V)"><span aria-hidden="true">⬚</span> Select</button>
       <button data-tool="eyedropper" title="Sample finish (I)"><span aria-hidden="true">✒</span> Eyedropper</button>
       <button data-tool="erase" title="Delete things (X)"><span aria-hidden="true">⌫</span> Erase</button>
+      <button id="btn-open-add-room-dims" title="Add Room by Dimensions (Ctrl+Shift+R)"><span aria-hidden="true">➕</span> Add Room Dims</button>
+      <button id="btn-close-room" title="Close Room Polygon" hidden><span aria-hidden="true">📐</span> Close Room</button>
       <span id="snap-toggles" class="seg"></span>
       <span id="bg-toolbar" hidden>
         <span class="toolbar-sep">|</span>
         <label class="toggle" for="bg-visible" title="Toggle blueprint visibility"><input type="checkbox" id="bg-visible" checked> Blueprint</label>
         <label for="bg-opacity" title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+        <select id="bg-map-preset" title="Geospatial Map Provider Preset">
+          <option value="">-- Map Preset --</option>
+          <option value="openstreetmap">OpenStreetMap</option>
+          <option value="carto-positron">CARTO Positron</option>
+          <option value="usgs-topo">USGS Topo</option>
+          <option value="copernicus-sentinel">Copernicus Sentinel</option>
+        </select>
         <button id="bg-lock-btn" title="Toggle blueprint position lock">🔓 Unlocked</button>
         <button id="bg-calibrate-btn" title="Calibrate scale with 2 points">📏 Calibrate</button>
         <button id="bg-remove-btn" title="Remove blueprint image">✕</button>
@@ -85,6 +95,7 @@
     <div id="plan-fallback-summary" class="sr-only" aria-live="polite"></div>
     <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" aria-describedby="view3d-fallback-summary" hidden></canvas>
     <div id="view3d-fallback-summary" class="sr-only" aria-live="polite"></div>
+    <div id="view3d-a11y-live" class="sr-only" aria-live="polite"></div>
     <div id="walkthrough-hud" class="walkthrough-hud k-overlay-hud" hidden>
       <span class="hud-title"><span aria-hidden="true">🚶</span> Walkthrough Mode</span>
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
@@ -214,8 +225,8 @@
 <dialog id="photo" aria-labelledby="photo-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head"><h2 id="photo-title">Photoreal render</h2><button value="close" aria-label="Close photoreal render"><span aria-hidden="true">✕</span></button></form>
   <div class="dlg-body">
-    <div class="row"><label for="p-room">Room</label><select id="p-room"></select></div>
-    <div class="row"><label for="p-style">Style</label><select id="p-style"></select></div>
+    <div class="row"><label for="p-room">Room</label><k-select id="p-room"></k-select></div>
+    <div class="row"><label for="p-style">Style</label><k-select id="p-style"></k-select></div>
     <div class="row"><label for="p-prompt">Prompt</label><textarea id="p-prompt" rows="5"></textarea></div>
     <div class="thumbs"><figure><img id="p-beauty" alt="Beauty capture"><figcaption>3D capture</figcaption></figure><figure><img id="p-depth" alt="Depth guide"><figcaption>Depth guide (near = white)</figcaption></figure></div>
     <div class="btns">
@@ -356,6 +367,29 @@
     </div>
   </div>
 </dialog>
+<dialog id="dxf-export" aria-labelledby="dxf-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dxf-export-title">Export DXF CAD Exchange Format</h2>
+    <button value="close" aria-label="Close DXF export modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <div class="row">
+      <label for="dxf-units">CAD Units</label>
+      <select id="dxf-units">
+        <option value="inches" selected>Inches (Standard 1:1 Scale)</option>
+        <option value="meters">Meters (SI Metric Scale)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="dxf-level">Floor Level</label>
+      <select id="dxf-level"></select>
+    </div>
+    <div class="btns">
+      <button id="dxf-cancel" type="button">Cancel</button>
+      <button id="dxf-generate" class="primary" type="button">Download DXF</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="dlg-branding" class="k-overlay-dialog" aria-labelledby="branding-title">
   <form method="dialog" class="dlg-head">
     <h2 id="branding-title">Project Branding &amp; Approval Stamp</h2>
@@ -490,6 +524,16 @@
         <option value="EPSG:32610">EPSG:32610 (UTM Zone 10N)</option>
       </select>
     </div>
+    <div class="row">
+      <label for="gis-map-preset">Geospatial Map Preset</label>
+      <select id="gis-map-preset">
+        <option value="">-- Select Map Provider Preset --</option>
+        <option value="openstreetmap">OpenStreetMap</option>
+        <option value="carto-positron">CARTO Positron</option>
+        <option value="usgs-topo">USGS Topo</option>
+        <option value="copernicus-sentinel">Copernicus Sentinel</option>
+      </select>
+    </div>
     <div class="btns" style="margin: 12px 0;">
       <button type="button" id="gis-load-sample" class="primary">Load Sample Municipal Lot</button>
       <button type="button" id="gis-import-file">Upload GeoJSON File</button>
@@ -538,6 +582,51 @@
     <ul id="cmd-list" role="listbox" aria-label="Commands"></ul>
   </div>
 </dialog>
+<dialog id="dlg-add-room-dims" aria-labelledby="dlg-add-room-dims-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-add-room-dims-title">Add Room by Dimensions</h2>
+    <button value="close" id="btn-add-room-dims-close" aria-label="Close direct room dimension modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Enter room type, dimensions, and positioning coordinates without dragging.</p>
+    <div class="row">
+      <label for="room-dims-type">Room Type</label>
+      <select id="room-dims-type">
+        <option value="living" selected>Living room</option>
+        <option value="bedroom">Bedroom</option>
+        <option value="kitchen">Kitchen</option>
+        <option value="dining">Dining room</option>
+        <option value="office">Office</option>
+        <option value="bathroom">Bathroom</option>
+        <option value="laundry">Laundry</option>
+        <option value="hallway">Hallway</option>
+        <option value="entry">Entry</option>
+        <option value="closet">Closet</option>
+        <option value="stairs">Stairs</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="room-dims-width">Width (inches)</label>
+      <input id="room-dims-width" type="number" min="24" step="6" value="144" />
+    </div>
+    <div class="row">
+      <label for="room-dims-depth">Depth (inches)</label>
+      <input id="room-dims-depth" type="number" min="24" step="6" value="144" />
+    </div>
+    <div class="row">
+      <label for="room-dims-x">Position X (inches)</label>
+      <input id="room-dims-x" type="number" step="6" value="0" />
+    </div>
+    <div class="row">
+      <label for="room-dims-y">Position Y (inches)</label>
+      <input id="room-dims-y" type="number" step="6" value="0" />
+    </div>
+    <div class="btns" style="margin-top:16px">
+      <button id="btn-add-room-dims-submit" class="primary" type="button">Add Room</button>
+      <button id="btn-add-room-dims-cancel" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="shortcut-overlay" aria-labelledby="shortcut-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
     <h2 id="shortcut-title">Keyboard Shortcuts</h2>
@@ -559,11 +648,13 @@
         <div class="shortcut-row"><span>Eyedropper Tool</span><span class="keys"><kbd>I</kbd></span></div>
         <div class="shortcut-row"><span>Erase Tool</span><span class="keys"><kbd>X</kbd></span></div>
         <div class="shortcut-row"><span>Rotate Selected Item</span><span class="keys"><kbd>R</kbd></span></div>
+        <div class="shortcut-row"><span>Add Room by Dimensions</span><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></span></div>
         <div class="shortcut-row"><span>Delete Selected</span><span class="keys"><kbd>Del</kbd> / <kbd>Backspace</kbd></span></div>
       </div>
       <div class="shortcut-group">
         <h3>Navigation &amp; Views</h3>
         <div class="shortcut-row"><span>Move Selected / Pan</span><span class="keys"><kbd>Arrow Keys</kbd></span></div>
+        <div class="shortcut-row"><span>Fine / Fast Nudge</span><span class="keys"><kbd>Alt</kbd> / <kbd>Shift</kbd> + <kbd>Arrows</kbd></span></div>
         <div class="shortcut-row"><span>Zoom In</span><span class="keys"><kbd>+</kbd></span></div>
         <div class="shortcut-row"><span>Zoom Out</span><span class="keys"><kbd>-</kbd></span></div>
       </div>

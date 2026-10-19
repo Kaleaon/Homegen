@@ -79,3 +79,141 @@ test('SnappingBridge responds to toolbar snap mode toggles', () => {
   snapRes = bridge.computeSnap({ x: 60, y: 0.2 });
   assert.equal(snapRes.snap?.type, 'midpoint');
 });
+
+<<<<<<< HEAD
+test('Direct consumption of SnappingBridge active snap points for room moves and resizes', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+      perpendicularThreshold: 14,
+    },
+    snapModes: { grid: false, edge: true, midpoint: true, perpendicular: false },
+  });
+
+  const room1 = { id: 'r1', x: 0, y: 0, w: 120, h: 120, level: 0 };
+  const room2 = { id: 'r2', x: 130, y: 0, w: 120, h: 120, level: 0 };
+
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => [room1, room2],
+  });
+
+  // Moving room2 near room1's right edge (120, 0)
+  const rawTarget = { x: 121.2, y: 0.1 };
+  const snapRes = bridge.computeSnap(rawTarget, rawTarget, [room1]);
+
+  assert.ok(snapRes.snap);
+  assert.equal(snapRes.snap.type, 'edge');
+  assert.equal(snapRes.point.x, 120);
+  assert.equal(snapRes.point.y, 0.1);
+  assert.equal(bridge.getActiveSnap().point.x, 120);
+
+  // Resizing room1 corner near room2's left edge (130, 0)
+  const cornerRaw = { x: 129.5, y: 0 };
+  const resizeSnap = bridge.computeSnap(cornerRaw, cornerRaw, [room2]);
+  assert.ok(resizeSnap.snap);
+  assert.equal(resizeSnap.point.x, 130);
+  assert.equal(bridge.getActiveSnap().point.x, 130);
+});
+
+test('Direct consumption of SnappingBridge active snap points for item and opening placement', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+      perpendicularThreshold: 14,
+    },
+    snapModes: { grid: false, edge: false, midpoint: true, perpendicular: false },
+  });
+
+  const room1 = { id: 'r1', x: 0, y: 0, w: 120, h: 120, level: 0 };
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => [room1],
+  });
+
+  // Pointer near top wall midpoint (60, 0)
+  const pointerRaw = { x: 59.8, y: 0.3 };
+  const snapRes = bridge.computeSnap(pointerRaw, pointerRaw);
+
+  assert.ok(snapRes.snap);
+  assert.equal(snapRes.snap.type, 'midpoint');
+  assert.equal(snapRes.point.x, 60);
+  assert.equal(snapRes.point.y, 0);
+
+  // Confirm activeSnap matches snap indicator
+  const active = bridge.getActiveSnap();
+  assert.deepEqual(active.point, { x: 60, y: 0 });
+  assert.deepEqual(active.indicator, { x: 60, y: 0 });
+});
+
+test('buildToggleViewModel includes token declarations for UI snap toggles', async () => {
+  const { buildToggleViewModel } = await import('../../designer3d/tools/index.mjs');
+  const interaction = new InteractionLayer();
+  const vms = buildToggleViewModel(interaction);
+
+  assert.equal(vms.length, 4);
+  for (const vm of vms) {
+    assert.equal(vm.token, '--ktheme-accent');
+    assert.equal(vm.tokenHover, '--ktheme-accent-hover');
+  }
+});
+
+test('SnappingBridge generates primary angle guide lines and secondary reference edge guide lines for angle snaps', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: { unitSize: 6, angleSnapDegrees: 15, magneticThreshold: 20 },
+    snapModes: { grid: false, edge: false, midpoint: false, perpendicular: false, angle: true },
+  });
+
+  const anchor = { x: 50, y: 50 };
+
+  // 1. Global cardinal angle snap (no reference edge)
+  const bridge = new SnappingBridge({ interaction, getRooms: () => [] });
+  const snapGlobal = bridge.computeSnap({ x: 100, y: 51 }, anchor);
+
+  assert.ok(snapGlobal);
+  assert.equal(snapGlobal.snap?.type, 'angle');
+  assert.equal(snapGlobal.snap?.edgeIndex, undefined);
+  assert.equal(snapGlobal.guideLines.length, 1);
+  assert.equal(snapGlobal.guideLines[0].type, 'angle');
+  assert.equal(snapGlobal.guideLines[0].start.x, anchor.x);
+  assert.equal(snapGlobal.guideLines[0].start.y, anchor.y);
+
+  // 2. Relative edge angle snap against angled wall (with primary angle + secondary angle_reference guide line)
+  const wallAngle = 23.5 * (Math.PI / 180); // ~23.5° angled wall
+  const wallLen = 100;
+  const angledRoom = {
+    id: 'r_angled',
+    points: [
+      { x: 0, y: 0 },
+      { x: wallLen * Math.cos(wallAngle), y: wallLen * Math.sin(wallAngle) },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ],
+  };
+
+  bridge.setGetRooms(() => [angledRoom]);
+
+  const dist = 50;
+  const pointRelative = {
+    x: anchor.x + dist * Math.cos(wallAngle + 0.01),
+    y: anchor.y + dist * Math.sin(wallAngle + 0.01),
+  };
+
+  const snapRelative = bridge.computeSnap(pointRelative, anchor);
+
+  assert.ok(snapRelative);
+  assert.equal(snapRelative.snap?.type, 'angle');
+  assert.equal(snapRelative.snap?.edgeIndex, 0); // Snapped to edge 0 of angledRoom
+  assert.equal(snapRelative.guideLines.length, 2);
+  assert.equal(snapRelative.guideLines[0].type, 'angle');
+  assert.equal(snapRelative.guideLines[1].type, 'angle_reference');
+  assert.equal(snapRelative.guideLines[1].start.x, 0);
+  assert.equal(snapRelative.guideLines[1].start.y, 0);
+});
+

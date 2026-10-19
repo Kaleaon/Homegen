@@ -77,9 +77,20 @@ export class InteractionLayer {
     return result;
   }
 
+  moveEntity3D(entity, pointerPoint3D, context = {}) {
+    if (!entity) throw new Error('moveEntity3D: entity is required');
+    if (!pointerPoint3D) throw new Error('moveEntity3D: pointerPoint3D is required');
+    return this.transformGizmo.move3D(entity, pointerPoint3D, context);
+  }
+
   rotateEntity(entity, pointerAngleRadians) {
     if (!entity) throw new Error('rotateEntity: entity is required');
     return this.transformGizmo.rotate(entity, pointerAngleRadians);
+  }
+
+  rotateEntity3D(entity, pointerAngleRadians, context = {}) {
+    if (!entity) throw new Error('rotateEntity3D: entity is required');
+    return this.transformGizmo.rotate3D(entity, pointerAngleRadians, context);
   }
 
   scaleEntity(entity, pointerPoint, context = {}) {
@@ -102,6 +113,12 @@ export class InteractionLayer {
     return result;
   }
 
+  scaleEntity3D(entity, pointerPoint3D, context = {}) {
+    if (!entity) throw new Error('scaleEntity3D: entity is required');
+    if (!pointerPoint3D) throw new Error('scaleEntity3D: pointerPoint3D is required');
+    return this.transformGizmo.scale3D(entity, pointerPoint3D, context);
+  }
+
   addRoomCorner(rawPoint, context = {}) {
     if (!rawPoint) throw new Error('addRoomCorner: rawPoint is required');
     if (!context) throw new Error('addRoomCorner: context is required');
@@ -117,5 +134,21 @@ export class InteractionLayer {
   closeRoom(context = {}) {
     if (!context) throw new Error('closeRoom: context is required');
     return this.roomTool.closeRoom(context);
+  }
+
+  getCornerCount() {
+    return this.roomTool.getCornerCount();
+  }
+
+  getRoomPoints() {
+    return this.roomTool.getPoints();
+  }
+
+  canCloseRoom() {
+    return this.roomTool.canClose();
+  }
+
+  resetRoomDrawing() {
+    this.roomTool.reset();
   }
 }

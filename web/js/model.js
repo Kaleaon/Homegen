@@ -12,7 +12,9 @@ import {
   footprint,
   getRoomPoints,
   getRoomBoundingBox,
+  computeGeoBounds,
 } from './geometry.js';
+import { isRegisteredEPSG } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
@@ -60,7 +62,9 @@ export function defaultCRS() {
 export function isValidEPSGCode(code) {
   if (!code || typeof code !== 'string') return false;
   const trimmed = code.trim().toUpperCase();
-  return /^EPSG:\d+$/.test(trimmed);
+  const normalized = trimmed.startsWith('EPSG:') ? trimmed : `EPSG:${trimmed}`;
+  if (!/^EPSG:\d+$/.test(normalized)) return false;
+  return isRegisteredEPSG(normalized);
 }
 
 export function normalizeEPSGCode(code) {
@@ -83,6 +87,110 @@ export function validateLogoSize(dataUrl, maxKb = 500) {
     );
   }
   return true;
+}
+
+function createMapPresetSvgDataUrl(name, primaryColor = '#e2e8f0', gridColor = '#cbd5e1') {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="${primaryColor}"/><path d="M0 100 H800 M0 200 H800 M0 300 H800 M0 400 H800 M0 500 H800 M100 0 V600 M200 0 V600 M300 0 V600 M400 0 V600 M500 0 V600 M600 0 V600 M700 0 V600" stroke="${gridColor}" stroke-width="1" stroke-dasharray="4 4"/><text x="400" y="300" font-family="sans-serif" font-size="22" font-weight="bold" fill="#475569" text-anchor="middle" dominant-baseline="middle">${name}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+export const MAP_PRESETS = {
+  openstreetmap: {
+    id: 'openstreetmap',
+    aliases: ['osm'],
+    name: 'OpenStreetMap',
+    provider: 'OpenStreetMap',
+    attributionText: '© OpenStreetMap contributors',
+    licenseUrl: 'https://www.openstreetmap.org/copyright',
+    isGeospatial: true,
+    description: 'Open community-mapped global topographic & road base layer',
+    dataUrl: createMapPresetSvgDataUrl('OpenStreetMap', '#f1f5f9', '#cbd5e1'),
+  },
+  'carto-positron': {
+    id: 'carto-positron',
+    aliases: ['carto', 'positron'],
+    name: 'CARTO Positron',
+    provider: 'CARTO',
+    attributionText: '© OpenStreetMap contributors, © CARTO',
+    licenseUrl: 'https://carto.com/attributions',
+    isGeospatial: true,
+    description: 'Light-toned minimalist basemap designed for architectural overlays',
+    dataUrl: createMapPresetSvgDataUrl('CARTO Positron', '#f8fafc', '#e2e8f0'),
+  },
+  'usgs-topo': {
+    id: 'usgs-topo',
+    aliases: ['usgs', 'usgs-quad'],
+    name: 'USGS Topo',
+    provider: 'USGS',
+    attributionText: 'Map Data © USGS Topo / U.S. Geological Survey',
+    licenseUrl: 'https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits',
+    isGeospatial: true,
+    description: 'Official U.S. Geological Survey national topographic map quadrangle data',
+    dataUrl: createMapPresetSvgDataUrl('USGS Topo', '#f0fdf4', '#bbf7d0'),
+  },
+  'copernicus-sentinel': {
+    id: 'copernicus-sentinel',
+    aliases: ['sentinel', 'copernicus'],
+    name: 'Copernicus Sentinel',
+    provider: 'Copernicus',
+    attributionText: 'Imagery © Copernicus Sentinel Data',
+    licenseUrl:
+      'https://sentinels.copernicus.eu/documents/247904/685211/Sentinel_Data_Legal_Notice.pdf',
+    isGeospatial: true,
+    description: 'European Space Agency Earth observation satellite multispectral imagery',
+    dataUrl: createMapPresetSvgDataUrl('Copernicus Sentinel', '#f0f9ff', '#bae6fd'),
+  },
+};
+
+export const GEOSPATIAL_MAP_PRESETS = MAP_PRESETS;
+
+export function getMapPreset(key) {
+  if (!key || typeof key !== 'string') return null;
+  const k = key.trim().toLowerCase();
+  if (MAP_PRESETS[k]) return MAP_PRESETS[k];
+  for (const preset of Object.values(MAP_PRESETS)) {
+    if (preset.id === k || (preset.aliases && preset.aliases.includes(k))) {
+      return preset;
+    }
+  }
+  return null;
+}
+
+export function applyMapPreset(state, presetKeyOrObj, opts = {}) {
+  if (!state) return null;
+  const preset =
+    typeof presetKeyOrObj === 'object' && presetKeyOrObj
+      ? presetKeyOrObj
+      : getMapPreset(presetKeyOrObj);
+
+  if (!preset) {
+    if (!presetKeyOrObj && state.background) {
+      state.background.presetKey = null;
+    }
+    return state.background || null;
+  }
+
+  const existing = state.background || {};
+  state.background = {
+    dataUrl: existing.dataUrl || preset.dataUrl,
+    x: existing.x ?? 0,
+    y: existing.y ?? 0,
+    scale: existing.scale ?? 1,
+    opacity: existing.opacity ?? 0.5,
+    visible: existing.visible ?? true,
+    locked: existing.locked ?? false,
+    width: existing.width || 800,
+    height: existing.height || 600,
+    attributionText: preset.attributionText,
+    provider: preset.provider,
+    licenseUrl: preset.licenseUrl,
+    logoUrl: preset.logoUrl || null,
+    isGeospatial: true,
+    presetKey: preset.id,
+    ...opts,
+  };
+
+  return state.background;
 }
 
 export function newState() {
@@ -166,6 +274,78 @@ export function createDefaultWallUV() {
   };
 }
 
+export function createMeshGraphFromPolygon(points, baseZ = 0, zOffsets = null) {
+  const n = points ? points.length : 0;
+  if (n === 0) {
+    return {
+      vertices: [],
+      VertexZArray: [],
+      triangles: [],
+      edges: [],
+    };
+  }
+
+  const VertexZArray = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const offset = zOffsets && typeof zOffsets[i] === 'number' ? zOffsets[i] : 0;
+    VertexZArray[i] = baseZ + offset;
+  }
+
+  const vertices = points.map((p, i) => ({
+    x: p.x,
+    y: p.y,
+    z: VertexZArray[i],
+  }));
+
+  const triangles = [];
+  if (n >= 3) {
+    for (let i = 1; i < n - 1; i++) {
+      triangles.push([0, i, i + 1]);
+    }
+  }
+
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    edges.push({ v1: i, v2: (i + 1) % n });
+  }
+
+  return {
+    vertices,
+    VertexZArray,
+    triangles,
+    edges,
+  };
+}
+
+export function updateMeshVertexZ(room, meshType, vertexIndex, newZ) {
+  if (!room) return;
+  const mesh = meshType === 'ceiling' ? room.ceilingMesh : room.floorMesh;
+  if (!mesh || !mesh.VertexZArray || vertexIndex < 0 || vertexIndex >= mesh.VertexZArray.length) {
+    return;
+  }
+  mesh.VertexZArray[vertexIndex] = newZ;
+  if (mesh.vertices && mesh.vertices[vertexIndex]) {
+    mesh.vertices[vertexIndex].z = newZ;
+  }
+}
+
+export function migratePlanTo3DMeshGraph(state) {
+  if (!state || !Array.isArray(state.rooms)) return state;
+  for (const room of state.rooms) {
+    const pts = getRoomPoints(room);
+    if (!room.floorMesh || !Array.isArray(room.floorMesh.VertexZArray)) {
+      const zOffsets = room.floorZOffsets || null;
+      room.floorMesh = createMeshGraphFromPolygon(pts, 0, zOffsets);
+    }
+    if (!room.ceilingMesh || !Array.isArray(room.ceilingMesh.VertexZArray)) {
+      const ceilingHeight = room.ceiling ?? 96;
+      const zOffsets = room.ceilingZOffsets || null;
+      room.ceilingMesh = createMeshGraphFromPolygon(pts, ceilingHeight, zOffsets);
+    }
+  }
+  return state;
+}
+
 export function createRoom(state, type, x, y, w, h, opts = {}) {
   const points =
     opts.points || opts.corners || opts.vertices
@@ -180,7 +360,7 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
   const room = {
     id: nid(state, 'r'),
     type,
-    name: ROOM_TYPES[type].name,
+    name: opts.name ?? ROOM_TYPES[type]?.name ?? 'Room',
     level: opts.level ?? 0,
     x: bbox.x,
     y: bbox.y,
@@ -198,11 +378,24 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
       ...(opts.walls || {}),
     },
     wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
+    floorMesh:
+      opts.floorMesh ||
+      createMeshGraphFromPolygon(points, 0, opts.floorZOffsets || opts.VertexZArray),
+    ceilingMesh:
+      opts.ceilingMesh ||
+      createMeshGraphFromPolygon(points, opts.ceiling ?? 96, opts.ceilingZOffsets),
     openings: [],
     items: [],
   };
   state.rooms.push(room);
   return room;
+}
+
+export function addRoom(state, x, y, w, h, type = 'living', opts = {}) {
+  if (typeof x === 'string') {
+    return createRoom(state, x, y, w, h, type, opts);
+  }
+  return createRoom(state, type || 'living', x, y, w, h, opts);
 }
 
 export function addOpening(state, room, type, wall, offset, props = {}) {
@@ -273,6 +466,18 @@ export function moveRoom(room, nx, ny, state = null) {
   room.y = ny;
   const pts = getRoomPoints(room);
   room.points = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  if (room.floorMesh && Array.isArray(room.floorMesh.vertices)) {
+    for (const v of room.floorMesh.vertices) {
+      v.x += dx;
+      v.y += dy;
+    }
+  }
+  if (room.ceilingMesh && Array.isArray(room.ceilingMesh.vertices)) {
+    for (const v of room.ceilingMesh.vertices) {
+      v.x += dx;
+      v.y += dy;
+    }
+  }
   for (const it of room.items)
     if (it.x !== undefined) {
       it.x += dx;
@@ -292,6 +497,10 @@ export function resizeRoom(room, x, y, w, h, state = null) {
     { x: x + w, y: y + h },
     { x, y: y + h },
   ];
+  const floorZ = room.floorMesh?.VertexZArray || null;
+  const ceilingZ = room.ceilingMesh?.VertexZArray || null;
+  room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
+  room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
     o.offset = Math.max(0, Math.min(o.offset, len - o.width));
@@ -306,6 +515,10 @@ export function updateRoomPoints(room, points, state = null) {
   room.y = bbox.y;
   room.w = bbox.w;
   room.h = bbox.h;
+  const floorZ = room.floorMesh?.VertexZArray || null;
+  const ceilingZ = room.ceilingMesh?.VertexZArray || null;
+  room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
+  room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
     o.offset = Math.max(0, Math.min(o.offset, len - o.width));
@@ -482,6 +695,25 @@ export function deserialize(text) {
     if (s.background.logoUrl !== undefined) s.background.logoUrl = s.background.logoUrl || null;
     if (s.background.isGeospatial !== undefined)
       s.background.isGeospatial = !!s.background.isGeospatial;
+    if (s.background.presetKey !== undefined)
+      s.background.presetKey = s.background.presetKey || null;
+
+    if (s.background.affineMatrix && Array.isArray(s.background.affineMatrix)) {
+      s.background.x = s.background.affineMatrix[4];
+      s.background.y = s.background.affineMatrix[5];
+      s.background.scale = Math.hypot(s.background.affineMatrix[0], s.background.affineMatrix[1]);
+
+      if (!s.background.geoBounds || typeof s.background.geoBounds !== 'object') {
+        const w = s.background.width || 1000;
+        const h = s.background.height || 1000;
+        s.background.geoBounds = computeGeoBounds(
+          s.background.affineMatrix,
+          w,
+          h,
+          s.background.worldfileCRS || 'PLAN'
+        );
+      }
+    }
   } else {
     s.background = null;
   }
@@ -556,6 +788,7 @@ export function deserialize(text) {
   for (const finish of s.customFinishes) {
     registerCustomWallFinish(finish, s);
   }
+  migratePlanTo3DMeshGraph(s);
   return s;
 }
 

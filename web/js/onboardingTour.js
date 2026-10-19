@@ -129,15 +129,15 @@ export class OnboardingTour {
       <div id="onboarding-popover" class="onboarding-popover k-overlay-dialog" role="dialog" aria-modal="true" aria-labelledby="spotlight-title" aria-describedby="spotlight-desc">
         <div class="spotlight-header">
           <span id="spotlight-step-badge" class="spotlight-badge">Step 1 of 5</span>
-          <button type="button" class="spotlight-close" aria-label="Close tour">✕</button>
+          <k-button type="button" class="spotlight-close" aria-label="Close tour">✕</k-button>
         </div>
         <h3 id="spotlight-title" class="spotlight-title"></h3>
         <p id="spotlight-desc" class="spotlight-desc"></p>
         <div class="spotlight-footer">
-          <button type="button" class="spotlight-btn spotlight-btn-skip">Skip</button>
+          <k-button type="button" class="spotlight-btn spotlight-btn-skip">Skip</k-button>
           <div class="spotlight-nav-btns">
-            <button type="button" class="spotlight-btn spotlight-btn-back">Back</button>
-            <button type="button" class="spotlight-btn spotlight-btn-next primary">Next</button>
+            <k-button type="button" class="spotlight-btn spotlight-btn-back">Back</k-button>
+            <k-button type="button" class="spotlight-btn spotlight-btn-next" primary>Next</k-button>
           </div>
         </div>
       </div>
@@ -361,7 +361,9 @@ export class OnboardingTour {
   trapFocus(e) {
     if (!this.popoverEl) return;
     const focusables = Array.from(
-      this.popoverEl.querySelectorAll('button:not([disabled]), [tabindex]:not([tabindex="-1"])')
+      this.popoverEl.querySelectorAll(
+        'k-button:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
     );
     if (focusables.length === 0) return;
 

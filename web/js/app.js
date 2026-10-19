@@ -16,6 +16,10 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
   polygonArea,
+  parseWorldfile,
+  solveAffineTransform,
+  computeGeoBounds,
+  worldfileToAffineMatrix,
 } from './geometry.js';
 import {
   ROOM_TYPES,
@@ -52,23 +56,25 @@ import { patternFor, clearPatternCache } from './patterns.js';
 import {
   registerCustomWallFinish,
   getWindowPresets,
+  getDoorPresets,
   getCladdingPresets,
   getBuildingPresets,
   applyBuildingPreset,
   applyCladdingMaterial,
   resolveWindowStyle,
+  resolveDoorStyle,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
-  getSnappedPoint,
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
+import { exportDXF } from './dxfExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { SnappingBridge } from './snapping-bridge.js';
@@ -207,6 +213,16 @@ function toast(msg, err = false, ms = 4500) {
   }, ms);
 }
 
+let liveRegionTimeout = null;
+function announceToLiveRegion(msg) {
+  const liveEl = $('#plan-fallback-summary');
+  if (!liveEl) return;
+  if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
+  liveRegionTimeout = setTimeout(() => {
+    liveEl.textContent = msg;
+  }, 100);
+}
+
 function persist() {
   try {
     localStorage.setItem(STORE, M.serialize(doc));
@@ -219,14 +235,59 @@ function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
   const viewModels = buildToggleViewModel(interaction);
-  container.innerHTML = viewModels
-    .map(
-      (vm) =>
-        `<button data-snap-id="${vm.id}" class="${vm.enabled ? 'on' : ''}" title="${esc(vm.description)}">${esc(vm.label)}</button>`
-    )
-    .join('');
-  container.querySelectorAll('button[data-snap-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+  const activeCount = viewModels.filter((vm) => vm.enabled).length;
+
+  const basicItems = viewModels.filter((vm) => (vm.category || 'basic') === 'basic');
+  const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
+
+  const existingPopover = container.querySelector('k-popover');
+  const wasOpen = existingPopover ? existingPopover.open : false;
+
+  const renderGroup = (items) =>
+    items
+      .map((vm) => {
+        const token = vm.token || '--ktheme-accent';
+        const tokenHover = vm.tokenHover || '--ktheme-accent-hover';
+        const styleAttr = `--snap-accent: var(${token}); --snap-accent-hover: var(${tokenHover});`;
+        return `
+        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
+          <span>${esc(vm.label)}</span>
+          <span class="snap-status">${vm.enabled ? 'ON' : 'OFF'}</span>
+        </k-button>
+      `;
+      })
+      .join('');
+
+  container.innerHTML = `
+    <k-popover id="snap-popover">
+      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} title="Snapping modes (${activeCount} enabled)">
+        <span aria-hidden="true">🧲</span> Snapping <span class="snap-badge badge">${activeCount}</span>
+      </k-button>
+      <div class="snap-popover-menu">
+        <div class="snap-category">
+          <div class="snap-category-title">Basic Drafting Snaps</div>
+          <div class="snap-category-items">
+            ${renderGroup(basicItems)}
+          </div>
+        </div>
+        <div class="snap-category">
+          <div class="snap-category-title">Precision CAD Snaps</div>
+          <div class="snap-category-items">
+            ${renderGroup(advancedItems)}
+          </div>
+        </div>
+      </div>
+    </k-popover>
+  `;
+
+  const newPopover = container.querySelector('k-popover');
+  if (newPopover && wasOpen) {
+    newPopover.open = true;
+  }
+
+  container.querySelectorAll('[data-snap-id]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const id = btn.dataset.snapId;
       const vm = viewModels.find((x) => x.id === id);
       if (vm) {
@@ -241,17 +302,25 @@ function renderSnapToggles() {
 function renderBgToolbar() {
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
-  if (doc.background && doc.background.dataUrl) {
+  if (doc.background && (doc.background.dataUrl || doc.background.presetKey)) {
     bgBar.hidden = false;
     const bg = doc.background;
     const vis = $('#bg-visible');
     if (vis) vis.checked = bg.visible !== false;
     const op = $('#bg-opacity');
     if (op) op.value = bg.opacity ?? 0.5;
+    const mapSelect = $('#bg-map-preset');
+    if (mapSelect) mapSelect.value = bg.presetKey || '';
+    const gisMapSelect = $('#gis-map-preset');
+    if (gisMapSelect) gisMapSelect.value = bg.presetKey || '';
     const lockBtn = $('#bg-lock-btn');
     if (lockBtn) lockBtn.textContent = bg.locked ? '🔒 Locked' : '🔓 Unlocked';
   } else {
     bgBar.hidden = true;
+    const mapSelect = $('#bg-map-preset');
+    if (mapSelect) mapSelect.value = '';
+    const gisMapSelect = $('#gis-map-preset');
+    if (gisMapSelect) gisMapSelect.value = '';
   }
 }
 
@@ -422,7 +491,10 @@ function pickAt(p) {
 /** Compute where an item lands for a pointer position. Returns {room, props, feedback} or null. */
 function placeItem(type, p, rot = ghostRot) {
   const def = ITEM_BY_ID[type];
-  const room = roomAt(p);
+  const snapRes = snappingBridge.computeSnap(p, p);
+  const targetP = snapRes && snapRes.snap ? snapRes.point : p;
+
+  const room = roomAt(targetP) || roomAt(p);
   if (!room) return null;
   const ir = interior(room);
 
@@ -438,23 +510,18 @@ function placeItem(type, p, rot = ghostRot) {
   const context = { edges, existingPolygons };
 
   if (def.mount === 'wall') {
-    const nw = nearestWall(p, 40, room);
+    const nw = nearestWall(targetP, 40, room);
     if (!nw) return null;
     const len = wallLength(room, nw.wall);
     const rawOffset = Math.max(8, Math.min(len - 8, nw.t));
-    const snappedPt = getSnappedPoint({
-      point: { x: rawOffset, y: 0 },
-      edges: [],
-      settings: interaction.gridSettings,
-      snapModes: interaction.snapModes,
-    }).point;
+    const offset = snapRes && snapRes.snap ? rawOffset : snap(rawOffset, 2);
     return {
       room,
-      props: { wall: nw.wall, offset: Math.max(8, Math.min(len - 8, snap(snappedPt.x, 2))) },
+      props: { wall: nw.wall, offset: Math.max(8, Math.min(len - 8, offset)) },
     };
   }
   if (def.mount === 'ceiling') {
-    const candPt = { x: p.x, y: p.y };
+    const candPt = { x: targetP.x, y: targetP.y };
     const entity = {
       position: candPt,
       rotation: 0,
@@ -476,7 +543,7 @@ function placeItem(type, p, rot = ghostRot) {
     for (const wall of WALLS) {
       const s = wallSeg(room, wall);
       const dist = Math.abs(
-        (p.x - s.ax - (s.nx * WT) / 2) * s.nx + (p.y - s.ay - (s.ny * WT) / 2) * s.ny
+        (targetP.x - s.ax - (s.nx * WT) / 2) * s.nx + (targetP.y - s.ay - (s.ny * WT) / 2) * s.ny
       );
       if (dist <= def.d / 2 + 10 && (!best || dist < best.dist)) best = { wall, dist };
     }
@@ -486,14 +553,11 @@ function placeItem(type, p, rot = ghostRot) {
       const itemLen = swap ? def.d : def.w;
       const span = horizontal ? ir.w : ir.h;
       const start = horizontal ? ir.x : ir.y;
-      const rawAlong = (horizontal ? p.x : p.y) - start - itemLen / 2;
-      const snappedPt = getSnappedPoint({
-        point: { x: rawAlong, y: 0 },
-        edges: [],
-        settings: interaction.gridSettings,
-        snapModes: interaction.snapModes,
-      }).point;
-      const along = Math.max(0, Math.min(span - itemLen, snap(snappedPt.x, 3)));
+      const rawAlong = (horizontal ? targetP.x : targetP.y) - start - itemLen / 2;
+      const along = Math.max(
+        0,
+        Math.min(span - itemLen, snapRes && snapRes.snap ? rawAlong : snap(rawAlong, 3))
+      );
       const props = M.backToWall(room, def, best.wall, along, 0);
       const candPoly = itemToPolygon({ ...props }, def);
       const validation = validatePlacement(candPoly, existingPolygons);
@@ -501,10 +565,10 @@ function placeItem(type, p, rot = ghostRot) {
     }
   }
 
-  const candidateItem = { x: p.x, y: p.y, rot };
+  const candidateItem = { x: targetP.x, y: targetP.y, rot };
   const candPoly = itemToPolygon(candidateItem, def);
-  const entity = { position: { x: p.x, y: p.y }, rotation: rot, polygon: candPoly };
-  const moveRes = interaction.moveEntity(entity, { x: p.x, y: p.y }, context);
+  const entity = { position: { x: targetP.x, y: targetP.y }, rotation: rot, polygon: candPoly };
+  const moveRes = interaction.moveEntity(entity, { x: targetP.x, y: targetP.y }, context);
   return {
     room,
     props: { x: moveRes.position.x, y: moveRes.position.y, rot },
@@ -668,6 +732,30 @@ function drawOverlay(c, _state) {
     c.setLineDash([4 / view.scale, 4 / view.scale]);
     c.fillRect(rc.x, rc.y, rc.w, rc.h);
     c.strokeRect(rc.x, rc.y, rc.w, rc.h);
+    c.restore();
+  }
+
+  const sequentialPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (sequentialPts && sequentialPts.length > 0) {
+    c.save();
+    c.strokeStyle = '#2a7fff';
+    c.fillStyle = 'rgba(42, 127, 255, 0.2)';
+    c.lineWidth = 2 / view.scale;
+    c.beginPath();
+    c.moveTo(sequentialPts[0].x, sequentialPts[0].y);
+    for (let i = 1; i < sequentialPts.length; i++) {
+      c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+    }
+    if (hover) {
+      c.lineTo(hover.x, hover.y);
+    }
+    c.stroke();
+    for (const pt of sequentialPts) {
+      c.beginPath();
+      c.arc(pt.x, pt.y, 4 / view.scale, 0, Math.PI * 2);
+      c.fillStyle = '#2a7fff';
+      c.fill();
+    }
     c.restore();
   }
 
@@ -1083,6 +1171,37 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position Y (${room.y}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Width (${room.w}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="width" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Depth (${room.h}")</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-nudge-btn" data-target="depth" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+      </div>
       <div class="btns"><button id="i-del">Delete room</button></div>
 
       <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
@@ -1224,6 +1343,46 @@ function renderInspector() {
       select(null);
     });
 
+    el.querySelectorAll('.i-nudge-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget.dataset.target;
+        const step = parseFloat(e.currentTarget.dataset.step);
+        if (target === 'pos-x') {
+          const dir = step > 0 ? 'East' : 'West';
+          apply(
+            (n) => M.moveRoom(roomOf(n, room.id), room.x + step, room.y),
+            'Nudge Room Position X'
+          );
+          announceToLiveRegion(
+            `${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`
+          );
+        } else if (target === 'pos-y') {
+          const dir = step > 0 ? 'South' : 'North';
+          apply(
+            (n) => M.moveRoom(roomOf(n, room.id), room.x, room.y + step),
+            'Nudge Room Position Y'
+          );
+          announceToLiveRegion(
+            `${room.name} moved ${dir} by ${Math.abs(step)} ${Math.abs(step) === 1 ? 'inch' : 'inches'}.`
+          );
+        } else if (target === 'width') {
+          const newW = Math.max(24, room.w + step);
+          apply(
+            (n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, newW, room.h),
+            'Nudge Room Width'
+          );
+          announceToLiveRegion(`${room.name} width adjusted to ${newW} inches.`);
+        } else if (target === 'depth') {
+          const newH = Math.max(24, room.h + step);
+          apply(
+            (n) => M.resizeRoom(roomOf(n, room.id), room.x, room.y, room.w, newH),
+            'Nudge Room Depth'
+          );
+          announceToLiveRegion(`${room.name} depth adjusted to ${newH} inches.`);
+        }
+      });
+    });
+
     $('#i-uv-wall')?.addEventListener('change', (e) => {
       window.__activeUVWall = e.target.value;
       renderInspector();
@@ -1345,12 +1504,31 @@ function renderInspector() {
   } else {
     const def = kind === 'item' ? ITEM_BY_ID[obj.type] : OPENING_BY_ID[obj.type];
     const winStyle = kind === 'opening' && def.kind === 'window' ? resolveWindowStyle(obj) : null;
+    const doorStyle = kind === 'opening' && def.kind === 'door' ? resolveDoorStyle(obj) : null;
     const winPresets = getWindowPresets();
+    const doorPresets = getDoorPresets();
 
     el.innerHTML = `<h3>${esc(def.name)}</h3><p class="note" style="margin:0 0 6px">in ${esc(room.name)}</p><div class="btns">
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
       <button id="i-del">Delete</button></div>
+      <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position X</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-item-nudge-btn" data-dx="-1" data-dy="0" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="-1" data-dy="0" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="1" data-dy="0" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="1" data-dy="0" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position Y</div>
+        <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="-1" data-step="-6" style="flex:1;padding:3px">-6"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="-1" data-step="-1" style="flex:1;padding:3px">-1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="1" data-step="1" style="flex:1;padding:3px">+1"</button>
+          <button type="button" class="i-item-nudge-btn" data-dx="0" data-dy="1" data-step="6" style="flex:1;padding:3px">+6"</button>
+        </div>
+      </div>
       ${
         kind === 'opening'
           ? formRow(
@@ -1403,6 +1581,78 @@ function renderInspector() {
                'i-win-casing',
                'Casing Size (W × D in)',
                `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Casing width in inches"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Casing depth in inches"></div>`
+             )}`
+          : ''
+      }
+      ${
+        kind === 'opening' && def.kind === 'door' && doorStyle
+          ? `<hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+             <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Door Styling & Preset</h4>
+             ${formRow(
+               'i-door-preset',
+               'Preset',
+               `<select id="i-door-preset">${Object.values(doorPresets)
+                 .map(
+                   (p) =>
+                     `<option value="${p.key}" ${p.key === doorStyle.presetKey ? 'selected' : ''}>${esc(p.name)}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-panel-style',
+               'Panel Style',
+               `<select id="i-door-panel-style">${[
+                 { key: 'flush', name: 'Flush Slab' },
+                 { key: 'panel_2', name: '2-Panel' },
+                 { key: 'panel_6', name: '6-Panel' },
+                 { key: 'french', name: 'French Glass' },
+                 { key: 'glass_top', name: 'Glass Top' },
+               ]
+                 .map(
+                   (ps) =>
+                     `<option value="${ps.key}" ${ps.key === doorStyle.panelStyle ? 'selected' : ''}>${ps.name}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-finish-color',
+               'Finish Color',
+               `<input id="i-door-finish-color" type="color" value="${doorStyle.finishColor || '#a9825a'}">`
+             )}
+             ${formRow(
+               'i-door-frame-mat',
+               'Frame Material',
+               `<select id="i-door-frame-mat">${['wood', 'vinyl', 'aluminum', 'steel', 'bronze']
+                 .map(
+                   (m) =>
+                     `<option value="${m}" ${m === doorStyle.frameMaterial ? 'selected' : ''}>${m.charAt(0).toUpperCase() + m.slice(1)}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-frame-color',
+               'Frame Color',
+               `<input id="i-door-frame-color" type="color" value="${doorStyle.frameColor || '#f3f1ea'}">`
+             )}
+             ${formRow(
+               'i-door-hw-finish',
+               'Hardware Finish',
+               `<select id="i-door-hw-finish">${[
+                 { key: 'brushed_nickel', name: 'Brushed Nickel' },
+                 { key: 'matte_black', name: 'Matte Black' },
+                 { key: 'brass', name: 'Brass' },
+                 { key: 'oil_rubbed_bronze', name: 'Oil-Rubbed Bronze' },
+               ]
+                 .map(
+                   (hw) =>
+                     `<option value="${hw.key}" ${hw.key === doorStyle.hardwareFinish ? 'selected' : ''}>${hw.name}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-casing',
+               'Casing Size (W × D in)',
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-door-casing-w" type="number" step="0.25" min="0" max="12" value="${doorStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Door casing width in inches"><span>×</span><input id="i-door-casing-d" type="number" step="0.25" min="0" max="6" value="${doorStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Door casing depth in inches"></div>`
              )}`
           : ''
       }`;
@@ -1462,9 +1712,66 @@ function renderInspector() {
       $('#i-win-casing-w')?.addEventListener('change', updateCasing);
       $('#i-win-casing-d')?.addEventListener('change', updateCasing);
     }
+    if (kind === 'opening' && def.kind === 'door') {
+      $('#i-door-preset')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.presetKey = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-panel-style')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.panelStyle = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-finish-color')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.finishColor = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-frame-mat')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.frameMaterial = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-frame-color')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.frameColor = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-hw-finish')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.hardwareFinish = e.target.value;
+        }, 'Update Door Style')
+      );
+      const updateDoorCasing = () => {
+        const width = parseFloat($('#i-door-casing-w')?.value || 2.0);
+        const depth = parseFloat($('#i-door-casing-d')?.value || 0.75);
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.casing = { ...(target.casing || {}), width, depth };
+        }, 'Update Door Style');
+      };
+      $('#i-door-casing-w')?.addEventListener('change', updateDoorCasing);
+      $('#i-door-casing-d')?.addEventListener('change', updateDoorCasing);
+    }
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, obj.id), 'Delete Element');
       select(null);
+    });
+
+    el.querySelectorAll('.i-item-nudge-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const dx = parseInt(e.currentTarget.dataset.dx, 10);
+        const dy = parseInt(e.currentTarget.dataset.dy, 10);
+        const step = Math.abs(parseFloat(e.currentTarget.dataset.step));
+        moveSelectedSpatial(dx, dy, step);
+      });
     });
   }
 }
@@ -1556,51 +1863,72 @@ function navigateSpatial(dir) {
   }
 }
 
-function moveSelectedSpatial(dx, dy) {
+function moveSelectedSpatial(dx, dy, customStep = null) {
   if (!selection) {
-    toast('Select an element to move using Shift+Arrow keys', true, 2000);
+    toast('Select an element to move using Arrow keys', true, 2000);
     return;
   }
   const hit = M.findOwner(doc, selection);
   if (!hit) return;
   const { room, kind, obj } = hit;
+  const dirName = dx > 0 ? 'East' : dx < 0 ? 'West' : dy > 0 ? 'South' : dy < 0 ? 'North' : '';
 
   if (kind === 'item') {
     const def = ITEM_BY_ID[obj.type];
     if (def.mount === 'floor' || def.mount === 'ceiling') {
-      const step = 6;
+      const step = customStep ?? 6;
       const targetP = { x: obj.x + dx * step, y: obj.y + dy * step };
       const pl = placeItem(obj.type, targetP, obj.rot || 0);
       if (pl) {
         const r = apply(moveItemMutation(selection, pl));
-        if (r.ok) toast(`Moved ${def.name} in ${pl.room.name}`, false, 1800);
+        if (r.ok) {
+          toast(`Moved ${def.name} in ${pl.room.name}`, false, 1800);
+          announceToLiveRegion(
+            `${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+          );
+        }
       }
     } else if (def.mount === 'wall') {
-      const step = 6;
+      const step = customStep ?? 6;
       const deltaOffset = (dx !== 0 ? dx : dy) * step;
       const newOffset = Math.max(8, obj.offset + deltaOffset);
       const r = apply((n) => {
         const it = M.findOwner(n, selection).obj;
         it.offset = newOffset;
       });
-      if (r.ok) toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+      if (r.ok) {
+        toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+        announceToLiveRegion(
+          `${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+        );
+      }
     }
   } else if (kind === 'opening') {
     const def = OPENING_BY_ID[obj.type];
-    const step = 6;
+    const step = customStep ?? 6;
     const deltaOffset = (dx !== 0 ? dx : dy) * step;
     const newOffset = Math.max(0, obj.offset + deltaOffset);
     const r = apply((n) => {
       const o = M.findOwner(n, selection).obj;
       o.offset = newOffset;
     });
-    if (r.ok) toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+    if (r.ok) {
+      toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
+      announceToLiveRegion(
+        `${def.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+      );
+    }
   } else if (kind === 'room') {
-    const step = 12;
+    const step = customStep ?? 6;
     const newX = room.x + dx * step;
     const newY = room.y + dy * step;
     const r = apply((n) => M.moveRoom(roomOf(n, room.id), newX, newY), 'Move Room');
-    if (r.ok) toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
+    if (r.ok) {
+      toast(`Moved ${room.name} to ${fmtLen(newX)}, ${fmtLen(newY)}`, false, 1800);
+      announceToLiveRegion(
+        `${room.name} moved ${dirName} by ${step} ${step === 1 ? 'inch' : 'inches'}.`
+      );
+    }
   }
 }
 
@@ -1988,27 +2316,30 @@ function updatePreview() {
       if (pl.feedback) preview.feedback = pl.feedback;
     }
   } else if (tool.kind === 'opening') {
-    const nw = nearestWall(hover);
+    const snapRes = snappingBridge.computeSnap(hover, hover);
+    const targetP = snapRes && snapRes.snap ? snapRes.point : hover;
+    const nw = nearestWall(targetP);
     if (nw) {
       const def = OPENING_BY_ID[tool.id];
-      preview = tryPreview((n) =>
-        M.addOpening(
-          n,
-          roomOf(n, nw.room.id),
-          tool.id,
-          nw.wall,
-          Math.max(0, snap(nw.t - def.w / 2, 3))
-        )
-      );
+      const offset =
+        snapRes && snapRes.snap
+          ? Math.max(0, nw.t - def.w / 2)
+          : Math.max(0, snap(nw.t - def.w / 2, 3));
+      preview = tryPreview((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, offset));
     }
   } else if (tool.kind === 'roomkit') {
     const kit = ROOM_KIT_BY_ID[tool.id];
-    const rc = snapRect({
-      x: snap(hover.x, 6) - kit.w / 2,
-      y: snap(hover.y, 6) - kit.h / 2,
-      w: kit.w,
-      h: kit.h,
-    });
+    const snapRes = snappingBridge.computeSnap(hover, hover);
+    const targetP = snapRes && snapRes.snap ? snapRes.point : hover;
+    const rc =
+      snapRes && snapRes.snap
+        ? { x: targetP.x - kit.w / 2, y: targetP.y - kit.h / 2, w: kit.w, h: kit.h }
+        : snapRect({
+            x: snap(hover.x, 6) - kit.w / 2,
+            y: snap(hover.y, 6) - kit.h / 2,
+            w: kit.w,
+            h: kit.h,
+          });
     preview = tryPreview((n) => M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel));
   }
 }
@@ -2131,14 +2462,18 @@ canvas?.addEventListener('pointerdown', (e) => {
       }
       break;
     }
-    case 'room':
+    case 'room': {
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const startPt =
+        snapRes && snapRes.snap ? snapRes.point : { x: snap(p.x, 6), y: snap(p.y, 6) };
       drag = {
         kind: 'room-new',
-        x0: snap(p.x, 6),
-        y0: snap(p.y, 6),
-        rect: { x: snap(p.x, 6), y: snap(p.y, 6), w: 0, h: 0 },
+        x0: startPt.x,
+        y0: startPt.y,
+        rect: { x: startPt.x, y: startPt.y, w: 0, h: 0 },
       };
       break;
+    }
     case 'item': {
       const pl = placeItem(tool.id, p);
       if (!pl) {
@@ -2154,23 +2489,19 @@ canvas?.addEventListener('pointerdown', (e) => {
       break;
     }
     case 'opening': {
-      const nw = nearestWall(p);
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const targetP = snapRes && snapRes.snap ? snapRes.point : p;
+      const nw = nearestWall(targetP);
       if (!nw) {
         toast('Click on a wall.', true, 2000);
         break;
       }
       const def = OPENING_BY_ID[tool.id];
-      apply(
-        (n) =>
-          M.addOpening(
-            n,
-            roomOf(n, nw.room.id),
-            tool.id,
-            nw.wall,
-            Math.max(0, snap(nw.t - def.w / 2, 3))
-          ),
-        'Add Opening'
-      );
+      const offset =
+        snapRes && snapRes.snap
+          ? Math.max(0, nw.t - def.w / 2)
+          : Math.max(0, snap(nw.t - def.w / 2, 3));
+      apply((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, offset), 'Add Opening');
       break;
     }
     case 'eyedropper': {
@@ -2208,12 +2539,17 @@ canvas?.addEventListener('pointerdown', (e) => {
     }
     case 'roomkit': {
       const kit = ROOM_KIT_BY_ID[tool.id];
-      const rc = snapRect({
-        x: snap(p.x, 6) - kit.w / 2,
-        y: snap(p.y, 6) - kit.h / 2,
-        w: kit.w,
-        h: kit.h,
-      });
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const targetP = snapRes && snapRes.snap ? snapRes.point : p;
+      const rc =
+        snapRes && snapRes.snap
+          ? { x: targetP.x - kit.w / 2, y: targetP.y - kit.h / 2, w: kit.w, h: kit.h }
+          : snapRect({
+              x: snap(p.x, 6) - kit.w / 2,
+              y: snap(p.y, 6) - kit.h / 2,
+              w: kit.w,
+              h: kit.h,
+            });
       apply((n) => {
         const r = M.placeRoomKit(n, tool.id, rc.x, rc.y, curLevel);
         selection = r.id;
@@ -2297,6 +2633,7 @@ canvas?.addEventListener('pointermove', (e) => {
           }
         });
       } else {
+        snappingBridge.computeSnap(p, p);
         const it = M.findOwner(doc, drag.id).obj;
         const pl = placeItem(it.type, p, it.rot || 0);
         if (pl) {
@@ -2305,10 +2642,16 @@ canvas?.addEventListener('pointermove', (e) => {
         }
       }
     } else if (drag.kind === 'opening') {
+      const snapRes = snappingBridge.computeSnap(p, p);
+      const targetP = snapRes && snapRes.snap ? snapRes.point : p;
       const { room, obj } = M.findOwner(doc, drag.id);
-      const nw = nearestWall(p, 40, room);
+      const nw = nearestWall(targetP, 40, room);
       if (nw) {
-        drag.target = { wall: nw.wall, offset: Math.max(0, snap(nw.t - obj.width / 2, 3)) };
+        const offset =
+          snapRes && snapRes.snap
+            ? Math.max(0, nw.t - obj.width / 2)
+            : Math.max(0, snap(nw.t - obj.width / 2, 3));
+        drag.target = { wall: nw.wall, offset };
         preview = tryPreview((n) => {
           const o = M.findOwner(n, drag.id).obj;
           Object.assign(o, drag.target);
@@ -2316,10 +2659,13 @@ canvas?.addEventListener('pointermove', (e) => {
       }
     } else if (drag.kind === 'room') {
       const r = roomOf(doc, drag.id);
-      const rc = snapRect(
-        { x: snap(p.x - drag.dx, 6), y: snap(p.y - drag.dy, 6), w: r.w, h: r.h },
-        r.id
-      );
+      const rawTarget = { x: p.x - drag.dx, y: p.y - drag.dy };
+      const otherRooms = levelRooms().filter((rm) => rm.id !== drag.id);
+      const snapRes = snappingBridge.computeSnap(rawTarget, rawTarget, otherRooms);
+      const rc =
+        snapRes && snapRes.snap
+          ? { x: snapRes.point.x, y: snapRes.point.y, w: r.w, h: r.h }
+          : snapRect({ x: snap(rawTarget.x, 6), y: snap(rawTarget.y, 6), w: r.w, h: r.h }, r.id);
       drag.target = rc;
       preview = tryPreview((n) => M.moveRoom(roomOf(n, drag.id), rc.x, rc.y));
     } else if (drag.kind === 'resize') {
@@ -2328,16 +2674,9 @@ canvas?.addEventListener('pointermove', (e) => {
       const cornerIdx = drag.corner % pts.length;
       const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
       const anchor = pts[prevIdx];
-      const levelRooms = doc.rooms.filter((rm) => (rm.level || 0) === curLevel && rm.id !== r.id);
-      const edges = extractRoomEdges(levelRooms);
+      const otherRooms = levelRooms().filter((rm) => rm.id !== r.id);
 
-      const snapRes = getSnappedPoint({
-        point: p,
-        anchor,
-        edges,
-        settings: interaction.gridSettings,
-        snapModes: interaction.snapModes,
-      });
+      const snapRes = snappingBridge.computeSnap(p, anchor, otherRooms);
 
       const newPt = snapRes.point;
       const newPts = pts.map((pt, i) => (i === cornerIdx ? { x: newPt.x, y: newPt.y } : { ...pt }));
@@ -2346,18 +2685,23 @@ canvas?.addEventListener('pointermove', (e) => {
         const bbox = getRoomBoundingBox(newPts);
         drag.target = { points: newPts, x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
         preview = tryPreview((n) => M.updateRoomPoints(roomOf(n, drag.id), newPts));
-        if (preview) preview.feedback = snapRes.snapFeedback;
+        if (preview) preview.feedback = snapRes.snap;
       }
     } else if (drag.kind === 'room-new') {
-      const x1 = snap(p.x, 6);
-      const y1 = snap(p.y, 6);
+      const snapRes = snappingBridge.computeSnap(p, { x: drag.x0, y: drag.y0 });
+      const cornerPt =
+        snapRes && snapRes.snap ? snapRes.point : { x: snap(p.x, 6), y: snap(p.y, 6) };
+      const x1 = cornerPt.x;
+      const y1 = cornerPt.y;
       drag.rect = {
         x: Math.min(drag.x0, x1),
         y: Math.min(drag.y0, y1),
         w: Math.abs(x1 - drag.x0),
         h: Math.abs(y1 - drag.y0),
       };
-      drag.rect = snapRect(drag.rect);
+      if (!snapRes || !snapRes.snap) {
+        drag.rect = snapRect(drag.rect);
+      }
 
       const candPoly = roomToPolygon(drag.rect);
       const existingRooms = doc.rooms.filter((r) => (r.level || 0) === curLevel).map(roomToPolygon);
@@ -2383,6 +2727,96 @@ canvas?.addEventListener('pointermove', (e) => {
 
 function moveItemTo(id, pl) {
   return moveItemMutation(id, pl);
+}
+
+function handleCloseRoom() {
+  if (!interaction.canCloseRoom || !interaction.canCloseRoom()) {
+    toast('At least 3 corners are required to close a room.', true);
+    return;
+  }
+  const closeRes = interaction.closeRoom({ existingRooms: levelRooms() });
+  if (closeRes.ok && closeRes.room?.corners) {
+    const pts = closeRes.room.corners;
+    const minX = Math.min(...pts.map((pt) => pt.x));
+    const maxX = Math.max(...pts.map((pt) => pt.x));
+    const minY = Math.min(...pts.map((pt) => pt.y));
+    const maxY = Math.max(...pts.map((pt) => pt.y));
+    const w = Math.max(24, maxX - minX);
+    const h = Math.max(24, maxY - minY);
+    const x = minX;
+    const y = minY;
+    const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
+    if (r.ok) {
+      announceToLiveRegion(
+        `Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+      );
+      interaction.resetRoomDrawing();
+      const btnClose = $('#btn-close-room');
+      if (btnClose) btnClose.hidden = true;
+      const hint = $('#tool-hint');
+      if (hint) hint.textContent = '';
+      redraw();
+    }
+  } else {
+    toast(
+      'Invalid room placement. Room corners overlap existing geometry or violate code constraints.',
+      true
+    );
+    announceToLiveRegion('Invalid room placement.');
+  }
+}
+
+function openAddRoomDimsModal() {
+  const dlg = $('#dlg-add-room-dims');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+function closeAddRoomDimsModal() {
+  const dlg = $('#dlg-add-room-dims');
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    dlg.close();
+  } else {
+    dlg.removeAttribute('open');
+  }
+}
+
+function setupAddRoomDimsModal() {
+  const btnOpen = $('#btn-open-add-room-dims');
+  const btnSubmit = $('#btn-add-room-dims-submit');
+  const btnCancel = $('#btn-add-room-dims-cancel');
+  const btnClose = $('#btn-add-room-dims-close');
+
+  btnOpen?.addEventListener('click', openAddRoomDimsModal);
+  btnCancel?.addEventListener('click', closeAddRoomDimsModal);
+  btnClose?.addEventListener('click', closeAddRoomDimsModal);
+
+  btnSubmit?.addEventListener('click', () => {
+    const type = $('#room-dims-type')?.value || 'living';
+    const w = parseFloat($('#room-dims-width')?.value || '144');
+    const h = parseFloat($('#room-dims-depth')?.value || '144');
+    const x = parseFloat($('#room-dims-x')?.value || '0');
+    const y = parseFloat($('#room-dims-y')?.value || '0');
+
+    if (isNaN(w) || w <= 0 || isNaN(h) || h <= 0) {
+      toast('Please enter valid room dimensions (width and depth > 0).', true);
+      return;
+    }
+
+    const r = apply((n) => M.addRoom(n, x, y, w, h, type, { level: curLevel }), 'Add Room');
+    if (r.ok) {
+      const typeName = ROOM_TYPES[type]?.name || type;
+      announceToLiveRegion(
+        `${typeName} room added at (${x}", ${y}") with dimensions ${w}" × ${h}".`
+      );
+      closeAddRoomDimsModal();
+    }
+  });
 }
 
 canvas?.addEventListener('pointerup', () => {
@@ -2435,7 +2869,17 @@ canvas?.addEventListener('pointerup', () => {
         select(room.id);
       }, 'Add Room');
       if (!r.ok) select(null);
-    } else toast('Drag to size the room.', true, 1800);
+    } else {
+      const p = hover || { x: d.x0, y: d.y0 };
+      interaction.addRoomCorner(p, { existingRooms: levelRooms() });
+      const count = interaction.getCornerCount();
+      const hint = $('#tool-hint');
+      if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
+      const btnClose = $('#btn-close-room');
+      if (btnClose) btnClose.hidden = !interaction.canCloseRoom();
+      announceToLiveRegion(`Placed corner ${count} at (${Math.round(p.x)}", ${Math.round(p.y)}").`);
+      redraw();
+    }
     refresh();
     return;
   }
@@ -2488,6 +2932,10 @@ canvas?.addEventListener('pointerleave', () => {
   redraw();
 });
 canvas?.addEventListener('dblclick', (e) => {
+  if (tool.kind === 'room' && interaction.canCloseRoom && interaction.canCloseRoom()) {
+    handleCloseRoom();
+    return;
+  }
   const p = toWorld(e);
   const hitNode = complianceScene.hitTest(p, view);
   if (hitNode && (hitNode.type === 'dimensionLabel' || hitNode.type === 'constraintHandle')) {
@@ -3105,7 +3553,7 @@ $('#file')?.addEventListener('change', async (e) => {
             e.target.value = '';
             return;
           }
-        } catch (_err) {
+        } catch {
           // fall back to standard JSON deserialize
         }
       }
@@ -3269,6 +3717,49 @@ $('#csv-generate')?.addEventListener('click', () => {
     toast('Exported Bill of Materials to CSV.');
   } catch (err) {
     toast(`Failed to export CSV: ${err.message}`, true);
+  }
+});
+
+// ------------------------------------------------------------- DXF CAD Export
+$('#export-dxf')?.addEventListener('click', (e) => {
+  if (!doc.rooms || doc.rooms.length === 0) {
+    toast('Cannot export DXF: add at least one room first.', true);
+    return;
+  }
+  const returnFocusEl = e.currentTarget || document.activeElement;
+  const dlg = $('#dxf-export');
+  if (dlg) {
+    const lvlSelect = $('#dxf-level');
+    if (lvlSelect) {
+      lvlSelect.innerHTML = '<option value="all" selected>All Levels</option>';
+      for (let i = 0; i < (doc.levels || 1); i++) {
+        lvlSelect.innerHTML += `<option value="${i}">Level ${i + 1}</option>`;
+      }
+    }
+    dlg.showModal();
+    const cleanup = trapFocus(dlg, returnFocusEl);
+    dlg.addEventListener('close', () => cleanup(), { once: true });
+  }
+});
+
+$('#dxf-cancel')?.addEventListener('click', () => {
+  $('#dxf-export')?.close();
+});
+
+$('#dxf-generate')?.addEventListener('click', () => {
+  try {
+    const units = $('#dxf-units')?.value || 'inches';
+    const levelVal = $('#dxf-level')?.value || 'all';
+    const level = levelVal === 'all' ? 'all' : Number(levelVal);
+
+    const dxfText = exportDXF(doc, { units, level });
+    const sanitizedName = (doc.name || 'plan').trim().replace(/\W+/g, '_') || 'plan';
+    const fileName = `${sanitizedName}.dxf`;
+    download(fileName, dxfText, 'image/vnd.dxf');
+    $('#dxf-export')?.close();
+    toast('Exported DXF CAD Exchange file.');
+  } catch (err) {
+    toast(`Failed to export DXF: ${err.message}`, true);
   }
 });
 
@@ -3556,6 +4047,8 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
 export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  const gisMapSelect = $('#gis-map-preset');
+  if (gisMapSelect) gisMapSelect.value = doc.background?.presetKey || '';
   renderGISSegments();
   if (typeof dlg.showModal === 'function') dlg.showModal();
   else dlg.setAttribute('open', '');
@@ -3573,28 +4066,29 @@ export function renderGISSegments() {
   if (!container) return;
   if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
     container.innerHTML =
-      '<p style="color: #666; font-size: 13px;">No GIS lot segments loaded yet. Click "Load Sample Municipal Lot" or upload a GeoJSON file.</p>';
+      '<p class="gis-empty-msg">No GIS lot segments loaded yet. Click "Load Sample Municipal Lot" or upload a GeoJSON file.</p>';
     return;
   }
 
-  let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+  let html = '<table class="gis-segment-table">';
   html +=
-    '<thead><tr style="border-bottom: 1px solid #ccc; text-align: left;"><th>Segment</th><th>Setback (in)</th></tr></thead><tbody>';
+    '<thead><tr class="gis-table-head-row"><th>Segment</th><th>Setback (in)</th></tr></thead><tbody>';
   for (const seg of doc.site.segments) {
-    html += `<tr style="border-bottom: 1px solid #eee;">
-      <td style="padding: 4px 0;">${seg.label || seg.id}</td>
-      <td style="padding: 4px 0;"><input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input" style="width: 70px; padding: 2px 4px;"> in</td>
+    html += `<tr class="gis-table-row">
+      <td class="gis-table-cell">${seg.label || seg.id}</td>
+      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input"></k-input> in</td>
     </tr>`;
   }
   html += '</tbody></table>';
   container.innerHTML = html;
 
   container.querySelectorAll('.gis-setback-input').forEach((input) => {
-    input.addEventListener('change', (e) => {
-      const segId = e.target.dataset.segId;
+    const handleSetbackChange = (e) => {
+      const segId = e.target.dataset.segId || e.target.getAttribute('data-seg-id');
       const val = parseFloat(e.target.value) || 0;
       setGISSegmentSetback(segId, val);
-    });
+    };
+    input.addEventListener('change', handleSetbackChange);
   });
 }
 $('#report')?.addEventListener('click', () =>
@@ -3777,12 +4271,20 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  setupAddRoomDimsModal();
+  $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
   window.addEventListener('keydown', (e) => {
     if (document.activeElement?.closest('#tabs')) return;
 
     const k = e.key;
     const lk = k ? k.toLowerCase() : '';
+
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && lk === 'r') {
+      e.preventDefault();
+      openAddRoomDimsModal();
+      return;
+    }
 
     // Cmd+K or Ctrl+K triggers Command Palette (works globally)
     if ((e.ctrlKey || e.metaKey) && lk === 'k') {
@@ -3822,8 +4324,12 @@ if (typeof window !== 'undefined') {
         ArrowRight: [1, 0, 'right'],
       };
       const [dx, dy, dir] = map[k];
-      if (e.shiftKey) moveSelectedSpatial(dx, dy);
-      else navigateSpatial(dir);
+      const step = e.altKey ? 1 : e.shiftKey ? 12 : 6;
+      if (selection) {
+        moveSelectedSpatial(dx, dy, step);
+      } else {
+        navigateSpatial(dir);
+      }
       return;
     }
 
@@ -3835,6 +4341,11 @@ if (typeof window !== 'undefined') {
       $('#redo').click();
     } else if (lk === 'r') rotateSelected();
     else if (lk === 'escape') {
+      if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+      const btnClose = $('#btn-close-room');
+      if (btnClose) btnClose.hidden = true;
+      const hint = $('#tool-hint');
+      if (hint && tool.kind === 'room') hint.textContent = '';
       const historyPopover = $('#history-popover');
       if (historyPopover && !historyPopover.hidden) {
         historyPopover.hidden = true;
@@ -3869,6 +4380,8 @@ if (typeof window !== 'undefined') {
     },
     toast,
     setLevel,
+    interaction,
+    snappingBridge,
   });
 
   function toggleHistoryPopover() {
@@ -3934,12 +4447,63 @@ function applyCalibration(p1, p2, distPx, valStr) {
   bg.scale = (bg.scale || 1) * factor;
   bg.x = p1.x - (p1.x - (bg.x || 0)) * factor;
   bg.y = p1.y - (p1.y - (bg.y || 0)) * factor;
+
+  if (Array.isArray(bg.affineMatrix) && bg.affineMatrix.length >= 6) {
+    const [a, b, c, d, e, f] = bg.affineMatrix;
+    bg.affineMatrix = [
+      a * factor,
+      b * factor,
+      c * factor,
+      d * factor,
+      p1.x - (p1.x - e) * factor,
+      p1.y - (p1.y - f) * factor,
+    ];
+  } else {
+    bg.affineMatrix = [bg.scale, 0, 0, bg.scale, bg.x, bg.y];
+  }
+  bg.geoBounds = computeGeoBounds(bg.affineMatrix, bg.width || 1000, bg.height || 1000, 'PLAN');
+
   hist.push(doc, 'Calibrate Blueprint');
   persist();
   calibPoints = [];
   setTool({ kind: 'select' });
   refresh();
   toast(`Blueprint scale calibrated (${fmtLen(targetInches)}).`);
+}
+
+function apply3PointCalibration(srcPts, dstPts) {
+  if (!doc.background) return false;
+  try {
+    const dstPlanPts = (dstPts || []).map((p) => {
+      if (p.crs && p.crs !== 'PLAN') {
+        const re = reproject([p.x, p.y], p.crs, 'PLAN');
+        return { x: re[0], y: re[1] };
+      }
+      return p;
+    });
+
+    const matrix = solveAffineTransform(srcPts, dstPlanPts);
+    const bg = doc.background;
+    bg.affineMatrix = matrix;
+    bg.x = matrix[4];
+    bg.y = matrix[5];
+    bg.scale = Math.hypot(matrix[0], matrix[1]);
+    bg.geoBounds = computeGeoBounds(matrix, bg.width || 1000, bg.height || 1000, 'PLAN');
+
+    hist.push(doc, 'Calibrate Blueprint (3-Point)');
+    persist();
+    calibPoints = [];
+    setTool({ kind: 'select' });
+    refresh();
+    toast('Blueprint calibrated using 3-point affine matrix.');
+    return true;
+  } catch (_err) {
+    calibPoints = [];
+    setTool({ kind: 'select' });
+    redraw();
+    toast('Collinear control points detected. Calibration failed.', true);
+    return false;
+  }
 }
 
 function setBackgroundAttribution(attr = {}) {
@@ -3976,36 +4540,89 @@ function handleBlueprintImport(file, meta = {}) {
         cctx.drawImage(img, 0, 0, w, h);
         finalDataUrl = cv.toDataURL('image/jpeg', 0.85);
       }
+
+      const worldfileRaw =
+        meta.worldfile ||
+        meta.worldfileText ||
+        meta.tfw ||
+        meta.wld ||
+        meta.worldfileContent ||
+        null;
+      const parsedWld = parseWorldfile(worldfileRaw);
+      let affineMatrix;
+      let sourceCRS = meta.crs || meta.sourceCRS || meta.epsg || doc.crs?.epsg || 'EPSG:4326';
+
+      if (parsedWld) {
+        affineMatrix = worldfileToAffineMatrix(parsedWld, sourceCRS, 'PLAN');
+      } else if (Array.isArray(meta.affineMatrix) && meta.affineMatrix.length >= 6) {
+        affineMatrix = meta.affineMatrix.slice(0, 6).map(Number);
+      } else {
+        affineMatrix = [1, 0, 0, 1, 0, 0];
+      }
+
+      const geoBounds =
+        meta.geoBounds && typeof meta.geoBounds === 'object'
+          ? meta.geoBounds
+          : computeGeoBounds(affineMatrix, w, h, 'PLAN');
+
       doc.background = {
         dataUrl: finalDataUrl,
-        x: 0,
-        y: 0,
-        scale: 1,
-        opacity: 0.5,
-        visible: true,
-        locked: false,
+        x: affineMatrix[4],
+        y: affineMatrix[5],
+        scale: Math.hypot(affineMatrix[0], affineMatrix[1]),
+        affineMatrix,
+        geoBounds,
+        worldfileCRS: sourceCRS,
+        opacity: meta.opacity ?? 0.5,
+        visible: meta.visible !== false,
+        locked: !!meta.locked,
         width: w,
         height: h,
         attributionText: meta.attributionText || null,
         provider: meta.provider || null,
         licenseUrl: meta.licenseUrl || null,
         logoUrl: meta.logoUrl || null,
-        isGeospatial: !!meta.isGeospatial,
+        isGeospatial: !!meta.isGeospatial || !!parsedWld,
       };
       hist.push(doc, 'Import Blueprint');
       persist();
       calibPoints = [];
-      setTool({ kind: 'calibrate' });
+      setTool({ kind: 'select' });
       refresh();
-      toast(
-        'Blueprint image imported. Click 2 points on a known dimension line to calibrate scale.'
-      );
+      toast('Blueprint image imported with spatial metadata.');
     };
     img.onerror = () => toast('Failed to load blueprint image.', true);
     img.src = dataUrl;
   };
   reader.readAsDataURL(file);
 }
+
+function handleMapPresetSelect(presetKey) {
+  if (!presetKey) {
+    if (doc.background) {
+      doc.background.presetKey = null;
+      hist.push(doc, 'Clear Map Preset');
+      persist();
+      refresh();
+    }
+    return;
+  }
+  const bg = M.applyMapPreset(doc, presetKey);
+  if (bg) {
+    const preset = M.getMapPreset(presetKey);
+    hist.push(doc, `Apply Map Preset: ${preset ? preset.name : presetKey}`);
+    persist();
+    refresh();
+    toast(`Geospatial map provider preset applied: ${preset ? preset.name : presetKey}`);
+  }
+}
+
+$('#bg-map-preset')?.addEventListener('change', (e) => {
+  handleMapPresetSelect(e.target.value);
+});
+$('#gis-map-preset')?.addEventListener('change', (e) => {
+  handleMapPresetSelect(e.target.value);
+});
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
 $('#blueprint-file')?.addEventListener('change', (e) => {
@@ -4399,6 +5016,13 @@ const COMMAND_REGISTRY = [
     action: () => $('#export-csv')?.click(),
   },
   {
+    id: 'export-dxf',
+    name: 'Export DXF CAD Exchange Format',
+    category: 'Export',
+    shortcut: '',
+    action: () => $('#export-dxf')?.click(),
+  },
+  {
     id: 'export-report',
     name: 'Code Compliance Report',
     category: 'Export',
@@ -4419,6 +5043,36 @@ const COMMAND_REGISTRY = [
       );
       toast(`Exported GeoJSON feature collection in ${doc.crs?.epsg || 'EPSG:4326'}.`);
     },
+  },
+
+  // Map Presets
+  {
+    id: 'map-preset-osm',
+    name: 'Map Preset: OpenStreetMap',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('openstreetmap'),
+  },
+  {
+    id: 'map-preset-carto',
+    name: 'Map Preset: CARTO Positron',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('carto-positron'),
+  },
+  {
+    id: 'map-preset-usgs',
+    name: 'Map Preset: USGS Topo',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('usgs-topo'),
+  },
+  {
+    id: 'map-preset-sentinel',
+    name: 'Map Preset: Copernicus Sentinel',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('copernicus-sentinel'),
   },
   {
     id: 'import-geojson',
@@ -4696,7 +5350,12 @@ if (typeof window !== 'undefined')
     interaction,
     generatePDF,
     applyCalibration,
+    apply3PointCalibration,
     handleBlueprintImport,
+    solveAffineTransform,
+    parseWorldfile,
+    computeGeoBounds,
+    worldfileToAffineMatrix,
     setBackgroundAttribution,
     renderCompliance,
     renderViolationItem,
