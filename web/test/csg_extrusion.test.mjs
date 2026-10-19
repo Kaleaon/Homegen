@@ -205,12 +205,10 @@ test('Door hinge positioning uses 2D contour tangent math to guarantee inward do
   const doorInGroup = api.entityMap.get(doorIn.id);
   assert.ok(doorInGroup, 'Inward door entity present');
 
-  let pivotIn = null;
-  doorInGroup.traverse((child) => {
-    if (child.type === 'Group' && child.children.length > 0) {
-      pivotIn = child;
-    }
-  });
+  let pivotIn =
+    doorInGroup.children.find(
+      (c) => c.type === 'Group' && c.children.length > 0 && Math.abs(c.rotation.y) > 0.01
+    ) || doorInGroup.children.find((c) => c.type === 'Group' && c.children.length > 0);
 
   assert.ok(pivotIn, 'Door hinge pivot group present');
 

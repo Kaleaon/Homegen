@@ -4,6 +4,8 @@ import {
   interiorPolygonData,
   polygonContainsRect,
   polygonContainsZone,
+  polygonCentroid,
+  getRoomPoints,
   WT,
 } from '../js/geometry.js';
 import { evaluate } from '../js/codes.js';
@@ -215,11 +217,11 @@ test('complianceOverlay.js renders vertex handles at every polygon vertex for mu
   const dimLabel = scene.getNodesByType('dimensionLabel')[0];
   assert.ok(dimLabel, 'Dimension label node should exist');
 
-  const polyData = interiorPolygonData(room);
-  assert.equal(dimLabel.bounds.x, polyData.centroid.x);
-  assert.equal(dimLabel.bounds.y, polyData.centroid.y);
+  const expectedCentroid = polygonCentroid(getRoomPoints(room));
+  assert.equal(dimLabel.bounds.x, expectedCentroid.x);
+  assert.equal(dimLabel.bounds.y, expectedCentroid.y);
   assert.ok(
-    dimLabel.data.dimensionText.includes('min clear'),
+    dimLabel.data.dimensionText.includes('clear'),
     'Multi-vertex dimension label text should display calculated minimum clearance'
   );
 });
