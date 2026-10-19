@@ -437,6 +437,164 @@ export function interiorPolygon(room, wallThickness = WT) {
   return innerPts;
 }
 
+/** Wall keys for room polygon ('N','E','S','W' for 4-wall rooms, or 0..N-1 for N-wall rooms). */
+export function getRoomWallKeys(room) {
+  const pts = getRoomPoints(room);
+  if (pts.length === 4) return ['N', 'E', 'S', 'W'];
+  return Array.from({ length: pts.length }, (_, i) => i);
+}
+
+export function polygonCentroid(points) {
+  if (!points || points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return { x: points[0].x, y: points[0].y };
+  if (points.length === 2) {
+    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+  }
+
+  let cx = 0;
+  let cy = 0;
+  let signedArea = 0;
+  const n = points.length;
+
+  for (let i = 0; i < n; i++) {
+    const x0 = points[i].x;
+    const y0 = points[i].y;
+    const x1 = points[(i + 1) % n].x;
+    const y1 = points[(i + 1) % n].y;
+    const a = x0 * y1 - x1 * y0;
+    signedArea += a;
+    cx += (x0 + x1) * a;
+    cy += (y0 + y1) * a;
+  }
+
+  signedArea *= 0.5;
+  if (Math.abs(signedArea) < 1e-6) {
+    let sx = 0,
+      sy = 0;
+    for (const p of points) {
+      sx += p.x;
+      sy += p.y;
+    }
+    return { x: sx / n, y: sy / n };
+  }
+
+  cx /= 6 * signedArea;
+  cy /= 6 * signedArea;
+
+  const pt = { x: cx, y: cy };
+  if (!pointInPolygon(pt, points)) {
+    let bestDist = Infinity;
+    let bestPt = pt;
+    for (let i = 0; i < n; i++) {
+      const mid = {
+        x: (points[i].x + points[(i + 1) % n].x) / 2,
+        y: (points[i].y + points[(i + 1) % n].y) / 2,
+      };
+      if (pointInPolygon(mid, points)) {
+        const d = Math.hypot(mid.x - cx, mid.y - cy);
+        if (d < bestDist) {
+          bestDist = d;
+          bestPt = mid;
+        }
+      }
+    }
+    if (bestDist < Infinity) return bestPt;
+  }
+
+  return pt;
+}
+
+/** Inscribed clear span (minimum clear horizontal dimension) across room interior polygon. */
+export function getRoomClearSpan(room) {
+  if (!room) return 0;
+  const pts = getRoomPoints(room);
+  const n = pts.length;
+
+  // Fast fallback for 4-vertex axis-aligned rectangular rooms
+  if (n === 4) {
+    const [p0, p1, p2, p3] = pts;
+    const isRect =
+      Math.abs(p0.y - p1.y) < 1e-4 &&
+      Math.abs(p1.x - p2.x) < 1e-4 &&
+      Math.abs(p2.y - p3.y) < 1e-4 &&
+      Math.abs(p3.x - p0.x) < 1e-4;
+    if (isRect) {
+      const ir = interior(room);
+      return Math.min(ir.w, ir.h);
+    }
+  }
+
+  // Caching
+  const ptsHash = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(';');
+  if (room._clearSpanCache && room._clearSpanCache.hash === ptsHash) {
+    return room._clearSpanCache.val;
+  }
+
+  const innerPts = interiorPolygon(room, WT);
+  const m = innerPts.length;
+  if (m < 3) return 0;
+
+  let minSpan = Infinity;
+
+  // 1. Rays along interior wall normals across opposing edges
+  for (let i = 0; i < m; i++) {
+    const p1 = innerPts[i];
+    const p2 = innerPts[(i + 1) % m];
+    const vx = p2.x - p1.x;
+    const vy = p2.y - p1.y;
+    const len = Math.hypot(vx, vy);
+    if (len < 1e-4) continue;
+    const dx = vx / len;
+    const dy = vy / len;
+
+    const winding = polygonWinding(innerPts);
+    const nx = winding > 0 ? dy : -dy;
+    const ny = winding > 0 ? -dx : dx;
+
+    // Sample along wall edge
+    const samples = [0.1, 0.25, 0.5, 0.75, 0.9];
+    for (const t of samples) {
+      const P = { x: p1.x + t * vx, y: p1.y + t * vy };
+
+      // Ray: P + lambda * (nx, ny)
+      for (let j = 0; j < m; j++) {
+        if (j === i) continue;
+        const A = innerPts[j];
+        const B = innerPts[(j + 1) % m];
+        const wx = B.x - A.x;
+        const wy = B.y - A.y;
+
+        const denom = nx * wy - ny * wx;
+        if (Math.abs(denom) < 1e-6) continue;
+
+        const lambda = ((A.x - P.x) * wy - (A.y - P.y) * wx) / denom;
+        const u = ((P.y - A.y) * nx - (P.x - A.x) * ny) / denom;
+
+        if (lambda > 0.1 && u >= -1e-4 && u <= 1 + 1e-4) {
+          const midRay = { x: P.x + (lambda / 2) * nx, y: P.y + (lambda / 2) * ny };
+          if (pointInPolygon(midRay, innerPts)) {
+            if (lambda < minSpan) {
+              minSpan = lambda;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Fallback to bounding box min dimension if no ray intersected or edge case
+  if (minSpan === Infinity || isNaN(minSpan)) {
+    const bbox = getRoomBoundingBox(innerPts);
+    minSpan = Math.min(bbox.w, bbox.h);
+  }
+
+  if (room && typeof room === 'object') {
+    room._clearSpanCache = { hash: ptsHash, val: minSpan };
+  }
+
+  return minSpan;
+}
+
 /** Clear interior bounding box or polygon. */
 export function interior(room) {
   const innerPts = interiorPolygon(room, WT);
@@ -455,6 +613,38 @@ export function rectsOverlap(a, b, eps = 0.01) {
     overlapLen(a.x, a.x + a.w, b.x, b.x + b.w) > eps &&
     overlapLen(a.y, a.y + a.h, b.y, b.y + b.h) > eps
   );
+}
+
+export function lineSegmentsIntersect(p1, p2, p3, p4) {
+  const ccw = (A, B, C) => (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+  return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
+}
+
+export function polygonsOverlap(polyA, polyB) {
+  if (!polyA || !polyB || polyA.length < 3 || polyB.length < 3) return false;
+  const boxA = getRoomBoundingBox(polyA);
+  const boxB = getRoomBoundingBox(polyB);
+  if (!rectsOverlap(boxA, boxB, EPS)) return false;
+
+  for (const p of polyA) {
+    if (pointInPolygon(p, polyB)) return true;
+  }
+  for (const p of polyB) {
+    if (pointInPolygon(p, polyA)) return true;
+  }
+
+  const nA = polyA.length;
+  const nB = polyB.length;
+  for (let i = 0; i < nA; i++) {
+    const a1 = polyA[i];
+    const a2 = polyA[(i + 1) % nA];
+    for (let j = 0; j < nB; j++) {
+      const b1 = polyB[j];
+      const b2 = polyB[(j + 1) % nB];
+      if (lineSegmentsIntersect(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
 }
 
 export const rectInside = (inner, outer, eps = 0.01) =>

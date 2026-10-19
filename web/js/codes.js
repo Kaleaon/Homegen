@@ -7,6 +7,10 @@ import {
   EPS,
   WALLS,
   OPPOSITE,
+  resolveWallIndex,
+  getRoomWallKeys,
+  getRoomClearSpan,
+  polygonsOverlap,
   wallLength,
   interior,
   floorAreaSqFt,
@@ -23,6 +27,7 @@ import {
   lv,
   rectsTouch,
   roomToPolygon,
+  itemToPolygon,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics } from './catalog.js';
 import { addItem, addOpening, createRoom } from './model.js';
@@ -65,21 +70,55 @@ export function openingInfo(state, room, o) {
 function doorSwingRects(state, room, o) {
   const def = OPENING_BY_ID[o.type];
   if (def.kind !== 'door' || def.pocket) return [];
-  const into = (r, depthSign) => {
-    const p1 = wallPoint(r, o.wall, o.offset, 0);
-    const p2 = wallPoint(r, o.wall, o.offset + o.width, depthSign * o.width);
-    return {
-      x: Math.min(p1.x, p2.x),
-      y: Math.min(p1.y, p2.y),
-      w: Math.abs(p1.x - p2.x),
-      h: Math.abs(p1.y - p2.y),
+  const makeEntry = (r, depthSign) => {
+    const H = wallPoint(r, o.wall, o.offset, 0);
+    const P_closed = wallPoint(r, o.wall, o.offset + o.width, 0);
+    const P_open = wallPoint(r, o.wall, o.offset, depthSign * o.width);
+
+    const rect = {
+      x: Math.min(H.x, P_closed.x, P_open.x),
+      y: Math.min(H.y, P_closed.y, P_open.y),
+      w: Math.max(H.x, P_closed.x, P_open.x) - Math.min(H.x, P_closed.x, P_open.x),
+      h: Math.max(H.y, P_closed.y, P_open.y) - Math.min(H.y, P_closed.y, P_open.y),
     };
+
+    const vClosed = { x: P_closed.x - H.x, y: P_closed.y - H.y };
+    const radius = Math.hypot(vClosed.x, vClosed.y) || o.width;
+    const startAngle = Math.atan2(vClosed.y, vClosed.x);
+
+    const vOpen = { x: P_open.x - H.x, y: P_open.y - H.y };
+    const endAngle = Math.atan2(vOpen.y, vOpen.x);
+
+    let sweep = endAngle - startAngle;
+    while (sweep > Math.PI) sweep -= 2 * Math.PI;
+    while (sweep < -Math.PI) sweep += 2 * Math.PI;
+
+    const arcSteps = 8;
+    const polygon = [H, P_closed];
+    for (let step = 1; step < arcSteps; step++) {
+      const frac = step / arcSteps;
+      const angle = startAngle + frac * sweep;
+      polygon.push({
+        x: H.x + radius * Math.cos(angle),
+        y: H.y + radius * Math.sin(angle),
+      });
+    }
+    polygon.push(P_open);
+
+    return { rect, polygon };
   };
+
   const rects = [];
   if (o.swing === 'out') {
     const info = openingInfo(state, room, o);
-    if (info.neighbor) rects.push({ roomId: info.neighbor.id, rect: into(room, -1) });
-  } else rects.push({ roomId: room.id, rect: into(room, 1) });
+    if (info.neighbor) {
+      const entry = makeEntry(room, -1);
+      rects.push({ roomId: info.neighbor.id, rect: entry.rect, polygon: entry.polygon });
+    }
+  } else {
+    const entry = makeEntry(room, 1);
+    rects.push({ roomId: room.id, rect: entry.rect, polygon: entry.polygon });
+  }
   return rects;
 }
 
@@ -120,16 +159,17 @@ export function daylight(state, room) {
 /** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
 export function outletSegments(state, room) {
   const segs = [];
-  for (const wall of WALLS) {
+  const walls = getRoomWallKeys(room);
+  for (const wall of walls) {
     const len = wallLength(room, wall);
     let iv = [[WT / 2, len - WT / 2]];
     for (const { o, from, to } of wallOpenings(state, room, wall))
       if (o.kind === 'door') iv = subtractInterval(iv, [from, to]);
     const outs = room.items.filter(
       (i) =>
-        i.wall === wall &&
-        ITEM_BY_ID[i.type].cat === 'electrical' &&
-        ITEM_BY_ID[i.type].shape === 'outlet'
+        resolveWallIndex(i.wall) === resolveWallIndex(wall) &&
+        ITEM_BY_ID[i.type]?.cat === 'electrical' &&
+        ITEM_BY_ID[i.type]?.shape === 'outlet'
     );
     for (const [a, b] of iv) {
       if (b - a < 24) continue;
@@ -603,7 +643,7 @@ export function evaluate(state, options = {}) {
     const area = floorAreaSqFt(room);
     const R = (rule, ref, sev, blocking, target, msg, extra) =>
       add(rule, ref, sev, blocking, target, `${room.name}: ${msg}`, { roomId: room.id, ...extra });
-    const minDim = Math.min(ir.w, ir.h);
+    const minDim = getRoomClearSpan(room);
 
     // Size (R304)
     if (t.habitable && room.type !== 'kitchen') {
@@ -748,11 +788,15 @@ export function evaluate(state, options = {}) {
             true,
             'interior doors should have at least 28 in clear width.'
           );
-        for (const { roomId, rect } of doorSwingRects(state, room, o)) {
+        for (const { roomId, rect, polygon } of doorSwingRects(state, room, o)) {
           const tr = rooms.find((x) => x.id === roomId);
           const blocker = tr
             ? tr.items.find(
-                (i) => collidable(i) && rectsOverlap(rect, footprint(i, ITEM_BY_ID[i.type]))
+                (i) =>
+                  collidable(i) &&
+                  (polygon
+                    ? polygonsOverlap(polygon, itemToPolygon(i, ITEM_BY_ID[i.type]))
+                    : rectsOverlap(rect, footprint(i, ITEM_BY_ID[i.type])))
               )
             : null;
           if (blocker)
