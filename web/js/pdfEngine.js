@@ -1,8 +1,32 @@
 // Pure client-side vector PDF generator for Homegen floorplans
 import { jsPDF } from '#jspdf';
-import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
+import {
+  WT,
+  WALLS,
+  wallSeg,
+  wallPoint,
+  interior,
+  interiorPolygon,
+  floorAreaSqFt,
+  getRoomPoints,
+  polygonCentroid,
+} from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
+
+/**
+ * Draws a closed vector polygon path from array of PDF points [{x, y}, ...].
+ */
+function drawPolygonPDF(pdf, points, style = 'FD') {
+  if (!points || points.length < 3) return;
+  const deltas = [];
+  const n = points.length;
+  for (let i = 1; i < n; i++) {
+    deltas.push([points[i].x - points[i - 1].x, points[i].y - points[i - 1].y]);
+  }
+  deltas.push([points[0].x - points[n - 1].x, points[0].y - points[n - 1].y]);
+  pdf.lines(deltas, points[0].x, points[0].y, [1, 1], style, true);
+}
 
 // Standard sheet sizes in points (1 in = 72 pt)
 export const SHEET_SIZES = {
@@ -207,10 +231,13 @@ export function generatePDF(docState, options = {}) {
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const r of levelRooms) {
-      if (r.x < minX) minX = r.x;
-      if (r.y < minY) minY = r.y;
-      if (r.x + r.w > maxX) maxX = r.x + r.w;
-      if (r.y + r.h > maxY) maxY = r.y + r.h;
+      const pts = getRoomPoints(r);
+      for (const p of pts) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
     }
 
     if (minX === Infinity) {
@@ -329,17 +356,14 @@ function drawFloorplanVector(pdf, state, levelRooms, transform) {
 
   // 1. Room Floor Fills
   for (const room of levelRooms) {
-    const rx = toPdfX(room.x);
-    const ry = toPdfY(room.y);
-    const rw = toPdfDim(room.w);
-    const rh = toPdfDim(room.h);
-
+    const pts = getRoomPoints(room);
+    const pdfPts = pts.map((p) => ({ x: toPdfX(p.x), y: toPdfY(p.y) }));
     const roomType = ROOM_TYPES[room.type] || { color: '#f7f5f0' };
 
     pdf.setFillColor(roomType.color || '#f7f5f0');
     pdf.setDrawColor('#cccccc');
     pdf.setLineWidth(0.4);
-    pdf.rect(rx, ry, rw, rh, 'FD');
+    drawPolygonPDF(pdf, pdfPts, 'FD');
 
     if (room.type === 'stairs') {
       drawStairsVector(pdf, room, transform);
@@ -399,33 +423,39 @@ function drawStairsVector(pdf, room, { toPdfX, toPdfY }) {
  * Draws walls and wall openings (doors, windows).
  */
 function drawWallsVector(pdf, state, room, transform) {
-  const { toPdfX, toPdfY, toPdfDim } = transform;
+  const { toPdfX, toPdfY } = transform;
+  const pts = getRoomPoints(room);
 
-  for (const wall of WALLS) {
-    const s = wallSeg(room, wall);
-    const horizontal = s.dx === 1;
-    const side = horizontal ? s.ny : s.nx;
+  for (let i = 0; i < pts.length; i++) {
+    const s = wallSeg(room, i);
+    const halfWT = WT / 2;
 
-    const innerDepth = side > 0 ? [0, WT / 2] : [-WT / 2, 0];
-    const outerDepth = side > 0 ? [-WT / 2, 0] : [0, WT / 2];
+    const axExt = s.ax - s.dx * halfWT;
+    const ayExt = s.ay - s.dy * halfWT;
+    const bxExt = s.ax + s.dx * (s.len + halfWT);
+    const byExt = s.ay + s.dy * (s.len + halfWT);
 
     // Outer structural wall
-    const ox0 = s.ax + (horizontal ? -WT / 2 : outerDepth[0]);
-    const oy0 = s.ay + (horizontal ? outerDepth[0] : -WT / 2);
-    const ow = horizontal ? s.len + WT : outerDepth[1] - outerDepth[0];
-    const oh = horizontal ? outerDepth[1] - outerDepth[0] : s.len + WT;
+    const outerPts = [
+      { x: toPdfX(axExt - s.nx * halfWT), y: toPdfY(ayExt - s.ny * halfWT) },
+      { x: toPdfX(bxExt - s.nx * halfWT), y: toPdfY(byExt - s.ny * halfWT) },
+      { x: toPdfX(bxExt), y: toPdfY(byExt) },
+      { x: toPdfX(axExt), y: toPdfY(ayExt) },
+    ];
 
     pdf.setFillColor('#3c3a38');
-    pdf.rect(toPdfX(ox0), toPdfY(oy0), toPdfDim(ow), toPdfDim(oh), 'F');
+    drawPolygonPDF(pdf, outerPts, 'F');
 
     // Inner finish
-    const ix0 = s.ax + (horizontal ? -WT / 2 : innerDepth[0]);
-    const iy0 = s.ay + (horizontal ? innerDepth[0] : -WT / 2);
-    const iw = horizontal ? s.len + WT : innerDepth[1] - innerDepth[0];
-    const ih = horizontal ? innerDepth[1] - innerDepth[0] : s.len + WT;
+    const innerPts = [
+      { x: toPdfX(axExt), y: toPdfY(ayExt) },
+      { x: toPdfX(bxExt), y: toPdfY(byExt) },
+      { x: toPdfX(bxExt + s.nx * halfWT), y: toPdfY(byExt + s.ny * halfWT) },
+      { x: toPdfX(axExt + s.nx * halfWT), y: toPdfY(ayExt + s.ny * halfWT) },
+    ];
 
     pdf.setFillColor('#d3d0c8');
-    pdf.rect(toPdfX(ix0), toPdfY(iy0), toPdfDim(iw), toPdfDim(ih), 'F');
+    drawPolygonPDF(pdf, innerPts, 'F');
   }
 
   // Openings
@@ -443,38 +473,46 @@ function drawOpeningVector(pdf, room, o, transform) {
 
   const a = wallPoint(room, o.wall, o.offset, 0);
   const s = wallSeg(room, o.wall);
-  const horizontal = s.dx === 1;
-  const th = WT + 0.6;
+  const halfTh = (WT + 0.6) / 2;
+
+  const openAx = a.x;
+  const openAy = a.y;
+  const openBx = a.x + s.dx * o.width;
+  const openBy = a.y + s.dy * o.width;
 
   // Gap in wall
-  const gx = a.x - (horizontal ? 0 : th / 2);
-  const gy = a.y - (horizontal ? th / 2 : 0);
-  const gw = horizontal ? o.width : th;
-  const gh = horizontal ? th : o.width;
+  const gapPts = [
+    { x: toPdfX(openAx - s.nx * halfTh), y: toPdfY(openAy - s.ny * halfTh) },
+    { x: toPdfX(openBx - s.nx * halfTh), y: toPdfY(openBy - s.ny * halfTh) },
+    { x: toPdfX(openBx + s.nx * halfTh), y: toPdfY(openBy + s.ny * halfTh) },
+    { x: toPdfX(openAx + s.nx * halfTh), y: toPdfY(openAy + s.ny * halfTh) },
+  ];
 
   pdf.setFillColor('#ffffff');
-  pdf.rect(toPdfX(gx), toPdfY(gy), toPdfDim(gw), toPdfDim(gh), 'F');
+  drawPolygonPDF(pdf, gapPts, 'F');
 
   if (def.kind === 'window') {
     pdf.setDrawColor('#2d2a26');
     pdf.setLineWidth(0.8);
-    pdf.rect(toPdfX(gx), toPdfY(gy), toPdfDim(gw), toPdfDim(gh), 'S');
+    drawPolygonPDF(pdf, gapPts, 'S');
 
     // Glass pane line
+    const glassPts = [
+      { x: toPdfX(openAx - s.nx * 1), y: toPdfY(openAy - s.ny * 1) },
+      { x: toPdfX(openBx - s.nx * 1), y: toPdfY(openBy - s.ny * 1) },
+      { x: toPdfX(openBx + s.nx * 1), y: toPdfY(openBy + s.ny * 1) },
+      { x: toPdfX(openAx + s.nx * 1), y: toPdfY(openAy + s.ny * 1) },
+    ];
     pdf.setFillColor('#bde0fe');
-    if (horizontal) {
-      pdf.rect(toPdfX(a.x), toPdfY(a.y - 1), toPdfDim(o.width), toPdfDim(2), 'F');
-    } else {
-      pdf.rect(toPdfX(a.x - 1), toPdfY(a.y), toPdfDim(2), toPdfDim(o.width), 'F');
-    }
+    drawPolygonPDF(pdf, glassPts, 'F');
   } else {
     // Door leaf and swing arc
     const dir = o.swing === 'out' ? -1 : 1;
     const nx = s.nx * dir;
     const ny = s.ny * dir;
 
-    const hx = a.x;
-    const hy = a.y;
+    const hx = openAx;
+    const hy = openAy;
     const lx = hx + nx * o.width;
     const ly = hy + ny * o.width;
 
@@ -484,8 +522,8 @@ function drawOpeningVector(pdf, room, o, transform) {
     pdf.line(toPdfX(hx), toPdfY(hy), toPdfX(lx), toPdfY(ly));
 
     // Swing arc
-    const ang0 = Math.atan2(ny * o.width, nx * o.width);
-    const ang1 = Math.atan2(s.dy * o.width, s.dx * o.width);
+    const ang0 = Math.atan2(ny, nx);
+    const ang1 = Math.atan2(s.dy, s.dx);
 
     let d = ang1 - ang0;
     while (d > Math.PI) d -= 2 * Math.PI;
@@ -629,11 +667,13 @@ function drawItemVector(pdf, room, item, def, transform) {
  */
 function drawRoomLabelVector(pdf, room, transform) {
   const { toPdfX, toPdfY } = transform;
+  const innerPts = interiorPolygon(room, WT);
+  const center = polygonCentroid(innerPts);
   const ir = interior(room);
   const area = floorAreaSqFt(room);
 
-  const cx = toPdfX(room.x + room.w / 2);
-  const cy = toPdfY(room.y + room.h / 2);
+  const cx = toPdfX(center.x);
+  const cy = toPdfY(center.y);
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(8);
