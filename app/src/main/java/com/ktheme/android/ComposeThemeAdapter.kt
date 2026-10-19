@@ -85,6 +85,11 @@ fun KthemeComposeTheme(
     val materialColorScheme = theme.toMaterial3ColorScheme(isDark = isDark)
     val semanticColors = theme.semanticColors()
 
+    KthemeSystemBarAdapter(
+        colors = semanticColors,
+        isDarkTheme = isDark,
+    )
+
     CompositionLocalProvider(
         LocalKthemeSemanticColors provides semanticColors,
     ) {

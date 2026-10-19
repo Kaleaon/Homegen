@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base Ktheme Dark Color Tokens (Navy Gold default) -->
+    <color name="ktheme_primary">#D4AF37</color>
+    <color name="ktheme_on_primary">#0A1630</color>
+    <color name="ktheme_primary_container">#1E2A4A</color>
+    <color name="ktheme_on_primary_container">#F0E6D2</color>
+
+    <color name="ktheme_secondary">#8A9EA7</color>
+    <color name="ktheme_on_secondary">#0A1630</color>
+    <color name="ktheme_secondary_container">#23334A</color>
+    <color name="ktheme_on_secondary_container">#DDE5ED</color>
+
+    <color name="ktheme_tertiary">#C5A059</color>
+    <color name="ktheme_on_tertiary">#0A1630</color>
+    <color name="ktheme_tertiary_container">#2E2818</color>
+    <color name="ktheme_on_tertiary_container">#F5E9D4</color>
+
+    <color name="ktheme_error">#CF6679</color>
+    <color name="ktheme_on_error">#000000</color>
+    <color name="ktheme_error_container">#B00020</color>
+    <color name="ktheme_on_error_container">#FFFFFF</color>
+
+    <color name="ktheme_background">#0A1630</color>
+    <color name="ktheme_on_background">#E0E6ED</color>
+    <color name="ktheme_surface">#12203F</color>
+    <color name="ktheme_on_surface">#E0E6ED</color>
+    <color name="ktheme_surface_variant">#1E2D4A</color>
+    <color name="ktheme_on_surface_variant">#B0BEC5</color>
+    <color name="ktheme_outline">#4A5D78</color>
+    <color name="ktheme_outline_variant">#2A3A52</color>
+
+    <!-- Semantic System Bar & Window Tokens -->
+    <color name="ktheme_window_background">@color/ktheme_background</color>
+    <color name="ktheme_status_bar">@color/ktheme_window_background</color>
+    <color name="ktheme_navigation_bar">@color/ktheme_window_background</color>
+
+    <!-- Light Status Bar Icon Flag -->
+    <bool name="ktheme_window_light_status_bar">false</bool>
+</resources>
