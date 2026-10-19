@@ -17,22 +17,47 @@ export class ElevationGrid {
     verticalScale = 1.0,
     visible = true,
   } = {}) {
-    this.width = width;
-    this.height = height;
-    if (data instanceof Float32Array) {
-      this.data = data;
-    } else if (Array.isArray(data)) {
-      this.data = new Float32Array(data);
-    } else if (data && typeof data === 'object') {
-      this.data = new Float32Array(Object.values(data));
-    } else if (width > 0 && height > 0) {
-      this.data = new Float32Array(width * height);
-    } else {
-      this.data = new Float32Array(0);
+    let capWidth = width;
+    let capHeight = height;
+    if (width * height > 10000) {
+      const aspect = width / height || 1;
+      capHeight = Math.floor(Math.sqrt(10000 / aspect));
+      capWidth = Math.floor(capHeight * aspect);
     }
+    this.width = capWidth;
+    this.height = capHeight;
+    this.maxVertexCap = 10000;
+
+    let rawData;
+    if (data instanceof Float32Array) {
+      rawData = data;
+    } else if (Array.isArray(data)) {
+      rawData = new Float32Array(data);
+    } else if (data && typeof data === 'object') {
+      rawData = new Float32Array(Object.values(data));
+    } else if (capWidth > 0 && capHeight > 0) {
+      rawData = new Float32Array(capWidth * capHeight);
+    } else {
+      rawData = new Float32Array(0);
+    }
+
+    if (width !== capWidth || height !== capHeight) {
+      this.data = new Float32Array(capWidth * capHeight);
+      for (let y = 0; y < capHeight; y++) {
+        for (let x = 0; x < capWidth; x++) {
+          const u = x / Math.max(1, capWidth - 1);
+          const v = y / Math.max(1, capHeight - 1);
+          const origX = Math.floor(u * (width - 1));
+          const origY = Math.floor(v * (height - 1));
+          this.data[y * capWidth + x] = rawData[origY * width + origX] || 0;
+        }
+      }
+    } else {
+      this.data = rawData;
+    }
+
     this.minElevation = minElevation;
     this.maxElevation = maxElevation;
-    // World bounds in plan inches: defaults to -600" to +600" (100ft x 100ft area)
     this.bounds = bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
     this.contourInterval = Math.max(0.1, contourInterval);
     this.verticalScale = verticalScale;
@@ -75,6 +100,128 @@ export class ElevationGrid {
     const bottom = v01 * (1 - tx) + v11 * tx;
     return top * (1 - ty) + bottom * ty;
   }
+
+  toVolumetricMesh(baseElevation = -50) {
+    const { width, height, data, bounds, verticalScale } = this;
+    if (width <= 0 || height <= 0 || !data || data.length === 0) {
+      return { vertices: [], triangles: [], vertexCount: 0 };
+    }
+
+    const vertices = [];
+    const triangles = [];
+
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        const wz = (data[y * width + x] || 0) * verticalScale;
+        vertices.push({ x: wx, y: wy, z: wz });
+      }
+    }
+
+    const offset = width * height;
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        vertices.push({ x: wx, y: wy, z: baseElevation });
+      }
+    }
+
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const i0 = y * width + x;
+        const i1 = y * width + (x + 1);
+        const i2 = (y + 1) * width + x;
+        const i3 = (y + 1) * width + (x + 1);
+        triangles.push([i0, i1, i2]);
+        triangles.push([i1, i3, i2]);
+      }
+    }
+
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const i0 = offset + y * width + x;
+        const i1 = offset + y * width + (x + 1);
+        const i2 = offset + (y + 1) * width + x;
+        const i3 = offset + (y + 1) * width + (x + 1);
+        triangles.push([i0, i2, i1]);
+        triangles.push([i1, i2, i3]);
+      }
+    }
+
+    return {
+      vertices,
+      triangles,
+      vertexCount: vertices.length,
+      bounds,
+    };
+  }
+
+  executeFoundationCut(foundationPolygon, padElevation = 0) {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!this.data || this.width <= 0 || this.height <= 0 || !Array.isArray(foundationPolygon)) {
+      return { grid: this, mesh: this.toVolumetricMesh(), executionTimeMs: 0 };
+    }
+
+    const { width, height, bounds, data } = this;
+    let minE = Infinity;
+    let maxE = -Infinity;
+
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        const idx = y * width + x;
+
+        if (pointInPolygon({ x: wx, y: wy }, foundationPolygon)) {
+          data[idx] = Math.min(data[idx], padElevation);
+        }
+
+        const currentVal = data[idx];
+        if (currentVal < minE) minE = currentVal;
+        if (currentVal > maxE) maxE = currentVal;
+      }
+    }
+
+    this.minElevation = minE === Infinity ? 0 : minE;
+    this.maxElevation = maxE === -Infinity ? padElevation : maxE;
+
+    const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const executionTimeMs = t1 - t0;
+
+    return {
+      grid: this,
+      mesh: this.toVolumetricMesh(),
+      executionTimeMs,
+    };
+  }
+
+  subtractCSGVolume(polygon, targetElevation) {
+    return this.executeFoundationCut(polygon, targetElevation);
+  }
+}
+
+function pointInPolygon(p, poly) {
+  let inside = false;
+  const px = p.x;
+  const py = p.y;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 /**

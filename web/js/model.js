@@ -166,6 +166,78 @@ export function createDefaultWallUV() {
   };
 }
 
+export function createMeshGraphFromPolygon(points, baseZ = 0, zOffsets = null) {
+  const n = points ? points.length : 0;
+  if (n === 0) {
+    return {
+      vertices: [],
+      VertexZArray: [],
+      triangles: [],
+      edges: [],
+    };
+  }
+
+  const VertexZArray = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const offset = zOffsets && typeof zOffsets[i] === 'number' ? zOffsets[i] : 0;
+    VertexZArray[i] = baseZ + offset;
+  }
+
+  const vertices = points.map((p, i) => ({
+    x: p.x,
+    y: p.y,
+    z: VertexZArray[i],
+  }));
+
+  const triangles = [];
+  if (n >= 3) {
+    for (let i = 1; i < n - 1; i++) {
+      triangles.push([0, i, i + 1]);
+    }
+  }
+
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    edges.push({ v1: i, v2: (i + 1) % n });
+  }
+
+  return {
+    vertices,
+    VertexZArray,
+    triangles,
+    edges,
+  };
+}
+
+export function updateMeshVertexZ(room, meshType, vertexIndex, newZ) {
+  if (!room) return;
+  const mesh = meshType === 'ceiling' ? room.ceilingMesh : room.floorMesh;
+  if (!mesh || !mesh.VertexZArray || vertexIndex < 0 || vertexIndex >= mesh.VertexZArray.length) {
+    return;
+  }
+  mesh.VertexZArray[vertexIndex] = newZ;
+  if (mesh.vertices && mesh.vertices[vertexIndex]) {
+    mesh.vertices[vertexIndex].z = newZ;
+  }
+}
+
+export function migratePlanTo3DMeshGraph(state) {
+  if (!state || !Array.isArray(state.rooms)) return state;
+  for (const room of state.rooms) {
+    const pts = getRoomPoints(room);
+    if (!room.floorMesh || !Array.isArray(room.floorMesh.VertexZArray)) {
+      const zOffsets = room.floorZOffsets || null;
+      room.floorMesh = createMeshGraphFromPolygon(pts, 0, zOffsets);
+    }
+    if (!room.ceilingMesh || !Array.isArray(room.ceilingMesh.VertexZArray)) {
+      const ceilingHeight = room.ceiling ?? 96;
+      const zOffsets = room.ceilingZOffsets || null;
+      room.ceilingMesh = createMeshGraphFromPolygon(pts, ceilingHeight, zOffsets);
+    }
+  }
+  return state;
+}
+
 export function createRoom(state, type, x, y, w, h, opts = {}) {
   const points =
     opts.points || opts.corners || opts.vertices
@@ -198,6 +270,12 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
       ...(opts.walls || {}),
     },
     wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
+    floorMesh:
+      opts.floorMesh ||
+      createMeshGraphFromPolygon(points, 0, opts.floorZOffsets || opts.VertexZArray),
+    ceilingMesh:
+      opts.ceilingMesh ||
+      createMeshGraphFromPolygon(points, opts.ceiling ?? 96, opts.ceilingZOffsets),
     openings: [],
     items: [],
   };
@@ -273,6 +351,18 @@ export function moveRoom(room, nx, ny, state = null) {
   room.y = ny;
   const pts = getRoomPoints(room);
   room.points = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  if (room.floorMesh && Array.isArray(room.floorMesh.vertices)) {
+    for (const v of room.floorMesh.vertices) {
+      v.x += dx;
+      v.y += dy;
+    }
+  }
+  if (room.ceilingMesh && Array.isArray(room.ceilingMesh.vertices)) {
+    for (const v of room.ceilingMesh.vertices) {
+      v.x += dx;
+      v.y += dy;
+    }
+  }
   for (const it of room.items)
     if (it.x !== undefined) {
       it.x += dx;
@@ -292,6 +382,10 @@ export function resizeRoom(room, x, y, w, h, state = null) {
     { x: x + w, y: y + h },
     { x, y: y + h },
   ];
+  const floorZ = room.floorMesh?.VertexZArray || null;
+  const ceilingZ = room.ceilingMesh?.VertexZArray || null;
+  room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
+  room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
     o.offset = Math.max(0, Math.min(o.offset, len - o.width));
@@ -306,6 +400,10 @@ export function updateRoomPoints(room, points, state = null) {
   room.y = bbox.y;
   room.w = bbox.w;
   room.h = bbox.h;
+  const floorZ = room.floorMesh?.VertexZArray || null;
+  const ceilingZ = room.ceilingMesh?.VertexZArray || null;
+  room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
+  room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
     o.offset = Math.max(0, Math.min(o.offset, len - o.width));
@@ -556,6 +654,7 @@ export function deserialize(text) {
   for (const finish of s.customFinishes) {
     registerCustomWallFinish(finish, s);
   }
+  migratePlanTo3DMeshGraph(s);
   return s;
 }
 

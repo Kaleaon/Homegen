@@ -603,21 +603,209 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return shape;
   }
 
+  function createTriangulatedSlabGeometry(room, e) {
+    const pts = getRoomPoints(room);
+    const mesh = room.floorMesh;
+    const n = pts.length;
+    if (!mesh || !Array.isArray(mesh.VertexZArray) || mesh.VertexZArray.length !== n) {
+      const shape = buildRoomShape(pts);
+      return new THREE.ExtrudeGeometry(shape, { depth: SLAB * S, bevelEnabled: false });
+    }
+
+    const geom = new THREE.BufferGeometry();
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+
+    // Top vertices
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const zOffset = mesh.VertexZArray[i] || 0;
+      positions.push(p.x * S, (e + zOffset) * S, p.y * S);
+      uvs.push(p.x * S, p.y * S);
+    }
+
+    // Bottom vertices
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const zOffset = mesh.VertexZArray[i] || 0;
+      positions.push(p.x * S, (e + zOffset - SLAB) * S, p.y * S);
+      uvs.push(p.x * S, p.y * S);
+    }
+
+    // Top face triangles
+    const topTris = mesh.triangles || [];
+    if (topTris.length > 0) {
+      for (const tri of topTris) {
+        indices.push(tri[0], tri[1], tri[2]);
+      }
+    } else {
+      for (let i = 1; i < n - 1; i++) {
+        indices.push(0, i, i + 1);
+      }
+    }
+
+    // Bottom face triangles (reversed winding)
+    if (topTris.length > 0) {
+      for (const tri of topTris) {
+        indices.push(n + tri[0], n + tri[2], n + tri[1]);
+      }
+    } else {
+      for (let i = 1; i < n - 1; i++) {
+        indices.push(n + 0, n + i + 1, n + i);
+      }
+    }
+
+    // Side face quads
+    for (let i = 0; i < n; i++) {
+      const next = (i + 1) % n;
+      const topA = i;
+      const topB = next;
+      const botA = n + i;
+      const botB = n + next;
+      indices.push(topA, botA, topB);
+      indices.push(topB, botA, botB);
+    }
+
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    return geom;
+  }
+
   function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, faceIdx) {
     const s = wallSeg(room, wall);
     const len = t1 - t0;
     const dep = d1 - d0;
     if (len <= 0.01 || y1 - y0 <= 0.01) return;
+
+    const pts = getRoomPoints(room);
+    const wallIdx = resolveWallIndex(wall);
+    const totalLen = wallLength(room, wall) || 1;
+    const n = pts.length;
+    const i0 = typeof wallIdx === 'number' ? wallIdx % n : 0;
+    const i1 = (i0 + 1) % n;
+
+    const fZ0 = room.floorMesh?.VertexZArray?.[i0] || 0;
+    const fZ1 = room.floorMesh?.VertexZArray?.[i1] || 0;
+    const cZ0 = room.ceilingMesh?.VertexZArray?.[i0] || room.ceiling || 96;
+    const cZ1 = room.ceilingMesh?.VertexZArray?.[i1] || room.ceiling || 96;
+
+    const isSloped = fZ0 !== fZ1 || cZ0 !== cZ1;
+
+    if (!isSloped) {
+      const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
+      const m = boxMesh(len, y1 - y0, dep, mats);
+      const along = (t0 + t1) / 2;
+      const off = (d0 + d1) / 2;
+      const cx = s.ax + s.dx * along + s.nx * off;
+      const cy = s.ay + s.dy * along + s.ny * off;
+      m.position.set(cx * S, (elev + (y0 + y1) / 2) * S, cy * S);
+      const m3 = new THREE.Matrix4();
+      m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
+      m.rotation.setFromRotationMatrix(m3);
+      group.add(m);
+      return;
+    }
+
+    const fT0 = fZ0 + (fZ1 - fZ0) * (t0 / totalLen);
+    const fT1 = fZ0 + (fZ1 - fZ0) * (t1 / totalLen);
+    const cT0 = cZ0 + (cZ1 - cZ0) * (t0 / totalLen);
+    const cT1 = cZ0 + (cZ1 - cZ0) * (t1 / totalLen);
+
+    const b0 = elev + y0 + fT0;
+    const b1 = elev + y0 + fT1;
+    const tH0 = elev + Math.min(y1, cT0);
+    const tH1 = elev + Math.min(y1, cT1);
+
+    const geom = new THREE.BufferGeometry();
+    const along0 = t0;
+    const along1 = t1;
+    const off0 = d0;
+    const off1 = d1;
+
+    const p000 = {
+      x: s.ax + s.dx * along0 + s.nx * off0,
+      y: b0,
+      z: s.ay + s.dy * along0 + s.ny * off0,
+    };
+    const p100 = {
+      x: s.ax + s.dx * along1 + s.nx * off0,
+      y: b1,
+      z: s.ay + s.dy * along1 + s.ny * off0,
+    };
+    const p110 = {
+      x: s.ax + s.dx * along1 + s.nx * off0,
+      y: tH1,
+      z: s.ay + s.dy * along1 + s.ny * off0,
+    };
+    const p010 = {
+      x: s.ax + s.dx * along0 + s.nx * off0,
+      y: tH0,
+      z: s.ay + s.dy * along0 + s.ny * off0,
+    };
+
+    const p001 = {
+      x: s.ax + s.dx * along0 + s.nx * off1,
+      y: b0,
+      z: s.ay + s.dy * along0 + s.ny * off1,
+    };
+    const p101 = {
+      x: s.ax + s.dx * along1 + s.nx * off1,
+      y: b1,
+      z: s.ay + s.dy * along1 + s.ny * off1,
+    };
+    const p111 = {
+      x: s.ax + s.dx * along1 + s.nx * off1,
+      y: tH1,
+      z: s.ay + s.dy * along1 + s.ny * off1,
+    };
+    const p011 = {
+      x: s.ax + s.dx * along0 + s.nx * off1,
+      y: tH0,
+      z: s.ay + s.dy * along0 + s.ny * off1,
+    };
+
+    const pos = [
+      p000.x * S,
+      p000.y * S,
+      p000.z * S,
+      p100.x * S,
+      p100.y * S,
+      p100.z * S,
+      p110.x * S,
+      p110.y * S,
+      p110.z * S,
+      p010.x * S,
+      p010.y * S,
+      p010.z * S,
+      p001.x * S,
+      p001.y * S,
+      p001.z * S,
+      p101.x * S,
+      p101.y * S,
+      p101.z * S,
+      p111.x * S,
+      p111.y * S,
+      p111.z * S,
+      p011.x * S,
+      p011.y * S,
+      p011.z * S,
+    ];
+    const idx = [
+      0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1,
+      2, 6, 1, 6, 5,
+    ];
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geom.setIndex(idx);
+    geom.computeVertexNormals();
+
     const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
-    const m = boxMesh(len, y1 - y0, dep, mats);
-    const along = (t0 + t1) / 2;
-    const off = (d0 + d1) / 2;
-    const cx = s.ax + s.dx * along + s.nx * off;
-    const cy = s.ay + s.dy * along + s.ny * off;
-    m.position.set(cx * S, (elev + (y0 + y1) / 2) * S, cy * S);
-    const m3 = new THREE.Matrix4();
-    m3.set(s.dx, 0, s.nx, 0, 0, 1, 0, 0, s.dy, 0, s.ny, 0, 0, 0, 0, 1);
-    m.rotation.setFromRotationMatrix(m3);
+    const m = new THREE.Mesh(geom, mats);
+    m.castShadow = true;
+    m.receiveShadow = true;
     group.add(m);
   }
 
@@ -696,22 +884,33 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       activeKeys.add(slabKey);
       const ff = FLOOR_BY_ID[room.floor] || FLOOR_BY_ID.floor_oak;
       const pts = getRoomPoints(room);
-      const slabSig = JSON.stringify({ pts, floor: room.floor, hd: opts.hd });
+      const hasFloorMesh = room.floorMesh && Array.isArray(room.floorMesh.VertexZArray);
+      const slabSig = JSON.stringify({
+        pts,
+        floor: room.floor,
+        hd: opts.hd,
+        z: room.floorMesh?.VertexZArray,
+      });
       let slab = entityMap.get(slabKey);
       if (!slab || slab.userData.sig !== slabSig) {
         if (slab) disposeNode(slab);
         const fm = finishMaterial(ff, 12, 12, room.floor, 0.55);
-        const shape = buildRoomShape(pts);
-        const geom = new THREE.ExtrudeGeometry(shape, { depth: SLAB * S, bevelEnabled: false });
+        const geom = createTriangulatedSlabGeometry(room, e);
         slab = new THREE.Mesh(geom, [fm, plain('#b9b2a4', 0.95)]);
-        slab.rotation.x = Math.PI / 2;
+        if (!hasFloorMesh) {
+          slab.rotation.x = Math.PI / 2;
+        }
         slab.castShadow = true;
         slab.receiveShadow = true;
         slab.userData = { id: slabKey, entityType: 'slab', sig: slabSig };
         roomGroup.add(slab);
         entityMap.set(slabKey, slab);
       }
-      slab.position.set(0, e * S, 0);
+      if (hasFloorMesh) {
+        slab.position.set(0, 0, 0);
+      } else {
+        slab.position.set(0, e * S, 0);
+      }
       box.expandByObject(slab);
 
       // Stairs (keyed by `${room.id}:stairs`)
