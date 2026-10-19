@@ -198,3 +198,27 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
     },
   };
 }
+
+/**
+ * Step-based resizing of room using constraint handles in 6-inch increments.
+ */
+export function stepResize(room, handleIndexOrId, dx = 0, dy = 0, options = {}) {
+  const handles = getConstraintHandles(room);
+  const handleIndex =
+    typeof handleIndexOrId === 'number'
+      ? handleIndexOrId
+      : ['nw', 'ne', 'sw', 'se'].indexOf(handleIndexOrId);
+
+  const handle = handles[handleIndex] || handles.find((h) => h.id === handleIndexOrId);
+  if (!handle) throw new Error(`Invalid handle: ${handleIndexOrId}`);
+
+  const pointerPoint = {
+    x: handle.x + dx,
+    y: handle.y + dy,
+  };
+
+  return resizeRoomWithConstraints(room, handleIndex, pointerPoint, {
+    snap: false,
+    ...options,
+  });
+}

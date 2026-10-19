@@ -201,11 +201,68 @@ export function initView3D({
 
   v3.addEventListener('keydown', (e) => {
     if (!api || mode !== '3d') return;
-    const camMode = api.getCameraMode();
     const k = e.key;
+    const lower = k.toLowerCase();
 
+    // 1. Tab / Shift + Tab: Cycle object/handle selection in 3D canvas
+    if (k === 'Tab') {
+      e.preventDefault();
+      api.cycle3DSelection(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    // 2. Escape: Deselect 3D object if selected, or exit walkthrough
+    if (k === 'Escape') {
+      if (api.getSelected3DEntity()) {
+        e.preventDefault();
+        api.clear3DSelection();
+        return;
+      }
+      if (api.getCameraMode() === 'walk') {
+        e.preventDefault();
+        api.setCameraMode('orbit');
+        toast('Switched to Orbit mode', false, 2000);
+        return;
+      }
+    }
+
+    // 3. If an object/handle is selected:
+    const selEntity = api.getSelected3DEntity();
+    if (selEntity) {
+      if (lower === 'g') {
+        e.preventDefault();
+        api.set3DTransformMode('move');
+        return;
+      }
+      if (lower === 'r') {
+        e.preventDefault();
+        api.set3DTransformMode('rotate');
+        return;
+      }
+      if (lower === 's') {
+        e.preventDefault();
+        api.set3DTransformMode('scale');
+        return;
+      }
+
+      if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+        e.preventDefault();
+        const step = e.shiftKey ? 12 : 6;
+        let dx = 0;
+        let dy = 0;
+        if (k === 'ArrowLeft') dx = -step;
+        if (k === 'ArrowRight') dx = step;
+        if (k === 'ArrowUp') dy = -step;
+        if (k === 'ArrowDown') dy = step;
+
+        api.stepTransformSelected(dx, dy, { shiftKey: e.shiftKey });
+        return;
+      }
+    }
+
+    // 4. Default camera navigation when no object is selected:
+    const camMode = api.getCameraMode();
     if (camMode === 'walk') {
-      const lower = k.toLowerCase();
       if (lower === 'w' || k === 'ArrowUp') {
         e.preventDefault();
         api.walkKeys.forward = true;

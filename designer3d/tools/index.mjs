@@ -21,6 +21,7 @@ import {
 import {
   getConstraintHandles,
   resizeRoomWithConstraints,
+  stepResize,
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
@@ -53,6 +54,7 @@ export {
   computeSurfaceOrientation,
   getConstraintHandles,
   resizeRoomWithConstraints,
+  stepResize,
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
