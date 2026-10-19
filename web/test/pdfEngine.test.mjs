@@ -132,3 +132,92 @@ test('generatePDF throws error when document has no rooms', () => {
     message: 'Cannot export PDF: add at least one room first.',
   });
 });
+
+test('generatePDF exports valid vector PDF for L-shaped polygon rooms', () => {
+  let doc = M.newState();
+  doc.name = 'L-Shaped Modern Residence';
+
+  const lShapePoints = [
+    { x: 0, y: 0 },
+    { x: 240, y: 0 },
+    { x: 240, y: 120 },
+    { x: 120, y: 120 },
+    { x: 120, y: 240 },
+    { x: 0, y: 240 },
+  ];
+
+  doc.rooms.push({
+    id: 'l_room_1',
+    type: 'living',
+    name: 'L Living Great Room',
+    points: lShapePoints,
+    ceiling: 96,
+    floor: 'oak',
+    walls: { 0: 'drywall', 1: 'drywall', 2: 'drywall', 3: 'drywall', 4: 'drywall', 5: 'drywall' },
+    items: [],
+    openings: [
+      { id: 'door1', type: 'door_single', wall: 0, offset: 36, width: 36, swing: 'in' },
+      { id: 'win1', type: 'win_std', wall: 4, offset: 48, width: 48 },
+    ],
+    level: 0,
+  });
+
+  const pdf = generatePDF(doc, {
+    pageSize: 'Letter',
+    orientation: 'landscape',
+    scale: '1/4"=1\'0"',
+    includeTitleBlock: true,
+    includeScaleBar: true,
+    includeRoomSchedule: true,
+  });
+
+  assert.ok(pdf, 'generatePDF must return a pdf object for L-shaped floorplan');
+  const buf = pdf.output('arraybuffer');
+  assert.ok(
+    buf.byteLength > 1000,
+    'generated PDF arraybuffer for L-shape must contain valid vector data'
+  );
+  assert.equal(pdf.getNumberOfPages(), 2, 'L-shaped PDF must include floorplan and schedule page');
+});
+
+test('generatePDF exports valid vector PDF for custom 5-sided and angled polygon rooms', () => {
+  let doc = M.newState();
+  doc.name = 'Angled Polygon Residence';
+
+  const angledPoints = [
+    { x: 0, y: 0 },
+    { x: 180, y: 0 },
+    { x: 240, y: 120 },
+    { x: 120, y: 200 },
+    { x: 0, y: 120 },
+  ];
+
+  doc.rooms.push({
+    id: 'poly_room_1',
+    type: 'bedroom',
+    name: 'Pentagonal Bedroom',
+    points: angledPoints,
+    ceiling: 96,
+    floor: 'carpet',
+    walls: { 0: 'drywall', 1: 'drywall', 2: 'drywall', 3: 'drywall', 4: 'drywall' },
+    items: [],
+    openings: [
+      { id: 'win_angled', type: 'win_std', wall: 1, offset: 24, width: 36 },
+      { id: 'door_angled', type: 'door_single', wall: 3, offset: 30, width: 36, swing: 'in' },
+    ],
+    level: 0,
+  });
+
+  const pdf = generatePDF(doc, {
+    pageSize: 'ARCH_C',
+    orientation: 'landscape',
+    scale: 'fit',
+    includeTitleBlock: true,
+    includeScaleBar: true,
+    includeRoomSchedule: true,
+  });
+
+  assert.ok(pdf);
+  const buf = pdf.output('arraybuffer');
+  assert.ok(buf.byteLength > 1000);
+});
