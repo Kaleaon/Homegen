@@ -13,6 +13,18 @@ export class RoomDrawingTool {
     this.points = [];
   }
 
+  getCornerCount() {
+    return this.points.length;
+  }
+
+  getPoints() {
+    return [...this.points];
+  }
+
+  canClose() {
+    return this.points.length >= 3;
+  }
+
   /**
    * Add a corner, snapped against reference edges.
    */
@@ -64,7 +76,7 @@ export class RoomDrawingTool {
     const last = this.points[this.points.length - 1];
     const closeEnough = distance(first, last) <= this.settings.magneticThreshold;
 
-    const closedPoints = closeEnough ? [...this.points.slice(0, -1)] : [...this.points, first];
+    const closedPoints = closeEnough ? [...this.points.slice(0, -1)] : [...this.points];
     const validation = validatePlacement(closedPoints, context.existingRooms || []);
 
     if (!validation.valid) {
