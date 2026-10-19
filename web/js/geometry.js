@@ -532,6 +532,23 @@ export function polygonArea(points) {
   return Math.abs(area) / 2;
 }
 
+export function polygonPerimeter(points) {
+  if (!points || points.length < 2) return 0;
+  let perimeter = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const p1 = points[i];
+    const p2 = points[j];
+    const x1 = p1.x ?? p1[0] ?? 0;
+    const y1 = p1.y ?? p1[1] ?? 0;
+    const x2 = p2.x ?? p2[0] ?? 0;
+    const y2 = p2.y ?? p2[1] ?? 0;
+    perimeter += Math.hypot(x2 - x1, y2 - y1);
+  }
+  return perimeter;
+}
+
 export function polygonWinding(points) {
   if (!points || points.length < 3) return 1;
   let sum = 0;

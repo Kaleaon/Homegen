@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { escapeCSVField, formatCSVRow, fmtLen, generateBOMCSV } from '../js/bomExporter.js';
+import { polygonPerimeter, interiorPolygon } from '../js/geometry.js';
 import { buildMultiLevel } from '../js/templates.js';
 
 const htmlPath = resolve('index.html');
@@ -156,4 +157,83 @@ test('app.js registers export-csv command in COMMAND_REGISTRY and binds event li
     'COMMAND_REGISTRY in app.js must define export-csv command'
   );
   assert.match(appJsContent, /generateBOMCSV/, 'app.js must import and call generateBOMCSV');
+});
+
+test('polygonPerimeter computes accurate Euclidean perimeter for 2D polygons', () => {
+  assert.equal(polygonPerimeter(null), 0);
+  assert.equal(polygonPerimeter([]), 0);
+  assert.equal(polygonPerimeter([{ x: 10, y: 10 }]), 0);
+
+  // Rectangle 100 x 50
+  const rect = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 50 },
+    { x: 0, y: 50 },
+  ];
+  assert.equal(polygonPerimeter(rect), 300);
+
+  // Array format coordinates [x, y]
+  const rectArr = [
+    [0, 0],
+    [100, 0],
+    [100, 50],
+    [0, 50],
+  ];
+  assert.equal(polygonPerimeter(rectArr), 300);
+
+  // L-shaped polygon (6 vertices)
+  const lShape = [
+    { x: 0, y: 0 },
+    { x: 120, y: 0 },
+    { x: 120, y: 60 },
+    { x: 60, y: 60 },
+    { x: 60, y: 120 },
+    { x: 0, y: 120 },
+  ];
+  // 120 + 60 + 60 + 60 + 60 + 120 = 480
+  assert.equal(polygonPerimeter(lShape), 480);
+});
+
+test('generateBOMCSV calculates wall finish area from actual polygon perimeter for non-rectangular rooms', () => {
+  // U-shaped room where bounding box perimeter differs drastically from actual polygon perimeter
+  const uShapedRoom = {
+    id: 'room_u',
+    name: 'U-Shaped Courtyard Room',
+    type: 'living',
+    points: [
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      { x: 300, y: 300 },
+      { x: 200, y: 300 },
+      { x: 200, y: 100 },
+      { x: 100, y: 100 },
+      { x: 100, y: 300 },
+      { x: 0, y: 300 },
+    ],
+    wallFinish: 'wallpaper_damask',
+    ceilingHeight: 96,
+  };
+
+  const docState = {
+    name: 'Non-Rectangular Room Test',
+    levels: 1,
+    rooms: [uShapedRoom],
+  };
+
+  const csv = generateBOMCSV(docState);
+
+  // Calculate expected wall finish area using polygonPerimeter(interiorPolygon(r))
+  const innerPoly = interiorPolygon(uShapedRoom);
+  const actualPerimeter = polygonPerimeter(innerPoly);
+  const expectedGrossSqIn = actualPerimeter * 96;
+  const expectedNetSqFt = (expectedGrossSqIn / 144).toFixed(2);
+
+  // Bounding box perimeter would be 2 * (295.5 + 295.5) = 1182 in -> 788.00 sq ft
+  // True polygon perimeter is ~1582 in -> ~1054.67 sq ft
+  assert.ok(csv.includes(`wallpaper_damask`), 'CSV must contain the wall finish item ID');
+  assert.ok(
+    csv.includes(expectedNetSqFt),
+    `CSV wall finish coverage area must equal actual polygon perimeter area (${expectedNetSqFt} sq ft)`
+  );
 });
