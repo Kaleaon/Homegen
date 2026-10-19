@@ -4,6 +4,8 @@
  * variable segment setbacks, and site layer scene graph geometries.
  */
 
+import { reproject } from './geometry.js';
+
 /**
  * 2D Minimum Bounding Rectangle helper.
  */
@@ -340,18 +342,31 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     return { crs, features: [], segments: [], layers: [] };
   }
 
-  // Convert raw coords to planar metric/projected values
+  const sourceCRS = crs;
+
+  // Convert raw coords to WGS84 via reproject, then to planar metric/projected values
   const projectPoint = (c) => {
-    const lon = c[0];
-    const lat = c[1];
-    if (crs === 'EPSG:3857') {
+    const wgs84 = reproject(c, sourceCRS, 'EPSG:4326');
+    const lon = wgs84[0];
+    const lat = wgs84[1];
+
+    if (isNaN(lon) || isNaN(lat)) {
+      return { px: 0, py: 0 };
+    }
+
+    if (sourceCRS === 'EPSG:3857') {
       return { px: lon, py: lat };
     }
-    // Default EPSG:4326 to Mercator meters or linear
-    const rad = (lat * Math.PI) / 180;
+
+    const clampedLat = Math.max(-89.9, Math.min(89.9, lat));
+    const rad = (clampedLat * Math.PI) / 180;
     const px = lon * 111319.49;
     const py = Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 6378137;
-    return { px, py };
+
+    return {
+      px: isNaN(px) ? lon : px,
+      py: isNaN(py) ? lat : py,
+    };
   };
 
   const planarCoords = allCoords.map(projectPoint);
