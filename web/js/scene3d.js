@@ -10,7 +10,7 @@ import {
   wallLength,
   wallNeighbors,
   interior,
-  subtractInterval,
+  csgExteriorCladdingIntervals,
   lv,
   getRoomPoints,
   getRoomBoundingBox,
@@ -634,11 +634,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
-  const faceMats = (base, face, visible) => {
-    const a = Array(6).fill(base);
-    a[face] = visible;
-    return a;
-  };
 
   function buildRoomShape(pts) {
     const shape = new THREE.Shape();
@@ -651,6 +646,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return shape;
   }
 
+<<<<<<< HEAD
   function createTriangulatedSlabGeometry(room, e) {
     const pts = getRoomPoints(room);
     const mesh = room.floorMesh;
@@ -724,10 +720,48 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   }
 
   function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, faceIdx) {
+=======
+  function createWallExtrusionMesh(len, y0, y1, depth, cuts, mat) {
+    if (len <= 0.01 || y1 - y0 <= 0.01) return null;
+    const shape = new THREE.Shape();
+    shape.moveTo(0, y0 * S);
+    shape.lineTo(len * S, y0 * S);
+    shape.lineTo(len * S, y1 * S);
+    shape.lineTo(0, y1 * S);
+    shape.closePath();
+
+    for (const c of cuts) {
+      const f = Math.max(0, c.from);
+      const t = Math.min(len, c.to);
+      if (t - f <= 0.01) continue;
+      const sill = Math.max(y0, c.sill);
+      const head = Math.min(y1, c.head);
+      if (head - sill <= 0.01) continue;
+
+      const hole = new THREE.Path();
+      hole.moveTo(f * S, sill * S);
+      hole.lineTo(t * S, sill * S);
+      hole.lineTo(t * S, head * S);
+      hole.lineTo(f * S, head * S);
+      hole.closePath();
+
+      shape.holes.push(hole);
+    }
+
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: depth * S, bevelEnabled: false });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function addExtrudedWallSegment(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, cuts = []) {
+>>>>>>> origin/stitch/csg-polygon-extrusion-jm0-f066e7c9-ec78-4272-ac9d-e505ae7cc774
     const s = wallSeg(room, wall);
     const len = t1 - t0;
     const dep = d1 - d0;
     if (len <= 0.01 || y1 - y0 <= 0.01) return;
+<<<<<<< HEAD
 
     const pts = getRoomPoints(room);
     const wallIdx = resolveWallIndex(wall);
@@ -1004,6 +1038,44 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       cur = Math.max(cur, t);
     }
     if (cur < b) piece(cur, b, 0, H);
+=======
+
+    const localCuts = cuts
+      .filter((c) => c.to > t0 && c.from < t1)
+      .map((c) => ({
+        ...c,
+        from: Math.max(0, c.from - t0),
+        to: Math.min(len, c.to - t0),
+      }));
+
+    const mesh = createWallExtrusionMesh(len, y0, y1, dep, localCuts, mat);
+    if (!mesh) return;
+
+    const m4 = new THREE.Matrix4();
+    m4.set(
+      s.dx,
+      0,
+      s.nx,
+      (s.ax + s.dx * t0 + s.nx * d0) * S,
+      0,
+      1,
+      0,
+      (elev + y0) * S,
+      s.dy,
+      0,
+      s.ny,
+      (s.ay + s.dy * t0 + s.ny * d0) * S,
+      0,
+      0,
+      0,
+      1
+    );
+
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(m4);
+    mesh.matrixWorldNeedsUpdate = true;
+    group.add(mesh);
+>>>>>>> origin/stitch/csg-polygon-extrusion-jm0-f066e7c9-ec78-4272-ac9d-e505ae7cc774
   }
 
   // ---------------------------------------------------------------- scene build
@@ -1551,13 +1623,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const wallUV = getWallUV(room, wall);
     const base = plain('#efece4', 0.9);
     const visMat = finishMaterial(fin, len, room.ceiling, finishId, 0.8, wallUV);
-    // local +z face is face 4 (interior normal), local -z face is face 5 (exterior normal)
-    const face = 4;
-    const outFace = 5;
     const ops = wallOpenings(state, room, wall);
     const cuts = ops.map(({ o, from, to }) => {
-      const d = OPENING_BY_ID[o.type] || OPENINGS[0];
-      return { from, to, sill: d.sill, head: d.sill + d.h, o, d };
+      const d = OPENING_BY_ID[o.type] || { sill: 0, h: 80, w: o.width || 32 };
+      return { from, to, sill: d.sill ?? 0, head: (d.sill ?? 0) + (d.h ?? 80), o, d };
     });
 
     let extFinId = room.cladding || room.exteriorCladding;
@@ -1581,9 +1650,16 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
 
     // Exterior shell interval calculation (where nothing is behind the wall)
-    let ext = [[-wallThick / 2, len + wallThick / 2]];
-    for (const n of wallNeighbors(state.rooms, room, wall))
-      ext = subtractInterval(ext, [n.from, n.to]);
+    let ext;
+    if (typeof csgExteriorCladdingIntervals === 'function') {
+      const { intervals } = csgExteriorCladdingIntervals(state.rooms, room, wall, wallThick);
+      if (intervals && intervals.length > 0) ext = intervals;
+    }
+    if (!ext) {
+      ext = [[-wallThick / 2, len + wallThick / 2]];
+      for (const n of wallNeighbors(state.rooms, room, wall))
+        ext = subtractInterval(ext, [n.from, n.to]);
+    }
 
     if (bulge) {
       const inner = { base, vis: visMat };
@@ -1670,10 +1746,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           );
       }
     }
-
-    // Fill openings (windows and doors) passing resolved assembly thickness
     for (const { o, d } of cuts) {
-      if (!room.openings.includes(o)) continue; // draw each opening once, from its owner
+      if (!room.openings.some((x) => x.id === o.id)) continue; // draw each opening once, from its owner
       const info = openingInfo(state, room, o);
       const og =
         d.kind === 'window'
@@ -1814,7 +1888,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     group.add(og);
     return og;
   }
-  function addDoor(group, room, wall, o, d, e, _exterior, wallThickness = WT) {
+  function addDoor(group, room, wall, o, d, e, exterior, wallThickness = WT) {
     const og = buildDoor3DMesh({
       room,
       wall,
