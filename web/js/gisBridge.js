@@ -569,6 +569,314 @@ export function ensureSpatialIndex(site) {
   return site.spatialIndex;
 }
 
+export function getBounds3D(pts) {
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
+  const list = Array.isArray(pts) ? pts : pts.points || pts.vertices || pts.triangle || [pts];
+  for (const p of list) {
+    const x = p.x ?? p[0] ?? 0;
+    const y = p.y ?? p[1] ?? 0;
+    const z = p.z ?? p[2] ?? 0;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
+  }
+  return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+export function boundsOverlap3D(a, b, eps = 0.001) {
+  return (
+    a.minX < b.maxX + eps &&
+    a.maxX > b.minX - eps &&
+    a.minY < b.maxY + eps &&
+    a.maxY > b.minY - eps &&
+    a.minZ < b.maxZ + eps &&
+    a.maxZ > b.minZ - eps
+  );
+}
+
+function sub3(a, b) {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+function cross3(a, b) {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+function dot3(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+export function triangleTriangleIntersect(t1, t2) {
+  const b1 = getBounds3D(t1);
+  const b2 = getBounds3D(t2);
+  if (!boundsOverlap3D(b1, b2)) return false;
+
+  const n1 = cross3(sub3(t1[1], t1[0]), sub3(t1[2], t1[0]));
+  const d1 = -dot3(n1, t1[0]);
+
+  const d2_0 = dot3(n1, t2[0]) + d1;
+  const d2_1 = dot3(n1, t2[1]) + d1;
+  const d2_2 = dot3(n1, t2[2]) + d1;
+
+  if (
+    (d2_0 > 1e-5 && d2_1 > 1e-5 && d2_2 > 1e-5) ||
+    (d2_0 < -1e-5 && d2_1 < -1e-5 && d2_2 < -1e-5)
+  ) {
+    return false;
+  }
+
+  const n2 = cross3(sub3(t2[1], t2[0]), sub3(t2[2], t2[0]));
+  const d2 = -dot3(n2, t2[0]);
+
+  const d1_0 = dot3(n2, t1[0]) + d2;
+  const d1_1 = dot3(n2, t1[1]) + d2;
+  const d1_2 = dot3(n2, t1[2]) + d2;
+
+  if (
+    (d1_0 > 1e-5 && d1_1 > 1e-5 && d1_2 > 1e-5) ||
+    (d1_0 < -1e-5 && d1_1 < -1e-5 && d1_2 < -1e-5)
+  ) {
+    return false;
+  }
+
+  const lineDir = cross3(n1, n2);
+  const len = Math.hypot(lineDir.x, lineDir.y, lineDir.z);
+  if (len < 1e-6) {
+    return boundsOverlap3D(b1, b2);
+  }
+
+  function computeInterval(t, distances) {
+    const proj = [dot3(t[0], lineDir), dot3(t[1], lineDir), dot3(t[2], lineDir)];
+    const pointsOnLine = [];
+    const edges = [
+      [0, 1],
+      [1, 2],
+      [2, 0],
+    ];
+    for (const [i, j] of edges) {
+      const di = distances[i];
+      const dj = distances[j];
+      if (Math.abs(di) < 1e-6 && Math.abs(dj) < 1e-6) {
+        pointsOnLine.push(proj[i], proj[j]);
+      } else if (di * dj <= 0 && Math.abs(di - dj) > 1e-6) {
+        const alpha = di / (di - dj);
+        pointsOnLine.push(proj[i] + alpha * (proj[j] - proj[i]));
+      }
+    }
+    if (pointsOnLine.length === 0) return [0, 0];
+    return [Math.min(...pointsOnLine), Math.max(...pointsOnLine)];
+  }
+
+  const int1 = computeInterval(t1, [d1_0, d1_1, d1_2]);
+  const int2 = computeInterval(t2, [d2_0, d2_1, d2_2]);
+
+  return Math.max(int1[0], int2[0]) <= Math.min(int1[1], int2[1]) + 1e-5;
+}
+
+export class SpatialBVH3D {
+  constructor(maxEntries = 8) {
+    this.maxEntries = maxEntries;
+    this.root = {
+      bounds: {
+        minX: Infinity,
+        minY: Infinity,
+        minZ: Infinity,
+        maxX: -Infinity,
+        maxY: -Infinity,
+        maxZ: -Infinity,
+      },
+      children: [],
+      leaf: true,
+    };
+    this.items = [];
+  }
+
+  insert(item, bounds3D) {
+    const bounds =
+      bounds3D ||
+      getBounds3D(item.triangle || item.points || item.vertices || item.vertices3D || item);
+    const nodeItem = { item, bounds };
+    this.items.push(nodeItem);
+    this._insertNode(this.root, nodeItem);
+  }
+
+  _insertNode(node, entry) {
+    this._expandBounds(node.bounds, entry.bounds);
+    if (node.leaf) {
+      node.children.push(entry);
+      if (node.children.length > this.maxEntries) {
+        this._split(node);
+      }
+    } else {
+      let bestChild = node.children[0];
+      let minVolume = Infinity;
+      for (const child of node.children) {
+        const vol = this._expansionVolume(child.bounds, entry.bounds);
+        if (vol < minVolume) {
+          minVolume = vol;
+          bestChild = child;
+        }
+      }
+      this._insertNode(bestChild, entry);
+    }
+  }
+
+  _expandBounds(target, addition) {
+    target.minX = Math.min(target.minX, addition.minX);
+    target.minY = Math.min(target.minY, addition.minY);
+    target.minZ = Math.min(target.minZ, addition.minZ);
+    target.maxX = Math.max(target.maxX, addition.maxX);
+    target.maxY = Math.max(target.maxY, addition.maxY);
+    target.maxZ = Math.max(target.maxZ, addition.maxZ);
+  }
+
+  _expansionVolume(b, addition) {
+    const minX = Math.min(b.minX, addition.minX);
+    const minY = Math.min(b.minY, addition.minY);
+    const minZ = Math.min(b.minZ, addition.minZ);
+    const maxX = Math.max(b.maxX, addition.maxX);
+    const maxY = Math.max(b.maxY, addition.maxY);
+    const maxZ = Math.max(b.maxZ, addition.maxZ);
+    const currVol = (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
+    const newVol = (maxX - minX) * (maxY - minY) * (maxZ - minZ);
+    return newVol - currVol;
+  }
+
+  _split(node) {
+    const children = node.children.slice();
+    node.children = [];
+    node.leaf = false;
+
+    const dx = node.bounds.maxX - node.bounds.minX;
+    const dy = node.bounds.maxY - node.bounds.minY;
+    const dz = node.bounds.maxZ - node.bounds.minZ;
+
+    if (dx >= dy && dx >= dz) {
+      children.sort((a, b) => a.bounds.minX + a.bounds.maxX - (b.bounds.minX + b.bounds.maxX));
+    } else if (dy >= dx && dy >= dz) {
+      children.sort((a, b) => a.bounds.minY + a.bounds.maxY - (b.bounds.minY + b.bounds.maxY));
+    } else {
+      children.sort((a, b) => a.bounds.minZ + a.bounds.maxZ - (b.bounds.minZ + b.bounds.maxZ));
+    }
+
+    const mid = Math.floor(children.length / 2);
+    const leftGroup = children.slice(0, mid);
+    const rightGroup = children.slice(mid);
+
+    const leftNode = { bounds: this._calcBounds(leftGroup), children: leftGroup, leaf: true };
+    const rightNode = { bounds: this._calcBounds(rightGroup), children: rightGroup, leaf: true };
+
+    node.children = [leftNode, rightNode];
+  }
+
+  _calcBounds(group) {
+    const bounds = {
+      minX: Infinity,
+      minY: Infinity,
+      minZ: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity,
+      maxZ: -Infinity,
+    };
+    for (const g of group) {
+      this._expandBounds(bounds, g.bounds);
+    }
+    return bounds;
+  }
+
+  search(queryBounds3D) {
+    const results = [];
+    this._searchNode(this.root, queryBounds3D, results);
+    return results;
+  }
+
+  _searchNode(node, queryBounds3D, results) {
+    if (!boundsOverlap3D(node.bounds, queryBounds3D)) return;
+    if (node.leaf) {
+      for (const child of node.children) {
+        if (boundsOverlap3D(child.bounds, queryBounds3D)) {
+          results.push(child.item);
+        }
+      }
+    } else {
+      for (const child of node.children) {
+        this._searchNode(child, queryBounds3D, results);
+      }
+    }
+  }
+
+  queryTriangleIntersections(trianglePoints) {
+    const queryBounds = getBounds3D(trianglePoints);
+    const candidates = this.search(queryBounds);
+    const intersections = [];
+    for (const item of candidates) {
+      const itemTris = item.triangle
+        ? [item.triangle]
+        : item.triangles || [item.points || item.vertices];
+      for (const tri of itemTris) {
+        if (tri && tri.length >= 3 && triangleTriangleIntersect(trianglePoints, tri)) {
+          intersections.push({ item, triangle: tri });
+          break;
+        }
+      }
+    }
+    return intersections;
+  }
+
+  queryTerrainCollisions(roomMesh, terrainMesh) {
+    const collisions = [];
+    if (!roomMesh || !terrainMesh) return collisions;
+
+    const terrainTris = terrainMesh.triangles || [];
+    const terrainVerts = terrainMesh.vertices || [];
+
+    for (let i = 0; i < terrainTris.length; i++) {
+      const triIndices = terrainTris[i];
+      const triPoints = [
+        terrainVerts[triIndices[0]],
+        terrainVerts[triIndices[1]],
+        terrainVerts[triIndices[2]],
+      ];
+      if (triPoints[0] && triPoints[1] && triPoints[2]) {
+        this.insert(
+          { type: 'terrainTriangle', triangle: triPoints, index: i },
+          getBounds3D(triPoints)
+        );
+      }
+    }
+
+    const roomTris = roomMesh.triangles || [];
+    const roomVerts = roomMesh.vertices || [];
+
+    for (let i = 0; i < roomTris.length; i++) {
+      const triIndices = roomTris[i];
+      const triPoints = [
+        roomVerts[triIndices[0]],
+        roomVerts[triIndices[1]],
+        roomVerts[triIndices[2]],
+      ];
+      if (triPoints[0] && triPoints[1] && triPoints[2]) {
+        const hits = this.queryTriangleIntersections(triPoints);
+        if (hits.length > 0) {
+          collisions.push({ roomTriangleIndex: i, terrainHits: hits });
+        }
+      }
+    }
+
+    return collisions;
+  }
+}
+
 /**
  * Subsystem controller class for GIS operations.
  */
