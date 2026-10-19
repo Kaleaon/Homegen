@@ -9,6 +9,9 @@ import {
   fixtureZone,
   rectsOverlap,
   floorAreaSqFt,
+  getRoomPoints,
+  getRoomClearSpan,
+  polygonCentroid,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
@@ -93,7 +96,7 @@ export class ComplianceOverlayScene {
         interior: roomInterior,
         isSleeping: !!ROOM_TYPES[room.type]?.sleeping,
         isHabitable: !!ROOM_TYPES[room.type]?.habitable && room.type !== 'kitchen',
-        minDim: polyData.minWidth,
+        minDim: getRoomClearSpan(room),
         areaSqFt: floorAreaSqFt(room),
       };
       this.roomIndex.set(room.id, roomEntry);
@@ -450,25 +453,25 @@ export class ComplianceOverlayScene {
         }
       }
 
-      // Corner & vertex handles
+      // N-vertex constraint handles
       const pts = getRoomPoints(room);
-      const cornerIds = ['nw', 'ne', 'se', 'sw'];
-
-      pts.forEach((pt, idx) => {
-        const handleId = pts.length === 4 && idx < 4 ? cornerIds[idx] : `v${idx}`;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const handleId =
+          pts.length === 4 ? (i === 0 ? 'nw' : i === 1 ? 'ne' : i === 2 ? 'se' : 'sw') : `v_${i}`;
         nextNodes.push(
           new SpatialOverlayNode(
             `node:handle:${room.id}:${handleId}`,
             'constraintHandle',
             {
-              x: pt.x,
-              y: pt.y,
+              x: p.x,
+              y: p.y,
               w: 8,
               h: 8,
             },
             {
               roomId: room.id,
-              handleIndex: idx,
+              handleIndex: i,
               handleId,
               isSelected,
               isValid,
@@ -480,24 +483,14 @@ export class ComplianceOverlayScene {
             }
           )
         );
-      });
+      }
 
-      // Live dimension label node anchored at polygon centroid
-      const polyData = roomEntry ? roomEntry.polyData : interiorPolygonData(room);
-      const centroid = polyData
-        ? polyData.centroid
-        : { x: room.x + room.w / 2, y: room.y + room.h / 2 };
-      const minDimVal = polyData ? polyData.minWidth : Math.min(room.w, room.h);
-
-      const isRect =
-        pts.length === 4 &&
-        Math.abs(pts[0].y - pts[1].y) < 1e-3 &&
-        Math.abs(pts[1].x - pts[2].x) < 1e-3 &&
-        Math.abs(pts[2].y - pts[3].y) < 1e-3 &&
-        Math.abs(pts[3].x - pts[0].x) < 1e-3;
-
-      const dimText = isRect ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(minDimVal)} min clear`;
-
+      // Live dimension label node centered at interior polygon centroid
+      const centroid = polygonCentroid(pts);
+      const clearSpan = getRoomClearSpan(room);
+      const minDimVal = clearSpan;
+      const dimText =
+        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} clear`;
       nextNodes.push(
         new SpatialOverlayNode(
           `node:dimension:${room.id}`,
@@ -511,6 +504,7 @@ export class ComplianceOverlayScene {
           {
             roomId: room.id,
             dimensionText: dimText,
+            clearSpan,
             areaSqFt,
             minWidth: minDimVal,
             minDim: minDimVal,

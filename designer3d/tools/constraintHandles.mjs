@@ -18,13 +18,47 @@ export function fmtDimensionText(w, h) {
 }
 
 /**
- * Get 4 corner constraint handles for a room rectangle.
+ * Get constraint handles for a room polygon (all N vertices).
  */
 export function getConstraintHandles(room, _options = {}) {
-  const x = room.x || 0;
-  const y = room.y || 0;
-  const w = room.w || 0;
-  const h = room.h || 0;
+  const pts = room?.points || room?.corners || room?.vertices;
+  if (Array.isArray(pts) && pts.length >= 3) {
+    if (pts.length === 4) {
+      return [
+        { id: 'nw', index: 0, x: pts[0].x, y: pts[0].y, cursor: 'nwse-resize', name: 'Top-Left' },
+        { id: 'ne', index: 1, x: pts[1].x, y: pts[1].y, cursor: 'nesw-resize', name: 'Top-Right' },
+        {
+          id: 'sw',
+          index: 2,
+          x: pts[3].x,
+          y: pts[3].y,
+          cursor: 'nesw-resize',
+          name: 'Bottom-Left',
+        },
+        {
+          id: 'se',
+          index: 3,
+          x: pts[2].x,
+          y: pts[2].y,
+          cursor: 'nwse-resize',
+          name: 'Bottom-Right',
+        },
+      ];
+    }
+    return pts.map((p, i) => ({
+      id: `v_${i}`,
+      index: i,
+      x: p.x,
+      y: p.y,
+      cursor: 'crosshair',
+      name: `Vertex ${i + 1}`,
+    }));
+  }
+
+  const x = room?.x || 0;
+  const y = room?.y || 0;
+  const w = room?.w || 0;
+  const h = room?.h || 0;
 
   return [
     { id: 'nw', index: 0, x, y, cursor: 'nwse-resize', name: 'Top-Left' },
@@ -37,10 +71,10 @@ export function getConstraintHandles(room, _options = {}) {
 /**
  * Validates room dimensions against IRC building code rules & constraints.
  */
-export function validateRoomDimensions(roomType, w, h) {
+export function validateRoomDimensions(roomType, w, h, options = {}) {
   const violations = [];
-  const minDim = Math.min(w, h);
-  const areaSqFt = (w * h) / 144;
+  const minDim = options.clearSpan !== undefined ? options.clearSpan : Math.min(w, h);
+  const areaSqFt = options.areaSqFt !== undefined ? options.areaSqFt : (w * h) / 144;
 
   // Minimum dimension general check (36 inches)
   if (w < 36 || h < 36) {

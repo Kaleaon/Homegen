@@ -124,4 +124,39 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
   test('fmtDimensionText formats inches into feet and inches', () => {
     expect(fmtDimensionText(144, 126)).toBe('12\' 0" × 10\' 6"');
   });
+
+  test('getConstraintHandles creates handle nodes for all N vertices of non-rectangular polygon room', () => {
+    const polygonRoom = {
+      id: 'poly_room',
+      name: 'L-Room',
+      type: 'living',
+      points: [
+        { x: 0, y: 0 },
+        { x: 240, y: 0 },
+        { x: 240, y: 120 },
+        { x: 120, y: 120 },
+        { x: 120, y: 240 },
+        { x: 0, y: 240 },
+      ],
+    };
+
+    const handles = getConstraintHandles(polygonRoom);
+    expect(handles).toHaveLength(6);
+    expect(handles[0]).toEqual({
+      id: 'v_0',
+      index: 0,
+      x: 0,
+      y: 0,
+      cursor: 'crosshair',
+      name: 'Vertex 1',
+    });
+    expect(handles[3]).toEqual({
+      id: 'v_3',
+      index: 3,
+      x: 120,
+      y: 120,
+      cursor: 'crosshair',
+      name: 'Vertex 4',
+    });
+  });
 });
