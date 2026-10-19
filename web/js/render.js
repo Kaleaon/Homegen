@@ -1402,6 +1402,9 @@ export function drawSnapGuides(ctx, snapResult, view) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
       else if (g.type === 'perpendicular')
         ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else if (g.type === 'angle_reference')
+        ctx.strokeStyle = getToken('--ktheme-warning', '#f59e0b');
+      else if (g.type === 'angle') ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
       else ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
 
       ctx.beginPath();
