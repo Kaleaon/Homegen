@@ -1017,7 +1017,7 @@ export function wallNeighbors(rooms, room, wall) {
           const from = Math.max(0, Math.min(t2_start, t2_end));
           const to = Math.min(s1.len, Math.max(t2_start, t2_end));
           if (to - from > EPS) {
-            out.push({ room: r, from, to });
+            out.push({ room: r, from, to, wall: j, neighborWall: j });
           }
         }
       }
@@ -1042,20 +1042,43 @@ export function csgExteriorCladdingIntervals(rooms, room, wall, wallThickness = 
   return { intervals: ext, neighbors: nbrs };
 }
 
-/** Offset translation from neighbour `r2`'s wall space into `room`'s wall space. */
-export const neighborShift = (room, r2, wall) =>
-  wall === 'N' || wall === 'S' ? r2.x - room.x : r2.y - room.y;
+/** Offset translation from neighbour `r2`'s wall space into `room`'s wall space via 2D vector projection. */
+export const neighborShift = (room, r2, wall, r2Wall) => {
+  const s1 = wallSeg(room, wall);
+  let s2 = null;
+  if (r2Wall !== undefined) {
+    s2 = wallSeg(r2, r2Wall);
+  } else {
+    const rPts = getRoomPoints(r2);
+    for (let j = 0; j < rPts.length; j++) {
+      const candidate = wallSeg(r2, j);
+      if (candidate.len <= EPS) continue;
+      const dotNorm = s1.nx * candidate.nx + s1.ny * candidate.ny;
+      if (Math.abs(dotNorm + 1) < 0.1 || Math.abs(dotNorm - 1) < 0.1) {
+        const perpDist = Math.abs((candidate.ax - s1.ax) * s1.nx + (candidate.ay - s1.ay) * s1.ny);
+        if (perpDist < WT + EPS) {
+          s2 = candidate;
+          break;
+        }
+      }
+    }
+  }
+  if (!s2) {
+    return wall === 'N' || wall === 'S' ? (r2.x ?? 0) - (room.x ?? 0) : (r2.y ?? 0) - (room.y ?? 0);
+  }
+  return (s2.ax - s1.ax) * s1.dx + (s2.ay - s1.ay) * s1.dy;
+};
 
 // ---- interval helpers (arrays of [a,b]) ----
 export function subtractInterval(intervals, [s0, s1]) {
   const out = [];
   for (const [a, b] of intervals) {
-    if (s1 <= a || s0 >= b) {
-      out.push([a, b]);
+    if (s1 <= a + EPS || s0 >= b - EPS) {
+      if (b - a > EPS) out.push([a, b]);
       continue;
     }
-    if (s0 > a) out.push([a, s0]);
-    if (s1 < b) out.push([s1, b]);
+    if (s0 - a > EPS) out.push([a, s0]);
+    if (b - s1 > EPS) out.push([s1, b]);
   }
   return out;
 }
