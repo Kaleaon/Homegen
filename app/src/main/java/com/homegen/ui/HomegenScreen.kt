@@ -5,14 +5,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetScaffoldState
@@ -28,6 +34,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -46,6 +54,7 @@ import com.homegen.electrical.ElectricalOverlayController
 import com.homegen.styles.model.DesignStyle
 import com.homegen.styles.ui.DesignStyleBrowser
 import com.homegen.templates.ui.RoomTemplatePanel
+import com.ktheme.android.KthemeComposeTheme
 import kotlinx.coroutines.launch
 
 /**
@@ -196,7 +205,7 @@ fun HomegenScreen(
                         .padding(top = 12.dp)
                         .background(
                             MaterialTheme.colorScheme.primaryContainer,
-                            shape = MaterialTheme.shapes.small,
+                            shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerControlDp.dp),
                         )
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -213,7 +222,7 @@ fun HomegenScreen(
                         .padding(start = 12.dp, top = 40.dp)
                         .background(
                             MaterialTheme.colorScheme.tertiaryContainer,
-                            shape = MaterialTheme.shapes.small,
+                            shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerTileDp.dp),
                         )
                         .padding(horizontal = 10.dp, vertical = 3.dp),
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -231,12 +240,14 @@ fun HomegenScreen(
                 IconButton(
                     onClick = { commandStack.undo() },
                     enabled = canUndo,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 ) {
                     Text("↩", style = MaterialTheme.typography.titleLarge)
                 }
                 IconButton(
                     onClick = { commandStack.redo() },
                     enabled = canRedo,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 ) {
                     Text("↪", style = MaterialTheme.typography.titleLarge)
                 }
@@ -264,63 +275,116 @@ fun HomegenScreen(
                     .padding(8.dp),
             )
 
-            // Bottom toolbar
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(8.dp),
-            ) {
-                // Primary tools row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+            // Adaptive Navigation (Rail >= 720dp vs Bar < 720dp)
+            val screenWidth = LocalConfiguration.current.screenWidthDp
+            val layoutConfig = KthemeComposeTheme.layout
+            val navItems = listOf(
+                NavigationToolItem("select", "Select", currentMode is InteractionMode.Select) {
+                    interactionController.mode = InteractionMode.Select
+                    currentMode = InteractionMode.Select
+                },
+                NavigationToolItem("wall", "Wall", currentMode is InteractionMode.WallDraw) {
+                    interactionController.mode = InteractionMode.WallDraw
+                    currentMode = InteractionMode.WallDraw
+                },
+                NavigationToolItem("room", "Room", currentMode is InteractionMode.RoomDraw) {
+                    interactionController.mode = InteractionMode.RoomDraw
+                    currentMode = InteractionMode.RoomDraw
+                },
+                NavigationToolItem("catalog", "Catalog") {
+                    scope.launch { scaffoldState.bottomSheetState.expand() }
+                },
+                NavigationToolItem("electrical", "Electrical", electricalMode) {
+                    electricalMode = !electricalMode
+                    if (electricalMode) {
+                        overlayController.enable(electricalLayer)
+                    } else {
+                        overlayController.disable()
+                    }
+                },
+            )
+
+            if (screenWidth >= layoutConfig.adaptiveWidthDp) {
+                // Wide layout (>= 720dp): Navigation Rail along left
+                NavigationRail(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(layoutConfig.cornerPanelDp.dp)),
                 ) {
-                    ToolButton("Select", currentMode is InteractionMode.Select) {
-                        interactionController.mode = InteractionMode.Select
-                        currentMode = InteractionMode.Select
-                    }
-                    ToolButton("Wall", currentMode is InteractionMode.WallDraw) {
-                        interactionController.mode = InteractionMode.WallDraw
-                        currentMode = InteractionMode.WallDraw
-                    }
-                    ToolButton("Room", currentMode is InteractionMode.RoomDraw) {
-                        interactionController.mode = InteractionMode.RoomDraw
-                        currentMode = InteractionMode.RoomDraw
-                    }
-                    ToolButton("Catalog") {
-                        scope.launch { scaffoldState.bottomSheetState.expand() }
-                    }
-                    ToolButton("Electrical", electricalMode) {
-                        electricalMode = !electricalMode
-                        if (electricalMode) {
-                            overlayController.enable(electricalLayer)
-                        } else {
-                            overlayController.disable()
-                        }
+                    navItems.forEach { item ->
+                        NavigationRailItem(
+                            selected = item.isActive,
+                            onClick = item.onClick,
+                            icon = { Text(item.label.take(1)) },
+                            label = { Text(item.label) },
+                            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                        )
                     }
                 }
-
-                // Secondary tools row
-                Row(
+            } else {
+                // Phone / compact layout (< 720dp): Bottom Navigation Bar
+                Column(
                     modifier = Modifier
+                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                        .padding(8.dp),
                 ) {
-                    ToolButton("Styles") {
-                        overlayScreen = OverlayScreen.STYLE_BROWSER
-                    }
-                    ToolButton("Templates") {
-                        overlayScreen = OverlayScreen.ROOM_TEMPLATES
-                    }
-                    FilledTonalButton(onClick = {
-                        val selectedId = surfaceManager.sceneController.selectedObjectId
-                        if (selectedId != null) {
-                            surfaceManager.sceneController.removeObject(selectedId)
+                    // Primary tools row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        ToolButton("Select", currentMode is InteractionMode.Select) {
+                            interactionController.mode = InteractionMode.Select
+                            currentMode = InteractionMode.Select
                         }
-                    }) {
-                        Text("Delete")
+                        ToolButton("Wall", currentMode is InteractionMode.WallDraw) {
+                            interactionController.mode = InteractionMode.WallDraw
+                            currentMode = InteractionMode.WallDraw
+                        }
+                        ToolButton("Room", currentMode is InteractionMode.RoomDraw) {
+                            interactionController.mode = InteractionMode.RoomDraw
+                            currentMode = InteractionMode.RoomDraw
+                        }
+                        ToolButton("Catalog") {
+                            scope.launch { scaffoldState.bottomSheetState.expand() }
+                        }
+                        ToolButton("Electrical", electricalMode) {
+                            electricalMode = !electricalMode
+                            if (electricalMode) {
+                                overlayController.enable(electricalLayer)
+                            } else {
+                                overlayController.disable()
+                            }
+                        }
+                    }
+
+                    // Secondary tools row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        ToolButton("Styles") {
+                            overlayScreen = OverlayScreen.STYLE_BROWSER
+                        }
+                        ToolButton("Templates") {
+                            overlayScreen = OverlayScreen.ROOM_TEMPLATES
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                val selectedId = surfaceManager.sceneController.selectedObjectId
+                                if (selectedId != null) {
+                                    surfaceManager.sceneController.removeObject(selectedId)
+                                }
+                            },
+                            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                            shape = RoundedCornerShape(layoutConfig.cornerControlDp.dp),
+                        ) {
+                            Text("Delete")
+                        }
                     }
                 }
             }
@@ -342,6 +406,8 @@ private fun ToolButton(
 ) {
     FilledTonalButton(
         onClick = onClick,
+        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+        shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerControlDp.dp),
         colors = if (isActive) {
             androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
                 containerColor = MaterialTheme.colorScheme.primary,

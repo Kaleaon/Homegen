@@ -303,7 +303,11 @@ button:disabled {
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px 1fr 320px;
+  grid-template-columns: minmax(200px, var(--ktheme-layout-sidebar-left, 260px)) 1fr minmax(
+      240px,
+      var(--ktheme-layout-sidebar-right, 320px)
+    );
+  border-radius: var(--ktheme-layout-corner-panel, 14px);
   min-height: 0;
 }
 aside {
@@ -598,9 +602,16 @@ ul.v .msg {
   flex-wrap: wrap;
   margin-top: 8px;
 }
-@media (max-width: 1000px) {
+@media (max-width: 720px) {
   main {
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  #left {
+    max-height: 30vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--ktheme-border);
+    border-radius: var(--ktheme-layout-corner-panel, 14px);
   }
   #right {
     position: fixed;
@@ -610,21 +621,8 @@ ul.v .msg {
     max-height: 40vh;
     border-top: 1px solid var(--ktheme-border);
     border-left: 0;
+    border-radius: var(--ktheme-layout-corner-panel, 14px);
     z-index: 5;
-  }
-  #stage {
-    margin-bottom: 40vh;
-  }
-}
-@media (max-width: 640px) {
-  main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-  #left {
-    max-height: 30vh;
-    border-right: 0;
-    border-bottom: 1px solid var(--ktheme-border);
   }
   #stage {
     margin-bottom: 40vh;

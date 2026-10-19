@@ -25,6 +25,144 @@ val LocalKthemeSemanticColors = staticCompositionLocalOf<KthemeSemanticColors> {
     error("No KthemeSemanticColors provided. Wrap your UI in KthemeComposeTheme { ... }.")
 }
 
+data class KthemeLayout(
+    val id: String = "compose",
+    val name: String = "Compose",
+    val navPhone: String = "bar",
+    val navWide: String = "rail",
+    val adaptiveWidthDp: Int = 720,
+    val cornerLargeDp: Int = 18,
+    val cornerPanelDp: Int = 14,
+    val cornerTileDp: Int = 12,
+    val cornerCoverDp: Int = 6,
+    val cornerControlDp: Int = 999,
+    val cornerIconDp: Int = 10,
+    val cornerArtworkDp: Int = 20,
+    val typographyBody: String = "Roboto",
+    val minimumMetadataSp: Int = 10,
+    val contentCase: String = "preserve",
+    val navigationCase: String = "preserve",
+    val surfaces: String = "compose",
+    val actions: String = "theme-effect",
+    val player: String = "docked",
+    val shadow: String = "theme-effect"
+)
+
+val LocalKthemeLayout = staticCompositionLocalOf { KthemeLayout() }
+
+fun Theme.toKthemeLayout(): KthemeLayout {
+    val layoutId = metadata.id.lowercase()
+    return when {
+        layoutId.contains("sweep") || layoutId.contains("lcars") -> KthemeLayout(
+            id = "sweep",
+            name = "Sweep Console",
+            navPhone = "sweep",
+            navWide = "sweep",
+            cornerLargeDp = 0,
+            cornerPanelDp = 0,
+            cornerTileDp = 0,
+            cornerCoverDp = 0,
+            cornerControlDp = 999,
+            cornerIconDp = 999,
+            cornerArtworkDp = 0,
+            typographyBody = "Antonio + Nunito Sans",
+            contentCase = "uppercase",
+            navigationCase = "uppercase",
+            surfaces = "lcars",
+            actions = "filled-text",
+            player = "docked-text",
+            shadow = "none"
+        )
+        layoutId.contains("terminal") -> KthemeLayout(
+            id = "terminal",
+            name = "Ink Terminal",
+            navPhone = "bar",
+            navWide = "rail",
+            cornerLargeDp = 4,
+            cornerPanelDp = 4,
+            cornerTileDp = 4,
+            cornerCoverDp = 4,
+            cornerControlDp = 4,
+            cornerIconDp = 4,
+            cornerArtworkDp = 4,
+            typographyBody = "JetBrains Mono",
+            minimumMetadataSp = 12,
+            contentCase = "uppercase",
+            navigationCase = "uppercase",
+            surfaces = "box",
+            shadow = "none"
+        )
+        layoutId.contains("tile") || layoutId.contains("metro") -> KthemeLayout(
+            id = "tiles",
+            name = "Metro Tiles",
+            navPhone = "pivot-appbar",
+            navWide = "pivot-appbar",
+            cornerLargeDp = 0,
+            cornerPanelDp = 0,
+            cornerTileDp = 0,
+            cornerCoverDp = 0,
+            cornerControlDp = 0,
+            cornerIconDp = 0,
+            cornerArtworkDp = 0,
+            typographyBody = "Open Sans",
+            navigationCase = "lowercase",
+            surfaces = "flat",
+            actions = "accent-tile"
+        )
+        layoutId.contains("glass") || layoutId.contains("aero") || layoutId.contains("frutiger") -> KthemeLayout(
+            id = "glass",
+            name = "Aero Glass",
+            navPhone = "bar",
+            navWide = "rail",
+            cornerLargeDp = 18,
+            cornerPanelDp = 16,
+            cornerTileDp = 12,
+            cornerCoverDp = 8,
+            cornerControlDp = 12,
+            cornerIconDp = 12,
+            cornerArtworkDp = 22,
+            typographyBody = "Nunito Sans",
+            surfaces = "soft"
+        )
+        layoutId.contains("rule") -> KthemeLayout(
+            id = "rules",
+            name = "Rule & Rail",
+            navPhone = "rail",
+            navWide = "rail",
+            cornerLargeDp = 0,
+            cornerPanelDp = 0,
+            cornerTileDp = 0,
+            cornerCoverDp = 0,
+            cornerControlDp = 0,
+            cornerIconDp = 0,
+            cornerArtworkDp = 0,
+            typographyBody = "Jost",
+            contentCase = "uppercase",
+            navigationCase = "uppercase",
+            surfaces = "rule",
+            shadow = "none"
+        )
+        layoutId.contains("press") || layoutId.contains("paper") -> KthemeLayout(
+            id = "press",
+            name = "Press",
+            navPhone = "bar",
+            navWide = "rail",
+            cornerLargeDp = 6,
+            cornerPanelDp = 3,
+            cornerTileDp = 2,
+            cornerCoverDp = 2,
+            cornerControlDp = 2,
+            cornerIconDp = 2,
+            cornerArtworkDp = 4,
+            typographyBody = "Source Serif 4 + Jost",
+            surfaces = "quiet",
+            actions = "quiet-solid",
+            shadow = "none"
+        )
+        else -> KthemeLayout()
+    }
+}
+
 /**
  * Default Ktheme theme instance used as fallback.
  */
@@ -76,15 +214,20 @@ object KthemeComposeTheme {
     val colors: KthemeSemanticColors
         @Composable
         get() = LocalKthemeSemanticColors.current
+
+    val layout: KthemeLayout
+        @Composable
+        get() = LocalKthemeLayout.current
 }
 
 /**
- * Custom Ktheme theme provider composable wrapping [MaterialTheme] and setting [LocalKthemeSemanticColors].
+ * Custom Ktheme theme provider composable wrapping [MaterialTheme] and setting [LocalKthemeSemanticColors] and [LocalKthemeLayout].
  */
 @Composable
 fun KthemeComposeTheme(
     theme: Theme = KthemeDefaultTheme,
     isDark: Boolean = theme.darkMode,
+    layout: KthemeLayout = theme.toKthemeLayout(),
     content: @Composable () -> Unit,
 ) {
     val materialColorScheme = theme.toMaterial3ColorScheme(isDark = isDark)
@@ -98,6 +241,7 @@ fun KthemeComposeTheme(
 
     CompositionLocalProvider(
         LocalKthemeSemanticColors provides semanticColors,
+        LocalKthemeLayout provides layout,
     ) {
         MaterialTheme(
             colorScheme = materialColorScheme,
