@@ -32,6 +32,7 @@
   <k-button id="print-btn">Print Sheet</k-button>
   <k-button id="export-pdf">Export PDF</k-button>
   <k-button id="export-csv" title="Export Bill of Materials schedule to CSV">Export CSV</k-button>
+  <k-button id="export-dxf" title="Export DXF CAD Exchange Format">Export DXF</k-button>
   <k-button id="branding-btn">Branding &amp; Stamp</k-button>
   <k-button id="gis-btn">GIS Site</k-button>
   <k-button id="report">Code report</k-button>
@@ -360,6 +361,29 @@
     <div class="btns">
       <button id="csv-cancel" type="button">Cancel</button>
       <button id="csv-generate" class="primary" type="button">Generate CSV</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dxf-export" aria-labelledby="dxf-export-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dxf-export-title">Export DXF CAD Exchange Format</h2>
+    <button value="close" aria-label="Close DXF export modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <div class="row">
+      <label for="dxf-units">CAD Units</label>
+      <select id="dxf-units">
+        <option value="inches" selected>Inches (Standard 1:1 Scale)</option>
+        <option value="meters">Meters (SI Metric Scale)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="dxf-level">Floor Level</label>
+      <select id="dxf-level"></select>
+    </div>
+    <div class="btns">
+      <button id="dxf-cancel" type="button">Cancel</button>
+      <button id="dxf-generate" class="primary" type="button">Download DXF</button>
     </div>
   </div>
 </dialog>

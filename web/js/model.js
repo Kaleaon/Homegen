@@ -360,7 +360,7 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
   const room = {
     id: nid(state, 'r'),
     type,
-    name: ROOM_TYPES[type].name,
+    name: opts.name ?? ROOM_TYPES[type]?.name ?? 'Room',
     level: opts.level ?? 0,
     x: bbox.x,
     y: bbox.y,
