@@ -940,3 +940,213 @@ export function rectsTouch(a, b, margin = 0) {
   const by1 = b.y + b.h;
   return Math.max(ax0, bx0) < Math.min(ax1, bx1) && Math.max(ay0, by0) < Math.min(ay1, by1);
 }
+
+export function polygonCentroid(points) {
+  if (!points || points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return { x: points[0].x, y: points[0].y };
+  if (points.length === 2) {
+    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+  }
+
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  const n = points.length;
+
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const p1 = points[i];
+    const p2 = points[j];
+    const cross = p1.x * p2.y - p2.x * p1.y;
+    area += cross;
+    cx += (p1.x + p2.x) * cross;
+    cy += (p1.y + p2.y) * cross;
+  }
+
+  area = area / 2;
+  if (Math.abs(area) < 1e-6) {
+    let sx = 0,
+      sy = 0;
+    for (const p of points) {
+      sx += p.x;
+      sy += p.y;
+    }
+    return { x: sx / n, y: sy / n };
+  }
+
+  cx = cx / (6 * area);
+  cy = cy / (6 * area);
+  return { x: cx, y: cy };
+}
+
+export function polygonMinClearanceWidth(points) {
+  if (!points || points.length < 3) return 0;
+  const bbox = getRoomBoundingBox(points);
+  let minClearance = Math.min(bbox.w, bbox.h);
+
+  const n = points.length;
+  const winding = polygonWinding(points);
+
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    const vx = p2.x - p1.x;
+    const vy = p2.y - p1.y;
+    const len = Math.hypot(vx, vy);
+    if (len < EPS) continue;
+    const dx = vx / len;
+    const dy = vy / len;
+    const nx = winding > 0 ? dy : -dy;
+    const ny = winding > 0 ? -dx : dx;
+    edges.push({ p1, p2, dx, dy, nx, ny, len, index: i });
+  }
+
+  for (let i = 0; i < edges.length; i++) {
+    const e1 = edges[i];
+    for (let j = i + 1; j < edges.length; j++) {
+      const e2 = edges[j];
+      const dotN = e1.nx * e2.nx + e1.ny * e2.ny;
+      if (dotN < -0.8) {
+        const dist = (e2.p1.x - e1.p1.x) * e1.nx + (e2.p1.y - e1.p1.y) * e1.ny;
+        if (dist > 0.1) {
+          const t1_start = 0;
+          const t1_end = e1.len;
+          const t2_p1 = (e2.p1.x - e1.p1.x) * e1.dx + (e2.p1.y - e1.p1.y) * e1.dy;
+          const t2_p2 = (e2.p2.x - e1.p1.x) * e1.dx + (e2.p2.y - e1.p1.y) * e1.dy;
+          const t2_start = Math.min(t2_p1, t2_p2);
+          const t2_end = Math.max(t2_p1, t2_p2);
+
+          const overlap = overlapLen(t1_start, t1_end, t2_start, t2_end);
+          if (overlap > EPS) {
+            minClearance = Math.min(minClearance, dist);
+          }
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i];
+    for (let k = 0; k < n; k++) {
+      if (k === e.index || k === (e.index + 1) % n) continue;
+      const pk = points[k];
+      const t = (pk.x - e.p1.x) * e.dx + (pk.y - e.p1.y) * e.dy;
+      const dist = (pk.x - e.p1.x) * e.nx + (pk.y - e.p1.y) * e.ny;
+      if (t > EPS && t < e.len - EPS && dist > 0.1) {
+        const projPt = { x: e.p1.x + t * e.dx, y: e.p1.y + t * e.dy };
+        const midPt = { x: (pk.x + projPt.x) / 2, y: (pk.y + projPt.y) / 2 };
+        if (pointInPolygon(midPt, points)) {
+          minClearance = Math.min(minClearance, dist);
+        }
+      }
+    }
+  }
+
+  return minClearance;
+}
+
+export function interiorPolygonData(room, wallThickness = WT) {
+  const points = interiorPolygon(room, wallThickness);
+  const centroid = polygonCentroid(points);
+  const minWidth = polygonMinClearanceWidth(points);
+  return {
+    points,
+    centroid,
+    minWidth,
+    minClearanceWidth: minWidth,
+    minEdgeClearanceWidth: minWidth,
+  };
+}
+
+function pointToSegmentDist(p, a, b) {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const lenSq = vx * vx + vy * vy;
+  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const qx = a.x + t * vx;
+  const qy = a.y + t * vy;
+  return Math.hypot(p.x - qx, p.y - qy);
+}
+
+export function isPointInPolygonOrBoundary(p, poly, eps = 0.5) {
+  if (!poly || poly.length < 3) return false;
+  if (pointInPolygon(p, poly)) return true;
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    if (pointToSegmentDist(p, poly[i], poly[j]) <= eps) return true;
+  }
+  return false;
+}
+
+function lineSegmentsCross(a1, a2, b1, b2, eps = 0.1) {
+  const lenA = Math.hypot(a2.x - a1.x, a2.y - a1.y);
+  const lenB = Math.hypot(b2.x - b1.x, b2.y - b1.y);
+  if (lenA < 1e-6 || lenB < 1e-6) return false;
+
+  const crossA1 = (a2.x - a1.x) * (b1.y - a1.y) - (a2.y - a1.y) * (b1.x - a1.x);
+  const crossA2 = (a2.x - a1.x) * (b2.y - a1.y) - (a2.y - a1.y) * (b2.x - a1.x);
+
+  const threshA = eps * lenA;
+  if (Math.abs(crossA1) <= threshA || Math.abs(crossA2) <= threshA) {
+    return false;
+  }
+  if ((crossA1 > 0 && crossA2 > 0) || (crossA1 < 0 && crossA2 < 0)) {
+    return false;
+  }
+
+  const crossB1 = (b2.x - b1.x) * (a1.y - b1.y) - (b2.y - b1.y) * (a1.x - b1.x);
+  const crossB2 = (b2.x - b1.x) * (a2.y - b1.y) - (b2.y - b1.y) * (a2.x - b1.x);
+
+  const threshB = eps * lenB;
+  if (Math.abs(crossB1) <= threshB || Math.abs(crossB2) <= threshB) {
+    return false;
+  }
+  if ((crossB1 > 0 && crossB2 > 0) || (crossB1 < 0 && crossB2 < 0)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function polygonContainsRect(poly, rect, eps = 0.5) {
+  if (!poly || poly.length < 3 || !rect) return false;
+  const corners = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
+  ];
+  const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+
+  for (const c of corners) {
+    if (!isPointInPolygonOrBoundary(c, poly, eps)) return false;
+  }
+  if (!isPointInPolygonOrBoundary(center, poly, eps)) return false;
+
+  const rectEdges = [
+    [corners[0], corners[1]],
+    [corners[1], corners[2]],
+    [corners[2], corners[3]],
+    [corners[3], corners[0]],
+  ];
+
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const p1 = poly[i];
+    const p2 = poly[(i + 1) % n];
+    for (const [r1, r2] of rectEdges) {
+      if (lineSegmentsCross(p1, p2, r1, r2, 0.1)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+export function polygonContainsZone(poly, zone, eps = 0.1) {
+  return polygonContainsRect(poly, zone, eps);
+}
