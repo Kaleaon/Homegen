@@ -339,6 +339,24 @@ export function parseImageHeightmap(imageInput, options = {}) {
 }
 
 /**
+ * Helper to extract double precision float arrays from DataView for GeoTIFF tags.
+ */
+function readDoubleArray(view, offset, count, littleEndian) {
+  if (!count || offset <= 0 || offset + count * 8 > view.byteLength) {
+    return null;
+  }
+  try {
+    const arr = new Float64Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = view.getFloat64(offset + i * 8, littleEndian);
+    }
+    return arr;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
 export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
@@ -359,17 +377,32 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
               imgHeight = 0,
               stripOffset = 0,
               bitsPerSample = 8;
+            let modelPixelScale = null;
+            let modelTiepoint = null;
+            let modelTransformation = null;
+
             for (let i = 0; i < numEntries; i++) {
               const entryOffset = firstIFD + 2 + i * 12;
               if (entryOffset + 12 > arrayBuffer.byteLength) break;
               const tag = view.getUint16(entryOffset, littleEndian);
+              const type = view.getUint16(entryOffset + 2, littleEndian);
+              const count = view.getUint32(entryOffset + 4, littleEndian);
               const val = view.getUint32(entryOffset + 8, littleEndian);
+
               if (tag === 256)
                 imgWidth = val; // ImageWidth
               else if (tag === 257)
                 imgHeight = val; // ImageLength
               else if (tag === 258) bitsPerSample = val & 0xffff;
-              else if (tag === 273) stripOffset = val; // StripOffsets
+              else if (tag === 273)
+                stripOffset = val; // StripOffsets
+              else if (tag === 33550 && type === 12) {
+                modelPixelScale = readDoubleArray(view, val, count, littleEndian);
+              } else if (tag === 33922 && type === 12) {
+                modelTiepoint = readDoubleArray(view, val, count, littleEndian);
+              } else if (tag === 34264 && type === 12) {
+                modelTransformation = readDoubleArray(view, val, count, littleEndian);
+              }
             }
             if (imgWidth > 0 && imgHeight > 0 && stripOffset > 0) {
               const total = imgWidth * imgHeight;
@@ -393,13 +426,66 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                   if (elev < minE) minE = elev;
                   if (elev > maxE) maxE = elev;
                 }
+
+                let computedBounds = null;
+                if (
+                  modelTiepoint &&
+                  modelTiepoint.length >= 6 &&
+                  modelPixelScale &&
+                  modelPixelScale.length >= 2
+                ) {
+                  const scaleX = modelPixelScale[0];
+                  const scaleY = modelPixelScale[1];
+                  const tieI = modelTiepoint[0];
+                  const tieJ = modelTiepoint[1];
+                  const tieX = modelTiepoint[3];
+                  const tieY = modelTiepoint[4];
+
+                  if (
+                    scaleX > 0 &&
+                    scaleY > 0 &&
+                    !isNaN(scaleX) &&
+                    !isNaN(scaleY) &&
+                    !isNaN(tieX) &&
+                    !isNaN(tieY)
+                  ) {
+                    const xOrigin = tieX - tieI * scaleX;
+                    const yOrigin = tieY + tieJ * scaleY;
+                    computedBounds = {
+                      minX: xOrigin,
+                      maxX: xOrigin + imgWidth * scaleX,
+                      minY: yOrigin - imgHeight * scaleY,
+                      maxY: yOrigin,
+                    };
+                  }
+                } else if (modelTransformation && modelTransformation.length >= 16) {
+                  const m = modelTransformation;
+                  const x00 = m[3];
+                  const y00 = m[7];
+                  const xW0 = m[0] * imgWidth + m[3];
+                  const yW0 = m[4] * imgWidth + m[7];
+                  const x0H = m[1] * imgHeight + m[3];
+                  const y0H = m[5] * imgHeight + m[7];
+                  const xWH = m[0] * imgWidth + m[1] * imgHeight + m[3];
+                  const yWH = m[4] * imgWidth + m[5] * imgHeight + m[7];
+
+                  const minX = Math.min(x00, xW0, x0H, xWH);
+                  const maxX = Math.max(x00, xW0, x0H, xWH);
+                  const minY = Math.min(y00, yW0, y0H, yWH);
+                  const maxY = Math.max(y00, yW0, y0H, yWH);
+
+                  if (!isNaN(minX) && !isNaN(maxX) && !isNaN(minY) && !isNaN(maxY)) {
+                    computedBounds = { minX, maxX, minY, maxY };
+                  }
+                }
+
                 return new ElevationGrid({
                   width: imgWidth,
                   height: imgHeight,
                   data,
                   minElevation: minE,
                   maxElevation: maxE,
-                  bounds: options.bounds,
+                  bounds: options.bounds ?? computedBounds ?? undefined,
                   contourInterval: options.contourInterval ?? 1.0,
                 });
               }

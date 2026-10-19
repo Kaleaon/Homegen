@@ -223,3 +223,210 @@ test('parseGeoTIFFWithFallback handles corrupt buffer by falling back or throwin
     /Failed to decode GeoTIFF binary data or fallback image heightmap/
   );
 });
+
+function createSyntheticGeoTIFF({
+  littleEndian = true,
+  width = 2,
+  height = 2,
+  bitsPerSample = 8,
+  pixelScale = null,
+  tiepoint = null,
+  transformation = null,
+  pixelData = null,
+} = {}) {
+  const entries = [
+    { tag: 256, type: 4, count: 1, val: width },
+    { tag: 257, type: 4, count: 1, val: height },
+    { tag: 258, type: 3, count: 1, val: bitsPerSample },
+  ];
+
+  let currentOffset =
+    8 +
+    2 +
+    (entries.length + (pixelScale ? 1 : 0) + (tiepoint ? 1 : 0) + (transformation ? 1 : 0) + 1) *
+      12 +
+    4;
+  currentOffset = Math.ceil(currentOffset / 8) * 8;
+
+  let pixelScaleOffset = 0;
+  if (pixelScale) {
+    entries.push({ tag: 33550, type: 12, count: pixelScale.length, val: currentOffset });
+    pixelScaleOffset = currentOffset;
+    currentOffset += pixelScale.length * 8;
+  }
+
+  let tiepointOffset = 0;
+  if (tiepoint) {
+    entries.push({ tag: 33922, type: 12, count: tiepoint.length, val: currentOffset });
+    tiepointOffset = currentOffset;
+    currentOffset += tiepoint.length * 8;
+  }
+
+  let transformationOffset = 0;
+  if (transformation) {
+    entries.push({ tag: 34264, type: 12, count: transformation.length, val: currentOffset });
+    transformationOffset = currentOffset;
+    currentOffset += transformation.length * 8;
+  }
+
+  const stripOffset = currentOffset;
+  entries.push({ tag: 273, type: 4, count: 1, val: stripOffset });
+
+  const bytesPerSample = bitsPerSample === 16 ? 2 : 1;
+  const stripLength = width * height * bytesPerSample;
+  const totalSize = stripOffset + stripLength;
+
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+
+  view.setUint16(0, littleEndian ? 0x4949 : 0x4d4d, false);
+  view.setUint16(2, 42, littleEndian);
+  view.setUint32(4, 8, littleEndian);
+
+  entries.sort((a, b) => a.tag - b.tag);
+
+  view.setUint16(8, entries.length, littleEndian);
+  entries.forEach((e, idx) => {
+    const entryOffset = 8 + 2 + idx * 12;
+    view.setUint16(entryOffset, e.tag, littleEndian);
+    view.setUint16(entryOffset + 2, e.type, littleEndian);
+    view.setUint32(entryOffset + 4, e.count, littleEndian);
+    view.setUint32(entryOffset + 8, e.val, littleEndian);
+  });
+  view.setUint32(8 + 2 + entries.length * 12, 0, littleEndian);
+
+  if (pixelScale) {
+    pixelScale.forEach((v, idx) => {
+      view.setFloat64(pixelScaleOffset + idx * 8, v, littleEndian);
+    });
+  }
+  if (tiepoint) {
+    tiepoint.forEach((v, idx) => {
+      view.setFloat64(tiepointOffset + idx * 8, v, littleEndian);
+    });
+  }
+  if (transformation) {
+    transformation.forEach((v, idx) => {
+      view.setFloat64(transformationOffset + idx * 8, v, littleEndian);
+    });
+  }
+
+  const pixels = pixelData || new Uint8Array(width * height);
+  for (let i = 0; i < pixels.length; i++) {
+    if (bytesPerSample === 2) {
+      view.setUint16(stripOffset + i * 2, pixels[i], littleEndian);
+    } else {
+      view.setUint8(stripOffset + i, pixels[i]);
+    }
+  }
+
+  return buffer;
+}
+
+test('parseGeoTIFFWithFallback extracts ModelPixelScaleTag and ModelTiepointTag to compute bounds', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 4,
+    height: 4,
+    pixelScale: [2.5, 5.0, 0.0],
+    tiepoint: [0.0, 0.0, 0.0, 1000.0, 2000.0, 0.0],
+    pixelData: new Uint8Array([
+      0, 50, 100, 150, 50, 100, 150, 200, 100, 150, 200, 250, 150, 200, 250, 255,
+    ]),
+  });
+
+  const grid = await parseGeoTIFFWithFallback(buffer, { minElevation: 0, maxElevation: 100 });
+  assert.ok(grid instanceof ElevationGrid);
+  assert.equal(grid.width, 4);
+  assert.equal(grid.height, 4);
+  assert.deepEqual(grid.bounds, {
+    minX: 1000.0,
+    maxX: 1010.0, // 1000 + 4 * 2.5
+    minY: 1980.0, // 2000 - 4 * 5.0
+    maxY: 2000.0,
+  });
+});
+
+test('parseGeoTIFFWithFallback calculates bounds correctly with non-zero tiepoint indices and Big-Endian encoding', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: false, // "MM"
+    width: 10,
+    height: 5,
+    pixelScale: [10.0, 20.0, 0.0],
+    tiepoint: [2.0, 1.0, 0.0, 520.0, 1080.0, 0.0],
+  });
+
+  const grid = await parseGeoTIFFWithFallback(buffer);
+  // xOrigin = 520 - 2 * 10 = 500
+  // yOrigin = 1080 + 1 * 20 = 1100
+  // minX = 500, maxX = 500 + 10 * 10 = 600
+  // minY = 1100 - 5 * 20 = 1000, maxY = 1100
+  assert.deepEqual(grid.bounds, {
+    minX: 500.0,
+    maxX: 600.0,
+    minY: 1000.0,
+    maxY: 1100.0,
+  });
+});
+
+test('parseGeoTIFFWithFallback extracts ModelTransformationTag matrix when tiepoints are absent', async () => {
+  const transformation = [
+    2.0, 0.0, 0.0, 500.0, 0.0, -3.0, 0.0, 1500.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+  ];
+
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 10,
+    height: 10,
+    transformation,
+  });
+
+  const grid = await parseGeoTIFFWithFallback(buffer);
+  assert.deepEqual(grid.bounds, {
+    minX: 500.0,
+    maxX: 520.0,
+    minY: 1470.0,
+    maxY: 1500.0,
+  });
+});
+
+test('options.bounds takes precedence over parsed GeoTIFF metadata when explicitly supplied', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 4,
+    height: 4,
+    pixelScale: [2.5, 5.0, 0.0],
+    tiepoint: [0.0, 0.0, 0.0, 1000.0, 2000.0, 0.0],
+  });
+
+  const customBounds = { minX: -100, maxX: 100, minY: -100, maxY: 100 };
+  const grid = await parseGeoTIFFWithFallback(buffer, { bounds: customBounds });
+  assert.deepEqual(grid.bounds, customBounds);
+});
+
+test('parseGeoTIFFWithFallback falls back to default bounds when georeferencing tags are absent', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+  });
+
+  const grid = await parseGeoTIFFWithFallback(buffer);
+  assert.deepEqual(grid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
+});
+
+test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 100,
+    height: 100,
+    pixelScale: [1.0, 1.0, 0.0],
+    tiepoint: [0.0, 0.0, 0.0, 0.0, 100.0, 0.0],
+  });
+
+  const start = performance.now();
+  await parseGeoTIFFWithFallback(buffer);
+  const duration = performance.now() - start;
+
+  assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
+});
