@@ -2,15 +2,20 @@ package com.ktheme.android
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 import com.ktheme.models.Theme
 import com.ktheme.models.ThemeMetadata
 import com.ktheme.utils.ColorUtils
+import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight
 import com.ktheme.models.ColorScheme as KthemeColorScheme
 
 /**
@@ -83,6 +88,7 @@ fun KthemeComposeTheme(
     content: @Composable () -> Unit,
 ) {
     val materialColorScheme = theme.toMaterial3ColorScheme(isDark = isDark)
+    val typography = theme.toMaterial3Typography()
     val semanticColors = theme.semanticColors()
 
     KthemeSystemBarAdapter(
@@ -95,8 +101,66 @@ fun KthemeComposeTheme(
     ) {
         MaterialTheme(
             colorScheme = materialColorScheme,
+            typography = typography,
             content = content,
         )
+    }
+}
+
+/**
+ * Convert a Ktheme [Theme] typography specification into Compose Material 3 [Typography].
+ *
+ * If [Theme.typography] is null, falls back gracefully to default Material 3 typography values.
+ */
+fun Theme.toMaterial3Typography(): Typography {
+    val t = typography ?: return Typography()
+    val family = parseFontFamily(t.fontFamily)
+
+    fun createStyle(fontSizeSp: Int, fontWeightInt: Int): TextStyle {
+        val size = fontSizeSp.coerceAtLeast(1)
+        val calculatedLineHeight = if (t.lineHeight > 0f) {
+            (size * t.lineHeight).sp
+        } else {
+            size.sp
+        }
+        return TextStyle(
+            fontFamily = family,
+            fontSize = size.sp,
+            fontWeight = ComposeFontWeight(fontWeightInt),
+            lineHeight = calculatedLineHeight,
+            letterSpacing = t.letterSpacing.sp,
+        )
+    }
+
+    return Typography(
+        displayLarge = createStyle(t.fontSize.xlarge, t.fontWeight.bold),
+        displayMedium = createStyle(t.fontSize.xlarge - 4, t.fontWeight.bold),
+        displaySmall = createStyle(t.fontSize.large, t.fontWeight.medium),
+        headlineLarge = createStyle(t.fontSize.xlarge, t.fontWeight.medium),
+        headlineMedium = createStyle(t.fontSize.large, t.fontWeight.medium),
+        headlineSmall = createStyle(t.fontSize.large - 2, t.fontWeight.medium),
+        titleLarge = createStyle(t.fontSize.large, t.fontWeight.medium),
+        titleMedium = createStyle(t.fontSize.medium, t.fontWeight.medium),
+        titleSmall = createStyle(t.fontSize.small, t.fontWeight.medium),
+        bodyLarge = createStyle(t.fontSize.medium, t.fontWeight.regular),
+        bodyMedium = createStyle(t.fontSize.medium - 2, t.fontWeight.regular),
+        bodySmall = createStyle(t.fontSize.small, t.fontWeight.light),
+        labelLarge = createStyle(t.fontSize.medium, t.fontWeight.medium),
+        labelMedium = createStyle(t.fontSize.small, t.fontWeight.medium),
+        labelSmall = createStyle(t.fontSize.small - 1, t.fontWeight.medium),
+    )
+}
+
+/**
+ * Safely parse font family string to Jetpack Compose [FontFamily] equivalent.
+ */
+fun parseFontFamily(fontFamilyStr: String?): FontFamily {
+    return when (fontFamilyStr?.lowercase()?.trim()) {
+        "sans-serif", "sansserif", "sans" -> FontFamily.SansSerif
+        "serif" -> FontFamily.Serif
+        "monospace", "mono" -> FontFamily.Monospace
+        "cursive" -> FontFamily.Cursive
+        else -> FontFamily.Default
     }
 }
 
