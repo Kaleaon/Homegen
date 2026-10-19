@@ -150,3 +150,15 @@ test('Direct consumption of SnappingBridge active snap points for item and openi
   assert.deepEqual(active.point, { x: 60, y: 0 });
   assert.deepEqual(active.indicator, { x: 60, y: 0 });
 });
+
+test('buildToggleViewModel includes token declarations for UI snap toggles', async () => {
+  const { buildToggleViewModel } = await import('../../designer3d/tools/index.mjs');
+  const interaction = new InteractionLayer();
+  const vms = buildToggleViewModel(interaction);
+
+  assert.equal(vms.length, 4);
+  for (const vm of vms) {
+    assert.equal(vm.token, '--ktheme-accent');
+    assert.equal(vm.tokenHover, '--ktheme-accent-hover');
+  }
+});

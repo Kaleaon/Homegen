@@ -70,7 +70,7 @@ test('validatePlacement and createPlacementFeedback return ghost preview and val
 
   assert.equal(validRes.valid, true);
   assert.equal(validFeedback.invalid, false);
-  assert.equal(validFeedback.style.color, '#4ade80');
+  assert.equal(validFeedback.style.color, '#2f8f5b');
 
   // Candidate overlapping room
   const overlappingCandidate = roomToPolygon({ x: 50, y: 50, w: 120, h: 120 });
@@ -79,16 +79,18 @@ test('validatePlacement and createPlacementFeedback return ghost preview and val
 
   assert.equal(invalidRes.valid, false);
   assert.equal(invalidFeedback.invalid, true);
-  assert.equal(invalidFeedback.style.color, '#f87171');
+  assert.equal(invalidFeedback.style.color, '#e84040');
 });
 
-test('buildToggleViewModel generates toggle items from SNAP_TOGGLE_DEFINITIONS', () => {
+test('buildToggleViewModel generates toggle items with token bindings from SNAP_TOGGLE_DEFINITIONS', () => {
   const layer = new InteractionLayer();
   const toggles = buildToggleViewModel(layer);
 
   assert.equal(toggles.length, SNAP_TOGGLE_DEFINITIONS.length);
   const gridToggle = toggles.find((t) => t.id === 'grid');
   assert.ok(gridToggle);
+  assert.equal(gridToggle.token, '--ktheme-accent');
+  assert.equal(gridToggle.tokenHover, '--ktheme-accent-hover');
   assert.equal(typeof gridToggle.onToggle, 'function');
 
   gridToggle.onToggle(false);

@@ -81,8 +81,35 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(res.rect.w).toBe(72);
     expect(res.rect.h).toBe(72);
     expect(res.areaSqFt).toBe(36);
-    expect(res.feedback.color).toBe('#f87171');
+    expect(res.feedback.color).toBe('#e84040'); // resolved --ktheme-critical token
     expect(res.violations.some((v) => v.includes('70 sq ft'))).toBe(true);
+  });
+
+  test('resizeRoomWithConstraints respects custom options.getToken resolver', () => {
+    const customGetToken = (name, fallback) => {
+      if (name === '--ktheme-info') return '#0000ff';
+      if (name === '--ktheme-critical') return '#ff0000';
+      if (name === '--ktheme-on-primary') return '#ffff00';
+      return fallback;
+    };
+
+    const validRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 180, y: 144 },
+      { getToken: customGetToken }
+    );
+    expect(validRes.feedback.color).toBe('#0000ff');
+    expect(validRes.feedback.handleColor).toBe('#ffff00');
+
+    const invalidRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 72, y: 72 },
+      { getToken: customGetToken }
+    );
+    expect(invalidRes.feedback.color).toBe('#ff0000');
+    expect(invalidRes.feedback.handleColor).toBe('#ff0000');
   });
 
   test('validateRoomDimensions checks kitchen minimum dimension requirement', () => {

@@ -85,7 +85,7 @@ describe('validatePlacement', () => {
 });
 
 describe('createPlacementFeedback', () => {
-  test('valid placement returns green style', () => {
+  test('valid placement returns green style from theme token', () => {
     const polygon = [
       { x: 0, y: 0 },
       { x: 1, y: 0 },
@@ -95,11 +95,11 @@ describe('createPlacementFeedback', () => {
     const feedback = createPlacementFeedback(polygon, validation);
 
     expect(feedback.invalid).toBe(false);
-    expect(feedback.style.color).toBe('#4ade80');
+    expect(feedback.style.color).toBe('#2f8f5b');
     expect(feedback.ghostPreview).toEqual(polygon);
   });
 
-  test('invalid placement returns red style', () => {
+  test('invalid placement returns red style from theme token', () => {
     const polygon = [
       { x: 0, y: 0 },
       { x: 1, y: 0 },
@@ -109,6 +109,31 @@ describe('createPlacementFeedback', () => {
     const feedback = createPlacementFeedback(polygon, validation);
 
     expect(feedback.invalid).toBe(true);
-    expect(feedback.style.color).toBe('#f87171');
+    expect(feedback.style.color).toBe('#e84040');
+  });
+
+  test('createPlacementFeedback respects custom options.getToken', () => {
+    const polygon = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+    ];
+    const customGetToken = (name) => (name === '--ktheme-success' ? '#00ff00' : '#ff0000');
+
+    const validFeedback = createPlacementFeedback(
+      polygon,
+      { valid: true, reasons: {} },
+      { getToken: customGetToken }
+    );
+    expect(validFeedback.style.color).toBe('#00ff00');
+    expect(validFeedback.style.outline).toBe('#00ff00');
+
+    const invalidFeedback = createPlacementFeedback(
+      polygon,
+      { valid: false, reasons: {} },
+      { getToken: customGetToken }
+    );
+    expect(invalidFeedback.style.color).toBe('#ff0000');
+    expect(invalidFeedback.style.outline).toBe('#ff0000');
   });
 });
