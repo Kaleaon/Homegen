@@ -53,6 +53,90 @@ export const WINDOW_PRESETS = {
 };
 
 /**
+ * Curated door style presets defining panel style, finish, frame material/color, hardware finish, and casing trim.
+ */
+export const DOOR_PRESETS = {
+  modern_flush: {
+    key: 'modern_flush',
+    name: 'Modern Flush',
+    panelStyle: 'flush',
+    finishColor: '#2b2b2b',
+    finishMaterial: 'paint',
+    frameMaterial: 'aluminum',
+    frameColor: '#1a1a1a',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'matte_black',
+    glass: { enabled: false },
+    casing: { width: 1.5, depth: 0.5 },
+  },
+  colonial_6panel: {
+    key: 'colonial_6panel',
+    name: 'Colonial 6-Panel',
+    panelStyle: 'panel_6',
+    finishColor: '#ffffff',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#ffffff',
+    hardwareStyle: 'knob',
+    hardwareFinish: 'brass',
+    glass: { enabled: false },
+    casing: { width: 2.5, depth: 0.75 },
+  },
+  craftsman_2panel: {
+    key: 'craftsman_2panel',
+    name: 'Craftsman 2-Panel',
+    panelStyle: 'panel_2',
+    finishColor: '#4a3728',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#4a3728',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'oil_rubbed_bronze',
+    glass: { enabled: false },
+    casing: { width: 3.5, depth: 1.0 },
+  },
+  french_glass: {
+    key: 'french_glass',
+    name: 'French Glass',
+    panelStyle: 'french',
+    finishColor: '#ffffff',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#ffffff',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'brushed_nickel',
+    glass: { enabled: true, cols: 3, rows: 5 },
+    casing: { width: 2.5, depth: 0.75 },
+  },
+  industrial_steel: {
+    key: 'industrial_steel',
+    name: 'Industrial Steel',
+    panelStyle: 'flush',
+    finishColor: '#3a2e2b',
+    finishMaterial: 'steel',
+    frameMaterial: 'steel',
+    frameColor: '#3a2e2b',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'matte_black',
+    glass: { enabled: false },
+    casing: { width: 2.0, depth: 0.5 },
+  },
+  standard_default: {
+    key: 'standard_default',
+    name: 'Standard Default',
+    panelStyle: 'flush',
+    finishColor: '#a9825a',
+    finishMaterial: 'wood',
+    frameMaterial: 'wood',
+    frameColor: '#f3f1ea',
+    hardwareStyle: 'lever',
+    hardwareFinish: 'brushed_nickel',
+    glass: { enabled: false },
+    casing: { width: 2.0, depth: 0.75 },
+  },
+};
+
+/**
  * Exterior cladding material registry maps.
  */
 export const CLADDING_PRESETS = {
@@ -129,28 +213,33 @@ export const BUILDING_PRESETS = {
     name: 'Modern Farmhouse',
     claddingKey: 'cladding_board_batten',
     windowPresetKey: 'modern_black',
+    doorPresetKey: 'craftsman_2panel',
   },
   colonial_white: {
     key: 'colonial_white',
     name: 'Colonial White',
     claddingKey: 'cladding_siding_white',
     windowPresetKey: 'colonial_white',
+    doorPresetKey: 'colonial_6panel',
   },
   craftsman: {
     key: 'craftsman',
     name: 'Craftsman',
     claddingKey: 'cladding_stone',
     windowPresetKey: 'craftsman_wood',
+    doorPresetKey: 'craftsman_2panel',
   },
   industrial: {
     key: 'industrial',
     name: 'Industrial',
     claddingKey: 'wall_brick',
     windowPresetKey: 'industrial_bronze',
+    doorPresetKey: 'industrial_steel',
   },
 };
 
 const registeredWindowPresets = new Map(Object.entries(WINDOW_PRESETS));
+const registeredDoorPresets = new Map(Object.entries(DOOR_PRESETS));
 const registeredCladdingMaterials = new Map(Object.entries(CLADDING_PRESETS));
 
 // Global revision counter for dynamic preset updates
@@ -177,6 +266,17 @@ export function incrementPresetRevision() {
 export function getWindowPresets() {
   const result = {};
   for (const [key, val] of registeredWindowPresets.entries()) {
+    result[key] = val;
+  }
+  return result;
+}
+
+/**
+ * Returns all registered door presets as an object map.
+ */
+export function getDoorPresets() {
+  const result = {};
+  for (const [key, val] of registeredDoorPresets.entries()) {
     result[key] = val;
   }
   return result;
@@ -214,6 +314,16 @@ export function getWindowPreset(presetKey) {
 }
 
 /**
+ * Retrieve door style preset by key, falling back safely to standard_default on invalid keys.
+ */
+export function getDoorPreset(presetKey) {
+  if (presetKey && registeredDoorPresets.has(presetKey)) {
+    return registeredDoorPresets.get(presetKey);
+  }
+  return DOOR_PRESETS.standard_default;
+}
+
+/**
  * Register a new window style preset dynamically without modifying core scene loops.
  */
 export function registerWindowPreset(key, presetSpec) {
@@ -229,6 +339,30 @@ export function registerWindowPreset(key, presetSpec) {
     ...presetSpec,
   };
   registeredWindowPresets.set(key, spec);
+  incrementPresetRevision();
+  return spec;
+}
+
+/**
+ * Register a new door style preset dynamically without modifying core scene loops.
+ */
+export function registerDoorPreset(key, presetSpec) {
+  if (!key || typeof presetSpec !== 'object') return;
+  const spec = {
+    key,
+    name: presetSpec.name || key,
+    panelStyle: presetSpec.panelStyle || 'flush',
+    finishColor: presetSpec.finishColor || '#a9825a',
+    finishMaterial: presetSpec.finishMaterial || 'wood',
+    frameMaterial: presetSpec.frameMaterial || 'wood',
+    frameColor: presetSpec.frameColor || '#f3f1ea',
+    hardwareStyle: presetSpec.hardwareStyle || 'lever',
+    hardwareFinish: presetSpec.hardwareFinish || 'brushed_nickel',
+    glass: presetSpec.glass ? { ...presetSpec.glass } : { enabled: false },
+    casing: presetSpec.casing ? { ...presetSpec.casing } : { width: 2.0, depth: 0.75 },
+    ...presetSpec,
+  };
+  registeredDoorPresets.set(key, spec);
   incrementPresetRevision();
   return spec;
 }
@@ -308,9 +442,81 @@ export function applyBuildingPreset(state, presetKey, { room, level = 0, scope =
     for (const o of r.openings) {
       if (o.kind === 'window') {
         o.presetKey = bPreset.windowPresetKey;
+      } else if (o.kind === 'door' || o.door) {
+        if (bPreset.doorPresetKey) o.presetKey = bPreset.doorPresetKey;
       }
     }
   }
+}
+
+/**
+ * Resolve effective door style attributes for an opening or catalog definition,
+ * merging preset specifications with any explicit instance property overrides.
+ */
+export function resolveDoorStyle(openingOrDef) {
+  if (!openingOrDef) return { ...DOOR_PRESETS.standard_default, presetKey: 'standard_default' };
+
+  const presetKey = openingOrDef.presetKey || openingOrDef.preset || null;
+  const preset = getDoorPreset(presetKey);
+
+  const panelStyle = openingOrDef.panelStyle || preset.panelStyle || 'flush';
+  const finishColor = openingOrDef.finishColor || preset.finishColor || '#a9825a';
+  const finishMaterial = openingOrDef.finishMaterial || preset.finishMaterial || 'wood';
+
+  let frameMaterial = preset.frameMaterial;
+  if (
+    openingOrDef.frameMaterial &&
+    openingOrDef.frameMaterial !== preset.frameMaterial &&
+    openingOrDef.frameMaterial !== 'wood'
+  ) {
+    frameMaterial = openingOrDef.frameMaterial;
+  }
+
+  let frameColor = preset.frameColor;
+  if (
+    openingOrDef.frameColor &&
+    openingOrDef.frameColor !== preset.frameColor &&
+    openingOrDef.frameColor !== '#f3f1ea'
+  ) {
+    frameColor = openingOrDef.frameColor;
+  }
+
+  const hardwareStyle = openingOrDef.hardwareStyle || preset.hardwareStyle || 'lever';
+  const hardwareFinish = openingOrDef.hardwareFinish || preset.hardwareFinish || 'brushed_nickel';
+
+  let casing = preset.casing;
+  if (openingOrDef.casing && typeof openingOrDef.casing === 'object') {
+    casing = {
+      width: openingOrDef.casing.width ?? preset.casing.width,
+      depth: openingOrDef.casing.depth ?? preset.casing.depth,
+    };
+  }
+
+  let glass = preset.glass;
+  if (openingOrDef.glass !== undefined) {
+    if (typeof openingOrDef.glass === 'boolean') {
+      glass = { enabled: openingOrDef.glass, cols: 3, rows: 4 };
+    } else if (typeof openingOrDef.glass === 'object') {
+      glass = {
+        ...preset.glass,
+        ...openingOrDef.glass,
+        enabled: openingOrDef.glass.enabled ?? true,
+      };
+    }
+  }
+
+  return {
+    presetKey: preset.key,
+    panelStyle,
+    finishColor,
+    finishMaterial,
+    frameMaterial,
+    frameColor,
+    hardwareStyle,
+    hardwareFinish,
+    casing,
+    glass,
+  };
 }
 
 /**

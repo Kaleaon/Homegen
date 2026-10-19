@@ -42,13 +42,26 @@ const door = (id, name, w, clear, extra = {}) => ({
 });
 
 export const OPENINGS = [
-  door('door_interior_30', 'Interior door 30"', 30, 28),
-  door('door_interior_32', 'Interior door 32"', 32, 30),
-  door('door_pocket_32', 'Pocket door 32"', 32, 30, { pocket: true }),
-  door('door_closet_24', 'Closet door 24"', 24, 22, { closet: true }),
-  door('door_entry_36', 'Entry door 36"', 36, 32.5, { exterior: true }),
-  door('door_entry_double', 'Double entry 60"', 60, 56, { exterior: true }),
-  door('door_patio_slider', 'Patio slider 72"', 72, 34, { exterior: true, glass: true }),
+  door('door_interior_30', 'Interior door 30"', 30, 28, { presetKey: 'standard_default' }),
+  door('door_interior_32', 'Interior door 32"', 32, 30, { presetKey: 'standard_default' }),
+  door('door_pocket_32', 'Pocket door 32"', 32, 30, { pocket: true, presetKey: 'modern_flush' }),
+  door('door_closet_24', 'Closet door 24"', 24, 22, {
+    closet: true,
+    presetKey: 'standard_default',
+  }),
+  door('door_entry_36', 'Entry door 36"', 36, 32.5, {
+    exterior: true,
+    presetKey: 'craftsman_2panel',
+  }),
+  door('door_entry_double', 'Double entry 60"', 60, 56, {
+    exterior: true,
+    presetKey: 'colonial_6panel',
+  }),
+  door('door_patio_slider', 'Patio slider 72"', 72, 34, {
+    exterior: true,
+    glass: true,
+    presetKey: 'french_glass',
+  }),
   win('win_hung_36x60', 'Double-hung 36×60', 36, 60, 24, 'hung', 'colonial_white', {
     frameMaterial: 'vinyl',
     frameColor: '#ffffff',

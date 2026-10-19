@@ -28,8 +28,14 @@ import {
   polyHavenHdriUrl,
   MaterialPreloader,
 } from './resources.js';
-import { getCladdingMaterial, getPresetRevision, resolveWindowStyle } from './presetRegistry.js';
+import {
+  getCladdingMaterial,
+  getPresetRevision,
+  resolveWindowStyle,
+  resolveDoorStyle,
+} from './presetRegistry.js';
 import { buildWindow3DMesh } from './windowBuilder.js';
+import { buildDoor3DMesh } from './doorBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
 import { getToken, subscribe } from './kthemeTokens.js';
@@ -1101,6 +1107,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const isWindow = o.kind === 'window' || OPENING_BY_ID[o.type]?.kind === 'window';
             return isWindow ? resolveWindowStyle(o) : null;
           });
+          const doorStyles = ops.map(({ o }) => {
+            const isDoor = o.kind === 'door' || OPENING_BY_ID[o.type]?.kind === 'door';
+            return isDoor ? resolveDoorStyle(o) : null;
+          });
           const wallSig = JSON.stringify({
             pts,
             ceiling: room.ceiling,
@@ -1114,6 +1124,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             cur,
             ops,
             winStyles,
+            doorStyles,
             presetRev: getPresetRevision(),
             nbrs,
           });
@@ -1394,7 +1405,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     reflectivity: 0.9,
     side: THREE.DoubleSide,
   });
-  const defaultFrameMat = plain('#f3f1ea', 0.6);
 
   function getFrameMaterial(matType, colorHex) {
     const key = `frame:${matType}:${colorHex}`;
@@ -1416,6 +1426,38 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
     const m = new THREE.MeshStandardMaterial({
       color: colorHex || '#ffffff',
+      roughness,
+      metalness,
+    });
+    matCache.set(key, m);
+    return m;
+  }
+
+  function getHardwareMaterial(finish) {
+    const key = `hardware:${finish}`;
+    if (matCache.has(key)) return matCache.get(key);
+    let color = '#c0c0c0';
+    let roughness = 0.4;
+    let metalness = 0.7;
+    if (finish === 'matte_black') {
+      color = '#1a1a1a';
+      roughness = 0.6;
+      metalness = 0.2;
+    } else if (finish === 'brass') {
+      color = '#d4af37';
+      roughness = 0.3;
+      metalness = 0.9;
+    } else if (finish === 'brushed_nickel') {
+      color = '#c0c0c0';
+      roughness = 0.4;
+      metalness = 0.7;
+    } else if (finish === 'oil_rubbed_bronze') {
+      color = '#3b2f2f';
+      roughness = 0.5;
+      metalness = 0.6;
+    }
+    const m = new THREE.MeshStandardMaterial({
+      color,
       roughness,
       metalness,
     });
@@ -1481,43 +1523,21 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     group.add(og);
     return og;
   }
-  const doorMat = plain('#a9825a', 0.55);
-  function addDoor(group, room, wall, o, d, e, exterior) {
-    const og = new THREE.Group();
-    og.userData = { id: o.id, entityType: 'opening' };
-    const s = wallSeg(room, wall);
-    const dir = o.swing === 'out' ? -1 : 1;
-    const head = wallAlignedBox(room, wall, o.width + 3, 2, WT + 1, defaultFrameMat);
-    og.add(placeInWall(room, wall, o.offset + o.width / 2, d.h + 1, 0, e, head));
-    if (exterior || d.pocket) {
-      const slabDoor = wallAlignedBox(
-        room,
-        wall,
-        o.width - 1,
-        d.h - 1,
-        1.75,
-        d.glass ? glassMat : doorMat
-      );
-      og.add(placeInWall(room, wall, o.offset + o.width / 2, (d.h - 1) / 2, 0, e, slabDoor));
-      group.add(og);
-      return og;
-    }
-    const ang = (80 * Math.PI) / 180;
-    const sn = { x: s.nx * dir, y: s.ny * dir };
-    const leaf = boxMesh(o.width - 1, d.h - 1, 1.75, doorMat);
-    const pivot = new THREE.Group();
-    const hx = s.ax + s.dx * o.offset;
-    const hy = s.ay + s.dy * o.offset;
-    pivot.position.set(hx * S, (e + (d.h - 1) / 2) * S, hy * S);
-    leaf.position.set(((o.width - 1) / 2) * S, 0, 0);
-    pivot.add(leaf);
-    const alongAng = Math.atan2(s.dy, s.dx);
-    const normAng = Math.atan2(sn.y, sn.x);
-    let delta = normAng - alongAng;
-    while (delta > Math.PI) delta -= 2 * Math.PI;
-    while (delta < -Math.PI) delta += 2 * Math.PI;
-    pivot.rotation.y = -(alongAng + Math.sign(delta) * ang);
-    og.add(pivot);
+  function addDoor(group, room, wall, o, d, e, _exterior) {
+    const og = buildDoor3DMesh({
+      room,
+      wall,
+      opening: o,
+      definition: d,
+      elevation: e,
+      scale: S,
+      wallThickness: WT,
+      getFrameMaterial,
+      getHardwareMaterial,
+      glassMaterial: glassMat,
+      wallAlignedBox,
+      placeInWall,
+    });
     group.add(og);
     return og;
   }

@@ -56,11 +56,13 @@ import { patternFor, clearPatternCache } from './patterns.js';
 import {
   registerCustomWallFinish,
   getWindowPresets,
+  getDoorPresets,
   getCladdingPresets,
   getBuildingPresets,
   applyBuildingPreset,
   applyCladdingMaterial,
   resolveWindowStyle,
+  resolveDoorStyle,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
@@ -1502,7 +1504,9 @@ function renderInspector() {
   } else {
     const def = kind === 'item' ? ITEM_BY_ID[obj.type] : OPENING_BY_ID[obj.type];
     const winStyle = kind === 'opening' && def.kind === 'window' ? resolveWindowStyle(obj) : null;
+    const doorStyle = kind === 'opening' && def.kind === 'door' ? resolveDoorStyle(obj) : null;
     const winPresets = getWindowPresets();
+    const doorPresets = getDoorPresets();
 
     el.innerHTML = `<h3>${esc(def.name)}</h3><p class="note" style="margin:0 0 6px">in ${esc(room.name)}</p><div class="btns">
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
@@ -1579,6 +1583,78 @@ function renderInspector() {
                `<div style="display:flex;gap:6px;align-items:center"><input id="i-win-casing-w" type="number" step="0.25" min="0" max="12" value="${winStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Casing width in inches"><span>×</span><input id="i-win-casing-d" type="number" step="0.25" min="0" max="6" value="${winStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Casing depth in inches"></div>`
              )}`
           : ''
+      }
+      ${
+        kind === 'opening' && def.kind === 'door' && doorStyle
+          ? `<hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+             <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Door Styling & Preset</h4>
+             ${formRow(
+               'i-door-preset',
+               'Preset',
+               `<select id="i-door-preset">${Object.values(doorPresets)
+                 .map(
+                   (p) =>
+                     `<option value="${p.key}" ${p.key === doorStyle.presetKey ? 'selected' : ''}>${esc(p.name)}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-panel-style',
+               'Panel Style',
+               `<select id="i-door-panel-style">${[
+                 { key: 'flush', name: 'Flush Slab' },
+                 { key: 'panel_2', name: '2-Panel' },
+                 { key: 'panel_6', name: '6-Panel' },
+                 { key: 'french', name: 'French Glass' },
+                 { key: 'glass_top', name: 'Glass Top' },
+               ]
+                 .map(
+                   (ps) =>
+                     `<option value="${ps.key}" ${ps.key === doorStyle.panelStyle ? 'selected' : ''}>${ps.name}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-finish-color',
+               'Finish Color',
+               `<input id="i-door-finish-color" type="color" value="${doorStyle.finishColor || '#a9825a'}">`
+             )}
+             ${formRow(
+               'i-door-frame-mat',
+               'Frame Material',
+               `<select id="i-door-frame-mat">${['wood', 'vinyl', 'aluminum', 'steel', 'bronze']
+                 .map(
+                   (m) =>
+                     `<option value="${m}" ${m === doorStyle.frameMaterial ? 'selected' : ''}>${m.charAt(0).toUpperCase() + m.slice(1)}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-frame-color',
+               'Frame Color',
+               `<input id="i-door-frame-color" type="color" value="${doorStyle.frameColor || '#f3f1ea'}">`
+             )}
+             ${formRow(
+               'i-door-hw-finish',
+               'Hardware Finish',
+               `<select id="i-door-hw-finish">${[
+                 { key: 'brushed_nickel', name: 'Brushed Nickel' },
+                 { key: 'matte_black', name: 'Matte Black' },
+                 { key: 'brass', name: 'Brass' },
+                 { key: 'oil_rubbed_bronze', name: 'Oil-Rubbed Bronze' },
+               ]
+                 .map(
+                   (hw) =>
+                     `<option value="${hw.key}" ${hw.key === doorStyle.hardwareFinish ? 'selected' : ''}>${hw.name}</option>`
+                 )
+                 .join('')}</select>`
+             )}
+             ${formRow(
+               'i-door-casing',
+               'Casing Size (W × D in)',
+               `<div style="display:flex;gap:6px;align-items:center"><input id="i-door-casing-w" type="number" step="0.25" min="0" max="12" value="${doorStyle.casing?.width ?? 2.0}" style="width:60px" aria-label="Door casing width in inches"><span>×</span><input id="i-door-casing-d" type="number" step="0.25" min="0" max="6" value="${doorStyle.casing?.depth ?? 0.75}" style="width:60px" aria-label="Door casing depth in inches"></div>`
+             )}`
+          : ''
       }`;
     $('#i-rot')?.addEventListener('click', rotateSelected);
     $('#i-swing')?.addEventListener('click', () =>
@@ -1635,6 +1711,54 @@ function renderInspector() {
       };
       $('#i-win-casing-w')?.addEventListener('change', updateCasing);
       $('#i-win-casing-d')?.addEventListener('change', updateCasing);
+    }
+    if (kind === 'opening' && def.kind === 'door') {
+      $('#i-door-preset')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.presetKey = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-panel-style')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.panelStyle = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-finish-color')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.finishColor = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-frame-mat')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.frameMaterial = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-frame-color')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.frameColor = e.target.value;
+        }, 'Update Door Style')
+      );
+      $('#i-door-hw-finish')?.addEventListener('change', (e) =>
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.hardwareFinish = e.target.value;
+        }, 'Update Door Style')
+      );
+      const updateDoorCasing = () => {
+        const width = parseFloat($('#i-door-casing-w')?.value || 2.0);
+        const depth = parseFloat($('#i-door-casing-d')?.value || 0.75);
+        apply((n) => {
+          const target = M.findOwner(n, obj.id)?.obj;
+          if (target) target.casing = { ...(target.casing || {}), width, depth };
+        }, 'Update Door Style');
+      };
+      $('#i-door-casing-w')?.addEventListener('change', updateDoorCasing);
+      $('#i-door-casing-d')?.addEventListener('change', updateDoorCasing);
     }
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, obj.id), 'Delete Element');
