@@ -241,17 +241,25 @@ function renderSnapToggles() {
 function renderBgToolbar() {
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
-  if (doc.background && doc.background.dataUrl) {
+  if (doc.background && (doc.background.dataUrl || doc.background.presetKey)) {
     bgBar.hidden = false;
     const bg = doc.background;
     const vis = $('#bg-visible');
     if (vis) vis.checked = bg.visible !== false;
     const op = $('#bg-opacity');
     if (op) op.value = bg.opacity ?? 0.5;
+    const mapSelect = $('#bg-map-preset');
+    if (mapSelect) mapSelect.value = bg.presetKey || '';
+    const gisMapSelect = $('#gis-map-preset');
+    if (gisMapSelect) gisMapSelect.value = bg.presetKey || '';
     const lockBtn = $('#bg-lock-btn');
     if (lockBtn) lockBtn.textContent = bg.locked ? '🔒 Locked' : '🔓 Unlocked';
   } else {
     bgBar.hidden = true;
+    const mapSelect = $('#bg-map-preset');
+    if (mapSelect) mapSelect.value = '';
+    const gisMapSelect = $('#gis-map-preset');
+    if (gisMapSelect) gisMapSelect.value = '';
   }
 }
 
@@ -3556,6 +3564,8 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
 export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  const gisMapSelect = $('#gis-map-preset');
+  if (gisMapSelect) gisMapSelect.value = doc.background?.presetKey || '';
   renderGISSegments();
   if (typeof dlg.showModal === 'function') dlg.showModal();
   else dlg.setAttribute('open', '');
@@ -4007,6 +4017,33 @@ function handleBlueprintImport(file, meta = {}) {
   reader.readAsDataURL(file);
 }
 
+function handleMapPresetSelect(presetKey) {
+  if (!presetKey) {
+    if (doc.background) {
+      doc.background.presetKey = null;
+      hist.push(doc, 'Clear Map Preset');
+      persist();
+      refresh();
+    }
+    return;
+  }
+  const bg = M.applyMapPreset(doc, presetKey);
+  if (bg) {
+    const preset = M.getMapPreset(presetKey);
+    hist.push(doc, `Apply Map Preset: ${preset ? preset.name : presetKey}`);
+    persist();
+    refresh();
+    toast(`Geospatial map provider preset applied: ${preset ? preset.name : presetKey}`);
+  }
+}
+
+$('#bg-map-preset')?.addEventListener('change', (e) => {
+  handleMapPresetSelect(e.target.value);
+});
+$('#gis-map-preset')?.addEventListener('change', (e) => {
+  handleMapPresetSelect(e.target.value);
+});
+
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
 $('#blueprint-file')?.addEventListener('change', (e) => {
   handleBlueprintImport(e.target.files[0]);
@@ -4419,6 +4456,36 @@ const COMMAND_REGISTRY = [
       );
       toast(`Exported GeoJSON feature collection in ${doc.crs?.epsg || 'EPSG:4326'}.`);
     },
+  },
+
+  // Map Presets
+  {
+    id: 'map-preset-osm',
+    name: 'Map Preset: OpenStreetMap',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('openstreetmap'),
+  },
+  {
+    id: 'map-preset-carto',
+    name: 'Map Preset: CARTO Positron',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('carto-positron'),
+  },
+  {
+    id: 'map-preset-usgs',
+    name: 'Map Preset: USGS Topo',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('usgs-topo'),
+  },
+  {
+    id: 'map-preset-sentinel',
+    name: 'Map Preset: Copernicus Sentinel',
+    category: 'GIS & Map Layers',
+    shortcut: '',
+    action: () => handleMapPresetSelect('copernicus-sentinel'),
   },
   {
     id: 'import-geojson',
