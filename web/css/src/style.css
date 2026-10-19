@@ -1028,3 +1028,67 @@ kbd {
   white-space: nowrap !important;
   border: 0 !important;
 }
+
+/* Snapping Popover & Categorized Menu */
+.snap-popover-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 230px;
+  padding: 2px;
+}
+
+.snap-category {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snap-category-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.snap-category-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snap-toggle-btn {
+  width: 100%;
+}
+
+.snap-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: var(--radius-full, 999px);
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 16px;
+  line-height: 1.2;
+  margin-left: 4px;
+}
+
+k-button[active] .snap-badge,
+k-button[on] .snap-badge,
+k-button.on .snap-badge {
+  background: var(--accent-ink);
+  color: var(--accent);
+}
+
+.snap-status {
+  font-size: 11px;
+  opacity: 0.85;
+  font-weight: 600;
+  margin-left: 8px;
+}
