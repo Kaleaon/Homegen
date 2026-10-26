@@ -13,6 +13,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
+import { resolvePlanScale } from './planScale.js';
 
 /**
  * Draws a closed vector polygon path from array of PDF points [{x, y}, ...].
@@ -222,15 +223,14 @@ export function generatePDF(docState, options = {}) {
     const scaleKey = options.scale || '1/4"=1\'0"';
     const scaleOpt = SCALE_OPTIONS[scaleKey] || SCALE_OPTIONS['1/4"=1\'0"'];
 
-    let scalePt = scaleOpt.ptPerInch;
-    let actualRatioStr = scaleOpt.ratioStr;
-
     // Model bounds
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const r of levelRooms) {
+    // One shared frame and scale across all exported floors keeps sheets comparable.
+    const exportRooms = docState.rooms.filter((r) => levelsToDraw.includes(r.level || 0));
+    for (const r of exportRooms) {
       const pts = getRoomPoints(r);
       for (const p of pts) {
         if (p.x < minX) minX = p.x;
@@ -246,15 +246,18 @@ export function generatePDF(docState, options = {}) {
       maxX = 240;
       maxY = 240;
     }
+    // Include the outer half of the structural walls in the printable bounds.
+    minX -= WT / 2;
+    minY -= WT / 2;
+    maxX += WT / 2;
+    maxY += WT / 2;
     const modelW = maxX - minX;
     const modelH = maxY - minY;
-
-    if (scaleOpt.fit || !scalePt) {
-      const fitW = (drawingArea.w - 40) / modelW;
-      const fitH = (drawingArea.h - 40) / modelH;
-      scalePt = Math.max(0.2, Math.min(fitW, fitH));
-      actualRatioStr = `Fit to Page (1:${Math.round(72 / (scalePt * 12))})`;
-    }
+    const { scalePt, label: actualRatioStr } = resolvePlanScale(
+      { minX, minY, maxX, maxY },
+      drawingArea,
+      scaleOpt
+    );
 
     const drawingCx = drawingArea.x + drawingArea.w / 2;
     const drawingCy = drawingArea.y + drawingArea.h / 2;
