@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { newState, createRoom, addItem, addOpening } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
 import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
-import { getRoomClearSpan, polygonCentroid, getRoomWallKeys } from '../js/geometry.js';
+import { getRoomClearSpan, interiorPolygonData, getRoomWallKeys } from '../js/geometry.js';
 import { getConstraintHandles } from '../../designer3d/tools/constraintHandles.mjs';
 
 test('AC1: Habitable non-rectangular rooms with narrow sections under 7 feet fail IRC R304.2 compliance evaluation', () => {
@@ -152,7 +152,7 @@ test('AC5: Spatial overlay dimension badges display true clear dimensions and ce
   assert.equal(dimLabelNodes.length, 1, 'Should generate 1 dimension label node');
 
   const dimNode = dimLabelNodes[0];
-  const expectedCentroid = polygonCentroid(room.points);
+  const expectedCentroid = interiorPolygonData(room).centroid;
 
   assert.equal(
     dimNode.bounds.x,

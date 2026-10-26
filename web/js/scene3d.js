@@ -11,6 +11,7 @@ import {
   wallNeighbors,
   interior,
   csgExteriorCladdingIntervals,
+  subtractInterval,
   lv,
   getRoomPoints,
   getRoomBoundingBox,
@@ -18,7 +19,7 @@ import {
   getArcParameters,
   pointOnArc,
 } from './geometry.js';
-import { OPENING_BY_ID, OPENINGS, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import {
@@ -734,7 +735,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const extrudeSettings = { depth: height, bevelEnabled: false };
     const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     geom.rotateX(Math.PI / 2);
-    const visMat = Array.isArray(material) ? material[0] : (material.vis || material.base || material);
+    const visMat = Array.isArray(material)
+      ? material[0]
+      : material.vis || material.base || material;
     const mesh = new THREE.Mesh(geom, visMat);
     mesh.position.y = (elev + y0) * S;
     group.add(mesh);
@@ -768,7 +771,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
 
     const geom = new THREE.ExtrudeGeometry(shape, { depth: depth * S, bevelEnabled: false });
-    const useMat = Array.isArray(mat) ? mat[0] : (mat.vis || mat.base || mat);
+    const useMat = Array.isArray(mat) ? mat[0] : mat.vis || mat.base || mat;
     const mesh = new THREE.Mesh(geom, useMat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -862,7 +865,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
   }
 
-  function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat, faceIdx) {
+  function addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat) {
+    // Curved-wall fallback callers supply a base/visible pair; Mesh needs a material.
+    const material = mat.vis || mat.base || mat;
     const s = wallSeg(room, wall);
     const len = t1 - t0;
     const dep = d1 - d0;
@@ -883,8 +888,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const isSloped = fZ0 !== fZ1 || cZ0 !== cZ1;
 
     if (!isSloped) {
-      const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
-      const m = boxMesh(len, y1 - y0, dep, mats);
+      const m = boxMesh(len, y1 - y0, dep, material);
       const along = (t0 + t1) / 2;
       const off = (d0 + d1) / 2;
       const cx = s.ax + s.dx * along + s.nx * off;
@@ -989,18 +993,16 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     geom.setIndex(idx);
     geom.computeVertexNormals();
 
-    const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
-    const m = new THREE.Mesh(geom, mats);
+    const m = new THREE.Mesh(geom, material);
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
 
-    const idx = resolveWallIndex(wall);
-    const pts = getRoomPoints(room);
+    const wallIndex = resolveWallIndex(wall);
     const N = pts.length;
     if (N >= 3) {
-      const prevWall = (idx - 1 + N) % N;
-      const nextWall = (idx + 1) % N;
+      const prevWall = (wallIndex - 1 + N) % N;
+      const nextWall = (wallIndex + 1) % N;
       const sPrev = wallSeg(room, prevWall);
       const sNext = wallSeg(room, nextWall);
 
@@ -1810,7 +1812,20 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (assembly.sheathingThickness > 0) {
         const sheathingMat = plain('#b89768', 0.8);
         for (const [a, b] of ext)
-          addExtrudedWallSegment(group, room, wall, a, b, 0, H, sheathingD0, sheathingD1, e, sheathingMat, cuts);
+          addExtrudedWallSegment(
+            group,
+            room,
+            wall,
+            a,
+            b,
+            0,
+            H,
+            sheathingD0,
+            sheathingD1,
+            e,
+            sheathingMat,
+            cuts
+          );
       }
 
       // 4. Air gap / cavity layer
@@ -1820,7 +1835,20 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (assembly.airGapThickness > 0) {
         const airGapMat = plain('#2a2a2a', 0.9);
         for (const [a, b] of ext)
-          addExtrudedWallSegment(group, room, wall, a, b, 0, H, airGapD0, airGapD1, e, airGapMat, cuts);
+          addExtrudedWallSegment(
+            group,
+            room,
+            wall,
+            a,
+            b,
+            0,
+            H,
+            airGapD0,
+            airGapD1,
+            e,
+            airGapMat,
+            cuts
+          );
       }
 
       // 5. Exterior cladding layer

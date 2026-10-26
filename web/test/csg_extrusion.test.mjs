@@ -205,12 +205,7 @@ test('Door hinge positioning uses 2D contour tangent math to guarantee inward do
   const doorInGroup = api.entityMap.get(doorIn.id);
   assert.ok(doorInGroup, 'Inward door entity present');
 
-  let pivotIn = null;
-  doorInGroup.traverse((child) => {
-    if (child.type === 'Group' && child.children.length > 0) {
-      pivotIn = child;
-    }
-  });
+  const pivotIn = doorInGroup.children.find((child) => child.userData.role === 'doorPivot');
 
   assert.ok(pivotIn, 'Door hinge pivot group present');
 
@@ -226,3 +221,33 @@ test('Door hinge positioning uses 2D contour tangent math to guarantee inward do
     'Door hinge rotation aligns with 2D contour tangent and inward normal'
   );
 });
+
+for (const sloped of [false, true]) {
+  test(`near-linear curved walls use real materials in the ${sloped ? 'sloped' : 'flat'} fallback`, () => {
+    const state = m.newState();
+    const room = m.createRoom(state, 'living', 0, 0, 180, 180);
+    // A tiny nonzero bulge enters the curved-wall builder, then takes its
+    // linear fallback. Both height branches must unwrap the material pair.
+    room.bulges = { N: 1e-12 };
+    if (sloped) room.floorMesh = { VertexZArray: [0, 12, 12, 0] };
+    const api = createScene3D(
+      canvas,
+      () => state,
+      () => 0
+    );
+    api.show();
+    const wall = api.entityMap.get(`${room.id}:wall:N`);
+    assert.ok(wall, 'fallback must build the wall successfully');
+    let meshes = 0;
+    wall.traverse((child) => {
+      if (!child.isMesh) return;
+      meshes++;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      assert.ok(
+        materials.every((material) => material?.isMaterial),
+        'Three.js meshes must receive materials rather than base/visible wrappers'
+      );
+    });
+    assert.ok(meshes > 0);
+  });
+}

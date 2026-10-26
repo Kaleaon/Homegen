@@ -61,7 +61,9 @@ test('RateLimiter processes queued requests in FIFO order', async () => {
   limiter.clear();
 });
 
-test('RateLimiter refills tokens over time when bucket is exhausted', async () => {
+test('RateLimiter refills tokens over time when bucket is exhausted', async (t) => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
   let fetchCalls = 0;
   const mockFetch = async () => {
     fetchCalls++;
@@ -82,6 +84,13 @@ test('RateLimiter refills tokens over time when bucket is exhausted', async () =
 
   // 3rd request should wait for token refill
   const p3 = limiter.fetch('/3');
+  assert.equal(fetchCalls, 2, 'third request waits until a token is available');
+  assert.equal(limiter.queue.length, 1);
+
+  // Advance the clock explicitly: elapsed wall time under load must not make
+  // the burst assertions flaky or require a real-time sleep.
+  now += 50;
+  limiter._processQueue();
 
   await Promise.all([p1, p2, p3]);
   assert.equal(fetchCalls, 3);

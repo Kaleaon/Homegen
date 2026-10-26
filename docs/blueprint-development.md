@@ -111,13 +111,25 @@ fixed-scale overflow errors, invalid inputs, and common scales across floors.
 Inspect generated sheets with an independent PDF reader; tests alone do not
 establish visual quality or a building's suitability for construction.
 
-Observed on this branch: all 13 focused PDF/scale tests pass; changed JavaScript
-passes ESLint with two existing unused-variable warnings in `pdfEngine.js`.
+Observed on this branch: all 437 web tests and all 58 designer3d/tools tests pass.
+The root Node lint command (web ESLint, CSS lint and tools ESLint) passes with
+zero warnings. Prettier checks pass in both Node projects.
 Two different-sized floors were exported and rendered with Poppler: both show
 the same 1:38.95 fit label and shared origin, with geometry inside the sheet.
-The full `npm test` pipeline builds CSS and passes CSS lint, then reports
-317 passing / 19 failing tests. Remaining failures include baseline duplicate
-`idx` declarations in `scene3d.js`, committed merge conflict markers in
-`test/snapping_bridge.test.mjs`, a polygon-overlay assertion and other existing
-3D/test issues. The full suite is not green; this change should remain a draft
-until the integration blockers are resolved. Android was not changed or tested.
+
+The follow-up repair removes duplicate scene declarations, a test conflict marker,
+and an extra closing brace in the tools suite. The 3D wall fallback resolves actual
+materials and imports interval subtraction; stale unused imports were removed.
+Door meshes now use the canonical wall geometry rather than a private implementation
+that reversed south/west offsets. Explicit pivot metadata lets tests inspect the
+hinge instead of accidentally selecting a nested hardware group. Thirty-six new
+checks cover hinge locations and physical inward/outward swing for single/double
+doors on all cardinal walls and a five-sided angled polygon.
+
+Polygon dimension labels use the clear-interior centroid consistently. Token refill
+tests advance a controlled clock; GeoTIFF tests count sample reads and bounded IFD
+work instead of asserting a machine-dependent five-millisecond wall-clock limit.
+No test cases were skipped or disabled to obtain the passing suites.
+The web suite (435 cases before adding the two wall-material fallback regressions)
+and tools suite also pass on Node 20, the CI runtime. Android validation is reported
+separately in the pull request.

@@ -2,7 +2,6 @@
 import { jsPDF } from '#jspdf';
 import {
   WT,
-  WALLS,
   wallSeg,
   wallPoint,
   interior,
@@ -355,7 +354,7 @@ function drawSheetBorder(pdf, r) {
  * Draws the vector floorplan geometry on the current page.
  */
 function drawFloorplanVector(pdf, state, levelRooms, transform) {
-  const { toPdfX, toPdfY, toPdfDim } = transform;
+  const { toPdfX, toPdfY } = transform;
 
   // 1. Room Floor Fills
   for (const room of levelRooms) {

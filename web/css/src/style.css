@@ -167,7 +167,10 @@ button:disabled {
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(200px, var(--ktheme-layout-sidebar-left, 260px)) 1fr minmax(240px, var(--ktheme-layout-sidebar-right, 320px));
+  grid-template-columns: minmax(200px, var(--ktheme-layout-sidebar-left, 260px)) 1fr minmax(
+      240px,
+      var(--ktheme-layout-sidebar-right, 320px)
+    );
   border-radius: var(--ktheme-layout-corner-panel, 14px);
   min-height: 0;
 }

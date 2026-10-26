@@ -6,7 +6,6 @@ import {
   WT,
   EPS,
   WALLS,
-  OPPOSITE,
   resolveWallIndex,
   getRoomWallKeys,
   getRoomClearSpan,
