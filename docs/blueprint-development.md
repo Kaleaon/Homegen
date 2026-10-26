@@ -130,6 +130,13 @@ Polygon dimension labels use the clear-interior centroid consistently. Token ref
 tests advance a controlled clock; GeoTIFF tests count sample reads and bounded IFD
 work instead of asserting a machine-dependent five-millisecond wall-clock limit.
 No test cases were skipped or disabled to obtain the passing suites.
-The web suite (435 cases before adding the two wall-material fallback regressions)
-and tools suite also pass on Node 20, the CI runtime. Android validation is reported
-separately in the pull request.
+The web suite (435 cases before adding the two wall-material fallback regressions,
+which were checked separately) and tools suite also pass on Node 20, the CI runtime.
+
+Android `spotlessCheck test` passes on JDK 17 with SDK 34: 104 debug and 104 release
+unit tests, zero failures/errors/skips. Spotless repaired unused imports and trailing
+commas in two Kotlin files. Android test JVMs load the Byte Buddy instrumentation
+agent at startup, matching Mockito's existing version, so inline mocks work in
+containers without dynamic JVM self-attachment. No production instrumentation is
+added. SDK/JDK installation and HTTP proxy settings are local validation setup;
+no machine paths or proxy configuration are committed.
