@@ -105,7 +105,7 @@ test('generatePDF automatically paginates room schedule if many rooms present', 
   const pdf = generatePDF(doc, {
     pageSize: 'Letter',
     orientation: 'landscape',
-    scale: '1/8"=1\'0"',
+    scale: 'fit',
     includeRoomSchedule: true,
   });
 

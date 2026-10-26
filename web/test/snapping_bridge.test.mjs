@@ -80,7 +80,6 @@ test('SnappingBridge responds to toolbar snap mode toggles', () => {
   assert.equal(snapRes.snap?.type, 'midpoint');
 });
 
-<<<<<<< HEAD
 test('Direct consumption of SnappingBridge active snap points for room moves and resizes', () => {
   const interaction = new InteractionLayer({
     gridSettings: {
@@ -216,4 +215,3 @@ test('SnappingBridge generates primary angle guide lines and secondary reference
   assert.equal(snapRelative.guideLines[1].start.x, 0);
   assert.equal(snapRelative.guideLines[1].start.y, 0);
 });
-

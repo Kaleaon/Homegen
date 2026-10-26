@@ -415,7 +415,7 @@ test('parseGeoTIFFWithFallback falls back to default bounds when georeferencing 
   assert.deepEqual(grid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
 });
 
-test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', async () => {
+test('parseGeoTIFFWithFallback reads each raster sample once with bounded IFD work', async (t) => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 100,
@@ -424,9 +424,15 @@ test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', as
     tiepoint: [0.0, 0.0, 0.0, 0.0, 100.0, 0.0],
   });
 
-  const start = performance.now();
-  await parseGeoTIFFWithFallback(buffer);
-  const duration = performance.now() - start;
-
-  assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
+  // Count work rather than elapsed time: parallel CI can deschedule a fast
+  // parser for longer than 5 ms without any algorithmic regression.
+  const sampleReads = t.mock.method(DataView.prototype, 'getUint8');
+  const tagReads = t.mock.method(DataView.prototype, 'getUint16');
+  const grid = await parseGeoTIFFWithFallback(buffer);
+  assert.equal(grid.width, 100);
+  assert.equal(grid.height, 100);
+  assert.equal(grid.data.length, 10000);
+  assert.equal(sampleReads.mock.callCount(), 10000);
+  assert.ok(tagReads.mock.callCount() < 100, 'IFD work must be independent of raster area');
+  assert.deepEqual(grid.bounds, { minX: 0, maxX: 100, minY: 0, maxY: 100 });
 });

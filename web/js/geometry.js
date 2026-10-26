@@ -742,66 +742,6 @@ export function getRoomWallKeys(room) {
   return Array.from({ length: pts.length }, (_, i) => i);
 }
 
-export function polygonCentroid(points) {
-  if (!points || points.length === 0) return { x: 0, y: 0 };
-  if (points.length === 1) return { x: points[0].x, y: points[0].y };
-  if (points.length === 2) {
-    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-  }
-
-  let cx = 0;
-  let cy = 0;
-  let signedArea = 0;
-  const n = points.length;
-
-  for (let i = 0; i < n; i++) {
-    const x0 = points[i].x;
-    const y0 = points[i].y;
-    const x1 = points[(i + 1) % n].x;
-    const y1 = points[(i + 1) % n].y;
-    const a = x0 * y1 - x1 * y0;
-    signedArea += a;
-    cx += (x0 + x1) * a;
-    cy += (y0 + y1) * a;
-  }
-
-  signedArea *= 0.5;
-  if (Math.abs(signedArea) < 1e-6) {
-    let sx = 0,
-      sy = 0;
-    for (const p of points) {
-      sx += p.x;
-      sy += p.y;
-    }
-    return { x: sx / n, y: sy / n };
-  }
-
-  cx /= 6 * signedArea;
-  cy /= 6 * signedArea;
-
-  const pt = { x: cx, y: cy };
-  if (!pointInPolygon(pt, points)) {
-    let bestDist = Infinity;
-    let bestPt = pt;
-    for (let i = 0; i < n; i++) {
-      const mid = {
-        x: (points[i].x + points[(i + 1) % n].x) / 2,
-        y: (points[i].y + points[(i + 1) % n].y) / 2,
-      };
-      if (pointInPolygon(mid, points)) {
-        const d = Math.hypot(mid.x - cx, mid.y - cy);
-        if (d < bestDist) {
-          bestDist = d;
-          bestPt = mid;
-        }
-      }
-    }
-    if (bestDist < Infinity) return bestPt;
-  }
-
-  return pt;
-}
-
 /** Inscribed clear span (minimum clear horizontal dimension) across room interior polygon. */
 export function getRoomClearSpan(room) {
   if (!room) return 0;
@@ -1190,44 +1130,6 @@ export function rectsTouch(a, b, margin = 0) {
   const by0 = b.y;
   const by1 = b.y + b.h;
   return Math.max(ax0, bx0) < Math.min(ax1, bx1) && Math.max(ay0, by0) < Math.min(ay1, by1);
-}
-
-export function polygonCentroid(points) {
-  if (!points || points.length === 0) return { x: 0, y: 0 };
-  if (points.length === 1) return { x: points[0].x, y: points[0].y };
-  if (points.length === 2) {
-    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-  }
-
-  let area = 0;
-  let cx = 0;
-  let cy = 0;
-  const n = points.length;
-
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const p1 = points[i];
-    const p2 = points[j];
-    const cross = p1.x * p2.y - p2.x * p1.y;
-    area += cross;
-    cx += (p1.x + p2.x) * cross;
-    cy += (p1.y + p2.y) * cross;
-  }
-
-  area = area / 2;
-  if (Math.abs(area) < 1e-6) {
-    let sx = 0,
-      sy = 0;
-    for (const p of points) {
-      sx += p.x;
-      sy += p.y;
-    }
-    return { x: sx / n, y: sy / n };
-  }
-
-  cx = cx / (6 * area);
-  cy = cy / (6 * area);
-  return { x: cx, y: cy };
 }
 
 export function polygonMinClearanceWidth(points) {

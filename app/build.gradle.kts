@@ -1,9 +1,17 @@
+import org.gradle.api.tasks.testing.Test
+import org.gradle.process.CommandLineArgumentProvider
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.diffplug.spotless")
+}
+
+val testInstrumentationAgent by configurations.creating {
+    isCanBeConsumed = false
+    isTransitive = false
 }
 
 android {
@@ -87,9 +95,20 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("org.mockito:mockito-core:5.11.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.3.1")
+    // Match Mockito 5.11's Byte Buddy version. Load instrumentation at startup
+    // so inline mocks also work in containers where JVM self-attachment is unavailable.
+    add(testInstrumentationAgent.name, "net.bytebuddy:byte-buddy-agent:1.14.12")
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("org.robolectric:robolectric:4.12.2")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+tasks.withType<Test>().configureEach {
+    jvmArgumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf("-javaagent:${testInstrumentationAgent.singleFile.absolutePath}")
+        },
+    )
 }
 
 spotless {

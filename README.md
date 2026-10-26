@@ -19,6 +19,11 @@ cd web && npm test         # code-engine tests (node:test, no installs needed)
 - **Photoreal…**: exports a depth guide + auto-written prompt of the current room and sends them to free generators (AI Horde with depth ControlNet, Pollinations), or downloads them for ComfyUI/Automatic1111. See [`web/RESOURCES.md`](web/RESOURCES.md) for what was verified and the caveats.
 - **Undo/redo, zoom/pan, save/open JSON, PNG export, code report (Markdown).**
 
+Vector PDF export preserves fixed architectural scales and reports when a plan
+needs a larger sheet or smaller scale. Fit to Page uses a shared frame and scale
+across exported floors. See [blueprint development](docs/blueprint-development.md)
+for the source audit, current limitations, and parallel development work packages.
+
 ### Automatic code compliance
 
 Every edit goes through `commit()` in `web/js/codes.js`:

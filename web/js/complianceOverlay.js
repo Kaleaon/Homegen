@@ -9,9 +9,7 @@ import {
   fixtureZone,
   rectsOverlap,
   floorAreaSqFt,
-  getRoomPoints,
   getRoomClearSpan,
-  polygonCentroid,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
@@ -486,11 +484,11 @@ export class ComplianceOverlayScene {
       }
 
       // Live dimension label node centered at interior polygon centroid
-      const centroid = polygonCentroid(pts);
+      const { centroid } = roomEntry?.polyData || interiorPolygonData(room);
       const clearSpan = getRoomClearSpan(room);
       const minDimVal = clearSpan;
       const dimText =
-        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} clear`;
+        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} min clear`;
       nextNodes.push(
         new SpatialOverlayNode(
           `node:dimension:${room.id}`,
