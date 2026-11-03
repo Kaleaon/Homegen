@@ -1,6 +1,7 @@
 // Modular 3D door builder component for Homegen rendering engines.
 import * as THREE from '#three';
 import { resolveDoorStyle } from './presetRegistry.js';
+import { wallSeg } from './geometry.js';
 
 /**
  * Construct pre-composed 3D door geometries with frame jambs, casing trim profiles,
@@ -118,7 +119,7 @@ export function buildDoor3DMesh({
   const singleLeafW = clearWidth / leafCount - (isDouble ? 0.25 : 0);
 
   function createHardwareGroup(hwStyle, isRightHand = false) {
-    const hwGroup = new THREE.Group();
+    const hwGroup = new THREE.Object3D();
     const plateGeom = new THREE.BoxGeometry(1.5 * (1 / 12), 6 * (1 / 12), 0.25 * (1 / 12));
     const plate = new THREE.Mesh(plateGeom, hwMat);
     plate.castShadow = true;
@@ -171,7 +172,7 @@ export function buildDoor3DMesh({
   }
 
   function createSingleLeafGroup(w, h, d, panelStyle, hwStyle, isRightHand = false) {
-    const leafGroup = new THREE.Group();
+    const leafGroup = new THREE.Object3D();
     const S = 1 / 12;
 
     if (panelStyle === 'panel_2') {
@@ -438,36 +439,4 @@ export function buildDoor3DMesh({
   }
 
   return og;
-}
-
-function wallSeg(room, wall) {
-  const pts = room.points || [
-    { x: room.x, y: room.y },
-    { x: room.x + room.w, y: room.y },
-    { x: room.x + room.w, y: room.y + room.h },
-    { x: room.x, y: room.y + room.h },
-  ];
-  let idx = 0;
-  if (typeof wall === 'number') idx = wall;
-  else if (wall === 'N') idx = 0;
-  else if (wall === 'E') idx = 1;
-  else if (wall === 'S') idx = 2;
-  else if (wall === 'W') idx = 3;
-
-  const a = pts[idx];
-  const b = pts[(idx + 1) % pts.length];
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  return {
-    ax: a.x,
-    ay: a.y,
-    bx: b.x,
-    by: b.y,
-    dx: dx / len,
-    dy: dy / len,
-    nx: -dy / len,
-    ny: dx / len,
-    len,
-  };
 }
