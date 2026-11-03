@@ -24,8 +24,11 @@ fun FloorSelector(
     modifier: Modifier = Modifier,
     minFloor: Int = 0,
     maxFloor: Int = 5,
+    elevationBadge: String? = null,
+    onEditProperties: (() -> Unit)? = null,
 ) {
     val clampedFloor = currentFloor.coerceIn(minFloor, maxFloor)
+    val floorLabel = if (clampedFloor < 0) "B${-clampedFloor}" else "F$clampedFloor"
 
     Column(
         modifier = modifier.padding(8.dp),
@@ -42,13 +45,20 @@ fun FloorSelector(
             Text("▲")
         }
         Text(
-            text = "F$clampedFloor",
+            text = floorLabel,
             modifier = Modifier
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primaryContainer)
                 .padding(8.dp),
             style = MaterialTheme.typography.labelMedium,
         )
+        if (elevationBadge != null) {
+            Text(
+                text = elevationBadge,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         IconButton(
             onClick = onFloorDown,
             enabled = clampedFloor > minFloor,
@@ -57,6 +67,16 @@ fun FloorSelector(
             },
         ) {
             Text("▼")
+        }
+        if (onEditProperties != null) {
+            IconButton(
+                onClick = onEditProperties,
+                modifier = Modifier.semantics {
+                    contentDescription = "Edit floor properties"
+                },
+            ) {
+                Text("⚙")
+            }
         }
     }
 }

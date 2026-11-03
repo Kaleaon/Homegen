@@ -10,6 +10,7 @@ import {
   interior,
   wallPoint,
   footprint,
+  lv,
   getRoomPoints,
   getRoomBoundingBox,
   computeGeoBounds,
@@ -193,12 +194,143 @@ export function applyMapPreset(state, presetKeyOrObj, opts = {}) {
   return state.background;
 }
 
+export const DEFAULT_STORY_HEIGHT = 106; // 96" ceiling + 10" slab
+export const DEFAULT_CEILING_HEIGHT = 96;
+export const DEFAULT_SLAB_THICKNESS = 10;
+
+export function defaultLevelDescriptor(index = 0, name = null) {
+  const isSub = index < 0;
+  return {
+    index,
+    name: name || (isSub ? `Basement ${Math.abs(index)}` : `Floor ${index + 1}`),
+    elevation: index * DEFAULT_STORY_HEIGHT,
+    storyHeight: DEFAULT_STORY_HEIGHT,
+    ceilingHeight: DEFAULT_CEILING_HEIGHT,
+    slabThickness: DEFAULT_SLAB_THICKNESS,
+    subterranean: isSub,
+  };
+}
+
+export function getLevelMetadata(state, levelIndex = 0) {
+  if (Array.isArray(state?.levelMetadata)) {
+    const found = state.levelMetadata.find((m) => m && m.index === levelIndex);
+    if (found) return found;
+  }
+  return defaultLevelDescriptor(levelIndex);
+}
+
+export function calculateLevelElevations(state) {
+  const elev = [];
+  const meta = state?.levelMetadata;
+  if (Array.isArray(meta) && meta.length > 0) {
+    for (const lvl of meta) {
+      if (lvl && typeof lvl.index === 'number') {
+        const e =
+          typeof lvl.elevation === 'number' && !isNaN(lvl.elevation)
+            ? lvl.elevation
+            : lvl.index * DEFAULT_STORY_HEIGHT;
+        elev[lvl.index] = e;
+      }
+    }
+  } else {
+    const n = Math.max(1, state?.levels || 1);
+    elev[0] = 0;
+    for (let l = 1; l < n; l++) {
+      const rs = (state?.rooms || []).filter((r) => lv(r) === l - 1);
+      const ceil = rs.length ? Math.max(...rs.map((r) => r.ceiling || 96)) : 96;
+      elev[l] = elev[l - 1] + ceil + DEFAULT_SLAB_THICKNESS;
+    }
+    const minRoomLevel = Math.min(0, ...(state?.rooms || []).map((r) => lv(r)));
+    for (let l = -1; l >= minRoomLevel; l--) {
+      const rs = (state?.rooms || []).filter((r) => lv(r) === l);
+      const ceil = rs.length ? Math.max(...rs.map((r) => r.ceiling || 96)) : 96;
+      elev[l] = (elev[l + 1] !== undefined ? elev[l + 1] : 0) - (ceil + DEFAULT_SLAB_THICKNESS);
+    }
+  }
+  return elev;
+}
+
+export function getLevelElevation(state, levelIndex = 0) {
+  const elevs = calculateLevelElevations(state);
+  if (elevs[levelIndex] !== undefined) return elevs[levelIndex];
+  return levelIndex * DEFAULT_STORY_HEIGHT;
+}
+
+export function validateLevelHierarchy(metadataArray) {
+  const errors = [];
+  if (!Array.isArray(metadataArray) || metadataArray.length === 0) {
+    return { valid: true, errors: [] };
+  }
+
+  const seenIndices = new Set();
+  for (const lvl of metadataArray) {
+    if (!lvl) continue;
+    if (seenIndices.has(lvl.index)) {
+      errors.push(`Duplicate level index ${lvl.index}.`);
+    }
+    seenIndices.add(lvl.index);
+    if (typeof lvl.storyHeight === 'number' && lvl.storyHeight <= 0) {
+      errors.push(`Level ${lvl.name || lvl.index} story height must be greater than 0.`);
+    }
+    const slab = lvl.slabThickness || DEFAULT_SLAB_THICKNESS;
+    if (typeof lvl.ceilingHeight === 'number' && lvl.ceilingHeight <= 0) {
+      errors.push(`Level ${lvl.name || lvl.index} ceiling height must be positive.`);
+    }
+    if (typeof lvl.storyHeight === 'number' && lvl.storyHeight < slab) {
+      errors.push(
+        `Level ${lvl.name || lvl.index} story height (${lvl.storyHeight}") cannot be less than slab thickness (${slab}").`
+      );
+    }
+  }
+
+  const sorted = [...metadataArray].sort((a, b) => (a.elevation ?? 0) - (b.elevation ?? 0));
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const cur = sorted[i];
+    const next = sorted[i + 1];
+    const slabCur = cur.slabThickness || DEFAULT_SLAB_THICKNESS;
+    if (next.elevation < cur.elevation + slabCur) {
+      errors.push(
+        `Level ${next.name || next.index} overlaps with level ${cur.name || cur.index} (minimum separation ${slabCur}").`
+      );
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+export function setLevelMetadata(state, metadataArray) {
+  if (!state) return { valid: false, errors: ['Invalid state'] };
+  const validation = validateLevelHierarchy(metadataArray);
+  if (!validation.valid) {
+    return validation;
+  }
+  state.levelMetadata = metadataArray.map((m) => ({ ...m }));
+  state.levelMetadata.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const maxIdx = Math.max(0, ...state.levelMetadata.map((m) => m.index));
+  state.levels = maxIdx + 1;
+  return { valid: true, errors: [] };
+}
+
+export function formatElevationBadge(inches) {
+  if (typeof inches !== 'number' || isNaN(inches)) return '+0\' 0"';
+  const sign = inches >= 0 ? '+' : '-';
+  const abs = Math.abs(inches);
+  const ft = Math.floor(abs / 12);
+  const rem = abs % 12;
+  const remStr = rem.toFixed(rem % 1 === 0 ? 0 : 1);
+  return `${sign}${ft}' ${remStr}"`;
+}
+
 export function newState() {
   return {
     version: 2,
     name: 'My home',
     nextId: 1,
     levels: 1,
+    levelMetadata: [defaultLevelDescriptor(0, 'Floor 1')],
     rooms: [],
     background: null,
     site: null, // { crs: 'EPSG:4326', features: [], segments: [], layers: [] }
@@ -770,7 +902,7 @@ export function deserialize(text) {
   for (const r of s.rooms) {
     r.openings ||= [];
     r.items ||= [];
-    r.level ||= 0;
+    if (r.level == null) r.level = 0;
     r.wallUV ||= {};
     const pts = getRoomPoints(r);
     r.points = pts;
@@ -783,7 +915,30 @@ export function deserialize(text) {
       r.wallUV[w] = getWallUV(r, w);
     }
   }
-  s.levels = Math.max(s.levels || 1, ...s.rooms.map((r) => r.level + 1));
+  const maxRoomLevel = s.rooms.length
+    ? Math.max(...s.rooms.map((r) => (r.level != null ? r.level : 0)))
+    : 0;
+  const minRoomLevel = s.rooms.length
+    ? Math.min(...s.rooms.map((r) => (r.level != null ? r.level : 0)))
+    : 0;
+  s.levels = Math.max(s.levels || 1, maxRoomLevel + 1);
+
+  if (!Array.isArray(s.levelMetadata) || s.levelMetadata.length === 0) {
+    s.levelMetadata = [];
+    const minL = Math.min(0, minRoomLevel);
+    const maxL = Math.max((s.levels || 1) - 1, maxRoomLevel);
+    for (let l = minL; l <= maxL; l++) {
+      s.levelMetadata.push(defaultLevelDescriptor(l));
+    }
+  } else {
+    for (const r of s.rooms) {
+      const l = r.level != null ? r.level : 0;
+      if (!s.levelMetadata.some((m) => m && m.index === l)) {
+        s.levelMetadata.push(defaultLevelDescriptor(l));
+      }
+    }
+    s.levelMetadata.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  }
   s.elevationGrid = s.elevationGrid ? deserializeElevationGrid(s.elevationGrid) : null;
   for (const finish of s.customFinishes) {
     registerCustomWallFinish(finish, s);
@@ -818,6 +973,34 @@ export function parseDistanceInInches(str) {
   const num = parseFloat(str);
   if (isNaN(num) || num <= 0) return null;
   return num <= 50 ? num * 12 : num;
+}
+
+export function formatDistanceInInches(inches) {
+  if (typeof inches !== 'number' || isNaN(inches)) return '0"';
+  const sign = inches < 0 ? '-' : '';
+  const abs = Math.abs(inches);
+  const ft = Math.floor(abs / 12);
+  const rem = abs % 12;
+  const remStr = rem.toFixed(rem % 1 === 0 ? 0 : 1);
+  if (ft === 0) return `${sign}${remStr}"`;
+  if (rem === 0) return `${sign}${ft}'`;
+  return `${sign}${ft}' ${remStr}"`;
+}
+
+export function parseElevationInInches(str) {
+  if (str === null || str === undefined) return null;
+  str = String(str).trim().toLowerCase();
+  if (!str) return null;
+  if (str === '0' || str === '0"' || str === "0'") return 0;
+  const isNegative = str.startsWith('-');
+  if (isNegative) str = str.slice(1).trim();
+  const val = parseDistanceInInches(str);
+  if (val === null) {
+    const num = parseFloat(str);
+    if (!isNaN(num)) return isNegative ? -num : num;
+    return null;
+  }
+  return isNegative ? -val : val;
 }
 
 export class History {

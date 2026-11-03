@@ -11,6 +11,7 @@ import {
   wallNeighbors,
   interior,
   csgExteriorCladdingIntervals,
+  subtractInterval,
   lv,
   getRoomPoints,
   getRoomBoundingBox,
@@ -631,6 +632,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
+  const faceMats = (base, face, visible) => {
+    const a = Array(6).fill(base);
+    a[face] = visible;
+    return a;
+  };
 
   function buildRoomShape(pts) {
     const shape = new THREE.Shape();
@@ -734,7 +740,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const extrudeSettings = { depth: height, bevelEnabled: false };
     const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     geom.rotateX(Math.PI / 2);
-    const visMat = Array.isArray(material) ? material[0] : (material.vis || material.base || material);
+    const visMat = Array.isArray(material)
+      ? material[0]
+      : material.vis || material.base || material;
     const mesh = new THREE.Mesh(geom, visMat);
     mesh.position.y = (elev + y0) * S;
     group.add(mesh);
@@ -768,7 +776,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
 
     const geom = new THREE.ExtrudeGeometry(shape, { depth: depth * S, bevelEnabled: false });
-    const useMat = Array.isArray(mat) ? mat[0] : (mat.vis || mat.base || mat);
+    const useMat = Array.isArray(mat) ? mat[0] : mat.vis || mat.base || mat;
     const mesh = new THREE.Mesh(geom, useMat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -995,12 +1003,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     group.add(m);
 
-    const idx = resolveWallIndex(wall);
-    const pts = getRoomPoints(room);
-    const N = pts.length;
-    if (N >= 3) {
-      const prevWall = (idx - 1 + N) % N;
-      const nextWall = (idx + 1) % N;
+    if (n >= 3) {
+      const prevWall = (wallIdx - 1 + n) % n;
+      const nextWall = (wallIdx + 1) % n;
       const sPrev = wallSeg(room, prevWall);
       const sNext = wallSeg(room, nextWall);
 
@@ -1191,11 +1196,36 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
   // ---------------------------------------------------------------- scene build
   function levelElevations(state) {
-    const n = state.levels || 1;
+    if (state && Array.isArray(state.levelMetadata) && state.levelMetadata.length > 0) {
+      const elev = [];
+      for (const lvl of state.levelMetadata) {
+        if (lvl && typeof lvl.index === 'number') {
+          elev[lvl.index] =
+            typeof lvl.elevation === 'number' && !isNaN(lvl.elevation)
+              ? lvl.elevation
+              : lvl.index * 106;
+        }
+      }
+      for (const r of state.rooms || []) {
+        const l = lv(r);
+        if (elev[l] === undefined) {
+          elev[l] = l * 106;
+        }
+      }
+      return elev;
+    }
+    const n = Math.max(1, state?.levels || 1);
     const elev = [0];
     for (let l = 1; l < n; l++) {
-      const rs = state.rooms.filter((r) => lv(r) === l - 1);
-      elev.push(elev[l - 1] + (rs.length ? Math.max(...rs.map((r) => r.ceiling)) : 96) + SLAB);
+      const rs = (state?.rooms || []).filter((r) => lv(r) === l - 1);
+      const ceil = rs.length ? Math.max(...rs.map((r) => r.ceiling || 96)) : 96;
+      elev[l] = elev[l - 1] + ceil + SLAB;
+    }
+    const minRoomLevel = Math.min(0, ...(state?.rooms || []).map((r) => lv(r)));
+    for (let l = -1; l >= minRoomLevel; l--) {
+      const rs = (state?.rooms || []).filter((r) => lv(r) === l);
+      const ceil = rs.length ? Math.max(...rs.map((r) => r.ceiling || 96)) : 96;
+      elev[l] = (elev[l + 1] !== undefined ? elev[l + 1] : 0) - (ceil + SLAB);
     }
     return elev;
   }
@@ -1810,7 +1840,20 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (assembly.sheathingThickness > 0) {
         const sheathingMat = plain('#b89768', 0.8);
         for (const [a, b] of ext)
-          addExtrudedWallSegment(group, room, wall, a, b, 0, H, sheathingD0, sheathingD1, e, sheathingMat, cuts);
+          addExtrudedWallSegment(
+            group,
+            room,
+            wall,
+            a,
+            b,
+            0,
+            H,
+            sheathingD0,
+            sheathingD1,
+            e,
+            sheathingMat,
+            cuts
+          );
       }
 
       // 4. Air gap / cavity layer
@@ -1820,7 +1863,20 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (assembly.airGapThickness > 0) {
         const airGapMat = plain('#2a2a2a', 0.9);
         for (const [a, b] of ext)
-          addExtrudedWallSegment(group, room, wall, a, b, 0, H, airGapD0, airGapD1, e, airGapMat, cuts);
+          addExtrudedWallSegment(
+            group,
+            room,
+            wall,
+            a,
+            b,
+            0,
+            H,
+            airGapD0,
+            airGapD1,
+            e,
+            airGapMat,
+            cuts
+          );
       }
 
       // 5. Exterior cladding layer
@@ -2466,6 +2522,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       return preloader.preload(finishIds || Object.keys(HD_MATERIALS));
     },
     scene,
+    camera,
     world,
     callbacks,
     walkKeys,

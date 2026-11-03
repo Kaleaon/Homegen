@@ -1955,8 +1955,44 @@ function rotateSelected() {
 }
 
 // ------------------------------------------------------------- levels
+function getMinLevel() {
+  if (Array.isArray(doc.levelMetadata) && doc.levelMetadata.length > 0) {
+    return Math.min(0, ...doc.levelMetadata.map((m) => m.index));
+  }
+  return doc.rooms && doc.rooms.length ? Math.min(0, ...doc.rooms.map((r) => r.level || 0)) : 0;
+}
+
+function getMaxLevel() {
+  if (Array.isArray(doc.levelMetadata) && doc.levelMetadata.length > 0) {
+    return Math.max(0, ...doc.levelMetadata.map((m) => m.index));
+  }
+  return Math.max(0, (doc.levels || 1) - 1);
+}
+
+function ensureLevelMetadata() {
+  if (!Array.isArray(doc.levelMetadata) || doc.levelMetadata.length === 0) {
+    doc.levelMetadata = [];
+    const minL = Math.min(0, ...(doc.rooms || []).map((r) => r.level || 0));
+    const maxL = Math.max((doc.levels || 1) - 1, ...(doc.rooms || []).map((r) => r.level || 0));
+    for (let l = minL; l <= maxL; l++) {
+      doc.levelMetadata.push(M.defaultLevelDescriptor(l));
+    }
+  } else {
+    for (const r of doc.rooms || []) {
+      const l = r.level != null ? r.level : 0;
+      if (!doc.levelMetadata.some((m) => m && m.index === l)) {
+        doc.levelMetadata.push(M.defaultLevelDescriptor(l));
+      }
+    }
+    doc.levelMetadata.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  }
+}
+
 function setLevel(l, redo = true) {
-  curLevel = Math.max(0, Math.min((doc.levels || 1) - 1, l));
+  ensureLevelMetadata();
+  const minL = getMinLevel();
+  const maxL = getMaxLevel();
+  curLevel = Math.max(minL, Math.min(maxL, l));
   selection = null;
   preview = null;
   autoFixDiffs = [];
@@ -1969,43 +2005,203 @@ function setLevel(l, redo = true) {
   }
 }
 
+let editingLevelMetadata = [];
+
+function openLevelManagerDialog() {
+  ensureLevelMetadata();
+  editingLevelMetadata = doc.levelMetadata.map((m) => ({ ...m }));
+  renderLevelManagerRows();
+  const errContainer = $('#level-manager-validation-errors');
+  if (errContainer) errContainer.style.display = 'none';
+  $('#dlg-level-manager')?.showModal();
+}
+
+function renderLevelManagerRows() {
+  const tbody = $('#level-manager-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  editingLevelMetadata.forEach((lvl, idx) => {
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--ktheme-border, #e5e7eb)';
+    tr.dataset.idx = idx;
+
+    const hasRooms = (doc.rooms || []).some((r) => (r.level || 0) === lvl.index);
+    const canDelete = editingLevelMetadata.length > 1 && !hasRooms;
+
+    tr.innerHTML = `
+      <td style="padding:6px 8px; font-weight:600;">${lvl.index}</td>
+      <td style="padding:6px 8px;"><input type="text" class="lvl-name" value="${esc(lvl.name)}" style="width:110px;" /></td>
+      <td style="padding:6px 8px;"><input type="number" class="lvl-elevation" value="${lvl.elevation}" style="width:75px;" /></td>
+      <td style="padding:6px 8px;"><input type="number" class="lvl-story" value="${lvl.storyHeight}" style="width:70px;" min="10" /></td>
+      <td style="padding:6px 8px;"><input type="number" class="lvl-ceiling" value="${lvl.ceilingHeight}" style="width:70px;" min="10" /></td>
+      <td style="padding:6px 8px;"><input type="number" class="lvl-slab" value="${lvl.slabThickness}" style="width:65px;" min="1" /></td>
+      <td style="padding:6px 8px; text-align:center;"><input type="checkbox" class="lvl-sub" ${lvl.subterranean ? 'checked' : ''} /></td>
+      <td style="padding:6px 8px;"><button type="button" class="btn-del-lvl secondary" style="padding:2px 6px;" ${canDelete ? '' : 'disabled'}>✕</button></td>
+    `;
+
+    tr.querySelector('.lvl-name').addEventListener('input', (e) => {
+      lvl.name = e.target.value;
+    });
+    tr.querySelector('.lvl-elevation').addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      lvl.elevation = isNaN(v) ? 0 : v;
+    });
+    tr.querySelector('.lvl-story').addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      lvl.storyHeight = isNaN(v) ? M.DEFAULT_STORY_HEIGHT : v;
+    });
+    tr.querySelector('.lvl-ceiling').addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      lvl.ceilingHeight = isNaN(v) ? M.DEFAULT_CEILING_HEIGHT : v;
+    });
+    tr.querySelector('.lvl-slab').addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      lvl.slabThickness = isNaN(v) ? M.DEFAULT_SLAB_THICKNESS : v;
+    });
+    tr.querySelector('.lvl-sub').addEventListener('change', (e) => {
+      lvl.subterranean = e.target.checked;
+    });
+    tr.querySelector('.btn-del-lvl').addEventListener('click', () => {
+      editingLevelMetadata.splice(idx, 1);
+      renderLevelManagerRows();
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
 function renderLevels() {
-  const n = doc.levels || 1;
-  if (curLevel >= n) curLevel = n - 1;
+  ensureLevelMetadata();
+  const minL = getMinLevel();
+  const maxL = getMaxLevel();
+  if (curLevel > maxL) curLevel = maxL;
+  if (curLevel < minL) curLevel = minL;
+
   const el = $('#levels');
+  if (!el) return;
+
+  const elevs = M.calculateLevelElevations(doc);
+  const levelsHtml = doc.levelMetadata
+    .map((lvl) => {
+      const e = elevs[lvl.index] !== undefined ? elevs[lvl.index] : lvl.elevation;
+      const badge = M.formatElevationBadge(e);
+      return `<button data-level="${lvl.index}" class="${lvl.index === curLevel ? 'on' : ''}">${esc(lvl.name)} <span class="elevation-badge" style="font-size:10px; opacity:0.8; margin-left:4px;">(${badge})</span></button>`;
+    })
+    .join('');
+
+  const canDeleteTop =
+    doc.levelMetadata.length > 1 && !doc.rooms.some((r) => (r.level || 0) === maxL);
+
   el.innerHTML =
-    Array.from(
-      { length: n },
-      (_, i) =>
-        `<button data-level="${i}" class="${i === curLevel ? 'on' : ''}">Floor ${i + 1}</button>`
-    ).join('') +
+    levelsHtml +
+    '<button id="btn-open-level-manager" title="Manage level elevations and story heights" aria-label="Level Elevation Manager">⚙ Levels</button>' +
     '<button id="add-floor" title="Add a floor above" aria-label="Add floor above"><span aria-hidden="true">+</span> Floor</button>' +
-    (n > 1 && !doc.rooms.some((r) => (r.level || 0) === n - 1)
+    (canDeleteTop
       ? '<button id="del-floor" title="Remove empty top floor" aria-label="Remove top floor"><span aria-hidden="true">−</span> Floor</button>'
       : '');
+
   el.querySelectorAll('[data-level]').forEach((b) =>
     b.addEventListener('click', () => setLevel(Number(b.dataset.level)))
   );
-  $('#add-floor').addEventListener('click', () => {
-    if ((doc.levels || 1) >= 4) return toast('Up to 4 floors are supported.', true);
-    doc.levels = (doc.levels || 1) + 1;
+
+  $('#btn-open-level-manager')?.addEventListener('click', () => {
+    openLevelManagerDialog();
+  });
+
+  $('#add-floor')?.addEventListener('click', () => {
+    ensureLevelMetadata();
+    const curMax = getMaxLevel();
+    const nextIdx = curMax + 1;
+    if (nextIdx >= 10) return toast('Up to 10 floors are supported.', true);
+    const topLvl =
+      doc.levelMetadata.find((m) => m.index === curMax) || M.defaultLevelDescriptor(curMax);
+    const newLvl = M.defaultLevelDescriptor(nextIdx);
+    newLvl.elevation =
+      (topLvl.elevation ?? curMax * M.DEFAULT_STORY_HEIGHT) +
+      (topLvl.storyHeight || M.DEFAULT_STORY_HEIGHT);
+    doc.levelMetadata.push(newLvl);
+    doc.levels = nextIdx + 1;
     hist.push(doc, 'Add Floor');
     persist();
-    setLevel(doc.levels - 1);
+    setLevel(nextIdx);
     refresh();
     toast(
-      `Floor ${doc.levels} added. Place a stair room on the floor below, then use Fix automatically to add its match here.`
+      `Floor ${nextIdx + 1} added. Place a stair room on the floor below, then use Fix automatically to add its match here.`
     );
   });
+
   $('#del-floor')?.addEventListener('click', () => {
-    doc.levels -= 1;
+    ensureLevelMetadata();
+    const curMax = getMaxLevel();
+    if (doc.levelMetadata.length <= 1) return;
+    doc.levelMetadata = doc.levelMetadata.filter((m) => m.index !== curMax);
+    doc.levels = Math.max(1, ...doc.levelMetadata.map((m) => (m.index >= 0 ? m.index + 1 : 1)));
     hist.push(doc, 'Delete Floor');
     persist();
     renderLevels();
-    setLevel(Math.min(curLevel, doc.levels - 1));
+    setLevel(Math.min(curLevel, getMaxLevel()));
     refresh();
   });
 }
+
+$('#btn-add-upper-level')?.addEventListener('click', () => {
+  const maxIdx = Math.max(0, ...editingLevelMetadata.map((m) => m.index));
+  const topLvl =
+    editingLevelMetadata.find((m) => m.index === maxIdx) || M.defaultLevelDescriptor(maxIdx);
+  const newIdx = maxIdx + 1;
+  const newLvl = M.defaultLevelDescriptor(newIdx);
+  newLvl.elevation =
+    (topLvl.elevation ?? maxIdx * M.DEFAULT_STORY_HEIGHT) +
+    (topLvl.storyHeight || M.DEFAULT_STORY_HEIGHT);
+  editingLevelMetadata.push(newLvl);
+  editingLevelMetadata.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  renderLevelManagerRows();
+});
+
+$('#btn-add-sub-level')?.addEventListener('click', () => {
+  const minIdx = Math.min(0, ...editingLevelMetadata.map((m) => m.index));
+  const botLvl =
+    editingLevelMetadata.find((m) => m.index === minIdx) || M.defaultLevelDescriptor(minIdx);
+  const newIdx = minIdx - 1;
+  const newLvl = M.defaultLevelDescriptor(newIdx, `Basement ${Math.abs(newIdx)}`);
+  newLvl.elevation =
+    (botLvl.elevation ?? minIdx * M.DEFAULT_STORY_HEIGHT) -
+    (botLvl.storyHeight || M.DEFAULT_STORY_HEIGHT);
+  newLvl.subterranean = true;
+  editingLevelMetadata.push(newLvl);
+  editingLevelMetadata.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  renderLevelManagerRows();
+});
+
+$('#btn-apply-level-manager')?.addEventListener('click', () => {
+  const errContainer = $('#level-manager-validation-errors');
+  const validation = M.validateLevelHierarchy(editingLevelMetadata);
+  if (!validation.valid) {
+    if (errContainer) {
+      errContainer.innerHTML = validation.errors.map((e) => `<div>• ${esc(e)}</div>`).join('');
+      errContainer.style.display = 'block';
+    }
+    return;
+  }
+  if (errContainer) {
+    errContainer.style.display = 'none';
+    errContainer.innerHTML = '';
+  }
+  M.setLevelMetadata(doc, editingLevelMetadata);
+  hist.push(doc, 'Update Level Elevation Properties');
+  persist();
+  renderLevels();
+  setLevel(curLevel);
+  window.__scene3d?.update();
+  redraw();
+  $('#dlg-level-manager')?.close();
+  toast('Level elevation settings applied.');
+});
+
+$('#btn-cancel-level-manager')?.addEventListener('click', () => {
+  $('#dlg-level-manager')?.close();
+});
 
 // ------------------------------------------------------------- palette
 function swatchStyle(f) {
@@ -3586,16 +3782,25 @@ $('#export-pdf')?.addEventListener('click', (e) => {
   const levelSelect = $('#pdf-level');
   if (levelSelect) {
     levelSelect.innerHTML = '<option value="all" selected>All levels (Multi-page)</option>';
-    const maxLevel = Math.max(
-      0,
-      ...(doc.rooms || []).map((r) => r.level || 0),
-      (doc.levels || 1) - 1
-    );
-    for (let l = 0; l <= maxLevel; l++) {
-      const opt = document.createElement('option');
-      opt.value = String(l);
-      opt.textContent = `Level ${l + 1}${l === curLevel ? ' (Current)' : ''}`;
-      levelSelect.appendChild(opt);
+    if (Array.isArray(doc.levelMetadata) && doc.levelMetadata.length > 0) {
+      for (const meta of doc.levelMetadata) {
+        const opt = document.createElement('option');
+        opt.value = String(meta.index);
+        opt.textContent = `${meta.name}${meta.index === curLevel ? ' (Current)' : ''}`;
+        levelSelect.appendChild(opt);
+      }
+    } else {
+      const maxLevel = Math.max(
+        0,
+        ...(doc.rooms || []).map((r) => r.level || 0),
+        (doc.levels || 1) - 1
+      );
+      for (let l = 0; l <= maxLevel; l++) {
+        const opt = document.createElement('option');
+        opt.value = String(l);
+        opt.textContent = `Level ${l + 1}${l === curLevel ? ' (Current)' : ''}`;
+        levelSelect.appendChild(opt);
+      }
     }
   }
   const sessionBox = $('#pdf-session-branding-box');
@@ -3732,8 +3937,14 @@ $('#export-dxf')?.addEventListener('click', (e) => {
     const lvlSelect = $('#dxf-level');
     if (lvlSelect) {
       lvlSelect.innerHTML = '<option value="all" selected>All Levels</option>';
-      for (let i = 0; i < (doc.levels || 1); i++) {
-        lvlSelect.innerHTML += `<option value="${i}">Level ${i + 1}</option>`;
+      if (Array.isArray(doc.levelMetadata) && doc.levelMetadata.length > 0) {
+        for (const meta of doc.levelMetadata) {
+          lvlSelect.innerHTML += `<option value="${meta.index}">${esc(meta.name)}</option>`;
+        }
+      } else {
+        for (let i = 0; i < (doc.levels || 1); i++) {
+          lvlSelect.innerHTML += `<option value="${i}">Level ${i + 1}</option>`;
+        }
       }
     }
     dlg.showModal();
