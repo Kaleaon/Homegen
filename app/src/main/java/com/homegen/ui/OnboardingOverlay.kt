@@ -17,11 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,9 +29,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.ktheme.android.KthemeComposeTheme
 import com.ktheme.android.LocalKthemeSemanticColors
+import com.ktheme.android.ui.KthemeBadge
+import com.ktheme.android.ui.KthemeBadgeVariant
+import com.ktheme.android.ui.KthemeCard
+import com.ktheme.android.ui.KthemeSurface
+import com.ktheme.android.ui.KthemeText
 
 internal val onboardingTooltips = listOf(
     "Tap the scene to select objects",
@@ -109,7 +112,7 @@ fun OnboardingOverlay(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Card(
+            KthemeCard(
                 modifier = Modifier
                     .padding(24.dp)
                     .fillMaxWidth(0.9f)
@@ -120,9 +123,6 @@ fun OnboardingOverlay(
                     ),
                 shape = MaterialTheme.shapes.large,
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
@@ -134,15 +134,15 @@ fun OnboardingOverlay(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
+                        KthemeBadge(
                             text = "Step ${state.currentStep + 1} of ${state.totalSteps}",
+                            variant = KthemeBadgeVariant.Brand,
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
                         )
                         TextButton(
                             onClick = dismissOnboarding,
                         ) {
-                            Text(
+                            KthemeText(
                                 text = "Skip",
                                 style = MaterialTheme.typography.labelLarge,
                             )
@@ -150,10 +150,9 @@ fun OnboardingOverlay(
                     }
 
                     // Main step tooltip content
-                    Text(
+                    KthemeText(
                         text = state.currentTooltip,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
                     )
 
                     // Visual step progress indicators (dots)
@@ -166,19 +165,17 @@ fun OnboardingOverlay(
                     ) {
                         state.tooltips.indices.forEach { index ->
                             val isActive = index == state.currentStep
-                            Box(
+                            KthemeSurface(
+                                shape = CircleShape,
+                                color = if (isActive) {
+                                    KthemeComposeTheme.colors.brand
+                                } else {
+                                    KthemeComposeTheme.colors.borderSubtle
+                                },
                                 modifier = Modifier
                                     .padding(horizontal = 4.dp)
-                                    .size(if (isActive) 10.dp else 6.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (isActive) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.outlineVariant
-                                        },
-                                    ),
-                            )
+                                    .size(if (isActive) 10.dp else 6.dp),
+                            ) {}
                         }
                     }
 
@@ -192,7 +189,7 @@ fun OnboardingOverlay(
                             onClick = { state.previousStep() },
                             enabled = !state.isFirstStep,
                         ) {
-                            Text("Previous")
+                            KthemeText("Previous")
                         }
 
                         Button(
@@ -202,7 +199,7 @@ fun OnboardingOverlay(
                                 }
                             },
                         ) {
-                            Text(
+                            KthemeText(
                                 if (state.isLastStep) "Got It" else "Next",
                             )
                         }
