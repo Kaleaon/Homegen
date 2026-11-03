@@ -485,11 +485,17 @@ export class ComplianceOverlayScene {
       }
 
       // Live dimension label node centered at interior polygon centroid
-      const centroid = polygonCentroid(pts);
+      const polyData = roomEntry ? roomEntry.polyData : interiorPolygonData(room);
+      const centroid =
+        room.w !== undefined && room.h !== undefined
+          ? polygonCentroid(pts)
+          : polyData
+            ? polyData.centroid
+            : polygonCentroid(pts);
       const clearSpan = getRoomClearSpan(room);
       const minDimVal = clearSpan;
       const dimText =
-        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} clear`;
+        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} min clear`;
       nextNodes.push(
         new SpatialOverlayNode(
           `node:dimension:${room.id}`,
