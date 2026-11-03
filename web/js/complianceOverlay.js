@@ -9,7 +9,6 @@ import {
   fixtureZone,
   rectsOverlap,
   floorAreaSqFt,
-  getRoomPoints,
   getRoomClearSpan,
   polygonCentroid,
 } from './geometry.js';
