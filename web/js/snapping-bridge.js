@@ -66,6 +66,64 @@ export class SnappingBridge {
   }
 
   /**
+   * Computes snapping for multi-item selection drags using group anchor snapping.
+   * Updates activeSnap and returns snapped point, anchor, and translation delta.
+   */
+  computeMultiSnap(pointOrItems, anchorOrPoint = null, itemsOrAnchor = null, roomsOverride = null) {
+    let point;
+    let anchor;
+    let items;
+    let rooms;
+
+    if (
+      pointOrItems &&
+      (Array.isArray(pointOrItems) ||
+        pointOrItems instanceof Map ||
+        (typeof pointOrItems === 'object' && !('x' in pointOrItems)))
+    ) {
+      items = pointOrItems;
+      point = anchorOrPoint;
+      anchor = itemsOrAnchor || point;
+      rooms = roomsOverride;
+    } else {
+      point = pointOrItems;
+      if (
+        anchorOrPoint &&
+        (Array.isArray(anchorOrPoint) ||
+          anchorOrPoint instanceof Map ||
+          (typeof anchorOrPoint === 'object' && !('x' in anchorOrPoint)))
+      ) {
+        items = anchorOrPoint;
+        anchor = itemsOrAnchor || point;
+        rooms = roomsOverride;
+      } else {
+        anchor = anchorOrPoint || point;
+        items = itemsOrAnchor;
+        rooms = roomsOverride;
+      }
+    }
+
+    if (!point) return null;
+    anchor = anchor || point;
+
+    const snapRes = this.computeSnap(point, anchor, rooms);
+    if (!snapRes) return null;
+
+    const dx = snapRes.point.x - anchor.x;
+    const dy = snapRes.point.y - anchor.y;
+
+    const multiSnapRes = {
+      ...snapRes,
+      items,
+      delta: { x: dx, y: dy, dx, dy },
+      dx,
+      dy,
+    };
+
+    return multiSnapRes;
+  }
+
+  /**
    * Computes snapping for a world point and anchor point.
    * Immediately updates optimistic preview state and dispatches async calculation to Worker.
    */
@@ -78,14 +136,20 @@ export class SnappingBridge {
     const settings = this.interaction ? this.interaction.gridSettings : null;
     const snapModes = this.interaction ? this.interaction.snapModes : null;
 
+    const unitSize = (settings && settings.unitSize) || 6;
+    const gridPoint = {
+      x: Math.round(point.x / unitSize) * unitSize,
+      y: Math.round(point.y / unitSize) * unitSize,
+    };
+
     if (!settings || !snapModes) {
       this.activeSnap = {
-        point,
+        point: gridPoint,
         rawPoint: point,
         anchor,
-        snap: null,
+        snap: { type: 'grid', point: gridPoint },
         guideLines: [],
-        indicator: null,
+        indicator: gridPoint,
       };
       return this.activeSnap;
     }
@@ -136,13 +200,18 @@ export class SnappingBridge {
       }
     }
 
+    const hasMagneticSnap = Boolean(res.snap && res.snap.type !== 'grid');
+    const finalPoint = hasMagneticSnap ? res.point : gridPoint;
+    const finalSnap = hasMagneticSnap ? res.snap : { type: 'grid', point: gridPoint };
+    const finalIndicator = hasMagneticSnap ? res.point : gridPoint;
+
     this.activeSnap = {
-      point: res.point,
+      point: finalPoint,
       rawPoint: point,
       anchor,
-      snap: res.snap,
+      snap: finalSnap,
       guideLines,
-      indicator: res.snap ? res.point : null,
+      indicator: finalIndicator,
     };
 
     // Also sync scene diff and dispatch off-thread async worker calculation
@@ -152,13 +221,17 @@ export class SnappingBridge {
         .computeSnapAsync(point, anchor, { rooms, edges, settings, snapModes })
         .then((asyncRes) => {
           if (asyncRes && asyncRes.point) {
+            const asyncHasMagnetic = Boolean(asyncRes.snap && asyncRes.snap.type !== 'grid');
+            const asyncPoint = asyncHasMagnetic ? asyncRes.point : gridPoint;
+            const asyncSnap = asyncHasMagnetic ? asyncRes.snap : { type: 'grid', point: gridPoint };
+            const asyncIndicator = asyncHasMagnetic ? asyncRes.point : gridPoint;
             this.activeSnap = {
-              point: asyncRes.point,
+              point: asyncPoint,
               rawPoint: asyncRes.rawPoint || point,
               anchor,
-              snap: asyncRes.snap,
+              snap: asyncSnap,
               guideLines: asyncRes.guideLines || guideLines,
-              indicator: asyncRes.indicator,
+              indicator: asyncIndicator,
             };
             if (typeof this.onSnap === 'function') {
               this.onSnap(this.activeSnap);
