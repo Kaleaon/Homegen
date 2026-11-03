@@ -169,5 +169,4 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(res.isValid).toBe(true);
     expect(res.dimensionText).toBe('12\' 0" × 11\' 0"');
   });
-  });
 });

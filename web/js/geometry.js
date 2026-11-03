@@ -569,51 +569,6 @@ export function polygonWinding(points) {
   return sum >= 0 ? 1 : -1;
 }
 
-export function polygonCentroid(points) {
-  if (!points || points.length === 0) return { x: 0, y: 0 };
-  if (points.length === 1) return { x: points[0].x, y: points[0].y };
-  if (points.length === 2)
-    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-
-  let area = 0;
-  let cx = 0;
-  let cy = 0;
-  const n = points.length;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const factor = points[i].x * points[j].y - points[j].x * points[i].y;
-    area += factor;
-    cx += (points[i].x + points[j].x) * factor;
-    cy += (points[i].y + points[j].y) * factor;
-  }
-  area = area / 2;
-  if (Math.abs(area) >= 1e-6) {
-    cx = cx / (6 * area);
-    cy = cy / (6 * area);
-    const pt = { x: cx, y: cy };
-    if (pointInPolygon(pt, points)) {
-      return pt;
-    }
-  }
-
-  const bbox = getRoomBoundingBox(points);
-  const mid = { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 };
-  if (pointInPolygon(mid, points)) {
-    return mid;
-  }
-
-  let sx = 0,
-    sy = 0;
-  for (const p of points) {
-    sx += p.x;
-    sy += p.y;
-  }
-  const avg = { x: sx / n, y: sy / n };
-  if (pointInPolygon(avg, points)) return avg;
-
-  return points[0];
-}
-
 /** Wall segment of a room. `t` offsets run along the edge from start to end vertex. */
 export function wallSeg(room, wall) {
   const points = getRoomPoints(room);
@@ -1192,44 +1147,6 @@ export function rectsTouch(a, b, margin = 0) {
   return Math.max(ax0, bx0) < Math.min(ax1, bx1) && Math.max(ay0, by0) < Math.min(ay1, by1);
 }
 
-export function polygonCentroid(points) {
-  if (!points || points.length === 0) return { x: 0, y: 0 };
-  if (points.length === 1) return { x: points[0].x, y: points[0].y };
-  if (points.length === 2) {
-    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-  }
-
-  let area = 0;
-  let cx = 0;
-  let cy = 0;
-  const n = points.length;
-
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const p1 = points[i];
-    const p2 = points[j];
-    const cross = p1.x * p2.y - p2.x * p1.y;
-    area += cross;
-    cx += (p1.x + p2.x) * cross;
-    cy += (p1.y + p2.y) * cross;
-  }
-
-  area = area / 2;
-  if (Math.abs(area) < 1e-6) {
-    let sx = 0,
-      sy = 0;
-    for (const p of points) {
-      sx += p.x;
-      sy += p.y;
-    }
-    return { x: sx / n, y: sy / n };
-  }
-
-  cx = cx / (6 * area);
-  cy = cy / (6 * area);
-  return { x: cx, y: cy };
-}
-
 export function polygonMinClearanceWidth(points) {
   if (!points || points.length < 3) return 0;
   const bbox = getRoomBoundingBox(points);
@@ -1299,7 +1216,8 @@ export function polygonMinClearanceWidth(points) {
 
 export function interiorPolygonData(room, wallThickness = WT) {
   const points = interiorPolygon(room, wallThickness);
-  const centroid = polygonCentroid(points);
+  const rawPoints = getRoomPoints(room);
+  const centroid = polygonCentroid(rawPoints);
   const minWidth = polygonMinClearanceWidth(points);
   return {
     points,
