@@ -9,7 +9,6 @@ import {
   fixtureZone,
   rectsOverlap,
   floorAreaSqFt,
-  getRoomPoints,
   getRoomClearSpan,
   polygonCentroid,
 } from './geometry.js';
@@ -202,6 +201,8 @@ export class ComplianceOverlayScene {
     const curLevel = options.curLevel ?? 0;
     const selection = options.selection || null;
     const drag = options.drag || null;
+    const view = options.view || { scale: 1, ox: 0, oy: 0 };
+    const scale = Math.max(0.01, view.scale || 1);
 
     const stateHash = options.stateHash ?? computeStateHash(state);
     if (state !== this.lastState || stateHash !== this.lastStateHash) {
@@ -253,20 +254,25 @@ export class ComplianceOverlayScene {
           const isFixable = !!v.fixable;
           let fixButtonBounds = null;
           if (isFixable) {
-            const btnW = 36;
-            const btnH = 16;
+            // Project screen-space hit button dimensions (36px x 16px) to world coordinates
+            const btnW = 36 / scale;
+            const btnH = 16 / scale;
+            const pad = 4 / scale;
+            const spacing = 4 / scale;
+            const minMargin = 8 / scale;
+
             const key = `${Math.round(bounds.x)},${Math.round(bounds.y)},${Math.round(bounds.w)},${Math.round(bounds.h)}`;
             const idx = fixBadgeCounts.get(key) || 0;
             fixBadgeCounts.set(key, idx + 1);
 
             const fx =
-              bounds.w >= btnW + 8
-                ? bounds.x + bounds.w - btnW - 4
+              bounds.w >= btnW + minMargin
+                ? bounds.x + bounds.w - btnW - pad
                 : bounds.x + (bounds.w - btnW) / 2;
             const fy =
-              bounds.w >= btnW + 8
-                ? bounds.y + 4 + idx * (btnH + 4)
-                : bounds.y - btnH - 2 - idx * (btnH + 4);
+              bounds.w >= btnW + minMargin
+                ? bounds.y + pad + idx * (btnH + spacing)
+                : bounds.y - btnH - 2 / scale - idx * (btnH + spacing);
             fixButtonBounds = { x: fx, y: fy, w: btnW, h: btnH };
           }
           nextNodes.push(
@@ -486,11 +492,12 @@ export class ComplianceOverlayScene {
       }
 
       // Live dimension label node centered at interior polygon centroid
-      const centroid = polygonCentroid(pts);
+      const polyData = interiorPolygonData(room);
+      const centroid = pts.length > 4 && !room.w ? polyData.centroid : polygonCentroid(pts);
       const clearSpan = getRoomClearSpan(room);
       const minDimVal = clearSpan;
       const dimText =
-        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} clear`;
+        pts.length === 4 ? `${fmt(room.w)} × ${fmt(room.h)}` : `${fmt(clearSpan)} min clear`;
       nextNodes.push(
         new SpatialOverlayNode(
           `node:dimension:${room.id}`,
@@ -651,14 +658,18 @@ export class ComplianceOverlayScene {
   /**
    * Hit test point against interactive nodes (handles, badges, clearance nodes).
    */
-  hitTest(point, view = { scale: 1 }) {
+  hitTest(point, view = { scale: 1 }, isScreen = false) {
     if (!point) return null;
-    const tol = 8 / view.scale;
+    const scale = view.scale || 1;
+    const testPoint = isScreen
+      ? { x: (point.x - (view.ox || 0)) / scale, y: (point.y - (view.oy || 0)) / scale }
+      : point;
+    const tol = 8 / scale;
 
     // Test constraint handles first
     for (const n of this.getNodesByType('constraintHandle')) {
-      const dx = point.x - n.bounds.x;
-      const dy = point.y - n.bounds.y;
+      const dx = testPoint.x - n.bounds.x;
+      const dy = testPoint.y - n.bounds.y;
       if (Math.hypot(dx, dy) <= tol + 4) return n;
     }
 
@@ -669,10 +680,10 @@ export class ComplianceOverlayScene {
       const fb = n.data?.fixButtonBounds;
       if (
         fb &&
-        point.x >= fb.x &&
-        point.x <= fb.x + fb.w &&
-        point.y >= fb.y &&
-        point.y <= fb.y + fb.h
+        testPoint.x >= fb.x &&
+        testPoint.x <= fb.x + fb.w &&
+        testPoint.y >= fb.y &&
+        testPoint.y <= fb.y + fb.h
       ) {
         return n;
       }
@@ -681,14 +692,24 @@ export class ComplianceOverlayScene {
     // Test egress badges
     for (const n of this.getNodesByType('egressReach')) {
       const b = n.bounds;
-      if (point.x >= b.x && point.x <= b.x + b.w && point.y >= b.y && point.y <= b.y + b.h)
+      if (
+        testPoint.x >= b.x &&
+        testPoint.x <= b.x + b.w &&
+        testPoint.y >= b.y &&
+        testPoint.y <= b.y + b.h
+      )
         return n;
     }
 
     // Test fixture clearance
     for (const n of this.getNodesByType('fixtureClearance')) {
       const b = n.bounds;
-      if (point.x >= b.x && point.x <= b.x + b.w && point.y >= b.y && point.y <= b.y + b.h)
+      if (
+        testPoint.x >= b.x &&
+        testPoint.x <= b.x + b.w &&
+        testPoint.y >= b.y &&
+        testPoint.y <= b.y + b.h
+      )
         return n;
     }
 
