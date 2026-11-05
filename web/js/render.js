@@ -1409,7 +1409,14 @@ export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
 }
 
 export function drawSnapGuides(ctx, snapResult, view) {
-  if (!snapResult || !snapResult.snap) return;
+  if (!snapResult) return;
+  if (
+    !snapResult.snap &&
+    !snapResult.indicator &&
+    (!snapResult.guideLines || !snapResult.guideLines.length)
+  ) {
+    return;
+  }
   const { snap, guideLines, indicator } = snapResult;
   ctx.save();
 
@@ -1441,9 +1448,9 @@ export function drawSnapGuides(ctx, snapResult, view) {
     const rInner = 3.5 / view.scale;
 
     let color = getToken('--ktheme-accent', '#3b82f6');
-    if (snap.type === 'midpoint') color = getToken('--ktheme-info', '#a855f7');
-    if (snap.type === 'perpendicular') color = getToken('--ktheme-warning', '#f59e0b');
-    if (snap.type === 'grid') color = getToken('--ktheme-success', '#10b981');
+    if (snap?.type === 'midpoint') color = getToken('--ktheme-info', '#a855f7');
+    else if (snap?.type === 'perpendicular') color = getToken('--ktheme-warning', '#f59e0b');
+    else if (snap?.type === 'grid') color = getToken('--ktheme-success', '#10b981');
 
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 / view.scale;
