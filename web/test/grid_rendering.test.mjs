@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { drawGrid, draw } from '../js/render.js';
+import { quantize } from '../../designer3d/tools/gridSettings.mjs';
 
 function createMockCtx(width = 800, height = 600) {
   const calls = [];
@@ -109,4 +110,66 @@ test('draw pipeline propagates gridSettings to drawGrid', () => {
   assert.ok(subGridMoves.length > 0);
   const subGridX = [...new Set(subGridMoves.map((m) => m.x))].sort((a, b) => a - b);
   assert.equal(subGridX[1] - subGridX[0], 8);
+});
+
+test('drawGrid deduplicates step tiers and avoids redundant stroke operations', () => {
+  const ctx = createMockCtx(120, 120);
+  const view = { ox: 0, oy: 0, scale: 1 };
+
+  // Default configuration: subGrid (6), minorGrid (12), majorGrid (60), theme 12, theme 60.
+  // Deduplicated should result in exactly 3 stroke operations for 6, 12, and 60.
+  drawGrid(ctx, view, 120, 120);
+
+  const strokes = ctx.calls.filter((c) => c.type === 'stroke');
+  assert.equal(
+    strokes.length,
+    3,
+    'Default grid rendering should execute exactly 3 stroke operations'
+  );
+
+  // Overlapping custom configuration where unitSize matches minorGrid
+  const ctx2 = createMockCtx(120, 120);
+  drawGrid(ctx2, view, 120, 120, {
+    gridSettings: { unitSize: 12, minorGrid: 12, majorGrid: 60 },
+  });
+  const strokes2 = ctx2.calls.filter((c) => c.type === 'stroke');
+  assert.equal(
+    strokes2.length,
+    2,
+    'Overlapping tiers should deduplicate down to 2 stroke operations'
+  );
+});
+
+test('drawGrid coordinates maintain exact mathematical alignment with quantize() under extreme pan and zoom', () => {
+  const ctx = createMockCtx(500, 400);
+  // Non-integer extreme pan and scale
+  const view = { ox: -7391.43, oy: 12485.67, scale: 2.375 };
+  const step = 6;
+  const x0 = -view.ox / view.scale;
+  const y0 = -view.oy / view.scale;
+
+  drawGrid(ctx, view, 500, 400, { gridSettings: { unitSize: step } });
+
+  const subGridMoves = ctx.calls.filter((c) => c.type === 'moveTo' && c.strokeStyle === '#f0ede6');
+  assert.ok(subGridMoves.length > 0, 'Sub-grid lines should be rendered');
+
+  for (const call of subGridMoves) {
+    const isVertical = Math.abs(call.y - y0) < 1e-9;
+    const isHorizontal = Math.abs(call.x - x0) < 1e-9;
+    assert.ok(isVertical || isHorizontal, 'MoveTo should start at viewport boundary');
+
+    const coord = isVertical ? call.x : call.y;
+    const expected = quantize(coord, step);
+    assert.ok(
+      Math.abs(coord - expected) < 1e-9,
+      `Rendered coordinate ${coord} must match quantize output ${expected}`
+    );
+
+    // Verify it is an integer multiple of step (no fractional drift)
+    const index = Math.round(coord / step);
+    assert.ok(
+      Math.abs(index * step - coord) < 1e-9,
+      `Rendered coordinate ${coord} must equal i * step (${index} * ${step})`
+    );
+  }
 });
