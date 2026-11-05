@@ -1,4 +1,4 @@
-import { quantize } from './gridSettings.mjs';
+import { quantize, DEFAULT_GRID_SETTINGS } from './gridSettings.mjs';
 import { SNAP_MODES } from './snapModes.mjs';
 import {
   closestPointOnArc,
@@ -171,11 +171,47 @@ function chooseBestSnap(candidates, magneticThreshold) {
   );
 }
 
-export function getSnappedPoint({ point, anchor = point, edges = [], settings, snapModes }) {
+export function getSnappedPoint({
+  point,
+  anchor = point,
+  edges = [],
+  settings,
+  snapModes,
+  scale = 1.0,
+}) {
+  const safeScale =
+    typeof scale === 'number' && Number.isFinite(scale) ? Math.max(scale, 0.0001) : 1.0;
+
+  const baseSettings = settings || DEFAULT_GRID_SETTINGS;
+  const magneticThreshold =
+    (baseSettings.magneticThreshold !== undefined
+      ? baseSettings.magneticThreshold
+      : DEFAULT_GRID_SETTINGS.magneticThreshold) / safeScale;
+  const edgeThreshold =
+    (baseSettings.edgeThreshold !== undefined
+      ? baseSettings.edgeThreshold
+      : DEFAULT_GRID_SETTINGS.edgeThreshold) / safeScale;
+  const midpointThreshold =
+    (baseSettings.midpointThreshold !== undefined
+      ? baseSettings.midpointThreshold
+      : DEFAULT_GRID_SETTINGS.midpointThreshold) / safeScale;
+  const perpendicularThreshold =
+    (baseSettings.perpendicularThreshold !== undefined
+      ? baseSettings.perpendicularThreshold
+      : DEFAULT_GRID_SETTINGS.perpendicularThreshold) / safeScale;
+
+  const normalizedSettings = {
+    ...baseSettings,
+    magneticThreshold,
+    edgeThreshold,
+    midpointThreshold,
+    perpendicularThreshold,
+  };
+
   const candidates = [];
 
   if (snapModes.isEnabled(SNAP_MODES.GRID)) {
-    const gridPoint = snapToGrid(point, settings);
+    const gridPoint = snapToGrid(point, normalizedSettings);
     candidates.push({
       type: 'grid',
       point: gridPoint,
@@ -184,22 +220,24 @@ export function getSnappedPoint({ point, anchor = point, edges = [], settings, s
   }
 
   if (snapModes.isEnabled(SNAP_MODES.EDGE)) {
-    candidates.push(snapToEdge(point, edges, settings.edgeThreshold));
+    candidates.push(snapToEdge(point, edges, normalizedSettings.edgeThreshold));
   }
 
   if (snapModes.isEnabled(SNAP_MODES.MIDPOINT)) {
-    candidates.push(snapToMidpoint(point, edges, settings.midpointThreshold));
+    candidates.push(snapToMidpoint(point, edges, normalizedSettings.midpointThreshold));
   }
 
   if (snapModes.isEnabled(SNAP_MODES.PERPENDICULAR)) {
-    candidates.push(snapToPerpendicular(point, anchor, edges, settings.perpendicularThreshold));
+    candidates.push(
+      snapToPerpendicular(point, anchor, edges, normalizedSettings.perpendicularThreshold)
+    );
   }
 
   if (snapModes.isEnabled(SNAP_MODES.ANGLE)) {
-    candidates.push(snapToAngle(point, anchor, settings, edges));
+    candidates.push(snapToAngle(point, anchor, normalizedSettings, edges));
   }
 
-  const best = chooseBestSnap(candidates, settings.magneticThreshold);
+  const best = chooseBestSnap(candidates, normalizedSettings.magneticThreshold);
 
   return {
     point: best ? best.point : point,

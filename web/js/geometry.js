@@ -575,26 +575,38 @@ export function polygonCentroid(points) {
   if (points.length === 2)
     return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
 
-  let area = 0;
   let cx = 0;
   let cy = 0;
+  let signedArea = 0;
   const n = points.length;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const factor = points[i].x * points[j].y - points[j].x * points[i].y;
-    area += factor;
-    cx += (points[i].x + points[j].x) * factor;
-    cy += (points[i].y + points[j].y) * factor;
-  }
-  area = area / 2;
-  if (Math.abs(area) >= 1e-6) {
-    cx = cx / (6 * area);
-    cy = cy / (6 * area);
-    const pt = { x: cx, y: cy };
-    if (pointInPolygon(pt, points)) {
-      return pt;
-    }
 
+  for (let i = 0; i < n; i++) {
+    const x0 = points[i].x;
+    const y0 = points[i].y;
+    const x1 = points[(i + 1) % n].x;
+    const y1 = points[(i + 1) % n].y;
+    const a = x0 * y1 - x1 * y0;
+    signedArea += a;
+    cx += (x0 + x1) * a;
+    cy += (y0 + y1) * a;
+  }
+
+  signedArea *= 0.5;
+  if (Math.abs(signedArea) < 1e-6) {
+    let sx = 0,
+      sy = 0;
+    for (const p of points) {
+      sx += p.x;
+      sy += p.y;
+    }
+    return { x: sx / n, y: sy / n };
+  }
+
+  cx /= 6 * signedArea;
+  cy /= 6 * signedArea;
+
+  const pt = { x: cx, y: cy };
+  if (!pointInPolygon(pt, points)) {
     let bestDist = Infinity;
     let bestPt = pt;
     for (let i = 0; i < n; i++) {
@@ -611,24 +623,13 @@ export function polygonCentroid(points) {
       }
     }
     if (bestDist < Infinity) return bestPt;
+
+    const bbox = getRoomBoundingBox(points);
+    const mid = { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 };
+    if (pointInPolygon(mid, points)) return mid;
   }
 
-  const bbox = getRoomBoundingBox(points);
-  const mid = { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 };
-  if (pointInPolygon(mid, points)) {
-    return mid;
-  }
-
-  let sx = 0,
-    sy = 0;
-  for (const p of points) {
-    sx += p.x;
-    sy += p.y;
-  }
-  const avg = { x: sx / n, y: sy / n };
-  if (pointInPolygon(avg, points)) return avg;
-
-  return points[0];
+  return pt;
 }
 
 /** Wall segment of a room. `t` offsets run along the edge from start to end vertex. */
@@ -1218,7 +1219,7 @@ export function polygonMinClearanceWidth(points) {
 
 export function interiorPolygonData(room, wallThickness = WT) {
   const points = interiorPolygon(room, wallThickness);
-  const centroid = polygonCentroid(points);
+  const centroid = polygonCentroid(getRoomPoints(room));
   const minWidth = polygonMinClearanceWidth(points);
   return {
     points,
