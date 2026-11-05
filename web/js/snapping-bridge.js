@@ -12,6 +12,9 @@ export class SnappingBridge {
     this.interaction = options.interaction || null;
     this.getRooms = options.getRooms || (() => []);
     this.toWorld = options.toWorld || null;
+    this.view = options.view || null;
+    this.getViewScale = options.getViewScale || null;
+    this.scale = options.scale !== undefined ? options.scale : null;
     this.onSnap = options.onSnap || null;
     this.workerClient = options.workerClient || globalCadWorkerClient;
     this.activeSnap = null;
@@ -65,11 +68,42 @@ export class SnappingBridge {
     this.toWorld = toWorld;
   }
 
+  setView(view) {
+    this.view = view;
+  }
+
+  setViewScale(scale) {
+    this.getViewScale = typeof scale === 'function' ? scale : () => scale;
+  }
+
+  getScale() {
+    if (typeof this.getViewScale === 'function') {
+      const s = this.getViewScale();
+      if (typeof s === 'number' && Number.isFinite(s)) return s;
+    }
+    if (typeof this.view === 'function') {
+      const v = this.view();
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (v && typeof v.scale === 'number' && Number.isFinite(v.scale)) return v.scale;
+    }
+    if (this.view && typeof this.view.scale === 'number' && Number.isFinite(this.view.scale)) {
+      return this.view.scale;
+    }
+    if (typeof this.scale === 'function') {
+      const s = this.scale();
+      if (typeof s === 'number' && Number.isFinite(s)) return s;
+    }
+    if (typeof this.scale === 'number' && Number.isFinite(this.scale)) {
+      return this.scale;
+    }
+    return 1.0;
+  }
+
   /**
    * Computes snapping for a world point and anchor point.
    * Immediately updates optimistic preview state and dispatches async calculation to Worker.
    */
-  computeSnap(point, anchor = point, roomsOverride = null) {
+  computeSnap(point, anchor = point, roomsOverride = null, scaleOverride = null) {
     if (!point) return null;
 
     const rooms = roomsOverride || (typeof this.getRooms === 'function' ? this.getRooms() : []);
@@ -77,6 +111,8 @@ export class SnappingBridge {
 
     const settings = this.interaction ? this.interaction.gridSettings : null;
     const snapModes = this.interaction ? this.interaction.snapModes : null;
+    const scale =
+      scaleOverride !== null && scaleOverride !== undefined ? scaleOverride : this.getScale();
 
     if (!settings || !snapModes) {
       this.activeSnap = {
@@ -97,6 +133,7 @@ export class SnappingBridge {
       edges,
       settings,
       snapModes,
+      scale,
     });
 
     const guideLines = [];
@@ -147,9 +184,9 @@ export class SnappingBridge {
 
     // Also sync scene diff and dispatch off-thread async worker calculation
     if (this.workerClient) {
-      this.workerClient.syncSceneDiff({ rooms, edges, settings, snapModes });
+      this.workerClient.syncSceneDiff({ rooms, edges, settings, snapModes, scale });
       this.workerClient
-        .computeSnapAsync(point, anchor, { rooms, edges, settings, snapModes })
+        .computeSnapAsync(point, anchor, { rooms, edges, settings, snapModes, scale })
         .then((asyncRes) => {
           if (asyncRes && asyncRes.point) {
             this.activeSnap = {

@@ -24,10 +24,21 @@ export class RateLimiter {
 
   _refillTokens() {
     const now = Date.now();
-    const elapsedSeconds = (now - this.lastRefill) / 1000;
-    if (elapsedSeconds > 0) {
-      this.tokens = Math.min(this.capacity, this.tokens + elapsedSeconds * this.refillRate);
+    if (this.tokens >= this.capacity) {
+      this.tokens = this.capacity;
       this.lastRefill = now;
+      return;
+    }
+    const elapsedSeconds = (now - this.lastRefill) / 1000;
+    const tokensToAdd = Math.floor(elapsedSeconds * this.refillRate);
+    if (tokensToAdd > 0) {
+      if (this.tokens + tokensToAdd >= this.capacity) {
+        this.tokens = this.capacity;
+        this.lastRefill = now;
+      } else {
+        this.tokens += tokensToAdd;
+        this.lastRefill += (tokensToAdd * 1000) / this.refillRate;
+      }
     }
   }
 
@@ -37,8 +48,9 @@ export class RateLimiter {
       this._processQueue();
       return;
     }
-    const missingTokens = 1 - this.tokens;
-    const waitMs = Math.ceil((missingTokens / this.refillRate) * 1000);
+    const elapsedMs = Math.max(0, Date.now() - this.lastRefill);
+    const msPerToken = 1000 / this.refillRate;
+    const waitMs = Math.ceil(msPerToken - (elapsedMs % msPerToken));
     this.timer = setTimeout(
       () => {
         this.timer = null;
