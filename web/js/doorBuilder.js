@@ -119,7 +119,7 @@ export function buildDoor3DMesh({
   const singleLeafW = clearWidth / leafCount - (isDouble ? 0.25 : 0);
 
   function createHardwareGroup(hwStyle, isRightHand = false) {
-    const hwGroup = new THREE.Group();
+    const hwGroup = new THREE.Object3D();
     const plateGeom = new THREE.BoxGeometry(1.5 * (1 / 12), 6 * (1 / 12), 0.25 * (1 / 12));
     const plate = new THREE.Mesh(plateGeom, hwMat);
     plate.castShadow = true;
@@ -172,7 +172,7 @@ export function buildDoor3DMesh({
   }
 
   function createSingleLeafGroup(w, h, d, panelStyle, hwStyle, isRightHand = false) {
-    const leafGroup = new THREE.Group();
+    const leafGroup = new THREE.Object3D();
     const S = 1 / 12;
 
     if (panelStyle === 'panel_2') {
