@@ -113,4 +113,58 @@ class FloorSelectorTest {
         composeTestRule.onNodeWithContentDescription("Navigate to floor above").assertIsEnabled()
         composeTestRule.onNodeWithContentDescription("Navigate to floor below").assertIsEnabled()
     }
+
+    @Test
+    fun `supports subterranean floors with negative minFloor`() {
+        composeTestRule.setContent {
+            FloorSelector(
+                currentFloor = -1,
+                onFloorUp = {},
+                onFloorDown = {},
+                minFloor = -2,
+                maxFloor = 3,
+            )
+        }
+
+        composeTestRule.onNodeWithText("B1").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Navigate to floor above").assertIsEnabled()
+        composeTestRule.onNodeWithContentDescription("Navigate to floor below").assertIsEnabled()
+    }
+
+    @Test
+    fun `displays elevation badge when provided`() {
+        composeTestRule.setContent {
+            FloorSelector(
+                currentFloor = 0,
+                onFloorUp = {},
+                onFloorDown = {},
+                minFloor = 0,
+                maxFloor = 3,
+                elevationBadge = "+0' 0\"",
+            )
+        }
+
+        composeTestRule.onNodeWithText("F0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("+0' 0\"").assertIsDisplayed()
+    }
+
+    @Test
+    fun `triggers onEditProperties callback`() {
+        var editClicked = false
+
+        composeTestRule.setContent {
+            FloorSelector(
+                currentFloor = 1,
+                onFloorUp = {},
+                onFloorDown = {},
+                minFloor = 0,
+                maxFloor = 3,
+                onEditProperties = { editClicked = true },
+            )
+        }
+
+        composeTestRule.onNodeWithContentDescription("Edit floor properties").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Edit floor properties").performClick()
+        assertTrue(editClicked)
+    }
 }

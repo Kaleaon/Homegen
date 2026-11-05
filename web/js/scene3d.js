@@ -9,9 +9,7 @@ import {
   wallSeg,
   wallLength,
   wallNeighbors,
-  subtractInterval,
   interior,
-  subtractInterval,
   csgExteriorCladdingIntervals,
   lv,
   getRoomPoints,
@@ -1201,11 +1199,36 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
   // ---------------------------------------------------------------- scene build
   function levelElevations(state) {
-    const n = state.levels || 1;
+    if (state && Array.isArray(state.levelMetadata) && state.levelMetadata.length > 0) {
+      const elev = [];
+      for (const lvl of state.levelMetadata) {
+        if (lvl && typeof lvl.index === 'number') {
+          elev[lvl.index] =
+            typeof lvl.elevation === 'number' && !isNaN(lvl.elevation)
+              ? lvl.elevation
+              : lvl.index * 106;
+        }
+      }
+      for (const r of state.rooms || []) {
+        const l = lv(r);
+        if (elev[l] === undefined) {
+          elev[l] = l * 106;
+        }
+      }
+      return elev;
+    }
+    const n = Math.max(1, state?.levels || 1);
     const elev = [0];
     for (let l = 1; l < n; l++) {
-      const rs = state.rooms.filter((r) => lv(r) === l - 1);
-      elev.push(elev[l - 1] + (rs.length ? Math.max(...rs.map((r) => r.ceiling)) : 96) + SLAB);
+      const rs = (state?.rooms || []).filter((r) => lv(r) === l - 1);
+      const ceil = rs.length ? Math.max(...rs.map((r) => r.ceiling || 96)) : 96;
+      elev[l] = elev[l - 1] + ceil + SLAB;
+    }
+    const minRoomLevel = Math.min(0, ...(state?.rooms || []).map((r) => lv(r)));
+    for (let l = -1; l >= minRoomLevel; l--) {
+      const rs = (state?.rooms || []).filter((r) => lv(r) === l);
+      const ceil = rs.length ? Math.max(...rs.map((r) => r.ceiling || 96)) : 96;
+      elev[l] = (elev[l + 1] !== undefined ? elev[l + 1] : 0) - (ceil + SLAB);
     }
     return elev;
   }
@@ -2502,6 +2525,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       return preloader.preload(finishIds || Object.keys(HD_MATERIALS));
     },
     scene,
+    camera,
     world,
     callbacks,
     walkKeys,
