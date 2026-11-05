@@ -15,11 +15,11 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
   resolveWallIndex,
-  subtractInterval,
   getArcParameters,
   pointOnArc,
+  subtractInterval,
 } from './geometry.js';
-import { OPENING_BY_ID, OPENINGS, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import {
@@ -632,7 +632,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
-
   const faceMats = (base, faceIdx, vis) => {
     const arr = [base, base, base, base, base, base];
     if (typeof faceIdx === 'number' && faceIdx >= 0 && faceIdx < 6) {
@@ -1006,9 +1005,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     group.add(m);
 
-    if (n >= 3) {
-      const prevWall = (wallIdx - 1 + n) % n;
-      const nextWall = (wallIdx + 1) % n;
+    const N = pts.length;
+    if (N >= 3) {
+      const prevWall = (wallIdx - 1 + N) % N;
+      const nextWall = (wallIdx + 1) % N;
       const sPrev = wallSeg(room, prevWall);
       const sNext = wallSeg(room, nextWall);
 
