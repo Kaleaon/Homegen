@@ -11,7 +11,6 @@ import {
   wallNeighbors,
   subtractInterval,
   interior,
-  subtractInterval,
   csgExteriorCladdingIntervals,
   lv,
   getRoomPoints,
@@ -19,7 +18,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
