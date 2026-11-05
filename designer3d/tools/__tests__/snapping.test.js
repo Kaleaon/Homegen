@@ -307,6 +307,121 @@ describe('getSnappedPoint', () => {
     expect(res.snap.type).toBe('angle');
     expect(res.snap.edgeIndex).toBeUndefined(); // Snapped to global 0° reference, degenerate edge ignored
   });
+
+  describe('view-scale normalized distance thresholds', () => {
+    const baseThreshold = 14;
+    const settings = createGridSettings({
+      magneticThreshold: baseThreshold,
+      edgeThreshold: baseThreshold,
+      midpointThreshold: baseThreshold,
+      perpendicularThreshold: baseThreshold,
+    });
+
+    test('snaps reliably within 14px screen radius at scale 0.1 and rejects outside 14px', () => {
+      const snapModes = new SnapModeState({
+        [SNAP_MODES.GRID]: false,
+        [SNAP_MODES.EDGE]: true,
+        [SNAP_MODES.MIDPOINT]: false,
+        [SNAP_MODES.PERPENDICULAR]: false,
+        [SNAP_MODES.ANGLE]: false,
+      });
+      const edges = [{ start: { x: 0, y: 0 }, end: { x: 1000, y: 0 }, index: 0 }];
+
+      // At scale 0.1, threshold is 14 / 0.1 = 140 world units
+      // 10 screen pixels away = 100 world units <= 140 (snaps)
+      const inside = getSnappedPoint({
+        point: { x: 500, y: 100 },
+        edges,
+        settings,
+        snapModes,
+        scale: 0.1,
+      });
+      expect(inside.snap).not.toBeNull();
+      expect(inside.snap.type).toBe('edge');
+      expect(inside.point.y).toBeCloseTo(0, 5);
+
+      // 15 screen pixels away = 150 world units > 140 (rejects)
+      const outside = getSnappedPoint({
+        point: { x: 500, y: 150 },
+        edges,
+        settings,
+        snapModes,
+        scale: 0.1,
+      });
+      expect(outside.snap).toBeNull();
+      expect(outside.point.y).toBe(150);
+    });
+
+    test('verifies edge and midpoint snapping at scale 1.0 and 2.0', () => {
+      const snapModes = new SnapModeState({
+        [SNAP_MODES.GRID]: false,
+        [SNAP_MODES.EDGE]: true,
+        [SNAP_MODES.MIDPOINT]: true,
+        [SNAP_MODES.PERPENDICULAR]: false,
+        [SNAP_MODES.ANGLE]: false,
+      });
+      const edges = [{ start: { x: 0, y: 0 }, end: { x: 200, y: 0 }, index: 0 }];
+
+      // Scale 1.0: threshold 14 world units
+      const res1 = getSnappedPoint({
+        point: { x: 105, y: 10 },
+        edges,
+        settings,
+        snapModes,
+        scale: 1.0,
+      });
+      expect(res1.snap).not.toBeNull();
+      expect(res1.point.y).toBeCloseTo(0, 5);
+
+      // Scale 2.0: threshold 7 world units
+      const res2Inside = getSnappedPoint({
+        point: { x: 100, y: 5 },
+        edges,
+        settings,
+        snapModes,
+        scale: 2.0,
+      });
+      expect(res2Inside.snap).not.toBeNull();
+      expect(res2Inside.point.y).toBeCloseTo(0, 5);
+
+      const res2Outside = getSnappedPoint({
+        point: { x: 100, y: 8 },
+        edges,
+        settings,
+        snapModes,
+        scale: 2.0,
+      });
+      expect(res2Outside.snap).toBeNull();
+    });
+
+    test('safe fallback to 1.0 when scale is missing, zero, or negative', () => {
+      const snapModes = new SnapModeState({
+        [SNAP_MODES.GRID]: false,
+        [SNAP_MODES.EDGE]: true,
+        [SNAP_MODES.MIDPOINT]: false,
+        [SNAP_MODES.PERPENDICULAR]: false,
+        [SNAP_MODES.ANGLE]: false,
+      });
+      const edges = [{ start: { x: 0, y: 0 }, end: { x: 200, y: 0 }, index: 0 }];
+
+      const resMissing = getSnappedPoint({
+        point: { x: 50, y: 10 },
+        edges,
+        settings,
+        snapModes,
+      });
+      expect(resMissing.snap).not.toBeNull();
+
+      const resZero = getSnappedPoint({
+        point: { x: 50, y: 10 },
+        edges,
+        settings,
+        snapModes,
+        scale: 0,
+      });
+      expect(resZero.snap).not.toBeNull();
+    });
+  });
 });
 
 describe('SNAP_TOGGLE_DEFINITIONS', () => {

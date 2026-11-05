@@ -9,6 +9,7 @@ import {
   wallSeg,
   wallLength,
   wallNeighbors,
+  subtractInterval,
   interior,
   subtractInterval,
   csgExteriorCladdingIntervals,
@@ -18,8 +19,9 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
+  subtractInterval,
 } from './geometry.js';
-import { OPENING_BY_ID, OPENINGS, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
+import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
 import { tileCanvasFor } from './patterns.js';
 import {
@@ -632,7 +634,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
-
   const faceMats = (base, faceIdx, vis) => {
     const arr = [base, base, base, base, base, base];
     if (typeof faceIdx === 'number' && faceIdx >= 0 && faceIdx < 6) {

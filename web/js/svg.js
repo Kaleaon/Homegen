@@ -4,6 +4,7 @@
 import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { getPalette } from './kthemeTokens.js';
+import { computeMarchingSquares } from './elevationEngine.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
@@ -48,6 +49,24 @@ export function exportSVG(doc, options = {}) {
     maxX = Math.max(...rooms.map((r) => r.x + r.w + WT));
     maxY = Math.max(...rooms.map((r) => r.y + r.h + WT));
   }
+
+  // Incorporate terrain bounds when elevation grid is active and visible
+  const hasActiveTerrain = Boolean(doc.elevationGrid && doc.elevationGrid.visible !== false);
+  if (hasActiveTerrain && options.includeTerrainBounds !== false && doc.elevationGrid.bounds) {
+    const eb = doc.elevationGrid.bounds;
+    if (rooms.length > 0) {
+      minX = Math.min(minX, eb.minX);
+      minY = Math.min(minY, eb.minY);
+      maxX = Math.max(maxX, eb.maxX);
+      maxY = Math.max(maxY, eb.maxY);
+    } else {
+      minX = eb.minX;
+      minY = eb.minY;
+      maxX = eb.maxX;
+      maxY = eb.maxY;
+    }
+  }
+
   const planBoxW = Math.max(36, maxX - minX);
   const planBoxH = Math.max(36, maxY - minY);
 
@@ -104,10 +123,37 @@ export function exportSVG(doc, options = {}) {
 
   const svgParts = [];
 
+  // CRS Geospatial attributes & metadata
+  const crs = doc.crs && typeof doc.crs === 'object' && doc.crs.epsg ? doc.crs : null;
+  const geoRootAttrs = crs
+    ? ` xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#" data-epsg="${escXml(crs.epsg)}" data-origin-longitude="${crs.origin?.longitude !== undefined ? crs.origin.longitude : ''}" data-origin-latitude="${crs.origin?.latitude !== undefined ? crs.origin.latitude : ''}"`
+    : '';
+
   // SVG Header
   svgParts.push(`<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${sheetW}pt" height="${sheetH}pt" viewBox="0 0 ${sheetW} ${sheetH}">
-<style>
+<svg xmlns="http://www.w3.org/2000/svg"${geoRootAttrs} width="${sheetW}pt" height="${sheetH}pt" viewBox="0 0 ${sheetW} ${sheetH}">`);
+
+  if (crs) {
+    svgParts.push(`  <metadata id="geospatial-crs">
+    <geo:SpatialReferenceSystem
+      xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#"
+      epsg="${escXml(crs.epsg)}"
+      proj4="${escXml(crs.proj4 || '')}"
+      wkt="${escXml(crs.wkt || '')}"
+      units="${escXml(crs.units || 'inches')}">
+      <geo:epsg>${escXml(crs.epsg)}</geo:epsg>
+      <geo:proj4>${escXml(crs.proj4 || '')}</geo:proj4>
+      <geo:wkt>${escXml(crs.wkt || '')}</geo:wkt>
+      <geo:units>${escXml(crs.units || 'inches')}</geo:units>
+      <geo:origin longitude="${crs.origin?.longitude ?? ''}" latitude="${crs.origin?.latitude ?? ''}">
+        <geo:lat>${crs.origin?.latitude ?? ''}</geo:lat>
+        <geo:long>${crs.origin?.longitude ?? ''}</geo:long>
+      </geo:origin>
+    </geo:SpatialReferenceSystem>
+  </metadata>`);
+  }
+
+  svgParts.push(`<style>
   :root {
 ${themeCssVars}
   }
@@ -118,6 +164,9 @@ ${themeCssVars}
   .title-head { font-size: 14px; font-weight: bold; fill: var(--ktheme-text, #111111); }
   .title-sub { font-size: 9px; fill: var(--ktheme-text-muted, #444444); }
   .floor-rect { fill: var(--ktheme-bg-surface, #faf8f5); stroke: var(--ktheme-border, #e0dcd3); stroke-width: 0.5; }
+  .contour-major { stroke: var(--ktheme-border, #44403c); stroke-width: 1.0; fill: none; }
+  .contour-minor { stroke: var(--ktheme-text-muted, #78716c); stroke-width: 0.5; stroke-dasharray: 4,2; fill: none; }
+  .contour-label { font-size: 7px; fill: var(--ktheme-text-muted, #57534e); text-anchor: middle; dominant-baseline: central; }
   .wall-struct { fill: var(--ktheme-border, #3a3836); stroke: var(--ktheme-border, #1a1a1a); stroke-width: 0.5; }
   .wall-finish { fill: var(--ktheme-bg-surface, #e5e2dc); stroke: var(--ktheme-border, #aaaaaa); stroke-width: 0.25; }
   .door-frame { stroke: var(--ktheme-text, #2a2a2a); stroke-width: 1; fill: none; }
@@ -132,6 +181,55 @@ ${themeCssVars}
 </style>
 <rect class="sheet-bg" x="0" y="0" width="${sheetW}" height="${sheetH}"/>
 <rect class="sheet-border" x="${margin}" y="${margin}" width="${sheetW - margin * 2}" height="${sheetH - margin * 2}"/>`);
+
+  // --- Group 0: Elevation Contours (Immediately prior to floors) ---
+  if (hasActiveTerrain) {
+    svgParts.push('  <g id="elevation-contours">');
+    const contours = doc._cachedContours || computeMarchingSquares(doc.elevationGrid);
+    const interval = doc.elevationGrid.contourInterval || 1.0;
+    const majorInterval = interval * 5;
+
+    for (const contour of contours || []) {
+      const elev = contour.elevation;
+      // Categorize into major index contours (every 5th interval or integer multiple) and minor intermediate contours
+      const isMajor =
+        Math.abs(elev / majorInterval - Math.round(elev / majorInterval)) < 1e-4 ||
+        Math.abs(elev % majorInterval) < 1e-4;
+      const contourClass = isMajor ? 'contour-major' : 'contour-minor';
+      const strokeWidth = isMajor ? '1.0' : '0.5';
+      const dashAttr = isMajor ? '' : ' stroke-dasharray="4,2"';
+      const strokeColor = isMajor
+        ? 'var(--ktheme-border, #44403c)'
+        : 'var(--ktheme-text-muted, #78716c)';
+
+      let pathD = '';
+      for (const line of contour.lines || []) {
+        pathD += `M ${px(line.x1).toFixed(2)} ${py(line.y1).toFixed(2)} L ${px(line.x2).toFixed(2)} ${py(line.y2).toFixed(2)} `;
+      }
+      pathD = pathD.trim();
+
+      if (pathD) {
+        svgParts.push(`    <g class="${contourClass}" data-elevation="${elev}">`);
+        svgParts.push(
+          `      <path class="${contourClass}" d="${pathD}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}"${dashAttr} />`
+        );
+
+        if (isMajor && contour.lines && contour.lines.length > 0) {
+          // Inline elevation height text label at midpoint of middle segment
+          const midIdx = Math.floor(contour.lines.length / 2);
+          const seg = contour.lines[midIdx];
+          const mx = px((seg.x1 + seg.x2) / 2);
+          const my = py((seg.y1 + seg.y2) / 2);
+          const labelText = `${elev.toFixed(1)}m`;
+          svgParts.push(
+            `      <text class="contour-label" x="${mx.toFixed(2)}" y="${my.toFixed(2)}" fill="var(--ktheme-text-muted, #57534e)">${labelText}</text>`
+          );
+        }
+        svgParts.push('    </g>');
+      }
+    }
+    svgParts.push('  </g>');
+  }
 
   // --- Group 1: Floors / Floor-fills ---
   svgParts.push('  <g id="floors">');
@@ -431,8 +529,17 @@ ${themeCssVars}
   svgParts.push(
     `    <text class="title-sub" x="${margin + 12}" y="${titleBlockY + 38}">${escXml(levelName)} · Date: ${dateStr} · Sheet: ${sheetSize.toUpperCase()} (${orientation})</text>`
   );
+  let crsTitleText = '';
+  if (crs) {
+    const epsgStr = crs.epsg.startsWith('EPSG:') ? crs.epsg : `EPSG:${crs.epsg}`;
+    const originStr =
+      crs.origin && (crs.origin.longitude !== undefined || crs.origin.latitude !== undefined)
+        ? ` · Origin: ${crs.origin.longitude ?? ''}, ${crs.origin.latitude ?? ''}`
+        : '';
+    crsTitleText = ` · ${escXml(epsgStr)}${originStr}`;
+  }
   svgParts.push(
-    `    <text class="title-sub" x="${margin + 12}" y="${titleBlockY + 52}">Architectural Scale: ${escXml(scaleText)}</text>`
+    `    <text class="title-sub" x="${margin + 12}" y="${titleBlockY + 52}">Architectural Scale: ${escXml(scaleText)}${crsTitleText}</text>`
   );
 
   // Middle Section: Graphic Scale Bar

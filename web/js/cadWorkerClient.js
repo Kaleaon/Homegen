@@ -99,6 +99,7 @@ export class CadWorkerClient {
     if (diff.edges) this.activeSceneState.edges = diff.edges;
     if (diff.settings) this.activeSceneState.settings = diff.settings;
     if (diff.snapModes) this.activeSceneState.snapModes = diff.snapModes;
+    if (diff.scale !== undefined) this.activeSceneState.scale = diff.scale;
 
     if (this.useWorker && this.worker) {
       const reqId = ++this.reqSeq;
@@ -125,6 +126,11 @@ export class CadWorkerClient {
     const pointArray = [point.x, point.y, anchor.x, anchor.y];
     const pointBuffer = new Float32Array(pointArray);
 
+    const scale =
+      overrideParams.scale !== undefined
+        ? overrideParams.scale
+        : (this.activeSceneState.scale ?? 1.0);
+
     const payload = {
       point,
       anchor,
@@ -134,6 +140,7 @@ export class CadWorkerClient {
       edges: overrideParams.edges || this.activeSceneState.edges,
       settings: overrideParams.settings || this.activeSceneState.settings,
       snapModes: overrideParams.snapModes || this.activeSceneState.snapModes,
+      scale,
     };
 
     if (this.useWorker && this.worker) {
