@@ -15,9 +15,9 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
   resolveWallIndex,
+  subtractInterval,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, OPENINGS, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -632,10 +632,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
-  const faceMats = (base, face, visible) => {
-    const a = Array(6).fill(base);
-    a[face] = visible;
-    return a;
+
+  const faceMats = (base, faceIdx, vis) => {
+    const arr = [base, base, base, base, base, base];
+    if (typeof faceIdx === 'number' && faceIdx >= 0 && faceIdx < 6) {
+      arr[faceIdx] = vis;
+    }
+    return arr;
   };
 
   function buildRoomShape(pts) {
@@ -989,12 +992,12 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       p011.y * S,
       p011.z * S,
     ];
-    const indices = [
+    const triIndices = [
       0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1,
       2, 6, 1, 6, 5,
     ];
     geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geom.setIndex(indices);
+    geom.setIndex(triIndices);
     geom.computeVertexNormals();
 
     const mats = faceIdx === undefined ? mat : faceMats(mat.base, faceIdx, mat.vis);
