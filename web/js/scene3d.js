@@ -16,7 +16,6 @@ import {
   getRoomPoints,
   getRoomBoundingBox,
   resolveWallIndex,
-  subtractInterval,
   getArcParameters,
   pointOnArc,
 } from './geometry.js';
