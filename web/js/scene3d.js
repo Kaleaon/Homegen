@@ -9,6 +9,7 @@ import {
   wallSeg,
   wallLength,
   wallNeighbors,
+  subtractInterval,
   interior,
   subtractInterval,
   csgExteriorCladdingIntervals,
@@ -633,7 +634,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     m.receiveShadow = true;
     return m;
   };
-
   const faceMats = (base, faceIdx, vis) => {
     const arr = [base, base, base, base, base, base];
     if (typeof faceIdx === 'number' && faceIdx >= 0 && faceIdx < 6) {
