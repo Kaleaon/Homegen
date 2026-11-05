@@ -42,6 +42,8 @@ import com.homegen.assets.model.CatalogEntry
 import com.homegen.assets.model.MaterialEntry
 import com.homegen.assets.model.PlaceableEntry
 import com.ktheme.android.LocalKthemeSemanticColors
+import com.ktheme.android.ui.KthemeText
+import com.ktheme.android.ui.KthemeTextVariant
 
 @Composable
 fun CatalogPanel(
@@ -293,16 +295,16 @@ fun EmptyCatalogState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
+        KthemeText(
             text = "No Items Found",
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
+            variant = KthemeTextVariant.Primary,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
+        KthemeText(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            variant = KthemeTextVariant.Muted,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(16.dp))

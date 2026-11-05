@@ -1,6 +1,5 @@
 package com.homegen.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,13 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.SheetValue
-import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
@@ -32,7 +26,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -53,6 +46,15 @@ import com.homegen.styles.model.DesignStyle
 import com.homegen.styles.ui.DesignStyleBrowser
 import com.homegen.templates.ui.RoomTemplatePanel
 import com.ktheme.android.KthemeComposeTheme
+import com.ktheme.android.ui.KthemeBadge
+import com.ktheme.android.ui.KthemeBadgeVariant
+import com.ktheme.android.ui.KthemeButton
+import com.ktheme.android.ui.KthemeButtonVariant
+import com.ktheme.android.ui.KthemeIconButton
+import com.ktheme.android.ui.KthemeNavigationRail
+import com.ktheme.android.ui.KthemeNavigationRailItem
+import com.ktheme.android.ui.KthemeText
+import com.ktheme.android.ui.KthemeTextVariant
 import kotlinx.coroutines.launch
 
 /**
@@ -154,7 +156,7 @@ fun HomegenScreen(
                         scope.launch { scaffoldState.bottomSheetState.hide() }
                     },
                 )
-            } ?: Text("Loading catalog...", modifier = Modifier.padding(16.dp))
+            } ?: KthemeText("Loading catalog...", modifier = Modifier.padding(16.dp), variant = KthemeTextVariant.Muted)
         },
         sheetPeekHeight = 0.dp,
     ) { innerPadding ->
@@ -176,13 +178,13 @@ fun HomegenScreen(
             // Overlay legend
             overlayLegend?.let { legend ->
                 if (legend.isNotEmpty()) {
-                    Text(
+                    KthemeText(
                         text = legend,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(12.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        variant = KthemeTextVariant.Primary,
                     )
                 }
             }
@@ -196,34 +198,26 @@ fun HomegenScreen(
                     is InteractionMode.Paint -> "Paint"
                     else -> ""
                 }
-                Text(
+                KthemeBadge(
                     text = modeName,
+                    variant = KthemeBadgeVariant.Brand,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 12.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerControlDp.dp),
-                        )
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        .padding(top = 12.dp),
+                    shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerControlDp.dp),
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
 
             // Active style indicator
             activeStyle?.let { style ->
-                Text(
+                KthemeBadge(
                     text = "Style: ${style.name}",
+                    variant = KthemeBadgeVariant.Highlight,
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(start = 12.dp, top = 40.dp)
-                        .background(
-                            MaterialTheme.colorScheme.tertiaryContainer,
-                            shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerTileDp.dp),
-                        )
-                        .padding(horizontal = 10.dp, vertical = 3.dp),
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        .padding(start = 12.dp, top = 40.dp),
+                    shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerTileDp.dp),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
@@ -235,19 +229,19 @@ fun HomegenScreen(
                     .padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                IconButton(
+                KthemeIconButton(
                     onClick = { commandStack.undo() },
                     enabled = canUndo,
                     modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 ) {
-                    Text("↩", style = MaterialTheme.typography.titleLarge)
+                    KthemeText("↩", style = MaterialTheme.typography.titleLarge)
                 }
-                IconButton(
+                KthemeIconButton(
                     onClick = { commandStack.redo() },
                     enabled = canRedo,
                     modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 ) {
-                    Text("↪", style = MaterialTheme.typography.titleLarge)
+                    KthemeText("↪", style = MaterialTheme.typography.titleLarge)
                 }
             }
 
@@ -304,18 +298,17 @@ fun HomegenScreen(
 
             if (screenWidth >= layoutConfig.adaptiveWidthDp) {
                 // Wide layout (>= 720dp): Navigation Rail along left
-                NavigationRail(
+                KthemeNavigationRail(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(8.dp)
-                        .clip(RoundedCornerShape(layoutConfig.cornerPanelDp.dp)),
+                        .padding(8.dp),
                 ) {
                     navItems.forEach { item ->
-                        NavigationRailItem(
+                        KthemeNavigationRailItem(
                             selected = item.isActive,
                             onClick = item.onClick,
-                            icon = { Text(item.label.take(1)) },
-                            label = { Text(item.label) },
+                            icon = { KthemeText(item.label.take(1)) },
+                            label = { KthemeText(item.label) },
                             modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                         )
                     }
@@ -371,7 +364,7 @@ fun HomegenScreen(
                         ToolButton("Templates") {
                             overlayScreen = OverlayScreen.ROOM_TEMPLATES
                         }
-                        FilledTonalButton(
+                        KthemeButton(
                             onClick = {
                                 val selectedId = surfaceManager.sceneController.selectedObjectId
                                 if (selectedId != null) {
@@ -379,9 +372,9 @@ fun HomegenScreen(
                                 }
                             },
                             modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
-                            shape = RoundedCornerShape(layoutConfig.cornerControlDp.dp),
+                            variant = KthemeButtonVariant.Tonal,
                         ) {
-                            Text("Delete")
+                            KthemeText("Delete")
                         }
                     }
                 }
@@ -402,19 +395,12 @@ private fun ToolButton(
     isActive: Boolean = false,
     onClick: () -> Unit,
 ) {
-    FilledTonalButton(
+    KthemeButton(
         onClick = onClick,
         modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
         shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerControlDp.dp),
-        colors = if (isActive) {
-            androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            )
-        } else {
-            androidx.compose.material3.ButtonDefaults.filledTonalButtonColors()
-        },
+        variant = if (isActive) KthemeButtonVariant.Brand else KthemeButtonVariant.Tonal,
     ) {
-        Text(label)
+        KthemeText(label)
     }
 }

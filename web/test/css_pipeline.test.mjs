@@ -104,11 +104,11 @@ test('Serve MJS: Serves compiled distribution stylesheet cleanly', async () => {
     }
   });
 
-  await new Promise((res) => server.listen(0, res));
+  await new Promise((res) => server.listen(0, '127.0.0.1', res));
   const port = server.address().port;
 
   try {
-    const resp = await fetch(`http://localhost:${port}/dist/css/style.css`);
+    const resp = await fetch(`http://127.0.0.1:${port}/dist/css/style.css`);
     assert.equal(resp.status, 200, 'HTTP status is 200 OK');
     assert.equal(resp.headers.get('content-type'), 'text/css', 'Content-Type is text/css');
     const body = await resp.text();
