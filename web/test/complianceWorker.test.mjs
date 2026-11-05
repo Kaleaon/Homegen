@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newState, createRoom, addItem, addOpening } from '../js/model.js';
+import { newState, createRoom, addItem } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
 import {
   handleComplianceWorkerMessage,
@@ -14,6 +14,9 @@ import { badIds } from '../js/app.js';
 test('ComplianceWorker handles INIT_STATE and evaluates base report off main thread', () => {
   const doc = newState();
   createRoom(doc, 'bedroom', 0, 0, 48, 48); // Undersized bedroom (16 sq ft < 70 sq ft)
+
+  const tree = rebuildSpatialIndex(doc);
+  assert.ok(tree);
 
   const res = handleComplianceWorkerMessage({
     data: {
@@ -34,7 +37,7 @@ test('ComplianceWorker handles INIT_STATE and evaluates base report off main thr
 test('ComplianceWorker executes partitioned incremental re-evaluation on ITEM_MOVED', () => {
   const doc = newState();
   const room = createRoom(doc, 'bathroom', 0, 0, 120, 120);
-  const toilet = addItem(doc, room, 'toilet', { x: 30, y: 30, rot: 0 });
+  addItem(doc, room, 'toilet', { x: 30, y: 30, rot: 0 });
   const vanity = addItem(doc, room, 'vanity', { x: 80, y: 30, rot: 0 });
 
   // Init worker state
@@ -87,7 +90,7 @@ test('ComplianceManager rejects stale responses when consecutive rapid drags occ
   assert.equal(staleRes.reason, 'stale');
 });
 
-test('badIds classifies all target types: roomId, wallId, openingId, itemId', () => {
+test('badIds and classifyViolationTargets classify all target types: roomId, wallId, openingId, itemId', () => {
   const fakeReport = {
     violations: [
       { severity: 'error', roomId: 'room_1' },
@@ -106,11 +109,18 @@ test('badIds classifies all target types: roomId, wallId, openingId, itemId', ()
   assert.ok(ids.has('room_2'));
   assert.ok(ids.has('room_2:north'));
   assert.ok(ids.has('room_2:wall:north'));
+
+  const classification = classifyViolationTargets(fakeReport.violations);
+  assert.ok(classification.targets.rooms.includes('room_1'));
+  assert.ok(classification.targets.walls.includes('room_1:wall:0'));
+  assert.ok(classification.targets.openings.includes('win_1'));
+  assert.ok(classification.targets.items.includes('item_1'));
+  assert.ok(classification.badTargetIds.includes('room_1'));
 });
 
 test('Screen-to-world fix button hit targets accurately transform across zoom levels (20% to 500%)', () => {
   const state = newState();
-  const room = createRoom(state, 'bedroom', 0, 0, 48, 48); // undersized
+  createRoom(state, 'bedroom', 0, 0, 48, 48); // undersized
   const report = evaluate(state);
   // Mark violation as fixable for test
   report.violations[0].fixable = true;

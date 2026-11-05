@@ -10,9 +10,13 @@ import { wallSeg, getRoomPoints, LEGACY_WALL_NAMES } from './geometry.js';
 import { ITEM_BY_ID } from './catalog.js';
 
 let workerDoc = null;
-let spatialTree = null;
+let _spatialTree = null;
 let cachedReport = null;
 let lastProcessedReqId = 0;
+
+export function getSpatialTree() {
+  return _spatialTree;
+}
 
 /**
  * Rebuilds spatial R-tree index from state document entities.
@@ -176,7 +180,7 @@ export function handleComplianceWorkerMessage(e) {
     case 'INIT_STATE':
     case 'SYNC_STATE': {
       workerDoc = payload.doc ? JSON.parse(JSON.stringify(payload.doc)) : null;
-      spatialTree = rebuildSpatialIndex(workerDoc);
+      _spatialTree = rebuildSpatialIndex(workerDoc);
       cachedReport = workerDoc
         ? evaluate(workerDoc)
         : { violations: [], errors: 0, warnings: 0, compliant: true };
@@ -202,7 +206,7 @@ export function handleComplianceWorkerMessage(e) {
     case 'ITEM_MOVED': {
       if (!workerDoc) {
         workerDoc = payload.doc ? JSON.parse(JSON.stringify(payload.doc)) : { rooms: [] };
-        spatialTree = rebuildSpatialIndex(workerDoc);
+        _spatialTree = rebuildSpatialIndex(workerDoc);
       }
       const { id, cx, cy, rot, roomId, oldBounds, newBounds } = payload;
       let targetRoom = null;
@@ -259,7 +263,7 @@ export function handleComplianceWorkerMessage(e) {
     case 'WALL_UPDATED': {
       if (!workerDoc) {
         workerDoc = payload.doc ? JSON.parse(JSON.stringify(payload.doc)) : { rooms: [] };
-        spatialTree = rebuildSpatialIndex(workerDoc);
+        _spatialTree = rebuildSpatialIndex(workerDoc);
       }
       const { roomId, oldBounds, newBounds } = payload;
       const targetRoom = (workerDoc.rooms || []).find((r) => r.id === roomId);
@@ -293,7 +297,7 @@ export function handleComplianceWorkerMessage(e) {
     case 'ROOM_RESIZED': {
       if (!workerDoc) {
         workerDoc = payload.doc ? JSON.parse(JSON.stringify(payload.doc)) : { rooms: [] };
-        spatialTree = rebuildSpatialIndex(workerDoc);
+        _spatialTree = rebuildSpatialIndex(workerDoc);
       }
       const { roomId, points, rect, oldBounds, newBounds } = payload;
       const targetRoom = (workerDoc.rooms || []).find((r) => r.id === roomId);
@@ -344,7 +348,7 @@ export function handleComplianceWorkerMessage(e) {
       const docToEval = payload.doc ? payload.doc : workerDoc;
       if (payload.doc) {
         workerDoc = JSON.parse(JSON.stringify(payload.doc));
-        spatialTree = rebuildSpatialIndex(workerDoc);
+        _spatialTree = rebuildSpatialIndex(workerDoc);
       }
       cachedReport = docToEval
         ? evaluate(docToEval)
