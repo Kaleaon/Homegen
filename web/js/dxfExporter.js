@@ -11,6 +11,72 @@ import {
   footprint,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID } from './catalog.js';
+import { computeMarchingSquares } from './elevationEngine.js';
+
+/**
+ * Stitches marching squares disconnected line segments into continuous polyline chains.
+ */
+function stitchSegmentsToPolylines(lines) {
+  if (!lines || lines.length === 0) return [];
+  const remaining = lines.map((l) => ({ ...l }));
+  const polylines = [];
+
+  while (remaining.length > 0) {
+    const first = remaining.pop();
+    const pts = [
+      { x: first.x1, y: first.y1 },
+      { x: first.x2, y: first.y2 },
+    ];
+
+    let extended = true;
+    while (extended) {
+      extended = false;
+      const head = pts[0];
+      const tail = pts[pts.length - 1];
+
+      for (let i = 0; i < remaining.length; i++) {
+        const seg = remaining[i];
+        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
+          pts.push({ x: seg.x2, y: seg.y2 });
+          remaining.splice(i, 1);
+          extended = true;
+          break;
+        }
+        if (Math.hypot(tail.x - seg.x2, tail.y - seg.y2) < 1e-4) {
+          pts.push({ x: seg.x1, y: seg.y1 });
+          remaining.splice(i, 1);
+          extended = true;
+          break;
+        }
+        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
+          pts.unshift({ x: seg.x1, y: seg.y1 });
+          remaining.splice(i, 1);
+          extended = true;
+          break;
+        }
+        if (Math.hypot(head.x - seg.x1, head.y - seg.y1) < 1e-4) {
+          pts.unshift({ x: seg.x2, y: seg.y2 });
+          remaining.splice(i, 1);
+          extended = true;
+          break;
+        }
+      }
+    }
+
+    let isClosed = false;
+    if (pts.length > 2) {
+      const head = pts[0];
+      const tail = pts[pts.length - 1];
+      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
+        isClosed = true;
+        pts.pop();
+      }
+    }
+    polylines.push({ pts, isClosed });
+  }
+
+  return polylines;
+}
 
 /**
  * Escaped string helper for DXF TEXT entities.
@@ -91,6 +157,44 @@ export function exportDXF(doc, options = {}) {
     }
   }
 
+  if (doc?.site?.segments && Array.isArray(doc.site.segments)) {
+    for (const seg of doc.site.segments) {
+      if (seg.pts && Array.isArray(seg.pts)) {
+        for (const p of seg.pts) {
+          const x = p.x * unitFactor;
+          const y = p.y * unitFactor;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+  }
+
+  let contours = [];
+  const elevationGrid = doc?.elevationGrid;
+  const hasElevation = elevationGrid && elevationGrid.visible !== false;
+  if (hasElevation) {
+    contours = computeMarchingSquares(elevationGrid);
+    for (const c of contours) {
+      for (const line of c.lines || []) {
+        const x1 = line.x1 * unitFactor;
+        const y1 = line.y1 * unitFactor;
+        const x2 = line.x2 * unitFactor;
+        const y2 = line.y2 * unitFactor;
+        if (x1 < minX) minX = x1;
+        if (x1 > maxX) maxX = x1;
+        if (y1 < minY) minY = y1;
+        if (y1 > maxY) maxY = y1;
+        if (x2 < minX) minX = x2;
+        if (x2 > maxX) maxX = x2;
+        if (y2 < minY) minY = y2;
+        if (y2 > maxY) maxY = y2;
+      }
+    }
+  }
+
   if (!isFinite(minX)) {
     minX = 0;
     minY = 0;
@@ -109,6 +213,41 @@ export function exportDXF(doc, options = {}) {
   // ------------------------------------------------------------- 1. HEADER
   push(0, 'SECTION');
   push(2, 'HEADER');
+
+  if (doc?.crs) {
+    const crs = doc.crs;
+    const origin = crs.origin || {};
+    const originLon =
+      origin.longitude !== undefined
+        ? origin.longitude
+        : origin.lon !== undefined
+          ? origin.lon
+          : Array.isArray(origin)
+            ? origin[0]
+            : 0;
+    const originLat =
+      origin.latitude !== undefined
+        ? origin.latitude
+        : origin.lat !== undefined
+          ? origin.lat
+          : Array.isArray(origin)
+            ? origin[1]
+            : 0;
+    const crsUnits = crs.units || units;
+
+    if (crs.epsg !== undefined) {
+      push(999, `GEOSPATIAL_CRS_EPSG: ${String(crs.epsg).replace(/[\r\n]+/g, ' ')}`);
+    }
+    if (crs.proj4 !== undefined) {
+      push(999, `GEOSPATIAL_CRS_PROJ4: ${String(crs.proj4).replace(/[\r\n]+/g, ' ')}`);
+    }
+    if (crs.wkt !== undefined) {
+      push(999, `GEOSPATIAL_CRS_WKT: ${String(crs.wkt).replace(/[\r\n]+/g, ' ')}`);
+    }
+    push(999, `GEOSPATIAL_ORIGIN_LON: ${originLon}`);
+    push(999, `GEOSPATIAL_ORIGIN_LAT: ${originLat}`);
+    push(999, `GEOSPATIAL_UNITS: ${crsUnits}`);
+  }
 
   push(9, '$ACADVER');
   push(1, 'AC1015');
@@ -156,6 +295,9 @@ export function exportDXF(doc, options = {}) {
     { name: 'A-FURN', color: 3 }, // Green
     { name: 'A-AREA-POLY', color: 5 }, // Blue
     { name: 'A-ANNO-TEXT', color: 1 }, // Red
+    { name: 'C-TOPO-MAJR', color: 30 }, // Orange-Brown
+    { name: 'C-TOPO-MINR', color: 34 }, // Light Brown
+    { name: 'C-TOPO-TEXT', color: 6 }, // Magenta
   ];
 
   push(0, 'TABLE');
@@ -409,6 +551,61 @@ export function exportDXF(doc, options = {}) {
         for (const p of seg.pts) {
           push(10, (p.x * unitFactor).toFixed(4));
           push(20, (p.y * unitFactor).toFixed(4));
+        }
+      }
+    }
+  }
+
+  // 4h. Topographic Elevation Contours (C-TOPO-MAJR, C-TOPO-MINR) and Altitude Labels (C-TOPO-TEXT)
+  if (hasElevation && contours.length > 0) {
+    const contourInterval = elevationGrid.contourInterval || 1.0;
+    const majorInterval = contourInterval * 5;
+
+    for (const contour of contours) {
+      const elev = contour.elevation;
+      const rem = Math.abs(elev % majorInterval);
+      const isMajor = rem < 1e-3 || Math.abs(rem - majorInterval) < 1e-3;
+      const layerName = isMajor ? 'C-TOPO-MAJR' : 'C-TOPO-MINR';
+      const elevStr = typeof elev === 'number' ? elev.toFixed(4) : String(elev);
+
+      const polylines = stitchSegmentsToPolylines(contour.lines);
+      for (const poly of polylines) {
+        if (!poly.pts || poly.pts.length < 2) continue;
+
+        push(0, 'LWPOLYLINE');
+        push(8, layerName);
+        push(38, elevStr);
+        push(90, poly.pts.length);
+        push(70, poly.isClosed ? 1 : 0);
+        for (const p of poly.pts) {
+          push(10, (p.x * unitFactor).toFixed(4));
+          push(20, (p.y * unitFactor).toFixed(4));
+        }
+
+        // Midpoint elevation tag on C-TOPO-TEXT for major contours
+        if (isMajor && poly.pts.length >= 2) {
+          const midIdx = Math.floor(poly.pts.length / 2);
+          const pPrev = poly.pts[midIdx - 1];
+          const pCurr = poly.pts[midIdx];
+          const mx = (pPrev.x + pCurr.x) / 2;
+          const my = (pPrev.y + pCurr.y) / 2;
+
+          const unitSuffix = units === 'meters' ? 'm' : 'ft';
+          const tagText = escapeDXFText(`${elev.toFixed(1)}${unitSuffix}`);
+          const labelHeight = 8 * unitFactor;
+
+          push(0, 'TEXT');
+          push(8, 'C-TOPO-TEXT');
+          push(10, (mx * unitFactor).toFixed(4));
+          push(20, (my * unitFactor).toFixed(4));
+          push(30, '0.0');
+          push(40, labelHeight.toFixed(4));
+          push(1, tagText);
+          push(72, 1); // Center horizontal
+          push(73, 2); // Middle vertical
+          push(11, (mx * unitFactor).toFixed(4));
+          push(21, (my * unitFactor).toFixed(4));
+          push(31, '0.0');
         }
       }
     }

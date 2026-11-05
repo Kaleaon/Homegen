@@ -11,6 +11,7 @@ let cachedRooms = [];
 let cachedEdges = [];
 let cachedSettings = null;
 let snapModes = null;
+let cachedScale = 1.0;
 
 // Marching Squares Lookup Table for isoline contours
 const MARCHING_SQUARES_LOOKUP = [
@@ -174,6 +175,9 @@ export function handleCadWorkerMessage(e) {
       if (payload.snapModes) {
         snapModes = payload.snapModes;
       }
+      if (payload.scale !== undefined) {
+        cachedScale = payload.scale;
+      }
       if (typeof self !== 'undefined' && self.postMessage) {
         self.postMessage({ type: 'SYNC_SCENE_DIFF_ACK', reqId, ok: true });
       }
@@ -209,6 +213,7 @@ export function handleCadWorkerMessage(e) {
       const edges = payload.edges || (rooms ? extractRoomEdges(rooms) : cachedEdges);
       const settings = payload.settings || cachedSettings;
       const modes = payload.snapModes || snapModes;
+      const scale = payload.scale !== undefined ? payload.scale : cachedScale;
       const normalizedSnapModes =
         typeof modes?.isEnabled === 'function' ? modes : new SnapModeState(modes?.modes || modes);
 
@@ -235,6 +240,7 @@ export function handleCadWorkerMessage(e) {
         edges,
         settings,
         snapModes: normalizedSnapModes,
+        scale,
       });
 
       const guideLines = [];

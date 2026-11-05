@@ -604,23 +604,43 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
   const x1 = x0 + cw / view.scale;
   const y1 = y0 + ch / view.scale;
   ctx.lineWidth = 1 / view.scale;
-  for (const [step, color] of [
+  const candidateTiers = [
     [subGrid, '#f0ede6'],
     [minorGrid, '#ebe7de'],
     [majorGrid, '#dcd6c8'],
     [12, getToken('--ktheme-border-light', '#ebe7de')],
     [60, getToken('--ktheme-border', '#dcd6c8')],
-  ]) {
+  ];
+
+  const seenSteps = new Set();
+  const tiers = [];
+  for (const [step, color] of candidateTiers) {
+    if (seenSteps.has(step)) continue;
+    seenSteps.add(step);
+    tiers.push([step, color]);
+  }
+
+  for (const [step, color] of tiers) {
     if (step * view.scale < 6) continue;
     ctx.strokeStyle = color;
     ctx.beginPath();
-    for (let x = Math.floor(x0 / step) * step; x < x1; x += step) {
-      ctx.moveTo(x, y0);
-      ctx.lineTo(x, y1);
+    {
+      const startIdx = Math.floor(x0 / step);
+      const endIdx = Math.ceil(x1 / step);
+      for (let i = startIdx; i < endIdx; i++) {
+        const x = i * step;
+        ctx.moveTo(x, y0);
+        ctx.lineTo(x, y1);
+      }
     }
-    for (let y = Math.floor(y0 / step) * step; y < y1; y += step) {
-      ctx.moveTo(x0, y);
-      ctx.lineTo(x1, y);
+    {
+      const startIdx = Math.floor(y0 / step);
+      const endIdx = Math.ceil(y1 / step);
+      for (let i = startIdx; i < endIdx; i++) {
+        const y = i * step;
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y);
+      }
     }
     ctx.stroke();
   }

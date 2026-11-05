@@ -168,6 +168,8 @@ const snappingBridge = new SnappingBridge({
   interaction,
   getRooms: () => levelRooms(),
   toWorld: (e) => toWorld(e),
+  view,
+  getViewScale: () => view.scale,
   onSnap: () => {
     redraw();
   },
