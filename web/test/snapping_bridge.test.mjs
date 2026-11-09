@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InteractionLayer, SNAP_MODES } from '../../designer3d/tools/index.mjs';
 import { SnappingBridge } from '../js/snapping-bridge.js';
+import { drawSnapGuides } from '../js/render.js';
+import { getToken } from '../js/kthemeTokens.js';
 
 test('SnappingBridge computes snap points and guide lines during pointer move', () => {
   const interaction = new InteractionLayer({
@@ -214,4 +216,164 @@ test('SnappingBridge generates primary angle guide lines and secondary reference
   assert.equal(snapRelative.guideLines[1].type, 'angle_reference');
   assert.equal(snapRelative.guideLines[1].start.x, 0);
   assert.equal(snapRelative.guideLines[1].start.y, 0);
+});
+
+test('SnappingBridge computeSnap returns grid-aligned coordinates whenever no magnetic target exists', () => {
+  // Test with default unitSize (6) and magnetic snap enabled but no edge nearby
+  const interaction = new InteractionLayer({
+    gridSettings: { unitSize: 6, magneticThreshold: 14, edgeThreshold: 14, midpointThreshold: 14 },
+    snapModes: { grid: false, edge: true, midpoint: true, perpendicular: false },
+  });
+
+  const rooms = [{ id: 'r1', x: 0, y: 0, w: 120, h: 120, level: 0 }];
+  const bridge = new SnappingBridge({ interaction, getRooms: () => rooms });
+
+  // Point far away from any edge or midpoint: (400.2, 500.8)
+  // Grid unitSize is 6: 400.2 / 6 = 66.7 -> 67 * 6 = 402; 500.8 / 6 = 83.46 -> 83 * 6 = 498
+  const snapRes = bridge.computeSnap({ x: 400.2, y: 500.8 });
+
+  assert.ok(snapRes);
+  assert.deepEqual(snapRes.point, { x: 402, y: 498 });
+  assert.deepEqual(snapRes.snap, { type: 'grid', point: { x: 402, y: 498 } });
+  assert.deepEqual(snapRes.indicator, { x: 402, y: 498 });
+
+  const active = bridge.getActiveSnap();
+  assert.ok(active);
+  assert.deepEqual(active.point, { x: 402, y: 498 });
+  assert.deepEqual(active.snap, { type: 'grid', point: { x: 402, y: 498 } });
+  assert.deepEqual(active.indicator, { x: 402, y: 498 });
+
+  // Test configured unitSize (12)
+  const interaction12 = new InteractionLayer({
+    gridSettings: { unitSize: 12, magneticThreshold: 14 },
+    snapModes: { grid: false, edge: false, midpoint: false },
+  });
+  const bridge12 = new SnappingBridge({ interaction: interaction12, getRooms: () => [] });
+  const snapRes12 = bridge12.computeSnap({ x: 14.1, y: 25.9 });
+  // 14.1 / 12 = 1.175 -> 12; 25.9 / 12 = 2.158 -> 24
+  assert.deepEqual(snapRes12.point, { x: 12, y: 24 });
+  assert.deepEqual(snapRes12.snap, { type: 'grid', point: { x: 12, y: 24 } });
+  assert.deepEqual(snapRes12.indicator, { x: 12, y: 24 });
+});
+
+test('SnappingBridge computeMultiSnap calculates group anchor snapping during multi-item dragging', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: { unitSize: 6, magneticThreshold: 14 },
+    snapModes: { grid: true, edge: false, midpoint: false },
+  });
+
+  const bridge = new SnappingBridge({ interaction, getRooms: () => [] });
+
+  const point = { x: 23.9, y: 41.8 };
+  const anchor = { x: 10, y: 20 };
+  const itemsInitial = new Map([
+    ['item1', { cx: 50, cy: 60 }],
+    ['item2', { cx: 80, cy: 90 }],
+  ]);
+
+  const multiRes = bridge.computeMultiSnap(point, anchor, itemsInitial);
+
+  assert.ok(multiRes);
+  // Grid snapped: 23.9 -> 24, 41.8 -> 42
+  assert.deepEqual(multiRes.point, { x: 24, y: 42 });
+  assert.deepEqual(multiRes.anchor, { x: 10, y: 20 });
+  // delta: dx = 24 - 10 = 14, dy = 42 - 20 = 22
+  assert.deepEqual(multiRes.delta, { x: 14, y: 22, dx: 14, dy: 22 });
+  assert.equal(multiRes.dx, 14);
+  assert.equal(multiRes.dy, 22);
+  assert.deepEqual(multiRes.indicator, { x: 24, y: 42 });
+  assert.equal(multiRes.items, itemsInitial);
+});
+
+test('drawSnapGuides does not abort when snapResult.snap is null and renders semantic tokens', () => {
+  const calls = [];
+  const ctx = {
+    save() {
+      calls.push('save');
+    },
+    restore() {
+      calls.push('restore');
+    },
+    beginPath() {
+      calls.push('beginPath');
+    },
+    moveTo(x, y) {
+      calls.push(`moveTo(${x},${y})`);
+    },
+    lineTo(x, y) {
+      calls.push(`lineTo(${x},${y})`);
+    },
+    arc(x, y, r) {
+      calls.push(`arc(${x},${y},${r})`);
+    },
+    stroke() {
+      calls.push('stroke');
+    },
+    fill() {
+      calls.push('fill');
+    },
+    setLineDash(d) {
+      calls.push(`setLineDash(${JSON.stringify(d)})`);
+    },
+    strokeStyle: '',
+    fillStyle: '',
+    lineWidth: 0,
+  };
+
+  const view = { scale: 1 };
+
+  // 1. Null snap with indicator
+  const nullSnapWithIndicator = {
+    snap: null,
+    indicator: { x: 50, y: 60 },
+    guideLines: [],
+  };
+  drawSnapGuides(ctx, nullSnapWithIndicator, view);
+  assert.ok(calls.includes('beginPath'));
+  assert.ok(calls.includes('arc(50,60,8)'));
+  assert.ok(calls.includes('arc(50,60,3.5)'));
+
+  // 2. Null snap with guideLines
+  calls.length = 0;
+  const nullSnapWithGuides = {
+    snap: null,
+    indicator: null,
+    guideLines: [{ start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, type: 'angle' }],
+  };
+  drawSnapGuides(ctx, nullSnapWithGuides, view);
+  assert.ok(calls.includes('moveTo(0,0)'));
+  assert.ok(calls.includes('lineTo(100,0)'));
+
+  // 3. Grid snap renders indicator with --ktheme-success
+  calls.length = 0;
+  const gridSnap = {
+    snap: { type: 'grid', point: { x: 24, y: 48 } },
+    indicator: { x: 24, y: 48 },
+    guideLines: [],
+  };
+  drawSnapGuides(ctx, gridSnap, view);
+  assert.equal(ctx.strokeStyle, getToken('--ktheme-success', '#10b981'));
+  assert.equal(ctx.fillStyle, getToken('--ktheme-success', '#10b981'));
+
+  // 4. Midpoint snap renders indicator with --ktheme-info
+  calls.length = 0;
+  const midpointSnap = {
+    snap: { type: 'midpoint', point: { x: 60, y: 0 } },
+    indicator: { x: 60, y: 0 },
+    guideLines: [],
+  };
+  drawSnapGuides(ctx, midpointSnap, view);
+  assert.equal(ctx.strokeStyle, getToken('--ktheme-info', '#a855f7'));
+  assert.equal(ctx.fillStyle, getToken('--ktheme-info', '#a855f7'));
+
+  // 5. Perpendicular snap renders indicator with --ktheme-warning
+  calls.length = 0;
+  const perpSnap = {
+    snap: { type: 'perpendicular', point: { x: 50, y: 50 } },
+    indicator: { x: 50, y: 50 },
+    guideLines: [],
+  };
+  drawSnapGuides(ctx, perpSnap, view);
+  assert.equal(ctx.strokeStyle, getToken('--ktheme-warning', '#f59e0b'));
+  assert.equal(ctx.fillStyle, getToken('--ktheme-warning', '#f59e0b'));
 });

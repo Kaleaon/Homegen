@@ -9,6 +9,7 @@ import {
   wallSeg,
   wallLength,
   wallNeighbors,
+  subtractInterval,
   interior,
   csgExteriorCladdingIntervals,
   lv,
