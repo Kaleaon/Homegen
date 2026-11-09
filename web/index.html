@@ -183,6 +183,41 @@
     </div>
   </div>
 </dialog>
+<dialog id="dlg-level-manager" aria-labelledby="dlg-level-manager-title" class="k-overlay-dialog" style="max-width:680px">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-level-manager-title">Level Elevation Manager</h2>
+    <button value="close" id="level-manager-close" aria-label="Close level manager dialog"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p class="note" style="margin:0 0 12px">Configure floor story heights, datum elevations, slab thicknesses, and subterranean levels.</p>
+    <div id="level-manager-validation-errors" class="validation-banner" style="display:none; color:var(--ktheme-danger, #ef4444); background:var(--ktheme-danger-subtle, rgba(239,68,68,0.1)); padding:8px 12px; border-radius:6px; margin-bottom:12px; font-size:12px;"></div>
+    <div style="overflow-x:auto">
+      <table id="level-manager-table" style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--ktheme-border, #d1d5db);">
+            <th style="padding:6px 8px">Level</th>
+            <th style="padding:6px 8px">Name</th>
+            <th style="padding:6px 8px">Elevation (in)</th>
+            <th style="padding:6px 8px">Story H (in)</th>
+            <th style="padding:6px 8px">Ceiling (in)</th>
+            <th style="padding:6px 8px">Slab (in)</th>
+            <th style="padding:6px 8px">Basement</th>
+            <th style="padding:6px 8px"></th>
+          </tr>
+        </thead>
+        <tbody id="level-manager-tbody"></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px; gap:8px; display:flex;">
+      <button id="btn-add-upper-level" class="secondary" type="button">+ Add Upper Floor</button>
+      <button id="btn-add-sub-level" class="secondary" type="button">+ Add Basement</button>
+    </div>
+    <div class="btns" style="margin-top:16px">
+      <button id="btn-apply-level-manager" class="primary" type="button">Apply Levels</button>
+      <button id="btn-cancel-level-manager" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="dlg-welcome" aria-labelledby="dlg-welcome-title" class="k-overlay-dialog welcome-wizard-dialog">
   <form method="dialog" class="dlg-head">
     <h2 id="dlg-welcome-title">Welcome to Homegen Designer</h2>

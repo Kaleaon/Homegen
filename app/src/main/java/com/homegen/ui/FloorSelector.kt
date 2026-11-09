@@ -15,6 +15,7 @@ import com.ktheme.android.ui.KthemeBadge
 import com.ktheme.android.ui.KthemeBadgeVariant
 import com.ktheme.android.ui.KthemeIconButton
 import com.ktheme.android.ui.KthemeText
+import com.ktheme.android.ui.KthemeTextVariant
 
 @Composable
 fun FloorSelector(
@@ -24,8 +25,11 @@ fun FloorSelector(
     modifier: Modifier = Modifier,
     minFloor: Int = 0,
     maxFloor: Int = 5,
+    elevationBadge: String? = null,
+    onEditProperties: (() -> Unit)? = null,
 ) {
     val clampedFloor = currentFloor.coerceIn(minFloor, maxFloor)
+    val floorLabel = if (clampedFloor < 0) "B${-clampedFloor}" else "F$clampedFloor"
 
     Column(
         modifier = modifier.padding(8.dp),
@@ -42,12 +46,19 @@ fun FloorSelector(
             KthemeText("▲")
         }
         KthemeBadge(
-            text = "F$clampedFloor",
+            text = floorLabel,
             variant = KthemeBadgeVariant.Brand,
             shape = CircleShape,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(2.dp),
         )
+        if (elevationBadge != null) {
+            KthemeText(
+                text = elevationBadge,
+                style = MaterialTheme.typography.labelSmall,
+                variant = KthemeTextVariant.Secondary,
+            )
+        }
         KthemeIconButton(
             onClick = onFloorDown,
             enabled = clampedFloor > minFloor,
@@ -56,6 +67,16 @@ fun FloorSelector(
             },
         ) {
             KthemeText("▼")
+        }
+        if (onEditProperties != null) {
+            KthemeIconButton(
+                onClick = onEditProperties,
+                modifier = Modifier.semantics {
+                    contentDescription = "Edit floor properties"
+                },
+            ) {
+                KthemeText("⚙")
+            }
         }
     }
 }

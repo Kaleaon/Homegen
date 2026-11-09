@@ -627,6 +627,17 @@ export function polygonCentroid(points) {
     const bbox = getRoomBoundingBox(points);
     const mid = { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 };
     if (pointInPolygon(mid, points)) return mid;
+
+    let sx = 0,
+      sy = 0;
+    for (const p of points) {
+      sx += p.x;
+      sy += p.y;
+    }
+    const avg = { x: sx / n, y: sy / n };
+    if (pointInPolygon(avg, points)) return avg;
+
+    return points[0];
   }
 
   return pt;

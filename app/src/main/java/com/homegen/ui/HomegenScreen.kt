@@ -80,6 +80,19 @@ fun HomegenScreen(
     var overlayLegend by remember { mutableStateOf<String?>(null) }
     var currentMode by remember { mutableStateOf<InteractionMode>(InteractionMode.Select) }
     var currentFloor by remember { mutableIntStateOf(0) }
+    var showLevelPropertiesDialog by remember { mutableStateOf(false) }
+    var levelProperties by remember {
+        mutableStateOf(
+            LevelProperties(
+                name = "Floor 1",
+                elevationInches = 0.0,
+                storyHeightInches = 106.0,
+                slabThicknessInches = 10.0,
+                ceilingHeightInches = 96.0,
+                isSubterranean = false,
+            ),
+        )
+    }
     var overlayScreen by remember { mutableStateOf(OverlayScreen.NONE) }
     var activeStyle by remember { mutableStateOf<DesignStyle?>(null) }
 
@@ -249,23 +262,48 @@ fun HomegenScreen(
             FloorSelector(
                 currentFloor = currentFloor,
                 onFloorUp = {
-                    val newFloor = (currentFloor + 1).coerceIn(0, 5)
+                    val newFloor = (currentFloor + 1).coerceIn(-2, 5)
                     if (newFloor != currentFloor) {
                         currentFloor = newFloor
+                        levelProperties = levelProperties.copy(
+                            name = if (newFloor < 0) "Basement ${-newFloor}" else "Floor ${newFloor + 1}",
+                            elevationInches = newFloor * levelProperties.storyHeightInches,
+                            isSubterranean = newFloor < 0,
+                        )
                         surfaceManager.sceneController.setFloorLevel(currentFloor)
                     }
                 },
                 onFloorDown = {
-                    val newFloor = (currentFloor - 1).coerceIn(0, 5)
+                    val newFloor = (currentFloor - 1).coerceIn(-2, 5)
                     if (newFloor != currentFloor) {
                         currentFloor = newFloor
+                        levelProperties = levelProperties.copy(
+                            name = if (newFloor < 0) "Basement ${-newFloor}" else "Floor ${newFloor + 1}",
+                            elevationInches = newFloor * levelProperties.storyHeightInches,
+                            isSubterranean = newFloor < 0,
+                        )
                         surfaceManager.sceneController.setFloorLevel(currentFloor)
                     }
                 },
+                minFloor = -2,
+                maxFloor = 5,
+                elevationBadge = "${if (levelProperties.elevationInches >= 0) "+" else ""}${levelProperties.elevationInches.toInt()}\"",
+                onEditProperties = { showLevelPropertiesDialog = true },
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(8.dp),
             )
+
+            if (showLevelPropertiesDialog) {
+                LevelPropertiesDialog(
+                    initialProperties = levelProperties,
+                    onConfirm = { updated ->
+                        levelProperties = updated
+                        showLevelPropertiesDialog = false
+                    },
+                    onDismiss = { showLevelPropertiesDialog = false },
+                )
+            }
 
             // Adaptive Navigation (Rail >= 720dp vs Bar < 720dp)
             val screenWidth = LocalConfiguration.current.screenWidthDp
