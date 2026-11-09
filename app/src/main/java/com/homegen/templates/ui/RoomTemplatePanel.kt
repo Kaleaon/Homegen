@@ -32,6 +32,8 @@ import com.homegen.templates.data.RoomTemplateRepository
 import com.homegen.templates.model.RoomTemplate
 import com.homegen.templates.model.RoomType
 import com.ktheme.android.LocalKthemeSemanticColors
+import com.ktheme.android.ui.KthemeText
+import com.ktheme.android.ui.KthemeTextVariant
 
 /**
  * Browsable panel for selecting pre-designed room templates.
@@ -149,16 +151,16 @@ fun EmptyTemplateState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
+        KthemeText(
             text = "No Templates Found",
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
+            variant = KthemeTextVariant.Primary,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
+        KthemeText(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            variant = KthemeTextVariant.Muted,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(16.dp))

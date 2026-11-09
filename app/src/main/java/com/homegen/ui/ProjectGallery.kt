@@ -1,6 +1,5 @@
 package com.homegen.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,14 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -35,6 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.homegen.designer3d.storage.ProjectStorage
+import com.ktheme.android.ui.KthemeCard
+import com.ktheme.android.ui.KthemeText
+import com.ktheme.android.ui.KthemeTextVariant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -137,21 +137,20 @@ fun EmptyGalleryState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
+        KthemeText(
             text = "No Projects Yet",
             style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
+        KthemeText(
             text = "Start by creating your first project to draft floor plans and 3D interior designs.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            variant = KthemeTextVariant.Secondary,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(24.dp))
         Button(onClick = onCreateProject) {
-            Text("Create New Project")
+            KthemeText("Create New Project")
         }
     }
 }
@@ -208,10 +207,9 @@ fun ProjectGallery(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(visibleProjects, key = { it.name }) { project ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onProjectSelected(project.name) },
+                        KthemeCard(
+                            onClick = { onProjectSelected(project.name) },
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Row(
                                 modifier = Modifier
@@ -221,11 +219,11 @@ fun ProjectGallery(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column {
-                                    Text(project.name, style = MaterialTheme.typography.titleMedium)
-                                    Text(
+                                    KthemeText(project.name, style = MaterialTheme.typography.titleMedium)
+                                    KthemeText(
                                         dateFormat.format(Date(project.lastModified)),
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        variant = KthemeTextVariant.Secondary,
                                     )
                                 }
                                 TextButton(
@@ -233,7 +231,7 @@ fun ProjectGallery(
                                         state.deleteProject(project.name, snackbarHostState)
                                     },
                                 ) {
-                                    Text("Delete")
+                                    KthemeText("Delete")
                                 }
                             }
                         }

@@ -21,8 +21,8 @@ import com.ktheme.models.ColorScheme as KthemeColorScheme
 /**
  * CompositionLocal providing [KthemeSemanticColors] to child views.
  */
-val LocalKthemeSemanticColors = staticCompositionLocalOf<KthemeSemanticColors> {
-    error("No KthemeSemanticColors provided. Wrap your UI in KthemeComposeTheme { ... }.")
+val LocalKthemeSemanticColors = staticCompositionLocalOf {
+    KthemeDefaultTheme.semanticColors()
 }
 
 data class KthemeLayout(

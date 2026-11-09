@@ -77,6 +77,7 @@ import { generateBOMCSV } from './bomExporter.js';
 import { exportDXF } from './dxfExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
+import { ComplianceManager } from './complianceClient.js';
 import { SnappingBridge } from './snapping-bridge.js';
 import {
   GISBridge,
@@ -131,6 +132,13 @@ try {
 }
 let hist = new M.History(doc, 'Initial Plan');
 let report = evaluate(doc);
+export const complianceManager = new ComplianceManager();
+complianceManager.initState(doc);
+complianceManager.onReport((rep) => {
+  report = rep;
+  redraw();
+});
+let hoveredViolation = null;
 const complianceScene = new ComplianceOverlayScene();
 let view = { scale: 1.6, ox: 40, oy: 40 };
 let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | item{type} | wall{id} | floor{id} | roomkit{id} | furnkit{id}
@@ -375,6 +383,7 @@ function renderHistoryTimeline() {
 
 function refresh() {
   report = evaluate(doc);
+  complianceManager.syncState(doc);
   renderSnapToggles();
   renderLevels();
   renderCompliance();
@@ -424,11 +433,13 @@ function apply(mutate, opts = {}) {
   return r;
 }
 
-function tryPreview(mutate) {
+function tryPreview(mutate, options = {}) {
   const next = M.clone(doc);
   mutate(next);
   const base = blockingIds(doc);
-  const rep = evaluate(next);
+  const rep = options.affectedBox
+    ? evaluate(next, { affectedBox: options.affectedBox })
+    : evaluate(next);
   const fresh = rep.violations.filter((v) => v.blocking && !base.has(v.id));
   return { next, ok: !fresh.length, fresh };
 }
@@ -610,11 +621,21 @@ function resize() {
   redraw();
 }
 
-function badIds(rep) {
+export function badIds(rep) {
   const s = new Set();
+  if (!rep || !rep.violations) return s;
   for (const v of rep.violations) {
-    if (v.severity !== 'error') continue;
-    for (const k of ['itemId', 'openingId']) if (v[k]) s.add(v[k]);
+    if (v.severity !== 'error' && v.severity !== 'warning') continue;
+    for (const k of ['itemId', 'openingId', 'roomId', 'wallId']) {
+      if (v[k]) s.add(v[k]);
+    }
+    if (v.wall !== undefined && v.roomId) {
+      s.add(`${v.roomId}:${v.wall}`);
+      s.add(`${v.roomId}:wall:${v.wall}`);
+    }
+    if (v.target && !s.has(v.target)) {
+      s.add(v.target);
+    }
   }
   return s;
 }
@@ -655,8 +676,11 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 function redraw() {
   const dpr = window.devicePixelRatio || 1;
   const state = preview ? preview.next : doc;
-  const rep = preview ? evaluate(preview.next) : report;
-  const bad = new Set([...badIds(rep)]);
+  const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
+  const bad = new Set([
+    ...badIds(rep),
+    ...(complianceManager.getBadTargetIds ? complianceManager.getBadTargetIds() : []),
+  ]);
   complianceScene.update(state, rep, {
     curLevel,
     selection,
@@ -2626,6 +2650,14 @@ canvas?.addEventListener('pointermove', (e) => {
         if (pl) {
           drag.target = pl;
           preview = tryPreview(moveItemTo(drag.id, pl));
+          complianceManager.dispatchItemMoved({
+            id: drag.id,
+            cx: pl.props.x,
+            cy: pl.props.y,
+            rot: it.rot,
+            roomId: pl.room.id,
+            doc: preview ? preview.next : null,
+          });
         }
       }
     } else if (drag.kind === 'opening') {
@@ -2640,6 +2672,11 @@ canvas?.addEventListener('pointermove', (e) => {
           const o = M.findOwner(n, drag.id).obj;
           Object.assign(o, drag.target);
         });
+        complianceManager.dispatchWallUpdated({
+          roomId: room.id,
+          wall: nw.wall,
+          doc: preview ? preview.next : null,
+        });
       }
     } else if (drag.kind === 'room') {
       const r = roomOf(doc, drag.id);
@@ -2650,6 +2687,11 @@ canvas?.addEventListener('pointermove', (e) => {
       const rc = { x: targetPt.x, y: targetPt.y, w: r.w, h: r.h };
       drag.target = rc;
       preview = tryPreview((n) => M.moveRoom(roomOf(n, drag.id), rc.x, rc.y));
+      complianceManager.dispatchRoomResized({
+        roomId: drag.id,
+        rect: rc,
+        doc: preview ? preview.next : null,
+      });
     } else if (drag.kind === 'resize') {
       const r = roomOf(doc, drag.id);
       const pts = getRoomPoints(r);
@@ -2668,6 +2710,12 @@ canvas?.addEventListener('pointermove', (e) => {
         drag.target = { points: newPts, x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
         preview = tryPreview((n) => M.updateRoomPoints(roomOf(n, drag.id), newPts));
         if (preview) preview.feedback = snapRes.snap;
+        complianceManager.dispatchRoomResized({
+          roomId: drag.id,
+          points: newPts,
+          rect: bbox,
+          doc: preview ? preview.next : null,
+        });
       }
     } else if (drag.kind === 'room-new') {
       const snapRes = snappingBridge.computeSnap(p, { x: drag.x0, y: drag.y0 });
@@ -2700,6 +2748,45 @@ canvas?.addEventListener('pointermove', (e) => {
     return;
   }
   updatePreview();
+
+  // Hover violation tooltip detection
+  if (p) {
+    const pickedId = pickAt(p);
+    const wallPick = nearestWall(p, 10 / view.scale);
+    const wallKey = wallPick ? `${wallPick.room.id}:${wallPick.wall}` : null;
+    const wallIdxKey = wallPick ? `${wallPick.room.id}:wall:${wallPick.wall}` : null;
+
+    const violations = report?.violations || [];
+    hoveredViolation =
+      violations.find((v) => {
+        if (
+          pickedId &&
+          (v.itemId === pickedId ||
+            v.openingId === pickedId ||
+            v.roomId === pickedId ||
+            v.target === pickedId)
+        ) {
+          return true;
+        }
+        if (
+          wallKey &&
+          (v.wallId === wallKey || (v.roomId === wallPick?.room.id && v.wall === wallPick?.wall))
+        ) {
+          return true;
+        }
+        if (wallIdxKey && v.wallId === wallIdxKey) {
+          return true;
+        }
+        return false;
+      }) || null;
+
+    if (canvas) {
+      canvas.title = hoveredViolation
+        ? `${hoveredViolation.severity.toUpperCase()}: ${hoveredViolation.msg} (${hoveredViolation.ref})`
+        : '';
+    }
+  }
+
   redraw();
 });
 
