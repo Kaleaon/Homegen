@@ -363,13 +363,11 @@ export function buildDoor3DMesh({
 
   // Swing Door Pivot Setup
   const s = wallSeg(room, wall);
-  const alongAng = Math.atan2(s.dy, s.dx);
-  const cross = s.dx * s.ny - s.dy * s.nx;
-  let swingSign = Math.sign(cross) || 1;
-  if (opening.swing === 'out') {
-    swingSign = -swingSign;
-  }
+  const dir = opening.swing === 'out' ? -1 : 1;
   const swingAng = (80 * Math.PI) / 180;
+  const cross = s.dx * (s.ny * dir) - s.dy * (s.nx * dir);
+  const swingSign = Math.sign(cross) || 1;
+  const alongAng = Math.atan2(s.dy, s.dx);
 
   const S = 1 / 12;
 

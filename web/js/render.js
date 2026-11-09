@@ -296,7 +296,7 @@ export function draw(ctx, state, view, opts = {}) {
     ctx.strokeRect(u.x, u.y, u.w, u.h);
     ctx.restore();
   }
-  for (const room of state.rooms) drawFloor(ctx, room, opts);
+  for (const room of state.rooms) drawFloor(ctx, room, opts, bad);
   for (const room of state.rooms) drawItems(ctx, room, bad, opts.selection, true);
   for (const room of state.rooms) drawWalls(ctx, state, room, bad, opts);
   for (const room of state.rooms) drawItems(ctx, room, bad, opts.selection, false);
@@ -646,7 +646,7 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
   }
 }
 
-function drawFloor(ctx, room, _opts) {
+function drawFloor(ctx, room, opts, bad) {
   const f = FLOOR_BY_ID[room.floor];
   ctx.fillStyle = f ? patternFor(ctx, f) : ROOM_TYPES[room.type].color;
   const pts = getRoomPoints(room);
@@ -657,6 +657,20 @@ function drawFloor(ctx, room, _opts) {
   }
   ctx.closePath();
   ctx.fill();
+
+  const isBadRoom = bad && bad.has(room.id);
+  if (isBadRoom) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(211, 51, 51, 0.12)';
+    ctx.fill();
+    ctx.strokeStyle = getToken('--ktheme-critical', '#d33');
+    const sc = opts?.view?.scale || 1;
+    ctx.lineWidth = 2 / sc;
+    ctx.setLineDash([6 / sc, 4 / sc]);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   if (room.type === 'stairs') drawStairs(ctx, room);
 }
 
@@ -683,6 +697,7 @@ function drawStairs(ctx, room) {
 
 function drawWalls(ctx, state, room, bad, _opts) {
   const pts = getRoomPoints(room);
+  const isBadRoom = bad && bad.has(room.id);
   for (let i = 0; i < pts.length; i++) {
     const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
     const s = wallSeg(room, i);
@@ -690,13 +705,28 @@ function drawWalls(ctx, state, room, bad, _opts) {
       (room.walls && (room.walls[wallKey] || room.walls[i] || room.walls[LEGACY_WALL_NAMES[i]])) ||
       'paint_white';
     const fin = WALL_BY_ID[finId];
+
+    const isBadWall =
+      bad &&
+      (bad.has(`${room.id}:wall:${i}`) ||
+        bad.has(`${room.id}:${wallKey}`) ||
+        bad.has(`${room.id}:${i}`) ||
+        bad.has(wallKey) ||
+        bad.has(`${room.id}:wall`) ||
+        (isBadRoom && bad.has(`${room.id}:wall`)));
+
     ctx.save();
     ctx.translate(s.ax, s.ay);
     ctx.rotate(Math.atan2(s.dy, s.dx));
     const len = s.len;
 
-    ctx.fillStyle = getToken('--ktheme-border', '#3c3a38');
-    ctx.fillRect(-WT / 2, -WT / 2, len + WT, WT / 2);
+    if (isBadWall) {
+      ctx.fillStyle = getToken('--ktheme-critical', '#d33');
+      ctx.fillRect(-WT / 2 - 1, -WT / 2 - 1, len + WT + 2, WT + 2);
+    } else {
+      ctx.fillStyle = getToken('--ktheme-border', '#3c3a38');
+      ctx.fillRect(-WT / 2, -WT / 2, len + WT, WT / 2);
+    }
     ctx.fillStyle = fin ? patternFor(ctx, fin) : '#ddd';
     ctx.fillRect(-WT / 2, 0, len + WT, WT / 2);
     ctx.restore();
