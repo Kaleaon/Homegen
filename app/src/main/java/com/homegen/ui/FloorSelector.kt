@@ -1,20 +1,21 @@
 package com.homegen.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.ktheme.android.ui.KthemeBadge
+import com.ktheme.android.ui.KthemeBadgeVariant
+import com.ktheme.android.ui.KthemeIconButton
+import com.ktheme.android.ui.KthemeText
+import com.ktheme.android.ui.KthemeTextVariant
 
 @Composable
 fun FloorSelector(
@@ -35,47 +36,46 @@ fun FloorSelector(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        IconButton(
+        KthemeIconButton(
             onClick = onFloorUp,
             enabled = clampedFloor < maxFloor,
             modifier = Modifier.semantics {
                 contentDescription = "Navigate to floor above"
             },
         ) {
-            Text("▲")
+            KthemeText("▲")
         }
-        Text(
+        KthemeBadge(
             text = floorLabel,
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .padding(8.dp),
+            variant = KthemeBadgeVariant.Brand,
+            shape = CircleShape,
             style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(2.dp),
         )
         if (elevationBadge != null) {
-            Text(
+            KthemeText(
                 text = elevationBadge,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                variant = KthemeTextVariant.Secondary,
             )
         }
-        IconButton(
+        KthemeIconButton(
             onClick = onFloorDown,
             enabled = clampedFloor > minFloor,
             modifier = Modifier.semantics {
                 contentDescription = "Navigate to floor below"
             },
         ) {
-            Text("▼")
+            KthemeText("▼")
         }
         if (onEditProperties != null) {
-            IconButton(
+            KthemeIconButton(
                 onClick = onEditProperties,
                 modifier = Modifier.semantics {
                     contentDescription = "Edit floor properties"
                 },
             ) {
-                Text("⚙")
+                KthemeText("⚙")
             }
         }
     }

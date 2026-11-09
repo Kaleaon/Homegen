@@ -372,12 +372,9 @@ export function buildDoor3DMesh({
   const s = wallSeg(room, wall);
   const dir = opening.swing === 'out' ? -1 : 1;
   const swingAng = (80 * Math.PI) / 180;
-  const sn = { x: s.nx * dir, y: s.ny * dir };
+  const cross = s.dx * (s.ny * dir) - s.dy * (s.nx * dir);
+  const swingSign = Math.sign(cross) || 1;
   const alongAng = Math.atan2(s.dy, s.dx);
-  const normAng = Math.atan2(sn.y, sn.x);
-  let delta = normAng - alongAng;
-  while (delta > Math.PI) delta -= 2 * Math.PI;
-  while (delta < -Math.PI) delta += 2 * Math.PI;
 
   const S = 1 / 12;
 
@@ -397,7 +394,7 @@ export function buildDoor3DMesh({
       false
     );
     pivotL.add(leafL);
-    pivotL.rotation.y = -(alongAng + Math.sign(delta) * swingAng);
+    pivotL.rotation.y = -(alongAng + swingSign * swingAng);
     og.add(pivotL);
 
     // Right Leaf Pivot
@@ -416,7 +413,7 @@ export function buildDoor3DMesh({
     );
     leafR.position.set(-singleLeafW * S, 0, 0);
     pivotR.add(leafR);
-    pivotR.rotation.y = -(alongAng - Math.sign(delta) * swingAng);
+    pivotR.rotation.y = -(alongAng - swingSign * swingAng);
     og.add(pivotR);
   } else {
     // Single Leaf Pivot
@@ -434,7 +431,7 @@ export function buildDoor3DMesh({
       false
     );
     pivot.add(leaf);
-    pivot.rotation.y = -(alongAng + Math.sign(delta) * swingAng);
+    pivot.rotation.y = -(alongAng + swingSign * swingAng);
     og.add(pivot);
   }
 
