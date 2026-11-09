@@ -162,8 +162,10 @@ export function daylight(state, room) {
       m.clearH >= EGRESS.minH &&
       m.clearW * m.clearH >= EGRESS.minArea &&
       def.sill <= EGRESS.maxSill
-    )
+    ) {
       egress = true;
+      maxSillOk = true;
+    }
   }
   const area = floorAreaSqFt(room) * 144;
   return { glaze, operable, egress, needGlaze: area * 0.08, needVent: area * 0.04, maxSillOk };

@@ -1229,8 +1229,9 @@ export function polygonMinClearanceWidth(points) {
 }
 
 export function interiorPolygonData(room, wallThickness = WT) {
+  const pts = getRoomPoints(room);
   const points = interiorPolygon(room, wallThickness);
-  const centroid = polygonCentroid(getRoomPoints(room));
+  const centroid = polygonCentroid(pts);
   const minWidth = polygonMinClearanceWidth(points);
   return {
     points,

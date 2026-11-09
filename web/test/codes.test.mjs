@@ -564,3 +564,24 @@ test('computeAffectedBoundingBox detects changed items and openings using direct
   assert.ok(box !== null);
   assert.ok(box.w > 0 && box.h > 0);
 });
+
+test('daylight calculation validates egress sill height against EGRESS.maxSill and sets maxSillOk', () => {
+  const s = m.newState();
+  const room = m.createRoom(s, 'bedroom', 0, 0, 144, 144);
+
+  // Without any openings, daylight returns egress: false and maxSillOk: false
+  const d0 = c.daylight(s, room);
+  assert.equal(d0.egress, false);
+  assert.equal(d0.maxSillOk, false);
+
+  // Add bath slider window with sill: 60 > 44 (non-compliant sill height)
+  m.addOpening(s, room, 'win_bath_slider_36x24', 'N', 36);
+  const d1 = c.daylight(s, room);
+  assert.equal(d1.maxSillOk, false);
+
+  // Add double-hung window 36x60 with compliant opening area and sill: 24 <= 44
+  m.addOpening(s, room, 'win_hung_36x60', 'S', 36);
+  const d2 = c.daylight(s, room);
+  assert.equal(d2.egress, true);
+  assert.equal(d2.maxSillOk, true);
+});

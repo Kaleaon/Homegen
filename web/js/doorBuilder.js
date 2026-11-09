@@ -118,61 +118,54 @@ export function buildDoor3DMesh({
   const leafCount = isDouble ? 2 : 1;
   const singleLeafW = clearWidth / leafCount - (isDouble ? 0.25 : 0);
 
-  function createHardwareGroup(hwStyle, isRightHand = false) {
-    const hwGroup = new THREE.Object3D();
-    const plateGeom = new THREE.BoxGeometry(1.5 * (1 / 12), 6 * (1 / 12), 0.25 * (1 / 12));
+  function addHardware(target, hwStyle, isRightHand, hwX, xOffset = 0) {
+    const S = 1 / 12;
+    const plateGeom = new THREE.BoxGeometry(1.5 * S, 6 * S, 0.25 * S);
     const plate = new THREE.Mesh(plateGeom, hwMat);
     plate.castShadow = true;
-    hwGroup.add(plate);
+    plate.position.set(hwX * S + xOffset, 36 * S, 0);
+    target.add(plate);
 
     const dirMultiplier = isRightHand ? -1 : 1;
 
     if (hwStyle === 'knob') {
-      const knobGeom = new THREE.SphereGeometry(1.2 * (1 / 12), 12, 12);
+      const knobGeom = new THREE.SphereGeometry(1.2 * S, 12, 12);
       const knobFront = new THREE.Mesh(knobGeom, hwMat);
-      knobFront.position.set(0, 0, 1.2 * (1 / 12));
+      knobFront.position.set(hwX * S + xOffset, 36 * S, 1.2 * S);
       knobFront.castShadow = true;
-      hwGroup.add(knobFront);
+      target.add(knobFront);
 
       const knobBack = new THREE.Mesh(knobGeom, hwMat);
-      knobBack.position.set(0, 0, -1.2 * (1 / 12));
+      knobBack.position.set(hwX * S + xOffset, 36 * S, -1.2 * S);
       knobBack.castShadow = true;
-      hwGroup.add(knobBack);
+      target.add(knobBack);
     } else {
       // Lever handle
-      const stemGeom = new THREE.CylinderGeometry(
-        0.3 * (1 / 12),
-        0.3 * (1 / 12),
-        1.5 * (1 / 12),
-        8
-      );
+      const stemGeom = new THREE.CylinderGeometry(0.3 * S, 0.3 * S, 1.5 * S, 8);
       const stemFront = new THREE.Mesh(stemGeom, hwMat);
       stemFront.rotation.x = Math.PI / 2;
-      stemFront.position.set(0, 0, 0.75 * (1 / 12));
-      hwGroup.add(stemFront);
+      stemFront.position.set(hwX * S + xOffset, 36 * S, 0.75 * S);
+      target.add(stemFront);
 
-      const handleBarGeom = new THREE.BoxGeometry(3.5 * (1 / 12), 0.6 * (1 / 12), 0.4 * (1 / 12));
+      const handleBarGeom = new THREE.BoxGeometry(3.5 * S, 0.6 * S, 0.4 * S);
       const leverFront = new THREE.Mesh(handleBarGeom, hwMat);
-      leverFront.position.set(1.5 * (1 / 12) * dirMultiplier, 0, 1.5 * (1 / 12));
+      leverFront.position.set(hwX * S + xOffset + 1.5 * S * dirMultiplier, 36 * S, 1.5 * S);
       leverFront.castShadow = true;
-      hwGroup.add(leverFront);
+      target.add(leverFront);
 
       const stemBack = new THREE.Mesh(stemGeom, hwMat);
       stemBack.rotation.x = Math.PI / 2;
-      stemBack.position.set(0, 0, -0.75 * (1 / 12));
-      hwGroup.add(stemBack);
+      stemBack.position.set(hwX * S + xOffset, 36 * S, -0.75 * S);
+      target.add(stemBack);
 
       const leverBack = new THREE.Mesh(handleBarGeom, hwMat);
-      leverBack.position.set(1.5 * (1 / 12) * dirMultiplier, 0, -1.5 * (1 / 12));
+      leverBack.position.set(hwX * S + xOffset + 1.5 * S * dirMultiplier, 36 * S, -1.5 * S);
       leverBack.castShadow = true;
-      hwGroup.add(leverBack);
+      target.add(leverBack);
     }
-
-    return hwGroup;
   }
 
-  function createSingleLeafGroup(w, h, d, panelStyle, hwStyle, isRightHand = false) {
-    const leafGroup = new THREE.Object3D();
+  function buildSingleLeaf(target, w, h, d, panelStyle, hwStyle, isRightHand = false, xOffset = 0) {
     const S = 1 / 12;
 
     if (panelStyle === 'panel_2') {
@@ -184,8 +177,8 @@ export function buildDoor3DMesh({
       // Base slab
       const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(w * S, h * S, d * S), leafMat);
       baseMesh.castShadow = true;
-      baseMesh.position.set((w / 2) * S, (h / 2) * S, 0);
-      leafGroup.add(baseMesh);
+      baseMesh.position.set((w / 2) * S + xOffset, (h / 2) * S, 0);
+      target.add(baseMesh);
 
       // Top and bottom recessed panel cutouts
       const innerW = w - stileW * 2;
@@ -201,8 +194,8 @@ export function buildDoor3DMesh({
           new THREE.BoxGeometry(innerW * S, pH * S, panelRecessD * S),
           leafMat
         );
-        pMesh.position.set((w / 2) * S, yCenter * S, 0);
-        leafGroup.add(pMesh);
+        pMesh.position.set((w / 2) * S + xOffset, yCenter * S, 0);
+        target.add(pMesh);
       }
     } else if (panelStyle === 'panel_6') {
       const stileW = 4.0;
@@ -213,8 +206,8 @@ export function buildDoor3DMesh({
 
       const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(w * S, h * S, d * S), leafMat);
       baseMesh.castShadow = true;
-      baseMesh.position.set((w / 2) * S, (h / 2) * S, 0);
-      leafGroup.add(baseMesh);
+      baseMesh.position.set((w / 2) * S + xOffset, (h / 2) * S, 0);
+      target.add(baseMesh);
 
       const panelW = (w - stileW * 2 - midStileW) / 2;
       const availH = h - railH * 2 - midRailH * 2;
@@ -233,8 +226,8 @@ export function buildDoor3DMesh({
             new THREE.BoxGeometry(panelW * S, rowH * S, panelRecessD * S),
             leafMat
           );
-          pMesh.position.set(cx * S, cy * S, 0);
-          leafGroup.add(pMesh);
+          pMesh.position.set(cx * S + xOffset, cy * S, 0);
+          target.add(pMesh);
         }
       }
     } else if (panelStyle === 'french') {
@@ -247,39 +240,39 @@ export function buildDoor3DMesh({
 
       // Stiles
       const leftStile = new THREE.Mesh(new THREE.BoxGeometry(stileW * S, h * S, d * S), leafMat);
-      leftStile.position.set((stileW / 2) * S, (h / 2) * S, 0);
+      leftStile.position.set((stileW / 2) * S + xOffset, (h / 2) * S, 0);
       leftStile.castShadow = true;
-      leafGroup.add(leftStile);
+      target.add(leftStile);
 
       const rightStile = new THREE.Mesh(new THREE.BoxGeometry(stileW * S, h * S, d * S), leafMat);
-      rightStile.position.set((w - stileW / 2) * S, (h / 2) * S, 0);
+      rightStile.position.set((w - stileW / 2) * S + xOffset, (h / 2) * S, 0);
       rightStile.castShadow = true;
-      leafGroup.add(rightStile);
+      target.add(rightStile);
 
       // Rails
       const topRail = new THREE.Mesh(
         new THREE.BoxGeometry(innerW * S, topRailH * S, d * S),
         leafMat
       );
-      topRail.position.set((w / 2) * S, (h - topRailH / 2) * S, 0);
+      topRail.position.set((w / 2) * S + xOffset, (h - topRailH / 2) * S, 0);
       topRail.castShadow = true;
-      leafGroup.add(topRail);
+      target.add(topRail);
 
       const botRail = new THREE.Mesh(
         new THREE.BoxGeometry(innerW * S, botRailH * S, d * S),
         leafMat
       );
-      botRail.position.set((w / 2) * S, (botRailH / 2) * S, 0);
+      botRail.position.set((w / 2) * S + xOffset, (botRailH / 2) * S, 0);
       botRail.castShadow = true;
-      leafGroup.add(botRail);
+      target.add(botRail);
 
       // Glass Pane
       const glassMesh = new THREE.Mesh(
         new THREE.BoxGeometry(innerW * S, innerH * S, 0.3 * S),
         gMat
       );
-      glassMesh.position.set((w / 2) * S, (botRailH + innerH / 2) * S, 0);
-      leafGroup.add(glassMesh);
+      glassMesh.position.set((w / 2) * S + xOffset, (botRailH + innerH / 2) * S, 0);
+      target.add(glassMesh);
 
       // Muntin Grid
       const cols = style.glass?.cols ?? 3;
@@ -292,8 +285,8 @@ export function buildDoor3DMesh({
         for (let i = 1; i < cols; i++) {
           const vx = stileW + i * colStep;
           const vBar = new THREE.Mesh(new THREE.BoxGeometry(mw * S, innerH * S, md * S), leafMat);
-          vBar.position.set(vx * S, (botRailH + innerH / 2) * S, 0);
-          leafGroup.add(vBar);
+          vBar.position.set(vx * S + xOffset, (botRailH + innerH / 2) * S, 0);
+          target.add(vBar);
         }
       }
 
@@ -302,8 +295,8 @@ export function buildDoor3DMesh({
         for (let j = 1; j < rows; j++) {
           const vy = botRailH + j * rowStep;
           const hBar = new THREE.Mesh(new THREE.BoxGeometry(innerW * S, mw * S, md * S), leafMat);
-          hBar.position.set((w / 2) * S, vy * S, 0);
-          leafGroup.add(hBar);
+          hBar.position.set((w / 2) * S + xOffset, vy * S, 0);
+          target.add(hBar);
         }
       }
     } else if (panelStyle === 'glass_top') {
@@ -318,8 +311,8 @@ export function buildDoor3DMesh({
       // Base slab for lower half
       const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(w * S, h * S, d * S), leafMat);
       baseMesh.castShadow = true;
-      baseMesh.position.set((w / 2) * S, (h / 2) * S, 0);
-      leafGroup.add(baseMesh);
+      baseMesh.position.set((w / 2) * S + xOffset, (h / 2) * S, 0);
+      target.add(baseMesh);
 
       // Upper glass insert
       const topY = h - railH - topGlassH / 2;
@@ -327,8 +320,8 @@ export function buildDoor3DMesh({
         new THREE.BoxGeometry(innerW * S, topGlassH * S, 0.3 * S),
         gMat
       );
-      glassMesh.position.set((w / 2) * S, topY * S, 0);
-      leafGroup.add(glassMesh);
+      glassMesh.position.set((w / 2) * S + xOffset, topY * S, 0);
+      target.add(glassMesh);
 
       // Lower recessed panel
       const botY = railH + botPanelH / 2;
@@ -336,33 +329,33 @@ export function buildDoor3DMesh({
         new THREE.BoxGeometry(innerW * S, botPanelH * S, d * 0.4 * S),
         leafMat
       );
-      pMesh.position.set((w / 2) * S, botY * S, 0);
-      leafGroup.add(pMesh);
+      pMesh.position.set((w / 2) * S + xOffset, botY * S, 0);
+      target.add(pMesh);
     } else {
       // Flush slab default
       const slabMesh = new THREE.Mesh(new THREE.BoxGeometry(w * S, h * S, d * S), leafMat);
       slabMesh.castShadow = true;
-      slabMesh.position.set((w / 2) * S, (h / 2) * S, 0);
-      leafGroup.add(slabMesh);
+      slabMesh.position.set((w / 2) * S + xOffset, (h / 2) * S, 0);
+      target.add(slabMesh);
     }
 
     // Add hardware
-    const hwGroup = createHardwareGroup(hwStyle, isRightHand);
     const hwX = isRightHand ? 2.5 : w - 2.5;
-    hwGroup.position.set(hwX * S, 36 * S, 0);
-    leafGroup.add(hwGroup);
-
-    return leafGroup;
+    addHardware(target, hwStyle, isRightHand, hwX, xOffset);
   }
 
   // Handle Pocket/Sliding vs Swing Doors
   if (definition.pocket || definition.slider || opening.pocket) {
-    const slabDoor = createSingleLeafGroup(
+    const slabDoor = new THREE.Group();
+    buildSingleLeaf(
+      slabDoor,
       clearWidth,
       clearHeight,
       leafDepth,
       style.panelStyle,
-      style.hardwareStyle
+      style.hardwareStyle,
+      false,
+      0
     );
     og.add(placeInWall(room, wall, mid, clearHeight / 2, 0, elevation, slabDoor));
     return og;
@@ -385,15 +378,16 @@ export function buildDoor3DMesh({
     const hyL = s.ay + s.dy * (opening.offset + jambThickness);
     pivotL.position.set(hxL * S, elevation * S, hyL * S);
 
-    const leafL = createSingleLeafGroup(
+    buildSingleLeaf(
+      pivotL,
       singleLeafW,
       clearHeight,
       leafDepth,
       style.panelStyle,
       style.hardwareStyle,
-      false
+      false,
+      0
     );
-    pivotL.add(leafL);
     pivotL.rotation.y = -(alongAng + swingSign * swingAng);
     og.add(pivotL);
 
@@ -403,16 +397,16 @@ export function buildDoor3DMesh({
     const hyR = s.ay + s.dy * (opening.offset + opening.width - jambThickness);
     pivotR.position.set(hxR * S, elevation * S, hyR * S);
 
-    const leafR = createSingleLeafGroup(
+    buildSingleLeaf(
+      pivotR,
       singleLeafW,
       clearHeight,
       leafDepth,
       style.panelStyle,
       style.hardwareStyle,
-      true
+      true,
+      -singleLeafW * S
     );
-    leafR.position.set(-singleLeafW * S, 0, 0);
-    pivotR.add(leafR);
     pivotR.rotation.y = -(alongAng - swingSign * swingAng);
     og.add(pivotR);
   } else {
@@ -422,15 +416,16 @@ export function buildDoor3DMesh({
     const hy = s.ay + s.dy * (opening.offset + jambThickness);
     pivot.position.set(hx * S, elevation * S, hy * S);
 
-    const leaf = createSingleLeafGroup(
+    buildSingleLeaf(
+      pivot,
       singleLeafW,
       clearHeight,
       leafDepth,
       style.panelStyle,
       style.hardwareStyle,
-      false
+      false,
+      0
     );
-    pivot.add(leaf);
     pivot.rotation.y = -(alongAng + swingSign * swingAng);
     og.add(pivot);
   }

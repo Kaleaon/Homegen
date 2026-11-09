@@ -1833,7 +1833,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const studD0 = studD1 - assembly.studDepth;
       currDepth = studD0;
       if (assembly.studDepth > 0) {
-        const studMat = plain('#c2a679', 0.7);
+        const studMat = getLayerMaterial('stud', '#c2a679', 0.7);
         addExtrudedWallSegment(group, room, wall, 0, len, 0, H, studD0, studD1, e, studMat, cuts);
       }
 
@@ -1842,7 +1842,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const sheathingD0 = sheathingD1 - assembly.sheathingThickness;
       currDepth = sheathingD0;
       if (assembly.sheathingThickness > 0) {
-        const sheathingMat = plain('#b89768', 0.8);
+        const sheathingMat = getLayerMaterial('sheathing', '#b89768', 0.8);
         for (const [a, b] of ext)
           addExtrudedWallSegment(
             group,
@@ -1865,7 +1865,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const airGapD0 = airGapD1 - assembly.airGapThickness;
       currDepth = airGapD0;
       if (assembly.airGapThickness > 0) {
-        const airGapMat = plain('#2a2a2a', 0.9);
+        const airGapMat = getLayerMaterial('air_gap', '#2a2a2a', 0.9);
         for (const [a, b] of ext)
           addExtrudedWallSegment(
             group,
@@ -1984,6 +1984,14 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       roughness,
       metalness,
     });
+    matCache.set(key, m);
+    return m;
+  }
+
+  function getLayerMaterial(type, colorHex, roughness = 0.8) {
+    const key = `layer:${type}:${colorHex}:${roughness}`;
+    if (matCache.has(key)) return matCache.get(key);
+    const m = plain(colorHex, roughness);
     matCache.set(key, m);
     return m;
   }

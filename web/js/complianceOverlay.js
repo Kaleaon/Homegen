@@ -492,7 +492,8 @@ export class ComplianceOverlayScene {
       }
 
       // Live dimension label node centered at interior polygon centroid
-      const centroid = polygonCentroid(pts);
+      const polyData = roomEntry ? roomEntry.polyData : interiorPolygonData(room);
+      const centroid = polyData ? polyData.centroid : polygonCentroid(pts);
       const clearSpan = getRoomClearSpan(room);
       const minDimVal = clearSpan;
       const dimText =
