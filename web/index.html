@@ -799,6 +799,10 @@
     <button value="close" aria-label="Close keyboard shortcuts"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body shortcut-body">
+    <div class="shortcut-settings">
+      <label class="toggle shortcut-preference-toggle" for="disable-single-key-shortcuts"><input type="checkbox" id="disable-single-key-shortcuts" role="switch" aria-checked="false"> Disable single-character shortcuts</label>
+      <p class="shortcut-settings-note">Modifier shortcuts (Ctrl/Cmd) and arrow keys remain active.</p>
+    </div>
     <input id="shortcut-search"
            type="search"
            placeholder="Search shortcuts or keys..."
