@@ -9,7 +9,12 @@ import {
 } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback } from './collision.mjs';
-import { buildToggleViewModel, SNAP_TOGGLE_DEFINITIONS } from './uiSnapToggles.mjs';
+import {
+  buildToggleViewModel,
+  buildGridSettingsViewModel,
+  isValidGridIncrement,
+  SNAP_TOGGLE_DEFINITIONS,
+} from './uiSnapToggles.mjs';
 import { getSnappedPoint, snapAngle } from './snapping.mjs';
 import {
   getSnappedPoint3D,
@@ -47,6 +52,8 @@ export {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  buildGridSettingsViewModel,
+  isValidGridIncrement,
   SNAP_TOGGLE_DEFINITIONS,
   getSnappedPoint,
   snapAngle,

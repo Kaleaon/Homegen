@@ -63,6 +63,7 @@ import {
   applyCladdingMaterial,
   resolveWindowStyle,
   resolveDoorStyle,
+  resolveWallAssembly,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
@@ -73,6 +74,7 @@ import {
   buildToggleViewModel,
   parseCoordinateInput,
   normalizeRotationDegrees,
+  buildGridSettingsViewModel,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -471,12 +473,18 @@ export function toast(msg, err = false, ms = 4500) {
 
 let liveRegionTimeout = null;
 function announceToLiveRegion(msg) {
+  const live3dEl = $('#view3d-a11y-live');
+  if (live3dEl) live3dEl.textContent = msg;
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
   if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
   liveRegionTimeout = setTimeout(() => {
+    if (a11yDebounceTimer) {
+      clearTimeout(a11yDebounceTimer);
+      a11yDebounceTimer = null;
+    }
     liveEl.textContent = msg;
-  }, 100);
+  }, 220);
 }
 
 function persist() {
@@ -491,13 +499,22 @@ function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
   const viewModels = buildToggleViewModel(interaction);
+  const gridVm = buildGridSettingsViewModel(interaction);
   const activeCount = viewModels.filter((vm) => vm.enabled).length;
 
   const basicItems = viewModels.filter((vm) => (vm.category || 'basic') === 'basic');
   const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
 
-  const existingPopover = container.querySelector('k-popover');
+  const existingPopover =
+    typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
   const wasOpen = existingPopover ? existingPopover.open : false;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const isContained =
+    activeEl &&
+    (typeof container.contains === 'function'
+      ? container.contains(activeEl)
+      : activeEl.id === 'snap-unit-size' || activeEl.id === 'snap-angle-degrees');
+  const focusedInputId = isContained && activeEl.id ? activeEl.id : null;
 
   const renderGroup = (items) =>
     items
@@ -532,13 +549,34 @@ function renderSnapToggles() {
             ${renderGroup(advancedItems)}
           </div>
         </div>
+        <div class="snap-category snap-increments-panel">
+          <div class="snap-category-title">Grid &amp; Angle Increments</div>
+          <div class="snap-increment-fields">
+            <div class="snap-increment-row">
+              <label for="snap-unit-size" class="snap-increment-label">Grid Spacing (in)</label>
+              <k-input id="snap-unit-size" class="snap-increment-input" type="number" min="0.25" step="0.25" data-grid-setting="unitSize" aria-label="Grid Spacing (in)" value="${esc(gridVm.unitSize)}"></k-input>
+            </div>
+            <div class="snap-increment-row">
+              <label for="snap-angle-degrees" class="snap-increment-label">Angle Snap (°)</label>
+              <k-input id="snap-angle-degrees" class="snap-increment-input" type="number" min="1" max="360" step="1" data-grid-setting="angleSnapDegrees" aria-label="Angle Snap (degrees)" value="${esc(gridVm.angleSnapDegrees)}"></k-input>
+            </div>
+          </div>
+        </div>
       </div>
     </k-popover>
   `;
 
-  const newPopover = container.querySelector('k-popover');
+  const newPopover =
+    typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
   if (newPopover && wasOpen) {
     newPopover.open = true;
+  }
+
+  if (focusedInputId && typeof container.querySelector === 'function') {
+    const restoredInput = container.querySelector(`#${focusedInputId}`);
+    if (restoredInput && typeof restoredInput.focus === 'function') {
+      restoredInput.focus();
+    }
   }
 
   container.querySelectorAll('[data-snap-id]').forEach((btn) => {
@@ -553,6 +591,54 @@ function renderSnapToggles() {
       }
     });
   });
+
+  const bindIncrementInput = (selector, settingKey, applyFn) => {
+    const inputEl =
+      typeof container.querySelector === 'function' ? container.querySelector(selector) : null;
+    if (!inputEl) return;
+
+    const labelEl =
+      inputEl.id && typeof container.querySelector === 'function'
+        ? container.querySelector(`label[for="${inputEl.id}"]`)
+        : null;
+    if (labelEl && typeof labelEl.addEventListener === 'function') {
+      labelEl.addEventListener('click', (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof inputEl.focus === 'function') inputEl.focus();
+      });
+    }
+
+    const readRawValue = (e) =>
+      e && e.detail && e.detail.value !== undefined ? e.detail.value : inputEl.value;
+
+    inputEl.addEventListener('click', (e) => {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    });
+
+    inputEl.addEventListener('input', (e) => {
+      const updated = applyFn(readRawValue(e));
+      if (updated) {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        redraw();
+      } else if (typeof inputEl.setAttribute === 'function') {
+        inputEl.setAttribute('aria-invalid', 'true');
+      }
+    });
+
+    inputEl.addEventListener('change', (e) => {
+      const updated = applyFn(readRawValue(e));
+      if (updated) {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        redraw();
+      } else {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        inputEl.value = String(interaction.gridSettings[settingKey]);
+      }
+    });
+  };
+
+  bindIncrementInput('#snap-unit-size', 'unitSize', gridVm.onUnitSizeChange);
+  bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
 export function renderBgToolbar(bg = doc.background) {
@@ -590,6 +676,12 @@ export function renderBgToolbar(bg = doc.background) {
 function renderHistoryTimeline() {
   const listEl = $('#history-list');
   if (!listEl) return;
+  const focusedIndex =
+    typeof document !== 'undefined' &&
+    document.activeElement?.classList?.contains?.('history-item') &&
+    (typeof listEl.contains !== 'function' || listEl.contains(document.activeElement))
+      ? document.activeElement.dataset?.index
+      : null;
   const timeline = hist.getTimeline();
   listEl.innerHTML = timeline
     .map((item) => {
@@ -632,6 +724,14 @@ function renderHistoryTimeline() {
       }
     });
   });
+
+  if (focusedIndex !== null && focusedIndex !== undefined) {
+    const popover = $('#history-popover');
+    if (popover && !popover.hidden) {
+      const nextFocusEl = listEl.querySelector(`.history-item[data-index="${focusedIndex}"]`);
+      nextFocusEl?.focus();
+    }
+  }
 }
 
 function refresh() {
@@ -1433,9 +1533,22 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     if (!window.__activeUVWall) window.__activeUVWall = 'N';
+    if (!window.__activeAssemblyScope) window.__activeAssemblyScope = 'single';
     const activeWall = window.__activeUVWall;
+    const activeAssemblyScope = window.__activeAssemblyScope;
     const uv = M.getWallUV(room, activeWall);
     const wallFinishId = room.walls?.[activeWall] || 'paint_white';
+    let activeExtFinId = room.cladding || room.exteriorCladding;
+    if (!activeExtFinId && WALL_BY_ID[wallFinishId]?.exterior) {
+      activeExtFinId = wallFinishId;
+    }
+    activeExtFinId = activeExtFinId || 'cladding_siding_white';
+    const assembly = resolveWallAssembly(
+      wallFinishId,
+      activeExtFinId,
+      room.wallAssemblyOverrides?.[activeWall]
+    );
+    const fmtInches = (v) => Number(Number(v).toFixed(3));
     const finishObj = WALL_BY_ID[wallFinishId];
     const finishLabel = finishObj
       ? finishObj.name
@@ -1560,6 +1673,49 @@ function renderInspector() {
             <option value="plan">Whole Plan</option>
           </select>
           <button id="i-uv-reset" style="font-size:0.8rem;padding:2px 6px">Reset UV</button>
+        </div>
+      </div>
+
+      <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Wall Assembly Layer Thicknesses</h4>
+      <div class="wall-assembly-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
+        ${formRow(
+          'i-wa-gypsum',
+          'Gypsum Board (in)',
+          `<input id="i-wa-gypsum" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.gypsumThickness)}" aria-label="Gypsum board thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-stud',
+          'Stud Depth (in)',
+          `<input id="i-wa-stud" type="number" step="0.25" min="1.5" max="24" value="${fmtInches(assembly.studDepth)}" aria-label="Stud framing depth in inches">`
+        )}
+        ${formRow(
+          'i-wa-sheathing',
+          'Sheathing (in)',
+          `<input id="i-wa-sheathing" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.sheathingThickness)}" aria-label="Sheathing thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-airgap',
+          'Air Gap (in)',
+          `<input id="i-wa-airgap" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.airGapThickness)}" aria-label="Air gap thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-cladding',
+          'Exterior Cladding (in)',
+          `<input id="i-wa-cladding" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.claddingThickness)}" aria-label="Exterior cladding thickness in inches">`
+        )}
+        <div class="row" style="margin:8px 0 6px;display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;padding-top:6px;border-top:1px dashed var(--border,#ddd)">
+          <span>Total Assembly Thickness (${esc(activeWall)})</span>
+          <strong id="i-wa-total" aria-live="polite">${fmtInches(assembly.totalThickness)}"</strong>
+        </div>
+        <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <select id="i-wa-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="Wall assembly override scope">
+            <option value="single" ${activeAssemblyScope === 'single' ? 'selected' : ''}>Active Wall Only</option>
+            <option value="room" ${activeAssemblyScope === 'room' ? 'selected' : ''}>Entire Room</option>
+            <option value="level" ${activeAssemblyScope === 'level' ? 'selected' : ''}>Level</option>
+            <option value="plan" ${activeAssemblyScope === 'plan' ? 'selected' : ''}>Whole Plan</option>
+          </select>
+          <button type="button" id="i-wa-reset" style="font-size:0.8rem;padding:2px 6px">Reset Assembly</button>
         </div>
       </div>
 
@@ -1822,6 +1978,110 @@ function renderInspector() {
       renderInspector();
       redraw();
       window.__scene3d?.render?.();
+    });
+
+    const readAssemblyInputs = () => {
+      const parseOr = (sel, fallback) => {
+        const val = parseFloat($(sel)?.value);
+        return Number.isFinite(val) ? val : fallback;
+      };
+      const rawOverrides = {
+        gypsumThickness: parseOr('#i-wa-gypsum', assembly.gypsumThickness),
+        studDepth: parseOr('#i-wa-stud', assembly.studDepth),
+        sheathingThickness: parseOr('#i-wa-sheathing', assembly.sheathingThickness),
+        airGapThickness: parseOr('#i-wa-airgap', assembly.airGapThickness),
+        claddingThickness: parseOr('#i-wa-cladding', assembly.claddingThickness),
+      };
+      const clamped = M.clampWallAssemblyOverrides(rawOverrides);
+      const scope = $('#i-wa-scope')?.value || 'single';
+      return { clamped, scope };
+    };
+
+    const previewAssemblyTotal = () => {
+      const { clamped } = readAssemblyInputs();
+      const resolved = resolveWallAssembly(wallFinishId, activeExtFinId, clamped);
+      const totalEl = $('#i-wa-total');
+      if (totalEl) {
+        totalEl.textContent = `${fmtInches(resolved.totalThickness)}"`;
+      }
+    };
+
+    const commitAssemblyUpdate = () => {
+      const { clamped, scope } = readAssemblyInputs();
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, clamped, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Update Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const updatedAssembly = resolveWallAssembly(
+        updatedFinish,
+        updatedExtFin,
+        updatedRoom.wallAssemblyOverrides?.[targetWall]
+      );
+      const totalInches = fmtInches(updatedAssembly.totalThickness);
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly updated to ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
+    };
+
+    ['#i-wa-gypsum', '#i-wa-stud', '#i-wa-sheathing', '#i-wa-airgap', '#i-wa-cladding'].forEach(
+      (sel) => {
+        const inputEl = $(sel);
+        if (!inputEl) return;
+        inputEl.addEventListener('input', previewAssemblyTotal);
+        inputEl.addEventListener('change', commitAssemblyUpdate);
+      }
+    );
+
+    $('#i-wa-scope')?.addEventListener('change', (e) => {
+      window.__activeAssemblyScope = e.target.value || 'single';
+    });
+
+    $('#i-wa-reset')?.addEventListener('click', () => {
+      const scope = $('#i-wa-scope')?.value || 'single';
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, null, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Reset Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const defaultAssembly = resolveWallAssembly(updatedFinish, updatedExtFin);
+      const totalInches = fmtInches(defaultAssembly.totalThickness);
+      renderInspector();
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly reset to default ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
     });
 
     const handleBuildingPresetApply = (scope) => {
@@ -3647,6 +3907,14 @@ canvas?.addEventListener('pointerleave', () => {
   preview = null;
   redraw();
 });
+export function parseRoomDimensionsInput(input) {
+  if (!input) return [];
+  return String(input)
+    .split(/[×x,]/i)
+    .map((segment) => M.parseDistanceInInches(segment, { defaultUnit: 'ft' }))
+    .filter((n) => n !== null && !isNaN(n) && n > 0);
+}
+
 canvas?.addEventListener('dblclick', (e) => {
   if (tool.kind === 'room' && interaction.canCloseRoom && interaction.canCloseRoom()) {
     handleCloseRoom();
@@ -3660,19 +3928,16 @@ canvas?.addEventListener('dblclick', (e) => {
       const currentFtW = (r.w / 12).toFixed(1);
       const currentFtH = (r.h / 12).toFixed(1);
       const input = prompt(
-        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or width in inches "144"):`,
+        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or with units "144 in"):`,
         `${currentFtW} × ${currentFtH}`
       );
       if (input) {
-        const parts = input
-          .split(/[×x,]/)
-          .map((s) => parseFloat(s.trim()))
-          .filter((n) => !isNaN(n) && n > 0);
+        const parts = parseRoomDimensionsInput(input);
         if (parts.length >= 1) {
-          const rawWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
+          const rawWInches = parts[0];
           let clamped;
           if (parts.length >= 2) {
-            const rawHInches = parts[1] < 30 ? Math.round(parts[1] * 12) : Math.round(parts[1]);
+            const rawHInches = parts[1];
             clamped = clampRoomDimensions(r, rawWInches, rawHInches);
           } else {
             const clampedW = clampRoomWidth(r, rawWInches, r.h);
@@ -3743,32 +4008,50 @@ function setDoc(next, label) {
   refresh();
 }
 
+let activeDiffDrawerCleanup = null;
+let activeHistoryPopoverCleanup = null;
+
 export function trapFocus(containerEl, returnFocusEl) {
+  if (!containerEl) return () => {};
   const focusableSelector =
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   const getVisibleFocusables = () =>
-    Array.from(containerEl.querySelectorAll(focusableSelector)).filter(
-      (el) =>
-        !el.hidden && !el.disabled && !(typeof el.closest === 'function' && el.closest('[hidden]'))
-    );
+    Array.from(containerEl.querySelectorAll(focusableSelector)).filter((el) => {
+      if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
+      if (typeof el.closest === 'function') {
+        const hiddenAncestor = el.closest('[hidden]');
+        if (hiddenAncestor && hiddenAncestor !== containerEl) return false;
+      }
+      let cur = el.parentElement;
+      while (cur && cur !== containerEl) {
+        if (cur.hidden || cur.hasAttribute?.('hidden')) return false;
+        cur = cur.parentElement;
+      }
+      return true;
+    });
 
   const initialFocusables = getVisibleFocusables();
-  if (!initialFocusables.length) return () => {};
-
-  initialFocusables[0].focus();
+  if (initialFocusables.length) {
+    initialFocusables[0].focus();
+  }
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
       if (typeof e.preventDefault === 'function') e.preventDefault();
       if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      containerEl.removeEventListener('keydown', handleKeyDown);
       if (typeof containerEl.close === 'function') {
         containerEl.close();
       } else {
         containerEl.hidden = true;
         if (containerEl.id === 'diff-drawer') {
+          activeDiffDrawerCleanup = null;
           autoFixDiffs = [];
           hoveredDiffIndex = null;
           redraw();
+        } else if (containerEl.id === 'history-popover') {
+          activeHistoryPopoverCleanup = null;
+          $('#history-btn')?.setAttribute('aria-expanded', 'false');
         }
       }
       if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
@@ -3778,20 +4061,26 @@ export function trapFocus(containerEl, returnFocusEl) {
     if (e.key !== 'Tab') return;
 
     const focusableElements = getVisibleFocusables();
-    if (!focusableElements.length) return;
+    if (!focusableElements.length) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      return;
+    }
+
     const firstEl = focusableElements[0];
     const lastEl = focusableElements[focusableElements.length - 1];
     const activeEl =
       (containerEl.ownerDocument && containerEl.ownerDocument.activeElement) ||
       (typeof document !== 'undefined' ? document.activeElement : null);
+    const activeOutside =
+      typeof containerEl.contains === 'function' && !containerEl.contains(activeEl);
 
     if (e.shiftKey) {
-      if (activeEl === firstEl) {
+      if (activeEl === firstEl || activeOutside) {
         e.preventDefault();
         lastEl.focus();
       }
     } else {
-      if (activeEl === lastEl) {
+      if (activeEl === lastEl || activeOutside) {
         e.preventDefault();
         firstEl.focus();
       }
@@ -3804,8 +4093,6 @@ export function trapFocus(containerEl, returnFocusEl) {
     if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
   };
 }
-
-let activeDiffDrawerCleanup = null;
 
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
@@ -4682,6 +4969,7 @@ $('#csv-generate')?.addEventListener('click', () => {
       includeOpenings: $('#csv-sec-openings')?.checked !== false,
       includeFinishes: $('#csv-sec-finishes')?.checked !== false,
       includeRooms: $('#csv-sec-rooms')?.checked !== false,
+      includePricing: $('#csv-inc-pricing')?.checked !== false,
     };
 
     if (
@@ -4972,7 +5260,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-const SAMPLE_MUNICIPAL_GIS = {
+export const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -5070,7 +5358,7 @@ function renderGISSegments() {
   for (const seg of doc.site.segments) {
     html += `<tr class="gis-table-row">
       <td class="gis-table-cell">${seg.label || seg.id}</td>
-      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input"></k-input> in</td>
+      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" aria-label="${seg.label || seg.id} setback (inches)" class="gis-setback-input"></k-input> in</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -5085,6 +5373,9 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+
+export { openGISDialog, renderGISSegments };
+
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -5265,6 +5556,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  initShortcutOverlayUI();
   setupAddRoomDimsModal();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
@@ -5350,6 +5642,12 @@ if (typeof window !== 'undefined') {
       if (hasOpenHistory) {
         historyPopover.hidden = true;
         $('#history-btn')?.setAttribute('aria-expanded', 'false');
+        if (activeHistoryPopoverCleanup) {
+          activeHistoryPopoverCleanup();
+          activeHistoryPopoverCleanup = null;
+        } else {
+          $('#history-btn')?.focus();
+        }
       }
       setTool({ kind: 'select' });
       select(null);
@@ -5398,20 +5696,18 @@ if (typeof window !== 'undefined') {
     snappingBridge,
   });
 
-  function toggleHistoryPopover() {
-    const popover = $('#history-popover');
-    const btn = $('#history-btn');
-    if (!popover) return;
-    const isHidden = popover.hidden;
-    popover.hidden = !isHidden;
-    if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-  }
-
   $('#history-btn')?.addEventListener('click', toggleHistoryPopover);
   $('#history-close')?.addEventListener('click', () => {
     const popover = $('#history-popover');
+    const btn = $('#history-btn');
     if (popover) popover.hidden = true;
-    $('#history-btn')?.setAttribute('aria-expanded', 'false');
+    btn?.setAttribute('aria-expanded', 'false');
+    if (activeHistoryPopoverCleanup) {
+      activeHistoryPopoverCleanup();
+      activeHistoryPopoverCleanup = null;
+    } else {
+      btn?.focus();
+    }
   });
 
   renderPalette();
@@ -5424,6 +5720,24 @@ if (typeof window !== 'undefined') {
     openWelcomeWizard();
   });
 }
+function toggleHistoryPopover() {
+  const popover = $('#history-popover');
+  const btn = $('#history-btn');
+  if (!popover) return;
+  const isHidden = popover.hidden;
+  popover.hidden = !isHidden;
+  if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+  if (isHidden) {
+    if (activeHistoryPopoverCleanup) activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = trapFocus(popover, btn);
+  } else if (activeHistoryPopoverCleanup) {
+    activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = null;
+  } else {
+    btn?.focus();
+  }
+}
+
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (distPx <= 0) {
@@ -6180,9 +6494,94 @@ function closeCommandPalette() {
   dlg.open = false;
 }
 
-function openShortcutOverlay() {
+function setShortcutElementHidden(el, isHidden) {
+  if (!el) return;
+  el.hidden = isHidden;
+  if (isHidden) {
+    if (typeof el.setAttribute === 'function') el.setAttribute('hidden', '');
+  } else if (typeof el.removeAttribute === 'function') {
+    el.removeAttribute('hidden');
+  }
+}
+
+function getShortcutRowSearchText(row) {
+  if (!row) return '';
+  if (row.children && row.children.length > 0) {
+    const parts = Array.from(row.children).map((child) => child.textContent || '');
+    return `${parts.join(' ')} ${row.textContent || ''}`.toLowerCase();
+  }
+  return (row.textContent || '').toLowerCase();
+}
+
+export function filterShortcuts(query = '') {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return 0;
+  const q = String(query ?? '')
+    .trim()
+    .toLowerCase();
+  const compactQuery = q.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+  const groups =
+    typeof dlg.querySelectorAll === 'function'
+      ? Array.from(dlg.querySelectorAll('.shortcut-group'))
+      : [];
+  let totalVisible = 0;
+
+  groups.forEach((group) => {
+    const rows =
+      typeof group.querySelectorAll === 'function'
+        ? Array.from(group.querySelectorAll('.shortcut-row'))
+        : [];
+    let groupVisibleCount = 0;
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) {
+        groupVisibleCount += 1;
+        totalVisible += 1;
+      }
+    });
+    setShortcutElementHidden(group, Boolean(q) && groupVisibleCount === 0);
+  });
+
+  if (groups.length === 0 && typeof dlg.querySelectorAll === 'function') {
+    const rows = Array.from(dlg.querySelectorAll('.shortcut-row'));
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) totalVisible += 1;
+    });
+  }
+
+  const gridEl =
+    typeof dlg.querySelector === 'function' ? dlg.querySelector('.shortcut-grid') : null;
+  if (gridEl) {
+    setShortcutElementHidden(gridEl, Boolean(q) && totalVisible === 0);
+  }
+
+  const noResultsEl =
+    $('#shortcut-no-results') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-no-results') : null);
+  if (noResultsEl) {
+    setShortcutElementHidden(noResultsEl, !(Boolean(q) && totalVisible === 0));
+  }
+
+  return totalVisible;
+}
+
+export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  const searchInput =
+    $('#shortcut-search') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.value = '';
+  }
+  filterShortcuts('');
   if (typeof dlg.showModal === 'function') {
     try {
       dlg.showModal();
@@ -6193,9 +6592,12 @@ function openShortcutOverlay() {
     dlg.setAttribute('open', '');
   }
   dlg.open = true;
+  if (searchInput && typeof searchInput.focus === 'function') {
+    searchInput.focus();
+  }
 }
 
-function closeShortcutOverlay() {
+export function closeShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
@@ -6337,6 +6739,20 @@ function initCommandPaletteUI() {
   }
 }
 
+function initShortcutOverlayUI() {
+  const dlg = $('#shortcut-overlay');
+  const searchInput =
+    $('#shortcut-search') ||
+    (dlg && typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      const val =
+        e && e.target && typeof e.target.value === 'string' ? e.target.value : searchInput.value;
+      filterShortcuts(val);
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
@@ -6357,6 +6773,7 @@ if (typeof window !== 'undefined')
     selectTemplate,
     TEMPLATES,
     setTool,
+    parseRoomDimensionsInput,
     select,
     isSelected,
     getSelectionList,
@@ -6364,6 +6781,7 @@ if (typeof window !== 'undefined')
     moveSelectedSpatial,
     getSpatialElements,
     interaction,
+    renderSnapToggles,
     generatePDF,
     applyCalibration,
     apply3PointCalibration,
@@ -6385,8 +6803,10 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    filterShortcuts,
     renderCommandList,
     trapFocus,
+    toggleHistoryPopover,
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
