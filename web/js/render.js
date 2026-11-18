@@ -18,10 +18,9 @@ import { patternFor } from './patterns.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
-const fmt = (inches) =>
-  `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
-export const fmtLen = fmt;
+export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
 
 let bgCache = { dataUrl: null, img: null };
 const logoCache = new Map();
