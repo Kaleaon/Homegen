@@ -114,7 +114,7 @@ export async function saveTextureBlobsBatch(items) {
   }
 }
 
-export async function getTextureBlob(id) {
+async function getTextureBlob(id) {
   if (!id) return null;
   const db = await getDB();
   if (db) {
@@ -141,52 +141,6 @@ export async function getTextureUrl(id) {
   return null;
 }
 
-export async function deleteTextureBlob(id) {
-  const db = await getDB();
-  if (db) {
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.delete(id);
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => resolve(false);
-    });
-  } else {
-    memoryStore.delete(id);
-    return true;
-  }
-}
-
-export async function listTextures() {
-  const db = await getDB();
-  if (db) {
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.getAll();
-      req.onsuccess = () => {
-        const items = (req.result || []).map((r) => ({
-          id: r.id,
-          name: r.name,
-          mimeType: r.mimeType,
-          size: r.blob ? r.blob.size || 0 : 0,
-          createdAt: r.createdAt,
-        }));
-        resolve(items);
-      };
-      req.onerror = () => resolve([]);
-    });
-  } else {
-    return Array.from(memoryStore.values()).map((r) => ({
-      id: r.id,
-      name: r.name,
-      mimeType: r.mimeType,
-      size: r.blob ? r.blob.size || 0 : 0,
-      createdAt: r.createdAt,
-    }));
-  }
-}
-
 export async function getAllTextureBlobs() {
   const db = await getDB();
   if (db) {
@@ -199,21 +153,5 @@ export async function getAllTextureBlobs() {
     });
   } else {
     return Array.from(memoryStore.values());
-  }
-}
-
-export async function clearTextures() {
-  const db = await getDB();
-  if (db) {
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.clear();
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => resolve(false);
-    });
-  } else {
-    memoryStore.clear();
-    return true;
   }
 }

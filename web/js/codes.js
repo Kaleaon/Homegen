@@ -11,6 +11,7 @@ import {
   getRoomClearSpan,
   polygonsOverlap,
   wallLength,
+  wallArcLength,
   interior,
   interiorPolygonData,
   polygonContainsRect,
@@ -176,11 +177,13 @@ export function computeWallIntervals(state, room) {
   const walls = getRoomWallKeys(room);
   const wallIntervals = [];
   for (const wall of walls) {
-    const len = wallLength(room, wall);
-    let iv = [[WT / 2, len - WT / 2]];
+    const chordLen = wallLength(room, wall);
+    const arcLen = wallArcLength(room, wall);
+    const scale = chordLen > 0 ? arcLen / chordLen : 1;
+    let iv = [[WT / 2, arcLen - WT / 2]];
     for (const { o, from, to } of wallOpenings(state, room, wall))
-      if (o.kind === 'door') iv = subtractInterval(iv, [from, to]);
-    wallIntervals.push({ wall, intervals: iv });
+      if (o.kind === 'door') iv = subtractInterval(iv, [from * scale, to * scale]);
+    wallIntervals.push({ wall, intervals: iv, scale });
   }
   return wallIntervals;
 }
@@ -189,8 +192,16 @@ export function computeWallIntervals(state, room) {
 export function outletSegments(state, room, wallIntervals = null) {
   const segs = [];
   const resolvedIntervals = wallIntervals ?? computeWallIntervals(state, room);
-  for (const { wall, intervals } of resolvedIntervals) {
+  for (const entry of resolvedIntervals) {
+    const { wall, intervals } = entry;
     if (!intervals.some(([a, b]) => b - a >= 24)) continue;
+    const scale =
+      entry.scale ??
+      (() => {
+        const chordLen = wallLength(room, wall);
+        const arcLen = wallArcLength(room, wall);
+        return chordLen > 0 ? arcLen / chordLen : 1;
+      })();
     const wallIdx = resolveWallIndex(wall);
     const outs = room.items.filter(
       (i) =>
@@ -201,8 +212,8 @@ export function outletSegments(state, room, wallIntervals = null) {
     for (const [a, b] of intervals) {
       if (b - a < 24) continue;
       const mine = outs
-        .filter((i) => i.offset >= a - EPS && i.offset <= b + EPS)
-        .map((i) => i.offset)
+        .map((i) => i.offset * scale)
+        .filter((off) => off >= a - EPS && off <= b + EPS)
         .sort((x, y) => x - y);
       let covered = mine.length > 0;
       if (covered) {
@@ -1679,25 +1690,29 @@ export function autoComply(state, options = {}) {
       const outType = t.wet ? 'outlet_gfci' : 'outlet';
       if (t.habitable || r.type === 'laundry') {
         const wallIntervals = computeWallIntervals(state, get());
+        const scaleByWall = new Map(wallIntervals.map((entry) => [entry.wall, entry.scale]));
         for (let k = 0; k < 20; k++) {
-          const seg = outletSegments(state, get(), wallIntervals).find((s) => !s.covered);
+          const curRoom = get();
+          const seg = outletSegments(state, curRoom, wallIntervals).find((s) => !s.covered);
           if (!seg) break;
+          const scale = scaleByWall.get(seg.wall) ?? 1;
           const parts = seg.need;
           let placed = false;
           for (let p = 0; p < parts && !placed; p++) {
             const c = seg.from + ((p + 0.5) * (seg.to - seg.from)) / parts;
+            const cWall = c / scale;
             if (
-              get().items.some(
+              curRoom.items.some(
                 (i) =>
-                  i.wall === seg.wall &&
-                  Math.abs(i.offset - c) < 6 &&
+                  resolveWallIndex(i.wall) === resolveWallIndex(seg.wall) &&
+                  Math.abs(i.offset - cWall) < 6 &&
                   ITEM_BY_ID[i.type].shape === 'outlet'
               )
             )
               continue;
             for (const off of [c, c - 12, c + 12, c - 24, c + 24])
               if (off >= seg.from && off <= seg.to) {
-                const itemId = addWallItem(state, id, outType, seg.wall, off, rep());
+                const itemId = addWallItem(state, id, outType, seg.wall, off / scale, rep());
                 if (itemId) {
                   placed = true;
                   addDiff(itemId, 'add', 'item', `${r.name}: added outlet on ${seg.wall} wall`);

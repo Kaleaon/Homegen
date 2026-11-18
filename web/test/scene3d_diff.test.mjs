@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from '#three';
 import * as m from '../js/model.js';
+import { registerCustomWallFinish } from '../js/presetRegistry.js';
 import { createScene3D } from '../js/scene3d.js';
 
 // Setup headless WebGL and DOM mocks for Node test environment
@@ -172,4 +174,129 @@ test('removed entities dismount from the scene graph and entityMap', () => {
     false,
     'Removed item dismounted from entityMap'
   );
+});
+
+test('proceduralTexture configures standard texture parameters and reuses cached CanvasTexture instances', () => {
+  const state = m.newState();
+  const room = m.placeRoomKit(state, 'kit_bedroom', 0, 0); // 144x144, wp_stripe_blue
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+  api.show();
+
+  const wallN = api.entityMap.get(`${room.id}:wall:N`);
+  const wallS = api.entityMap.get(`${room.id}:wall:S`);
+  const texN = wallN.children[0].material.map;
+  const texS = wallS.children[0].material.map;
+
+  assert.ok(texN instanceof THREE.CanvasTexture);
+  assert.strictEqual(texN.wrapS, THREE.RepeatWrapping);
+  assert.strictEqual(texN.wrapT, THREE.RepeatWrapping);
+  assert.strictEqual(texN.colorSpace, THREE.SRGBColorSpace);
+  assert.strictEqual(texN.anisotropy, 8);
+  assert.strictEqual(texN.repeat.x, 144 / 24);
+  assert.strictEqual(texN.repeat.y, 96 / 24);
+  assert.strictEqual(texN, texS, 'Matching wall dimensions and finish reuse cached texture');
+  api.destroy();
+});
+
+test('customTexture caches dataUrl textures, preserves async render callback, and falls back to proceduralTexture without dataUrl', () => {
+  const origLoad = THREE.TextureLoader.prototype.load;
+  const loadCalls = [];
+  let renderCalls = 0;
+
+  THREE.TextureLoader.prototype.load = function mockLoad(url, onLoad) {
+    const tex = new THREE.Texture();
+    loadCalls.push({ url, onLoad, tex });
+    return tex;
+  };
+
+  try {
+    const state = m.newState();
+    const room = m.createRoom(state, 'living', 0, 0, 144, 144);
+    const dataUrl =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    registerCustomWallFinish(
+      {
+        id: 'scene3d_custom_with_url',
+        name: 'Custom With URL',
+        dataUrl,
+        tileInches: 48,
+      },
+      state
+    );
+    m.applyWallFinish(state, 'scene3d_custom_with_url', { scope: 'room', room });
+
+    const api = createScene3D(
+      canvas,
+      () => state,
+      () => {
+        renderCalls += 1;
+        return 0;
+      }
+    );
+    api.show();
+
+    assert.strictEqual(
+      loadCalls.length,
+      1,
+      'TextureLoader.load invoked once and cached across all four 144x96 walls'
+    );
+    assert.strictEqual(loadCalls[0].url, dataUrl);
+
+    const texN = api.entityMap.get(`${room.id}:wall:N`).children[0].material.map;
+    const texE = api.entityMap.get(`${room.id}:wall:E`).children[0].material.map;
+    assert.strictEqual(texN, loadCalls[0].tex);
+    assert.strictEqual(texN, texE);
+    assert.strictEqual(texN.wrapS, THREE.RepeatWrapping);
+    assert.strictEqual(texN.wrapT, THREE.RepeatWrapping);
+    assert.strictEqual(texN.colorSpace, THREE.SRGBColorSpace);
+    assert.strictEqual(texN.anisotropy, 8);
+    assert.strictEqual(texN.repeat.x, 144 / 48);
+    assert.strictEqual(texN.repeat.y, 96 / 48);
+
+    const rendersBeforeLoad = renderCalls;
+    loadCalls[0].onLoad(texN);
+    assert.strictEqual(
+      renderCalls,
+      rendersBeforeLoad + 1,
+      'Async onLoad callback triggers render()'
+    );
+
+    // Fallback path when dataUrl is absent
+    loadCalls.length = 0;
+    registerCustomWallFinish(
+      {
+        id: 'scene3d_custom_without_url',
+        name: 'Custom Without URL',
+        tileInches: 24,
+      },
+      state
+    );
+    m.applyWallFinish(state, 'scene3d_custom_without_url', { scope: 'room', room });
+    api.update();
+
+    assert.strictEqual(
+      loadCalls.length,
+      0,
+      'Missing dataUrl delegates to proceduralTexture without calling TextureLoader.load'
+    );
+    const fallbackN = api.entityMap.get(`${room.id}:wall:N`).children[0].material.map;
+    const fallbackS = api.entityMap.get(`${room.id}:wall:S`).children[0].material.map;
+    assert.ok(fallbackN instanceof THREE.CanvasTexture);
+    assert.strictEqual(fallbackN, fallbackS);
+    assert.strictEqual(fallbackN.wrapS, THREE.RepeatWrapping);
+    assert.strictEqual(fallbackN.wrapT, THREE.RepeatWrapping);
+    assert.strictEqual(fallbackN.colorSpace, THREE.SRGBColorSpace);
+    assert.strictEqual(fallbackN.anisotropy, 8);
+    assert.strictEqual(fallbackN.repeat.x, 144 / 24);
+    assert.strictEqual(fallbackN.repeat.y, 96 / 24);
+
+    api.destroy();
+  } finally {
+    THREE.TextureLoader.prototype.load = origLoad;
+  }
 });

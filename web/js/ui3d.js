@@ -2,17 +2,53 @@
 import { HDRI_ENVS, FREE_RESOURCES } from './resources.js';
 import {
   STYLES,
+  RESOLUTION_TIERS,
   NEGATIVE,
   buildPrompt,
   pollinationsUrl,
   hordeRender,
   hordeWidth,
+  isAnonymousKey,
+  resolveResolutionTier,
   toWebpDataUrl,
 } from './photoreal.js';
 import { getSnappedPoint3D } from '../../designer3d/tools/index.mjs';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'homegen.horde.key';
+
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function formatWalkHeight(inches) {
+  const val = Math.round((Number(inches) || 0) * 10) / 10;
+  const ft = Math.floor(val / 12);
+  const rem = Math.round((val - ft * 12) * 10) / 10;
+  return `${ft}' ${rem}" (${val}")`;
+}
+
+function getSortedWalkLevels(doc) {
+  if (doc && Array.isArray(doc.levelMetadata) && doc.levelMetadata.length > 0) {
+    return [...doc.levelMetadata]
+      .filter((m) => m && typeof m.index === 'number')
+      .sort((a, b) => a.index - b.index)
+      .map((m) => ({
+        index: m.index,
+        name: m.name || `Floor ${m.index + 1}`,
+      }));
+  }
+  const count = Math.max(1, doc?.levels || 1);
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    list.push({ index: i, name: `Floor ${i + 1}` });
+  }
+  return list;
+}
 
 export function initView3D({
   getDoc,
@@ -22,8 +58,10 @@ export function initView3D({
   setLevel,
   interaction,
   _snappingBridge,
+  scene3dApi = null,
+  hordeOptions = {},
 }) {
-  let api = null;
+  let api = scene3dApi;
   let mode = '2d';
   let abort = null;
   const plan = $('#plan');
@@ -45,9 +83,50 @@ export function initView3D({
       onCameraModeChange: (camMode) => {
         updateModeUI(camMode);
       },
+      onWalkHeightChange: () => {
+        syncWalkthroughHUD();
+      },
+      onSceneUpdate: () => {
+        syncWalkthroughHUD();
+      },
     });
     window.__scene3d = api;
     return api;
+  }
+
+  function syncWalkthroughHUD() {
+    const doc = getDoc ? getDoc() : null;
+    const curLevel = getLevel ? getLevel() : 0;
+    const levels = getSortedWalkLevels(doc);
+
+    const walkLevelSelect = $('#walk-level-select');
+    if (walkLevelSelect) {
+      walkLevelSelect.innerHTML = levels
+        .map((lvl) => `<option value="${lvl.index}">${escHtml(lvl.name)}</option>`)
+        .join('');
+      const hasCurrent = levels.some((lvl) => lvl.index === curLevel);
+      walkLevelSelect.value = String(hasCurrent ? curLevel : levels[0].index);
+    }
+
+    const curHeight = api && typeof api.getWalkHeight === 'function' ? api.getWalkHeight() : 64;
+    const elevLabel = $('#walk-elev-label');
+    if (elevLabel) {
+      elevLabel.textContent = formatWalkHeight(curHeight);
+    }
+
+    document.querySelectorAll('#walkthrough-hud [data-walk-height]').forEach((btn) => {
+      const presetVal = Number(btn.dataset.walkHeight);
+      const isActive = Math.abs(presetVal - curHeight) < 0.01;
+      btn.classList.toggle('on', isActive);
+      if (typeof btn.setAttribute === 'function') {
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      }
+    });
+
+    const downBtn = $('#walk-elev-down');
+    if (downBtn) downBtn.disabled = curHeight <= 12;
+    const upBtn = $('#walk-elev-up');
+    if (upBtn) upBtn.disabled = curHeight >= 180;
   }
 
   function updateModeUI(camMode) {
@@ -62,6 +141,9 @@ export function initView3D({
     }
     if (hud) {
       hud.hidden = camMode !== 'walk' || mode !== '3d';
+    }
+    if (camMode === 'walk') {
+      syncWalkthroughHUD();
     }
   }
 
@@ -85,6 +167,7 @@ export function initView3D({
     $('#bar3d').hidden = next !== '3d';
     const hud = $('#walkthrough-hud');
     if (hud) hud.hidden = next !== '3d' || api?.getCameraMode() !== 'walk';
+    if (next === '3d') syncWalkthroughHUD();
 
     document.querySelectorAll('#toolbar [data-tool]').forEach((b) => {
       b.disabled = next === '3d';
@@ -135,6 +218,46 @@ export function initView3D({
       if (!api) return;
       api.setCameraMode('orbit');
       toast('Switched to Orbit mode', false, 2000);
+    });
+  }
+  document.querySelectorAll('#walkthrough-hud [data-walk-height]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      if (!api) return;
+      const targetHeight = Number(btn.dataset.walkHeight);
+      api.setWalkHeight(targetHeight);
+      syncWalkthroughHUD();
+      if (e && e.detail > 0 && typeof v3?.focus === 'function') {
+        v3.focus();
+      }
+    });
+  });
+  document.querySelectorAll('#walkthrough-hud [data-walk-step]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      if (!api) return;
+      const baseStep = Number(btn.dataset.walkStep) || 0;
+      const delta = e && e.shiftKey ? baseStep * 2 : baseStep;
+      api.setWalkHeight(api.getWalkHeight() + delta);
+      syncWalkthroughHUD();
+      if (e && e.detail > 0 && typeof v3?.focus === 'function') {
+        v3.focus();
+      }
+    });
+  });
+  const walkLevelSelect = $('#walk-level-select');
+  if (walkLevelSelect) {
+    walkLevelSelect.addEventListener('change', (e) => {
+      const nextLevel = Number(e.target.value);
+      if (Number.isNaN(nextLevel)) return;
+      if (typeof setLevel === 'function') {
+        setLevel(nextLevel);
+      }
+      if (api && api.getCameraMode() === 'walk') {
+        api.setWalkHeight(api.getWalkHeight());
+      }
+      syncWalkthroughHUD();
+      const selectedOpt = walkLevelSelect.options?.[walkLevelSelect.selectedIndex];
+      const lvlName = selectedOpt?.textContent || `Floor ${nextLevel + 1}`;
+      toast(`Switched walkthrough to ${lvlName}`, false, 1800);
     });
   }
   $('#o-photo').addEventListener('click', openPhoto);
@@ -399,6 +522,89 @@ export function initView3D({
     $('#p-lower-res').hidden = true;
   }
 
+  function currentHordeKey() {
+    const el = $('#p-key');
+    const raw = el && typeof el.value === 'string' ? el.value.trim() : '';
+    return raw || '0000000000';
+  }
+
+  function populateResolutionTiers(preserveValue = false) {
+    const sel = $('#p-resolution-tier');
+    if (!sel) return;
+    const prev = preserveValue ? sel.value : 'sd';
+    const hasKey = !isAnonymousKey(currentHordeKey());
+    sel.innerHTML = Object.values(RESOLUTION_TIERS)
+      .map((tier) => {
+        const badgeText = tier.locked && !hasKey ? `${tier.plan} 🔒` : tier.plan;
+        return `<option value="${tier.id}">${tier.label} — ${badgeText}</option>`;
+      })
+      .join('');
+    sel.value = RESOLUTION_TIERS[prev] ? prev : 'sd';
+  }
+
+  function updateTierBadges(activeTierId = 'sd') {
+    const container = $('#p-tier-badges');
+    if (!container) return;
+    const hasKey = !isAnonymousKey(currentHordeKey());
+    container.innerHTML = Object.values(RESOLUTION_TIERS)
+      .map((tier) => {
+        const locked = Boolean(tier.locked && !hasKey);
+        const isActive = tier.id === activeTierId;
+        const classes = [
+          'tier-badge',
+          `tier-${tier.plan.toLowerCase()}`,
+          isActive ? 'active' : '',
+          locked ? 'is-locked' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const lockHtml = locked ? ' <span class="lock-icon" aria-hidden="true">🔒</span>' : '';
+        return `<span class="${classes}" data-tier="${tier.id}">${tier.plan}${lockHtml}</span>`;
+      })
+      .join('');
+  }
+
+  function syncResolutionTierUI({ showUpgradeOnLocked = false } = {}) {
+    const sel = $('#p-resolution-tier');
+    const hint = $('#p-upgrade-hint');
+    if (!sel) return RESOLUTION_TIERS.sd;
+
+    const { requested, effective, downgraded } = resolveResolutionTier(
+      sel.value || 'sd',
+      currentHordeKey()
+    );
+
+    if (downgraded) {
+      sel.value = effective.id;
+      if (showUpgradeOnLocked) {
+        const guidance = `🔒 ${requested.label} (${requested.plan} tier) requires a registered key or paid plan. Enter an API key below to unlock higher resolutions — enforcing Free SD (${effective.width}p) limit.`;
+        if (hint) {
+          hint.textContent = guidance;
+          hint.hidden = false;
+        }
+        $('#p-status').textContent = guidance;
+      }
+    } else if (hint) {
+      hint.textContent = '';
+      hint.hidden = true;
+    }
+
+    updateTierBadges(effective.id);
+    return effective;
+  }
+
+  function resetResolutionTier() {
+    overrideResolution = null;
+    const sel = $('#p-resolution-tier');
+    if (sel) sel.value = 'sd';
+    const hint = $('#p-upgrade-hint');
+    if (hint) {
+      hint.textContent = '';
+      hint.hidden = true;
+    }
+    updateTierBadges('sd');
+  }
+
   function showPhotorealError(e) {
     const errBox = $('#p-error');
     const msg = $('#p-error-msg');
@@ -442,7 +648,8 @@ export function initView3D({
     }
     capture();
     clearPhotorealError();
-    overrideResolution = null;
+    populateResolutionTiers(false);
+    resetResolutionTier();
     $('#p-status').textContent =
       'Tip: press “Eye level” in the room you want, then re-capture, for a photo-like angle.';
     $('#p-result').hidden = true;
@@ -466,7 +673,18 @@ export function initView3D({
     }
   });
 
-  $('#p-key').addEventListener('input', () => $('#p-key').classList.remove('invalid', 'error'));
+  $('#p-key').addEventListener('input', () => {
+    $('#p-key').classList.remove('invalid', 'error');
+    populateResolutionTiers(true);
+    syncResolutionTierUI({ showUpgradeOnLocked: false });
+  });
+  const resTierSelect = $('#p-resolution-tier');
+  if (resTierSelect) {
+    resTierSelect.addEventListener('change', () => {
+      overrideResolution = null;
+      syncResolutionTierUI({ showUpgradeOnLocked: true });
+    });
+  }
   $('#p-room').addEventListener('change', () => {
     const r = selectedRoom();
     setLevel(r.level || 0);
@@ -512,10 +730,16 @@ export function initView3D({
       $('#p-status').textContent = 'Done.';
     };
     img.onerror = () => {
+      resetResolutionTier();
       $('#p-status').textContent =
         'Pollinations did not return an image (rate limit or service change). Try again shortly or use AI Horde.';
     };
-    img.src = pollinationsUrl($('#p-prompt').value, { seed: Math.floor(Math.random() * 1e6) });
+    const effective = syncResolutionTierUI({ showUpgradeOnLocked: false });
+    img.src = pollinationsUrl($('#p-prompt').value, {
+      width: effective.width,
+      height: effective.height,
+      seed: Math.floor(Math.random() * 1e6),
+    });
   });
 
   async function runHordeRender() {
@@ -535,7 +759,9 @@ export function initView3D({
     } catch {
       /* ignore */
     }
-    const width = overrideResolution ?? hordeWidth(key);
+    const selectedTier = $('#p-resolution-tier')?.value || 'sd';
+    const width = overrideResolution ?? hordeWidth(key, selectedTier);
+    syncResolutionTierUI({ showUpgradeOnLocked: false });
     abort = new AbortController();
     btn.textContent = 'Cancel AI Horde job';
     try {
@@ -552,11 +778,13 @@ export function initView3D({
       const out = await hordeRender({
         prompt: $('#p-prompt').value,
         depthWebp,
+        width,
         apikey: key,
         signal: abort.signal,
         onStatus: (t) => {
           $('#p-status').textContent = t;
         },
+        ...hordeOptions,
       });
       result(out.url);
       $('#p-status').textContent = out.censored
@@ -566,6 +794,10 @@ export function initView3D({
       if (e.name === 'AbortError') {
         $('#p-status').textContent = 'Cancelled.';
       } else {
+        if (e.type === 'network') {
+          populateResolutionTiers(false);
+          resetResolutionTier();
+        }
         $('#p-status').textContent = `AI Horde: ${e.message}`;
         showPhotorealError(e);
       }
@@ -587,14 +819,17 @@ export function initView3D({
     } catch {
       /* ignore */
     }
+    populateResolutionTiers(false);
+    resetResolutionTier();
     clearPhotorealError();
     runHordeRender();
   });
   $('#p-lower-res').addEventListener('click', () => {
+    resetResolutionTier();
     overrideResolution = 576;
     clearPhotorealError();
     runHordeRender();
   });
 
-  return { setView, isThree: () => mode === '3d' };
+  return { setView, isThree: () => mode === '3d', syncWalkthroughHUD };
 }

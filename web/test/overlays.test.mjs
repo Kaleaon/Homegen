@@ -152,11 +152,11 @@ test('renderGISSegments in app.js uses <k-input type="number"> and contains zero
   assert.ok(fnMatch, 'renderGISSegments function found in app.js');
   const fnCode = fnMatch[1];
 
-  // Verify k-input usage
+  // Verify k-input usage and direct ARIA label formatting
   assert.match(
     fnCode,
-    /<k-input type="number" min="0" max="360" value="\${seg\.setback \?\? 36}" data-seg-id="\${seg\.id}" class="gis-setback-input"><\/k-input>/,
-    'renderGISSegments renders setback inputs using <k-input>'
+    /<k-input type="number" min="0" max="360" value="\${seg\.setback \?\? 36}" data-seg-id="\${seg\.id}" aria-label="\${seg\.label \|\| seg\.id} setback \(inches\)" class="gis-setback-input"><\/k-input>/,
+    'renderGISSegments renders setback inputs using <k-input> with aria-label'
   );
 
   // Verify zero hardcoded inline style attributes
@@ -359,4 +359,59 @@ test('updateHudAttribution dynamically injects .scene3d-hud-attribution without 
     globalThis.requestAnimationFrame = prevRaf;
     globalThis.ResizeObserver = prevRO;
   }
+});
+
+test('index.html #walkthrough-hud contains elevation presets, step controls, height readout, and floor level selector', () => {
+  const htmlPath = path.join(__dirname, '../index.html');
+  const html = fs.readFileSync(htmlPath, 'utf8');
+
+  const hudMatch = html.match(/<div id="walkthrough-hud"[\s\S]*?<\/div>\s*(?=<div id="toast")/);
+  assert.ok(hudMatch, '#walkthrough-hud block must exist in index.html');
+  const hudHtml = hudMatch[0];
+
+  // Elevation presets: Seated (36"), Eye level (64"), Overhead (96")
+  assert.match(
+    hudHtml,
+    /id="walk-preset-seated"[^>]*data-walk-height="36"[^>]*>Seated \(36&quot;\)|id="walk-preset-seated"[^>]*data-walk-height="36"[^>]*>Seated \(36"\)/,
+    '#walkthrough-hud must include Seated (36") preset button'
+  );
+  assert.match(
+    hudHtml,
+    /id="walk-preset-eye"[^>]*data-walk-height="64"[^>]*>Eye level \(64&quot;\)|id="walk-preset-eye"[^>]*data-walk-height="64"[^>]*>Eye level \(64"\)/,
+    '#walkthrough-hud must include Eye level (64") preset button'
+  );
+  assert.match(
+    hudHtml,
+    /id="walk-preset-overhead"[^>]*data-walk-height="96"[^>]*>Overhead \(96&quot;\)|id="walk-preset-overhead"[^>]*data-walk-height="96"[^>]*>Overhead \(96"\)/,
+    '#walkthrough-hud must include Overhead (96") preset button'
+  );
+
+  // Step buttons and height readout label
+  assert.match(
+    hudHtml,
+    /id="walk-elev-down"[^>]*data-walk-step="-6"/,
+    '#walkthrough-hud must include decrease height step button (#walk-elev-down)'
+  );
+  assert.match(
+    hudHtml,
+    /id="walk-elev-up"[^>]*data-walk-step="6"/,
+    '#walkthrough-hud must include increase height step button (#walk-elev-up)'
+  );
+  assert.match(
+    hudHtml,
+    /id="walk-elev-label"[^>]*aria-live="polite"/,
+    '#walkthrough-hud must include polite live height readout (#walk-elev-label)'
+  );
+
+  // Floor level selector dropdown with associated label
+  assert.match(
+    hudHtml,
+    /<label for="walk-level-select"[^>]*>Floor<\/label>/,
+    '#walkthrough-hud must include explicit <label for="walk-level-select">'
+  );
+  assert.match(
+    hudHtml,
+    /<select id="walk-level-select"/,
+    '#walkthrough-hud must include #walk-level-select dropdown'
+  );
 });
