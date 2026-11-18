@@ -647,8 +647,15 @@ export function computeMarchingSquares(grid, intervalOverride = null) {
   }
 
   const interval = intervalOverride || grid.contourInterval || 1.0;
+  if (!Number.isFinite(interval) || interval <= 0) {
+    return [];
+  }
+
   const minE = grid.minElevation;
   const maxE = grid.maxElevation;
+  if (!Number.isFinite(minE) || !Number.isFinite(maxE) || minE > maxE) {
+    return [];
+  }
 
   const startLevel = Math.ceil(minE / interval) * interval;
   const levels = [];
@@ -656,25 +663,56 @@ export function computeMarchingSquares(grid, intervalOverride = null) {
     levels.push(Number(z.toFixed(2)));
   }
 
-  if (levels.length === 0) return [];
+  const numLevels = levels.length;
+  if (numLevels === 0) return [];
 
-  const { width, height, data, bounds } = grid;
-  const contours = [];
+  const { width, height, data } = grid;
+  const bounds = grid.bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
+  const minLevel = levels[0];
+  const maxLevel = levels[numLevels - 1];
+  const invInterval = 1 / interval;
 
-  for (const z of levels) {
-    const lines = [];
+  const buckets = new Array(numLevels);
+  for (let i = 0; i < numLevels; i++) {
+    buckets[i] = [];
+  }
 
-    for (let y = 0; y < height - 1; y++) {
-      for (let x = 0; x < width - 1; x++) {
-        const i0 = y * width + x;
-        const i1 = y * width + (x + 1);
-        const i2 = (y + 1) * width + (x + 1);
-        const i3 = (y + 1) * width + x;
+  for (let y = 0; y < height - 1; y++) {
+    const row0 = y * width;
+    const row1 = row0 + width;
 
-        const v0 = data[i0];
-        const v1 = data[i1];
-        const v2 = data[i2];
-        const v3 = data[i3];
+    for (let x = 0; x < width - 1; x++) {
+      const v0 = data[row0 + x];
+      const v1 = data[row0 + x + 1];
+      const v2 = data[row1 + x + 1];
+      const v3 = data[row1 + x];
+
+      let cellMin = v0;
+      let cellMax = v0;
+      if (v1 < cellMin) cellMin = v1;
+      else if (v1 > cellMax) cellMax = v1;
+      if (v2 < cellMin) cellMin = v2;
+      else if (v2 > cellMax) cellMax = v2;
+      if (v3 < cellMin) cellMin = v3;
+      else if (v3 > cellMax) cellMax = v3;
+
+      if (!(cellMin < cellMax) || cellMax < minLevel || cellMin >= maxLevel) {
+        continue;
+      }
+
+      let startIdx = Math.floor((cellMin - startLevel) * invInterval);
+      if (startIdx < 0) startIdx = 0;
+      else if (startIdx >= numLevels) startIdx = numLevels - 1;
+      while (startIdx > 0 && levels[startIdx - 1] > cellMin) {
+        startIdx--;
+      }
+      while (startIdx < numLevels && levels[startIdx] <= cellMin) {
+        startIdx++;
+      }
+
+      for (let lIdx = startIdx; lIdx < numLevels; lIdx++) {
+        const z = levels[lIdx];
+        if (z > cellMax) break;
 
         let index = 0;
         if (v0 >= z) index |= 8;
@@ -685,16 +723,21 @@ export function computeMarchingSquares(grid, intervalOverride = null) {
         if (index === 0 || index === 15) continue;
 
         const edges = MARCHING_SQUARES_LOOKUP[index];
-        for (const [eA, eB] of edges) {
-          const pA = getEdgePoint(x, y, eA, v0, v1, v2, v3, z, width, height, bounds);
-          const pB = getEdgePoint(x, y, eB, v0, v1, v2, v3, z, width, height, bounds);
+        const lines = buckets[lIdx];
+        for (let k = 0; k < edges.length; k++) {
+          const edgePair = edges[k];
+          const pA = getEdgePoint(x, y, edgePair[0], v0, v1, v2, v3, z, width, height, bounds);
+          const pB = getEdgePoint(x, y, edgePair[1], v0, v1, v2, v3, z, width, height, bounds);
           lines.push({ x1: pA.x, y1: pA.y, x2: pB.x, y2: pB.y });
         }
       }
     }
+  }
 
-    if (lines.length > 0) {
-      contours.push({ elevation: z, lines });
+  const contours = [];
+  for (let i = 0; i < numLevels; i++) {
+    if (buckets[i].length > 0) {
+      contours.push({ elevation: levels[i], lines: buckets[i] });
     }
   }
 
