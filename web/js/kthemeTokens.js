@@ -23,6 +23,7 @@ export const DEFAULT_TOKENS = {
   '--ktheme-on-secondary': '#0f172a',
   '--ktheme-tertiary': '#cbd5e1',
   '--ktheme-error': '#ef4444',
+  '--ktheme-on-error': '#ffffff',
   '--ktheme-background': '#0a1630',
   '--ktheme-surface': '#0f1d3a',
   '--ktheme-outline': '#334155',
@@ -124,10 +125,18 @@ export function subscribe(listener) {
 }
 
 /**
+ * Clears the in-memory token cache without notifying subscribers,
+ * allowing subsequent animation frames to re-query fresh computed CSS values.
+ */
+export function clearTokenCache() {
+  tokenCache = Object.create(null);
+}
+
+/**
  * Invalidates the in-memory token cache and notifies subscribers.
  */
 export function invalidateCache() {
-  tokenCache = Object.create(null);
+  clearTokenCache();
   const currentPalette = getPalette();
   for (const fn of subscribers) {
     try {
@@ -179,6 +188,12 @@ function initObserverIfNeeded() {
         attributes: true,
         attributeFilter: ['data-theme', 'style', 'class'],
       });
+    }
+    if (typeof window.matchMedia === 'function') {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)');
+      if (mql && typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', () => invalidateCache());
+      }
     }
     isObserverInitialized = true;
   } catch {

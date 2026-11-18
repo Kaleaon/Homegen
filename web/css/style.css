@@ -70,6 +70,7 @@
   --ktheme-warning: #f59e0b;
   --ktheme-info: #3b82f6;
   --ktheme-critical: #ef4444;
+  --ktheme-critical-muted: rgba(239, 68, 68, 0.25);
 
   /* Typography Tokens */
   --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;

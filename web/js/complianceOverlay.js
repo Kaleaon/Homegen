@@ -14,7 +14,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
-import { getToken } from './kthemeTokens.js';
+import { getToken, subscribe, clearTokenCache } from './kthemeTokens.js';
 
 const fmt = (inches) =>
   `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ' 0"'}`;
@@ -72,7 +72,66 @@ export class ComplianceOverlayScene {
     this.spatialGrid = new Map();
     this.lastState = null;
     this.lastStateHash = null;
+    this.lastReport = null;
+    this.lastOptions = null;
     this.options = options;
+    this._themeRafId = null;
+    this._unsubscribeTheme = subscribe(() => this._handleThemeChange());
+  }
+
+  /**
+   * Handles Ktheme token / theme mutations by refreshing node token colors
+   * and scheduling a safe animation-frame re-query and canvas redraw.
+   */
+  _handleThemeChange() {
+    if (this.lastState) {
+      this.update(this.lastState, this.lastReport, this.lastOptions || {});
+    }
+
+    const raf =
+      typeof globalThis.requestAnimationFrame === 'function'
+        ? globalThis.requestAnimationFrame.bind(globalThis)
+        : null;
+
+    const runDeferredRefresh = () => {
+      this._themeRafId = null;
+      const targetCanvas = this.options?.canvas || this.lastOptions?.canvas || null;
+      if (
+        targetCanvas &&
+        typeof targetCanvas.isConnected === 'boolean' &&
+        !targetCanvas.isConnected
+      ) {
+        return;
+      }
+      clearTokenCache();
+      if (this.lastState) {
+        this.update(this.lastState, this.lastReport, this.lastOptions || {});
+      }
+      const onRedraw = this.options?.onRedraw || this.options?.redraw;
+      if (typeof onRedraw === 'function') {
+        onRedraw();
+      }
+    };
+
+    if (raf) {
+      if (this._themeRafId !== null && typeof globalThis.cancelAnimationFrame === 'function') {
+        globalThis.cancelAnimationFrame(this._themeRafId);
+      }
+      this._themeRafId = raf(runDeferredRefresh);
+    } else {
+      const targetCanvas = this.options?.canvas || this.lastOptions?.canvas || null;
+      if (
+        targetCanvas &&
+        typeof targetCanvas.isConnected === 'boolean' &&
+        !targetCanvas.isConnected
+      ) {
+        return;
+      }
+      const onRedraw = this.options?.onRedraw || this.options?.redraw;
+      if (typeof onRedraw === 'function') {
+        onRedraw();
+      }
+    }
   }
 
   /**
@@ -210,6 +269,8 @@ export class ComplianceOverlayScene {
       this.lastState = state;
       this.lastStateHash = stateHash;
     }
+    this.lastReport = report;
+    this.lastOptions = options;
 
     // Filter rooms for current level
     const levelRooms = (state.rooms || []).filter((r) => (r.level || 0) === curLevel);
@@ -332,11 +393,11 @@ export class ComplianceOverlayScene {
               itemName: def.name,
               isColliding,
               fillColor: isColliding
-                ? getToken('--ktheme-critical-muted') || 'rgba(232, 64, 64, 0.25)'
-                : getToken('--ktheme-accent-muted') || 'rgba(42, 127, 255, 0.12)',
+                ? getToken('--ktheme-critical-muted')
+                : getToken('--ktheme-accent-muted'),
               borderColor: isColliding
-                ? getToken('--ktheme-critical', '#e84040')
-                : getToken('--ktheme-accent', '#2a7fff'),
+                ? getToken('--ktheme-critical')
+                : getToken('--ktheme-accent'),
               label: `${def.name} Clearance`,
             })
           );
@@ -483,9 +544,9 @@ export class ComplianceOverlayScene {
               isValid,
               color: isValid
                 ? isSelected
-                  ? getToken('--ktheme-accent', '#2a7fff')
-                  : getToken('--ktheme-border', '#444444')
-                : getToken('--ktheme-critical', '#f87171'),
+                  ? getToken('--ktheme-accent')
+                  : getToken('--ktheme-border')
+                : getToken('--ktheme-critical'),
             }
           )
         );
@@ -595,8 +656,8 @@ export class ComplianceOverlayScene {
                 targetId,
                 violations: relevantViolations,
                 message: mainMsg,
-                haloColor: '#e84040',
-                fillColor: 'rgba(232, 64, 64, 0.22)',
+                haloColor: getToken('--ktheme-critical'),
+                fillColor: getToken('--ktheme-critical-muted'),
               }
             )
           );
@@ -732,6 +793,16 @@ export class ComplianceOverlayScene {
    * Clean up resources / cached nodes.
    */
   dispose() {
+    if (this._themeRafId !== null && typeof globalThis.cancelAnimationFrame === 'function') {
+      globalThis.cancelAnimationFrame(this._themeRafId);
+      this._themeRafId = null;
+    }
+    if (this._unsubscribeTheme) {
+      this._unsubscribeTheme();
+      this._unsubscribeTheme = null;
+    }
+    this.lastReport = null;
+    this.lastOptions = null;
     this.nodes = [];
     this.nodesById.clear();
     this.invalidateCache();

@@ -77,6 +77,7 @@ import { generateBOMCSV } from './bomExporter.js';
 import { exportDXF } from './dxfExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
+import { getToken } from './kthemeTokens.js';
 import { ComplianceManager } from './complianceClient.js';
 import { SnappingBridge } from './snapping-bridge.js';
 import {
@@ -139,7 +140,15 @@ complianceManager.onReport((rep) => {
   redraw();
 });
 let hoveredViolation = null;
-const complianceScene = new ComplianceOverlayScene();
+const complianceScene = new ComplianceOverlayScene({
+  canvas,
+  onRedraw: () => {
+    if (!canvas || !ctx || (typeof canvas.isConnected === 'boolean' && !canvas.isConnected)) {
+      return;
+    }
+    redraw();
+  },
+});
 let view = { scale: 1.6, ox: 40, oy: 40 };
 let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | item{type} | wall{id} | floor{id} | roomkit{id} | furnkit{id}
 let tab = 'build';
@@ -674,7 +683,8 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  const dpr = window.devicePixelRatio || 1;
+  if (!ctx || !canvas) return;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const state = preview ? preview.next : doc;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
   const bad = new Set([
@@ -719,7 +729,7 @@ function drawOverlay(c, _state) {
     for (const id of errRooms) {
       const r = roomOf(doc, id);
       c.save();
-      c.strokeStyle = 'rgba(196,59,59,.65)';
+      c.strokeStyle = getToken('--ktheme-critical');
       c.lineWidth = 2 / view.scale;
       c.setLineDash([6 / view.scale, 4 / view.scale]);
       c.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
@@ -976,7 +986,7 @@ function renderCompliance() {
       : `<span class="chip">${errs.length} issue${errs.length === 1 ? '' : 's'}</span>`;
   el.innerHTML = `<h3>Building code</h3><div class="score">${status}<span class="note" style="margin:0">${doc.rooms.length} rooms · ${sqft.toFixed(0)} sq ft</span></div>
     <div class="btns"><button id="fix" class="primary" ${errs.some((v) => v.fixable) ? '' : 'disabled'}>Fix automatically</button></div>
-    <ul class="v">${[...errs, ...warns].map(renderViolationItem).join('') || (doc.rooms.length ? '<li style="border-color:var(--ok);cursor:default">No issues found.</li>' : '<li style="border-color:var(--muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
+    <ul class="v">${[...errs, ...warns].map(renderViolationItem).join('') || (doc.rooms.length ? '<li style="border-color:var(--ktheme-success);cursor:default">No issues found.</li>' : '<li style="border-color:var(--ktheme-text-muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
     <p class="note">Rules follow the 2021 IRC and NEC residential provisions plus marked “Practice” items. Hard rules (overlaps, room sizes, blocked doors, fixture clearances) reject the edit; everything else is auto-fixed. This is a design aid — your local authority having jurisdiction has the final say.</p>`;
   $('#fix')?.addEventListener('click', () => {
     const r = apply(() => {}, { quiet: true });

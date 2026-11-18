@@ -386,15 +386,15 @@ aside {
   border-radius: var(--radius-full);
   font-size: 12px;
   font-weight: 600;
-  background: var(--err);
+  background: var(--ktheme-critical);
   color: var(--ktheme-on-primary);
 }
 .chip.ok {
-  background: var(--ok);
+  background: var(--ktheme-success);
 }
 .chip.mid {
-  background: var(--warn);
-  color: var(--warn-ink);
+  background: var(--ktheme-warning);
+  color: var(--ktheme-on-secondary);
 }
 .score {
   display: flex;
@@ -418,8 +418,8 @@ ul.v li {
 }
 ul.v li:not(.v-item) {
   padding: 6px 8px;
-  border-left: 3px solid var(--err);
-  background: var(--bg);
+  border-left: 3px solid var(--ktheme-critical);
+  background: var(--ktheme-bg);
   border-radius: var(--radius-xs);
 }
 .v-item-btn {
@@ -428,8 +428,8 @@ ul.v li:not(.v-item) {
   text-align: left;
   padding: 6px 8px;
   border: none;
-  border-left: 3px solid var(--err);
-  background: var(--bg);
+  border-left: 3px solid var(--ktheme-critical);
+  background: var(--ktheme-bg);
   border-radius: var(--radius-xs);
   cursor: pointer;
   color: inherit;
@@ -438,25 +438,25 @@ ul.v li:not(.v-item) {
   box-sizing: border-box;
 }
 .v-item-btn.warn {
-  border-left-color: var(--warn);
+  border-left-color: var(--ktheme-warning);
 }
 .v-item-btn:hover {
-  outline: 1px solid var(--accent);
+  outline: 1px solid var(--ktheme-accent);
 }
 .v-item-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ktheme-accent);
   outline-offset: 2px;
 }
 ul.v .ref {
   display: block;
-  color: var(--muted);
+  color: var(--ktheme-text-muted);
   font-size: 11px;
 }
 ul.v .msg {
   margin: 2px 0 3px;
 }
 .note {
-  color: var(--muted);
+  color: var(--ktheme-text-muted);
   font-size: 11.5px;
   margin-top: 10px;
 }

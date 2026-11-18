@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, createRoom, addItem, addOpening } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
-import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
-import { getToken } from '../js/kthemeTokens.js';
+import { ComplianceOverlayScene, SpatialOverlayNode } from '../js/complianceOverlay.js';
+import { getToken, invalidateCache, DEFAULT_TOKENS } from '../js/kthemeTokens.js';
+import { drawComplianceScene } from '../js/render.js';
 
 test('ComplianceOverlayScene compiles spatial nodes for active compliance violations', () => {
   const state = newState();
@@ -345,4 +346,238 @@ test('Room resizes evaluate undersized dimensions and room overlap during active
   assert.ok(dimLabel);
   assert.equal(dimLabel.data.isValid, false);
   assert.ok(dimLabel.data.violations.some((v) => v.includes('70 sq ft')));
+});
+
+test('ComplianceOverlayScene subscribes to Ktheme token mutations, updates node colors dynamically, and handles unmounted canvases safely', () => {
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevRaf = globalThis.requestAnimationFrame;
+  const prevCancelRaf = globalThis.cancelAnimationFrame;
+
+  let activeTokens = {
+    '--ktheme-critical': '#dc2626',
+    '--ktheme-critical-muted': 'rgba(220, 38, 38, 0.2)',
+    '--ktheme-accent': '#4f46e5',
+    '--ktheme-accent-muted': 'rgba(79, 70, 229, 0.14)',
+  };
+
+  let rafQueue = [];
+  let nextRafId = 1;
+
+  try {
+    globalThis.document = { documentElement: {} };
+    globalThis.window = {
+      getComputedStyle: () => ({
+        getPropertyValue: (prop) => activeTokens[prop] || '',
+      }),
+    };
+    globalThis.requestAnimationFrame = (cb) => {
+      const id = nextRafId++;
+      rafQueue.push({ id, cb });
+      return id;
+    };
+    globalThis.cancelAnimationFrame = (id) => {
+      rafQueue = rafQueue.filter((item) => item.id !== id);
+    };
+
+    const flushAnimationFrame = () => {
+      const pending = rafQueue.splice(0);
+      for (const item of pending) {
+        item.cb();
+      }
+    };
+
+    invalidateCache();
+    flushAnimationFrame();
+
+    const mockCanvas = { isConnected: true };
+    let redrawCount = 0;
+    const scene = new ComplianceOverlayScene({
+      canvas: mockCanvas,
+      onRedraw: () => {
+        redrawCount++;
+      },
+    });
+
+    const state = newState();
+    const room = createRoom(state, 'bathroom', 0, 0, 120, 120);
+    const toilet = addItem(state, room, 'toilet', { x: 30, y: 30, rot: 0 });
+    const vanity = addItem(state, room, 'vanity', { x: 30, y: 45, rot: 0 });
+    const report = evaluate(state);
+
+    scene.update(state, report, {
+      curLevel: 0,
+      drag: { kind: 'item', id: vanity.id },
+      freshViolations: [{ id: 'v1', msg: 'Overlap', severity: 'error', itemId: vanity.id }],
+    });
+
+    let clearance = scene
+      .getNodesByType('fixtureClearance')
+      .find((n) => n.data.itemId === toilet.id);
+    let rejection = scene.getNodesByType('activeDragRejection')[0];
+    assert.equal(clearance.data.borderColor, '#dc2626');
+    assert.equal(clearance.data.fillColor, 'rgba(220, 38, 38, 0.2)');
+    assert.equal(rejection.data.haloColor, '#dc2626');
+    assert.equal(rejection.data.fillColor, 'rgba(220, 38, 38, 0.2)');
+
+    // Toggle theme tokens (e.g., dark theme) and invalidate multiple times rapidly
+    activeTokens = {
+      '--ktheme-critical': '#fb7185',
+      '--ktheme-critical-muted': 'rgba(251, 113, 133, 0.3)',
+      '--ktheme-accent': '#818cf8',
+      '--ktheme-accent-muted': 'rgba(129, 140, 248, 0.2)',
+    };
+    invalidateCache();
+    const firstScheduledId = scene._themeRafId;
+    assert.ok(firstScheduledId !== null, 'Scene should schedule animation frame on theme toggle');
+    invalidateCache();
+    assert.notEqual(
+      scene._themeRafId,
+      firstScheduledId,
+      'Rapid theme toggle should cancel previous pending RAF and replace it'
+    );
+
+    // Synchronous node refresh
+    clearance = scene.getNodesByType('fixtureClearance').find((n) => n.data.itemId === toilet.id);
+    rejection = scene.getNodesByType('activeDragRejection')[0];
+    assert.equal(clearance.data.borderColor, '#fb7185');
+    assert.equal(rejection.data.haloColor, '#fb7185');
+    assert.equal(rejection.data.fillColor, 'rgba(251, 113, 133, 0.3)');
+
+    // Flush animation frame when canvas is mounted: coalesced to 1 redraw despite 2 invalidations
+    flushAnimationFrame();
+    assert.equal(
+      redrawCount,
+      1,
+      'Mounted canvas should re-render once on subsequent animation frame'
+    );
+
+    // Unmount canvas and toggle theme: should safely skip redraw on unmounted canvas
+    mockCanvas.isConnected = false;
+    activeTokens = {
+      '--ktheme-critical': '#ef4444',
+      '--ktheme-critical-muted': 'rgba(239, 68, 68, 0.25)',
+      '--ktheme-accent': '#6366f1',
+      '--ktheme-accent-muted': 'rgba(99, 102, 241, 0.15)',
+    };
+    invalidateCache();
+    flushAnimationFrame();
+    assert.equal(redrawCount, 1, 'Unmounted canvas must skip redraw safely');
+
+    // Re-mount canvas before animation frame fires: re-queries updated CSS tokens on that frame
+    mockCanvas.isConnected = false;
+    invalidateCache();
+    activeTokens = {
+      '--ktheme-critical': '#e11d48',
+      '--ktheme-critical-muted': 'rgba(225, 29, 72, 0.28)',
+      '--ktheme-accent': '#4338ca',
+      '--ktheme-accent-muted': 'rgba(67, 56, 202, 0.18)',
+    };
+    mockCanvas.isConnected = true;
+    flushAnimationFrame();
+    assert.equal(redrawCount, 2, 'Re-mounted canvas redraws on subsequent animation frame');
+    assert.equal(
+      scene.getNodesByType('activeDragRejection')[0].data.haloColor,
+      '#e11d48',
+      'Animation frame re-queries latest computed CSS tokens'
+    );
+
+    // Dispose unsubscribes cleanly
+    scene.dispose();
+    invalidateCache();
+    assert.equal(scene._themeRafId, null, 'Disposed scene must not schedule theme RAFs');
+    flushAnimationFrame();
+    assert.equal(redrawCount, 2, 'Disposed scene must not invoke redraw');
+  } finally {
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.requestAnimationFrame = prevRaf;
+    globalThis.cancelAnimationFrame = prevCancelRaf;
+    invalidateCache();
+  }
+});
+
+test('drawComplianceScene resolves fallback stroke and fill styles from Ktheme tokens', () => {
+  invalidateCache();
+
+  const recordedFillStyles = [];
+  const recordedStrokeStyles = [];
+  const mockCtx = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    stroke() {
+      recordedStrokeStyles.push(this._strokeStyle);
+    },
+    fill() {
+      recordedFillStyles.push(this._fillStyle);
+    },
+    fillRect() {
+      recordedFillStyles.push(this._fillStyle);
+    },
+    strokeRect() {
+      recordedStrokeStyles.push(this._strokeStyle);
+    },
+    roundRect() {},
+    rect() {},
+    arc() {},
+    setLineDash() {},
+    fillText() {
+      recordedFillStyles.push(this._fillStyle);
+    },
+    measureText: (t) => ({ width: String(t).length * 6 }),
+    set fillStyle(v) {
+      this._fillStyle = v;
+    },
+    get fillStyle() {
+      return this._fillStyle;
+    },
+    set strokeStyle(v) {
+      this._strokeStyle = v;
+    },
+    get strokeStyle() {
+      return this._strokeStyle;
+    },
+  };
+
+  const manualScene = {
+    getNodes: () => [
+      new SpatialOverlayNode(
+        'c1',
+        'fixtureClearance',
+        { x: 0, y: 0, w: 30, h: 30 },
+        { isColliding: true }
+      ),
+      new SpatialOverlayNode(
+        'e1',
+        'egressReach',
+        { x: 10, y: 10, w: 60, h: 20, anchorX: 40, anchorY: 0 },
+        { isEgressCompliant: true, badgeText: 'Egress OK' }
+      ),
+      new SpatialOverlayNode(
+        'r1',
+        'activeDragRejection',
+        { x: 20, y: 20, w: 40, h: 40 },
+        { message: 'Blocked' }
+      ),
+    ],
+  };
+
+  drawComplianceScene(mockCtx, manualScene, { scale: 1 });
+
+  assert.ok(
+    recordedFillStyles.includes(DEFAULT_TOKENS['--ktheme-critical-muted']),
+    'Clearance and drag rejection fills use --ktheme-critical-muted fallback'
+  );
+  assert.ok(
+    recordedStrokeStyles.includes(DEFAULT_TOKENS['--ktheme-critical']),
+    'Clearance and drag rejection strokes use --ktheme-critical fallback'
+  );
+  assert.ok(
+    recordedFillStyles.includes(DEFAULT_TOKENS['--ktheme-success']),
+    'Compliant egress badge uses --ktheme-success token'
+  );
 });
