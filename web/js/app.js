@@ -5363,6 +5363,8 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
+export { renderGISSegments };
+
 function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
@@ -6853,5 +6855,3 @@ if (typeof window !== 'undefined')
     setCatalogFilters,
     resetCatalogFilters,
   };
-
-export { renderGISSegments };
