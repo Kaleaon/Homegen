@@ -173,6 +173,11 @@ fun HomegenScreen(
         },
         sheetPeekHeight = 0.dp,
     ) { innerPadding ->
+        val currentColorScheme = MaterialTheme.colorScheme
+        LaunchedEffect(currentColorScheme) {
+            surfaceManager.updateTheme(currentColorScheme)
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
