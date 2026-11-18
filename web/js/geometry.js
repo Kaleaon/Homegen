@@ -716,6 +716,46 @@ export function wallSeg(room, wall) {
 
 export const wallLength = (room, wall) => wallSeg(room, wall).len;
 
+export function wallArcLength(room, wall) {
+  if (!room) return 0;
+  const s = wallSeg(room, wall);
+  if (s.len <= 0) return 0;
+
+  const rawPts = room.points || room.corners || room.vertices;
+  const points = Array.isArray(rawPts) && rawPts.length >= 2 ? rawPts : getRoomPoints(room);
+  const n = points.length;
+  if (n === 0) return s.len;
+
+  const idx = ((resolveWallIndex(wall) % n) + n) % n;
+  const wallName = n === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
+
+  let bulge = 0;
+  if (room.bulges) {
+    if (typeof room.bulges[wall] === 'number' && room.bulges[wall] !== 0) {
+      bulge = room.bulges[wall];
+    } else if (typeof room.bulges[wallName] === 'number' && room.bulges[wallName] !== 0) {
+      bulge = room.bulges[wallName];
+    } else if (
+      Array.isArray(room.bulges) &&
+      typeof room.bulges[idx] === 'number' &&
+      room.bulges[idx] !== 0
+    ) {
+      bulge = room.bulges[idx];
+    } else if (typeof room.bulges[idx] === 'number' && room.bulges[idx] !== 0) {
+      bulge = room.bulges[idx];
+    }
+  }
+  if (!bulge && typeof points[idx]?.bulge === 'number') {
+    bulge = points[idx].bulge;
+  }
+
+  if (!Number.isFinite(bulge) || bulge === 0) return s.len;
+
+  const start = { x: s.ax, y: s.ay };
+  const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+  return getArcParameters(start, end, bulge).arcLength;
+}
+
 export function polygonOffset(pts, distance) {
   if (!pts || pts.length < 3) return pts;
   const n = pts.length;
