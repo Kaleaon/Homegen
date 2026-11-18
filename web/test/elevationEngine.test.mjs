@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   ElevationGrid,
   parseGoogleElevationJson,
@@ -10,6 +12,8 @@ import {
   computeContoursAsync,
   serializeElevationGrid,
   deserializeElevationGrid,
+  sanitizeSlopePercent,
+  sanitizeSlopeDirection,
 } from '../js/elevationEngine.js';
 import { newState, serialize, deserialize } from '../js/model.js';
 import { drawContours } from '../js/render.js';
@@ -429,4 +433,179 @@ test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', as
   const duration = performance.now() - start;
 
   assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
+});
+
+test('ElevationGrid stores targetSlopePercent and slopeDirectionDeg properties and persists via JSON', () => {
+  const defaultGrid = new ElevationGrid({ width: 3, height: 3 });
+  assert.equal(defaultGrid.targetSlopePercent, 0);
+  assert.equal(defaultGrid.slopeDirectionDeg, 0);
+
+  const gradedGrid = new ElevationGrid({
+    width: 3,
+    height: 3,
+    targetSlopePercent: 5,
+    slopeDirectionDeg: 270,
+  });
+  assert.equal(gradedGrid.targetSlopePercent, 5);
+  assert.equal(gradedGrid.slopeDirectionDeg, 270);
+
+  const json = gradedGrid.toJSON();
+  assert.equal(json.targetSlopePercent, 5);
+  assert.equal(json.slopeDirectionDeg, 270);
+
+  const restored = deserializeElevationGrid(serializeElevationGrid(gradedGrid));
+  assert.equal(restored.targetSlopePercent, 5);
+  assert.equal(restored.slopeDirectionDeg, 270);
+});
+
+test('applyGradedSlope computes accurate directional height offsets across 0°, 90°, 180°, and 270° bearings at 2% and 5% grades', () => {
+  const bounds = { minX: -50, maxX: 50, minY: -50, maxY: 50 }; // 100 x 100 site
+
+  // 0° (North, -Y): 2% grade over 100 units -> North (v=0) = +1.0, Center = 0, South (v=1) = -1.0
+  const gridNorth = new ElevationGrid({
+    width: 3,
+    height: 3,
+    data: new Float32Array(9).fill(0),
+    bounds,
+  });
+  gridNorth.applyGradedSlope({ slopePercent: 2, directionDegrees: 0, originElevation: 10 });
+  assert.ok(Math.abs(gridNorth.getElevationAt(0.5, 0) - 11.0) < 1e-5);
+  assert.ok(Math.abs(gridNorth.getElevationAt(0.5, 0.5) - 10.0) < 1e-5);
+  assert.ok(Math.abs(gridNorth.getElevationAt(0.5, 1) - 9.0) < 1e-5);
+  // Perpendicular axis (East-West along midline) remains level at 10.0
+  assert.ok(Math.abs(gridNorth.getElevationAt(0, 0.5) - 10.0) < 1e-5);
+  assert.ok(Math.abs(gridNorth.getElevationAt(1, 0.5) - 10.0) < 1e-5);
+  assert.ok(Math.abs(gridNorth.minElevation - 9.0) < 1e-5);
+  assert.ok(Math.abs(gridNorth.maxElevation - 11.0) < 1e-5);
+
+  // 90° (East, +X): 5% grade over 100 units -> East (u=1) = +2.5, Center = 0, West (u=0) = -2.5
+  const gridEast = new ElevationGrid({
+    width: 3,
+    height: 3,
+    data: new Float32Array(9).fill(0),
+    bounds,
+  });
+  gridEast.applyGradedSlope({ slopePercent: 5, directionDegrees: 90, originElevation: 0 });
+  assert.ok(Math.abs(gridEast.getElevationAt(1, 0.5) - 2.5) < 1e-5);
+  assert.ok(Math.abs(gridEast.getElevationAt(0.5, 0.5) - 0.0) < 1e-5);
+  assert.ok(Math.abs(gridEast.getElevationAt(0, 0.5) - -2.5) < 1e-5);
+  assert.ok(Math.abs(gridEast.getElevationAt(0.5, 0) - 0.0) < 1e-5);
+  assert.ok(Math.abs(gridEast.getElevationAt(0.5, 1) - 0.0) < 1e-5);
+
+  // 180° (South, +Y): 5% grade over 100 units -> South (v=1) = +2.5, North (v=0) = -2.5
+  const gridSouth = new ElevationGrid({
+    width: 3,
+    height: 3,
+    data: new Float32Array(9).fill(0),
+    bounds,
+  });
+  gridSouth.applyGradedSlope({ slopePercent: 5, directionDegrees: 180, originElevation: 0 });
+  assert.ok(Math.abs(gridSouth.getElevationAt(0.5, 1) - 2.5) < 1e-5);
+  assert.ok(Math.abs(gridSouth.getElevationAt(0.5, 0.5) - 0.0) < 1e-5);
+  assert.ok(Math.abs(gridSouth.getElevationAt(0.5, 0) - -2.5) < 1e-5);
+
+  // 270° (West, -X): 2% grade over 100 units -> West (u=0) = +1.0, East (u=1) = -1.0
+  const gridWest = new ElevationGrid({
+    width: 3,
+    height: 3,
+    data: new Float32Array(9).fill(0),
+    bounds,
+  });
+  gridWest.applyGradedSlope({ slopePercent: 2, directionDegrees: 270, originElevation: 5 });
+  assert.ok(Math.abs(gridWest.getElevationAt(0, 0.5) - 6.0) < 1e-5);
+  assert.ok(Math.abs(gridWest.getElevationAt(0.5, 0.5) - 5.0) < 1e-5);
+  assert.ok(Math.abs(gridWest.getElevationAt(1, 0.5) - 4.0) < 1e-5);
+});
+
+test('applyGradedSlope validates against negative percentages, extreme >100% values, and cleared inputs', () => {
+  assert.equal(sanitizeSlopePercent(-15), 0);
+  assert.equal(sanitizeSlopePercent('-0.5'), 0);
+  assert.equal(sanitizeSlopePercent(150), 100);
+  assert.equal(sanitizeSlopePercent('250'), 100);
+  assert.equal(sanitizeSlopePercent(Infinity), 100);
+  assert.equal(sanitizeSlopePercent(-Infinity), 0);
+  assert.equal(sanitizeSlopePercent(''), 0);
+  assert.equal(sanitizeSlopePercent('   '), 0);
+  assert.equal(sanitizeSlopePercent(null), 0);
+  assert.equal(sanitizeSlopePercent(undefined), 0);
+  assert.equal(sanitizeSlopePercent(NaN), 0);
+  assert.equal(sanitizeSlopePercent('invalid'), 0);
+
+  assert.equal(sanitizeSlopeDirection(''), 0);
+  assert.equal(sanitizeSlopeDirection(-90), 270);
+  assert.equal(sanitizeSlopeDirection(360), 0);
+  assert.equal(sanitizeSlopeDirection(450), 90);
+
+  const bounds = { minX: -50, maxX: 50, minY: -50, maxY: 50 };
+  const grid = new ElevationGrid({
+    width: 3,
+    height: 3,
+    data: new Float32Array(9).fill(10),
+    bounds,
+  });
+
+  // Negative percentage clamps to 0%
+  grid.applyGradedSlope({ slopePercent: -20, directionDegrees: 90 });
+  assert.equal(grid.targetSlopePercent, 0);
+  assert.ok(Math.abs(grid.getElevationAt(1, 0.5) - 10) < 1e-5);
+
+  // Extreme percentage (>100%) clamps to 100% (rise = 50 on +X side, -50 on -X side)
+  grid.applyGradedSlope({ slopePercent: 250, directionDegrees: 90 });
+  assert.equal(grid.targetSlopePercent, 100);
+  assert.ok(Math.abs(grid.getElevationAt(1, 0.5) - 60) < 1e-5);
+  assert.ok(Math.abs(grid.getElevationAt(0, 0.5) - -40) < 1e-5);
+
+  // Re-applying same slope is idempotent (no compounding)
+  grid.applyGradedSlope({ slopePercent: 100, directionDegrees: 90 });
+  assert.ok(Math.abs(grid.getElevationAt(1, 0.5) - 60) < 1e-5);
+
+  // Clearing input ('') falls back to 0% grade and restores original flat 10m terrain
+  grid.applyGradedSlope({ slopePercent: '', directionDegrees: '' });
+  assert.equal(grid.targetSlopePercent, 0);
+  assert.equal(grid.slopeDirectionDeg, 0);
+  assert.ok(Math.abs(grid.getElevationAt(1, 0.5) - 10) < 1e-5);
+  assert.ok(Math.abs(grid.getElevationAt(0, 0.5) - 10) < 1e-5);
+});
+
+test('applyGradedSlope remains fully compatible with computeContoursAsync and executeFoundationCut', async () => {
+  const grid = new ElevationGrid({
+    width: 11,
+    height: 11,
+    data: new Float32Array(121).fill(10),
+    bounds: { minX: -50, maxX: 50, minY: -50, maxY: 50 },
+    contourInterval: 1.0,
+  });
+
+  // Apply 5% slope East: elevations span [7.5 .. 12.5]
+  grid.applyGradedSlope({ slopePercent: 5, directionDegrees: 90 });
+  const contours = await computeContoursAsync(grid);
+  assert.ok(contours.length >= 5, 'Should generate isolines across graded slope levels');
+
+  // Execute CSG foundation pad cut at center down to 9.0
+  const pad = [
+    { x: -20, y: -20 },
+    { x: 20, y: -20 },
+    { x: 20, y: 20 },
+    { x: -20, y: 20 },
+  ];
+  const cutResult = grid.executeFoundationCut(pad, 9.0);
+  assert.ok(cutResult.mesh.vertices.length > 0);
+  assert.ok(Math.abs(grid.getElevationAt(0.5, 0.5) - 9.0) < 1e-5);
+  // Upslope East edge outside pad remains at ~12.5
+  assert.ok(Math.abs(grid.getElevationAt(1, 0.5) - 12.5) < 1e-5);
+});
+
+test('index.html #dlg-elevation exposes accessible slope grade and bearing inputs wired in app.js', () => {
+  const htmlContent = readFileSync(resolve('index.html'), 'utf8');
+  const appJsContent = readFileSync(resolve('js/app.js'), 'utf8');
+
+  assert.match(
+    htmlContent,
+    /<label for="elevation-slope-percent">[^<]+<\/label>\s*<input id="elevation-slope-percent" type="number" min="0" max="100"/
+  );
+  assert.match(
+    htmlContent,
+    /<label for="elevation-slope-direction">[^<]+<\/label>\s*<input id="elevation-slope-direction" type="number" min="0" max="360"/
+  );
+  assert.match(appJsContent, /applyGradedSlope\(/);
 });

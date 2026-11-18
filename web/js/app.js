@@ -40,7 +40,13 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
-import { parseElevationRaster, computeContoursAsync, ElevationGrid } from './elevationEngine.js';
+import {
+  parseElevationRaster,
+  computeContoursAsync,
+  ElevationGrid,
+  sanitizeSlopePercent,
+  sanitizeSlopeDirection,
+} from './elevationEngine.js';
 import {
   evaluate,
   blockingIds,
@@ -3719,9 +3725,29 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
 }
 
 $('#load')?.addEventListener('click', () => $('#file').click());
-$('#import-elevation')?.addEventListener('click', () => {
+function syncElevationDialogInputs(grid) {
+  const intervalInput = $('#elevation-contour-interval');
+  const scaleInput = $('#elevation-vertical-scale');
+  const slopeInput = $('#elevation-slope-percent');
+  const dirInput = $('#elevation-slope-direction');
+  const visInput = $('#elevation-visible');
+  if (intervalInput) intervalInput.value = String(grid?.contourInterval ?? 1.0);
+  if (scaleInput) scaleInput.value = String(grid?.verticalScale ?? 1.0);
+  if (slopeInput) slopeInput.value = String(sanitizeSlopePercent(grid?.targetSlopePercent ?? 0));
+  if (dirInput) dirInput.value = String(sanitizeSlopeDirection(grid?.slopeDirectionDeg ?? 0));
+  if (visInput) visInput.checked = grid?.visible !== false;
+}
+
+$('#import-elevation')?.addEventListener('click', (e) => {
   if (doc.elevationGrid) {
-    $('#dlg-elevation')?.showModal();
+    syncElevationDialogInputs(doc.elevationGrid);
+    const dlg = $('#dlg-elevation');
+    if (dlg) {
+      const returnFocusEl = e.currentTarget || document.activeElement;
+      dlg.showModal();
+      const cleanup = trapFocus(dlg, returnFocusEl);
+      dlg.addEventListener('close', () => cleanup(), { once: true });
+    }
   } else {
     $('#elevation-file')?.click();
   }
@@ -3771,26 +3797,53 @@ $('#elevation-file')?.addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-$('#btn-apply-elevation')?.addEventListener('click', async () => {
+export async function applyElevationSettings() {
   if (!doc.elevationGrid) return;
-  const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
-  const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
-  const visible = $('#elevation-visible')?.checked !== false;
+  const intervalEl = $('#elevation-contour-interval');
+  const scaleEl = $('#elevation-vertical-scale');
+  const slopeEl = $('#elevation-slope-percent');
+  const dirEl = $('#elevation-slope-direction');
+  const visEl = $('#elevation-visible');
+
+  const rawInterval = parseFloat(intervalEl?.value ?? '');
+  const interval = Number.isFinite(rawInterval) ? Math.max(0.1, Math.min(50, rawInterval)) : 1.0;
+  const rawScale = parseFloat(scaleEl?.value ?? '');
+  const scale = Number.isFinite(rawScale) ? Math.max(0.1, Math.min(10, rawScale)) : 1.0;
+  const slopePercent = sanitizeSlopePercent(slopeEl?.value ?? '');
+  const directionDegrees = sanitizeSlopeDirection(dirEl?.value ?? '');
+  const visible = visEl?.checked !== false;
+
+  if (intervalEl) intervalEl.value = String(interval);
+  if (scaleEl) scaleEl.value = String(scale);
+  if (slopeEl) slopeEl.value = String(slopePercent);
+  if (dirEl) dirEl.value = String(directionDegrees);
 
   doc.elevationGrid.contourInterval = interval;
   doc.elevationGrid.verticalScale = scale;
   doc.elevationGrid.visible = visible;
+  doc.elevationGrid.applyGradedSlope({
+    slopePercent,
+    directionDegrees,
+    unitScale: 0.0254,
+  });
 
   doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
+  persist();
   window.__scene3d?.update();
   redraw();
   $('#dlg-elevation')?.close();
   toast('Updated elevation terrain settings.');
+}
+
+$('#btn-apply-elevation')?.addEventListener('click', () => {
+  applyElevationSettings();
 });
 
 $('#btn-clear-elevation')?.addEventListener('click', () => {
   doc.elevationGrid = null;
   doc._cachedContours = null;
+  syncElevationDialogInputs(null);
+  persist();
   window.__scene3d?.update();
   redraw();
   $('#dlg-elevation')?.close();
@@ -5660,6 +5713,7 @@ if (typeof window !== 'undefined')
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
+    applyElevationSettings,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
