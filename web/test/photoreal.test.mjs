@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWebpDataUrl, hordeRender, HordeError, DEFAULT_RETRY_DELAYS } from '../js/photoreal.js';
+import {
+  RESOLUTION_TIERS,
+  hordeWidth,
+  isAnonymousKey,
+  resolveResolutionTier,
+  toWebpDataUrl,
+  hordeRender,
+  HordeError,
+  DEFAULT_RETRY_DELAYS,
+} from '../js/photoreal.js';
 import { defaultRateLimiter } from '../js/rateLimiter.js';
 
 function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) {
@@ -386,6 +395,94 @@ test('hordeRender abort signal cancels polling cleanly and sends delete request'
     deletedJobs.some((u) => u.includes('/generate/status/job-abort')),
     'sent DELETE request to cancel job on Horde'
   );
+});
+
+test('RESOLUTION_TIERS defines SD Free, HD Pro, and 4K Enterprise tiers with badges and 64px-aligned dimensions', () => {
+  assert.deepEqual(Object.keys(RESOLUTION_TIERS), ['sd', 'hd', '4k']);
+
+  assert.equal(RESOLUTION_TIERS.sd.plan, 'Free');
+  assert.equal(RESOLUTION_TIERS.sd.badge, 'Free');
+  assert.equal(RESOLUTION_TIERS.sd.locked, false);
+  assert.equal(RESOLUTION_TIERS.sd.width, 576);
+  assert.equal(RESOLUTION_TIERS.sd.width % 64, 0);
+  assert.equal(RESOLUTION_TIERS.sd.height % 64, 0);
+
+  assert.equal(RESOLUTION_TIERS.hd.plan, 'Pro');
+  assert.equal(RESOLUTION_TIERS.hd.badge, 'Pro 🔒');
+  assert.equal(RESOLUTION_TIERS.hd.locked, true);
+  assert.equal(RESOLUTION_TIERS.hd.width, 1024);
+  assert.equal(RESOLUTION_TIERS.hd.width % 64, 0);
+  assert.equal(RESOLUTION_TIERS.hd.height % 64, 0);
+
+  assert.equal(RESOLUTION_TIERS['4k'].plan, 'Enterprise');
+  assert.equal(RESOLUTION_TIERS['4k'].badge, 'Enterprise 🔒');
+  assert.equal(RESOLUTION_TIERS['4k'].locked, true);
+  assert.equal(RESOLUTION_TIERS['4k'].width, 2048);
+  assert.equal(RESOLUTION_TIERS['4k'].width % 64, 0);
+  assert.equal(RESOLUTION_TIERS['4k'].height % 64, 0);
+});
+
+test('hordeWidth and resolveResolutionTier enforce free SD fallback for anonymous keys and unlock HD/4K for paid keys', () => {
+  assert.equal(isAnonymousKey(''), true);
+  assert.equal(isAnonymousKey('0000000000'), true);
+  assert.equal(isAnonymousKey('  0000000000  '), true);
+  assert.equal(isAnonymousKey('paid-horde-key-123'), false);
+
+  // Default & anonymous fallback behavior
+  assert.equal(hordeWidth(), 576);
+  assert.equal(hordeWidth('0000000000'), 576);
+  assert.equal(hordeWidth('0000000000', 'sd'), 576);
+  assert.equal(hordeWidth('0000000000', 'hd'), 576);
+  assert.equal(hordeWidth('0000000000', '4k'), 576);
+  assert.equal(hordeWidth('', '4k'), 576);
+
+  const anonHd = resolveResolutionTier('hd', '0000000000');
+  assert.equal(anonHd.requested.id, 'hd');
+  assert.equal(anonHd.effective.id, 'sd');
+  assert.equal(anonHd.downgraded, true);
+
+  // Paid / registered key unlocks HD and 4K
+  assert.equal(hordeWidth('paid-horde-key-123'), 576);
+  assert.equal(hordeWidth('paid-horde-key-123', 'sd'), 576);
+  assert.equal(hordeWidth('paid-horde-key-123', 'hd'), 1024);
+  assert.equal(hordeWidth('paid-horde-key-123', '4k'), 2048);
+  assert.equal(hordeWidth('paid-horde-key-123', 'unknown-tier'), 576);
+
+  const paid4k = resolveResolutionTier('4k', 'paid-horde-key-123');
+  assert.equal(paid4k.requested.id, '4k');
+  assert.equal(paid4k.effective.id, '4k');
+  assert.equal(paid4k.downgraded, false);
+});
+
+test('hordeRender derives request dimensions from selected tier width when depthWebp.size is omitted', async () => {
+  let submittedBody = null;
+  const fakeFetch = async (url, opts = {}) => {
+    const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+    if (url.endsWith('/generate/async')) {
+      submittedBody = JSON.parse(opts.body);
+      return ok({ id: 'job-hd-tier' });
+    }
+    if (url.includes('/generate/check/'))
+      return ok({ done: true, queue_position: 0, wait_time: 0 });
+    if (url.includes('/generate/status/')) {
+      return ok({ generations: [{ img: 'https://example.test/hd.webp', censored: false }] });
+    }
+    return ok({});
+  };
+
+  const out = await hordeRender({
+    prompt: 'modern kitchen',
+    depthWebp: { url: 'data:image/webp;base64,QUJD' },
+    width: RESOLUTION_TIERS.hd.width,
+    apikey: 'paid-pro-key',
+    fetchImpl: fakeFetch,
+    pollIntervalMs: 1,
+  });
+
+  assert.equal(out.url, 'https://example.test/hd.webp');
+  assert.equal(submittedBody.params.width, 1024);
+  assert.equal(submittedBody.params.height, 768);
+  assert.equal(submittedBody.params.steps, 28);
 });
 
 test('hordeRender executes initial check immediately without sleeping pollIntervalMs', async () => {

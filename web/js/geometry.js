@@ -12,7 +12,7 @@ import {
   parseCurveHudInput,
 } from '../../designer3d/tools/math2d.mjs';
 import proj4 from '#proj4';
-import { registerAllEPSG, isRegisteredEPSG } from './epsgRegistry.js';
+import { registerAllEPSG, isRegisteredEPSG, normalizeCode } from './epsgRegistry.js';
 
 export {
   closestPointOnArc,
@@ -32,26 +32,30 @@ if (proj4 && proj4.defs) {
   registerAllEPSG(proj4);
 }
 
-function safeProj4(sDef, tDef, pt) {
+function tryProj4(sDef, tDef, pt) {
   try {
     if (sDef.startsWith('EPSG:') && !isRegisteredEPSG(sDef)) {
       console.warn(`[Geometry] Unsupported EPSG projection code "${sDef}". Falling back safely.`);
-      return [pt[0], pt[1]];
+      return null;
     }
     if (tDef.startsWith('EPSG:') && !isRegisteredEPSG(tDef)) {
       console.warn(`[Geometry] Unsupported EPSG projection code "${tDef}". Falling back safely.`);
-      return [pt[0], pt[1]];
+      return null;
     }
     const res = proj4(sDef, tDef, pt);
     if (!res || isNaN(res[0]) || isNaN(res[1])) {
       console.warn(`[Geometry] Reprojection returned invalid coordinates for ${sDef} -> ${tDef}`);
-      return [pt[0], pt[1]];
+      return null;
     }
     return res;
   } catch (err) {
     console.warn(`[Geometry] Safe reprojection caught error (${sDef} -> ${tDef}): ${err.message}`);
-    return [pt[0], pt[1]];
+    return null;
   }
+}
+
+function safeProj4(sDef, tDef, pt) {
+  return tryProj4(sDef, tDef, pt) || [pt[0], pt[1]];
 }
 
 class SpatialCache {
@@ -62,9 +66,17 @@ class SpatialCache {
 
   getKey(coords, sourceCRS, targetCRS) {
     const sStr =
-      typeof sourceCRS === 'string' ? sourceCRS : sourceCRS?.epsg || JSON.stringify(sourceCRS);
+      typeof sourceCRS === 'string'
+        ? resolveCRSDef(sourceCRS)
+        : sourceCRS?.epsg
+          ? resolveCRSDef(sourceCRS.epsg)
+          : JSON.stringify(sourceCRS);
     const tStr =
-      typeof targetCRS === 'string' ? targetCRS : targetCRS?.epsg || JSON.stringify(targetCRS);
+      typeof targetCRS === 'string'
+        ? resolveCRSDef(targetCRS)
+        : targetCRS?.epsg
+          ? resolveCRSDef(targetCRS.epsg)
+          : JSON.stringify(targetCRS);
     if (typeof coords === 'number') return `${coords}:${sStr}:${tStr}`;
     if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === 'number') {
       return `${coords[0].toFixed(6)},${coords[1].toFixed(6)}:${sStr}:${tStr}`;
@@ -100,12 +112,11 @@ function resolveCRSDef(crs) {
   if (typeof crs === 'string') {
     const upper = crs.trim().toUpperCase();
     if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') return 'PLAN';
-    if (/^\d+$/.test(upper)) return `EPSG:${upper}`;
-    return crs;
+    return normalizeCode(crs) || 'EPSG:4326';
   }
   if (typeof crs === 'object') {
     if (crs.proj4) return crs.proj4;
-    if (crs.epsg) return crs.epsg;
+    if (crs.epsg) return resolveCRSDef(crs.epsg);
   }
   return 'EPSG:4326';
 }
@@ -208,22 +219,24 @@ export function reproject(coords, sourceCRS = 'EPSG:4326', targetCRS = 'PLAN') {
       if (tDef === 'EPSG:3857') {
         resPt = [xMeters, yMeters];
       } else {
-        resPt = safeProj4('EPSG:3857', tDef, [xMeters, yMeters]);
+        resPt = tryProj4('EPSG:3857', tDef, [xMeters, yMeters]) || [coords[0], coords[1]];
       }
     } else if (tDef === 'PLAN') {
       // Source CRS to Plan inches relative to origin
-      let srcMeters;
-      if (sDef === 'EPSG:3857') {
-        srcMeters = [coords[0], coords[1]];
+      const srcMeters =
+        sDef === 'EPSG:3857'
+          ? [coords[0], coords[1]]
+          : tryProj4(sDef, 'EPSG:3857', [coords[0], coords[1]]);
+      if (!srcMeters) {
+        resPt = [coords[0], coords[1]];
       } else {
-        srcMeters = safeProj4(sDef, 'EPSG:3857', [coords[0], coords[1]]);
-      }
-      const originLonLat = getPlanOrigin(targetCRS);
-      const originMeters = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
+        const originLonLat = getPlanOrigin(targetCRS);
+        const originMeters = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
 
-      const xInches = (srcMeters[0] - originMeters[0]) / INCH_TO_METER;
-      const yInches = -(srcMeters[1] - originMeters[1]) / INCH_TO_METER;
-      resPt = [xInches, yInches];
+        const xInches = (srcMeters[0] - originMeters[0]) / INCH_TO_METER;
+        const yInches = -(srcMeters[1] - originMeters[1]) / INCH_TO_METER;
+        resPt = [xInches, yInches];
+      }
     } else {
       // Standard CRS to CRS conversion via proj4
       resPt = safeProj4(sDef, tDef, [coords[0], coords[1]]);
@@ -545,16 +558,79 @@ export function getRoomBoundingBox(points) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-export function polygonArea(points) {
+export function getBounds(pts) {
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  if (Array.isArray(pts)) {
+    for (const p of pts) {
+      if (!p) continue;
+      const x = p.x ?? p[0];
+      const y = p.y ?? p[1];
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  } else if (pts && typeof pts === 'object') {
+    minX = pts.x ?? pts.minX ?? 0;
+    minY = pts.y ?? pts.minY ?? 0;
+    maxX = pts.w !== undefined ? minX + pts.w : (pts.maxX ?? minX);
+    maxY = pts.h !== undefined ? minY + pts.h : (pts.maxY ?? minY);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export function boundsOverlap(a, b, eps = 0.001) {
+  if (!a || !b) return false;
+  return (
+    a.minX < b.maxX + eps && a.maxX > b.minX - eps && a.minY < b.maxY + eps && a.maxY > b.minY - eps
+  );
+}
+
+export function lineIntersection(a1, a2, b1, b2) {
+  if (!a1 || !a2 || !b1 || !b2) return null;
+  const a1x = a1.x ?? a1[0];
+  const a1y = a1.y ?? a1[1];
+  const a2x = a2.x ?? a2[0];
+  const a2y = a2.y ?? a2[1];
+  const b1x = b1.x ?? b1[0];
+  const b1y = b1.y ?? b1[1];
+  const b2x = b2.x ?? b2[0];
+  const b2y = b2.y ?? b2[1];
+
+  const dx1 = a2x - a1x;
+  const dy1 = a2y - a1y;
+  const dx2 = b2x - b1x;
+  const dy2 = b2y - b1y;
+
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-9) return null;
+
+  const t1 = ((b1x - a1x) * dy2 - (b1y - a1y) * dx2) / denom;
+  return {
+    x: a1x + t1 * dx1,
+    y: a1y + t1 * dy1,
+  };
+}
+
+export function polygonArea(points, signed = false) {
   if (!points || points.length < 3) return 0;
   let area = 0;
   const n = points.length;
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    area += points[i].x * points[j].y;
-    area -= points[j].x * points[i].y;
+    const pi = points[i];
+    const pj = points[j];
+    const xi = pi.x ?? pi[0];
+    const yi = pi.y ?? pi[1];
+    const xj = pj.x ?? pj[0];
+    const yj = pj.y ?? pj[1];
+    area += xi * yj - xj * yi;
   }
-  return Math.abs(area) / 2;
+  const signedArea = area / 2 || 0;
+  return signed ? signedArea : Math.abs(signedArea);
 }
 
 export function polygonPerimeter(points) {
@@ -746,6 +822,46 @@ export function getWallEdgeSegment(room, wall) {
   const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
   const bulge = getWallBulge(room, wall);
   return { start, end, chordLen, bulge, index: idx, wall: wallKey };
+}
+
+export function wallArcLength(room, wall) {
+  if (!room) return 0;
+  const s = wallSeg(room, wall);
+  if (s.len <= 0) return 0;
+
+  const rawPts = room.points || room.corners || room.vertices;
+  const points = Array.isArray(rawPts) && rawPts.length >= 2 ? rawPts : getRoomPoints(room);
+  const n = points.length;
+  if (n === 0) return s.len;
+
+  const idx = ((resolveWallIndex(wall) % n) + n) % n;
+  const wallName = n === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
+
+  let bulge = 0;
+  if (room.bulges) {
+    if (typeof room.bulges[wall] === 'number' && room.bulges[wall] !== 0) {
+      bulge = room.bulges[wall];
+    } else if (typeof room.bulges[wallName] === 'number' && room.bulges[wallName] !== 0) {
+      bulge = room.bulges[wallName];
+    } else if (
+      Array.isArray(room.bulges) &&
+      typeof room.bulges[idx] === 'number' &&
+      room.bulges[idx] !== 0
+    ) {
+      bulge = room.bulges[idx];
+    } else if (typeof room.bulges[idx] === 'number' && room.bulges[idx] !== 0) {
+      bulge = room.bulges[idx];
+    }
+  }
+  if (!bulge && typeof points[idx]?.bulge === 'number') {
+    bulge = points[idx].bulge;
+  }
+
+  if (!Number.isFinite(bulge) || bulge === 0) return s.len;
+
+  const start = { x: s.ax, y: s.ay };
+  const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+  return getArcParameters(start, end, bulge).arcLength;
 }
 
 export function polygonOffset(pts, distance) {
@@ -966,14 +1082,17 @@ export const rectInside = (inner, outer, eps = 0.01) =>
   inner.y + inner.h <= outer.y + outer.h + eps;
 
 export function pointInPolygon(p, polygon) {
+  if (!p || !polygon || polygon.length < 3) return false;
   let inside = false;
+  const px = p.x ?? p[0];
+  const py = p.y ?? p[1];
   const n = polygon.length;
   for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = polygon[i].x,
-      yi = polygon[i].y;
-    const xj = polygon[j].x,
-      yj = polygon[j].y;
-    const intersect = yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi;
+    const xi = polygon[i].x ?? polygon[i][0];
+    const yi = polygon[i].y ?? polygon[i][1];
+    const xj = polygon[j].x ?? polygon[j][0];
+    const yj = polygon[j].y ?? polygon[j][1];
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
   return inside;
