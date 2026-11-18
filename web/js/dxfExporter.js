@@ -19,15 +19,13 @@ import { computeMarchingSquares } from './elevationEngine.js';
 function stitchSegmentsToPolylines(lines) {
   if (!lines || lines.length === 0) return [];
   const n = lines.length;
-  const TOL_SQ = 1e-8;
-  const INV_CELL = 1e4;
   const used = new Uint8Array(n);
-  const grid = new Map();
+  const INV_EPS = 1e4;
 
-  const addEndpoint = (x, y, entry) => {
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    const gx = Math.floor(x * INV_CELL);
-    const gy = Math.floor(y * INV_CELL);
+  const grid = new Map();
+  const addEndpoint = (x, y, idx) => {
+    const gx = Math.floor(x * INV_EPS);
+    const gy = Math.floor(y * INV_EPS);
     let col = grid.get(gx);
     if (!col) {
       col = new Map();
@@ -38,99 +36,96 @@ function stitchSegmentsToPolylines(lines) {
       bucket = [];
       col.set(gy, bucket);
     }
-    bucket.push(entry);
+    if (bucket[bucket.length - 1] !== idx) {
+      bucket.push(idx);
+    }
   };
 
   for (let i = 0; i < n; i++) {
-    const seg = lines[i];
-    addEndpoint(seg.x1, seg.y1, i * 2);
-    addEndpoint(seg.x2, seg.y2, i * 2 + 1);
+    const l = lines[i];
+    addEndpoint(l.x1, l.y1, i);
+    addEndpoint(l.x2, l.y2, i);
   }
 
-  const claimConnectedPoint = (px, py) => {
-    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
-    const gx = Math.floor(px * INV_CELL);
-    const gy = Math.floor(py * INV_CELL);
-    let bestEntry = Infinity;
-    for (let ox = -1; ox <= 1; ox++) {
-      const col = grid.get(gx + ox);
+  const findLowestMatch = (px, py) => {
+    const gx = Math.floor(px * INV_EPS);
+    const gy = Math.floor(py * INV_EPS);
+    let bestIdx = -1;
+    for (let dx = -1; dx <= 1; dx++) {
+      const col = grid.get(gx + dx);
       if (!col) continue;
-      for (let oy = -1; oy <= 1; oy++) {
-        const bucket = col.get(gy + oy);
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = col.get(gy + dy);
         if (!bucket) continue;
-        for (let k = 0; k < bucket.length; k++) {
-          const entry = bucket[k];
-          if (entry >= bestEntry) break;
-          const segIdx = Math.floor(entry / 2);
-          if (used[segIdx]) continue;
-          const seg = lines[segIdx];
-          const isEnd2 = entry % 2 === 1;
-          const ex = isEnd2 ? seg.x2 : seg.x1;
-          const ey = isEnd2 ? seg.y2 : seg.y1;
-          const dx = px - ex;
-          const dy = py - ey;
-          if (dx * dx + dy * dy < TOL_SQ) {
-            bestEntry = entry;
+        for (let b = 0; b < bucket.length; b++) {
+          const idx = bucket[b];
+          if (used[idx]) continue;
+          if (bestIdx !== -1 && idx >= bestIdx) break;
+          const seg = lines[idx];
+          if (
+            Math.hypot(px - seg.x1, py - seg.y1) < 1e-4 ||
+            Math.hypot(px - seg.x2, py - seg.y2) < 1e-4
+          ) {
+            bestIdx = idx;
             break;
           }
         }
       }
     }
-    if (bestEntry === Infinity) return null;
-    const bestSegIdx = Math.floor(bestEntry / 2);
-    used[bestSegIdx] = 1;
-    const bestSeg = lines[bestSegIdx];
-    return bestEntry % 2 === 1
-      ? { x: bestSeg.x1, y: bestSeg.y1 }
-      : { x: bestSeg.x2, y: bestSeg.y2 };
+    return bestIdx;
   };
 
   const polylines = [];
-  for (let startIdx = n - 1; startIdx >= 0; startIdx--) {
-    if (used[startIdx]) continue;
-    used[startIdx] = 1;
-    const first = lines[startIdx];
+  for (let seedIdx = n - 1; seedIdx >= 0; seedIdx--) {
+    if (used[seedIdx]) continue;
+    used[seedIdx] = 1;
+    const first = lines[seedIdx];
+    const headPts = [];
+    const tailPts = [
+      { x: first.x1, y: first.y1 },
+      { x: first.x2, y: first.y2 },
+    ];
 
-    const forward = [];
-    let tx = first.x2;
-    let ty = first.y2;
     for (;;) {
-      const nextPt = claimConnectedPoint(tx, ty);
-      if (!nextPt) break;
-      forward.push(nextPt);
-      tx = nextPt.x;
-      ty = nextPt.y;
+      const head = headPts.length > 0 ? headPts[headPts.length - 1] : tailPts[0];
+      const tail = tailPts[tailPts.length - 1];
+
+      const tailIdx = findLowestMatch(tail.x, tail.y);
+      const headIdx = findLowestMatch(head.x, head.y);
+      if (tailIdx === -1 && headIdx === -1) break;
+
+      if (tailIdx !== -1 && (headIdx === -1 || tailIdx <= headIdx)) {
+        const seg = lines[tailIdx];
+        used[tailIdx] = 1;
+        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
+          tailPts.push({ x: seg.x2, y: seg.y2 });
+        } else {
+          tailPts.push({ x: seg.x1, y: seg.y1 });
+        }
+      } else {
+        const seg = lines[headIdx];
+        used[headIdx] = 1;
+        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
+          headPts.push({ x: seg.x1, y: seg.y1 });
+        } else {
+          headPts.push({ x: seg.x2, y: seg.y2 });
+        }
+      }
     }
 
-    const backward = [];
-    let hx = first.x1;
-    let hy = first.y1;
-    for (;;) {
-      const prevPt = claimConnectedPoint(hx, hy);
-      if (!prevPt) break;
-      backward.push(prevPt);
-      hx = prevPt.x;
-      hy = prevPt.y;
-    }
-
-    const pts = new Array(backward.length + 2 + forward.length);
-    let pIdx = 0;
-    for (let b = backward.length - 1; b >= 0; b--) {
-      pts[pIdx++] = backward[b];
-    }
-    pts[pIdx++] = { x: first.x1, y: first.y1 };
-    pts[pIdx++] = { x: first.x2, y: first.y2 };
-    for (let f = 0; f < forward.length; f++) {
-      pts[pIdx++] = forward[f];
+    let pts;
+    if (headPts.length > 0) {
+      headPts.reverse();
+      pts = headPts.concat(tailPts);
+    } else {
+      pts = tailPts;
     }
 
     let isClosed = false;
     if (pts.length > 2) {
       const head = pts[0];
       const tail = pts[pts.length - 1];
-      const dx = head.x - tail.x;
-      const dy = head.y - tail.y;
-      if (dx * dx + dy * dy < TOL_SQ) {
+      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
         isClosed = true;
         pts.pop();
       }

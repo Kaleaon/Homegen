@@ -5,11 +5,27 @@ import {
   getArcParameters,
   pointOnArc,
   tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
 } from '../../designer3d/tools/math2d.mjs';
 import proj4 from '#proj4';
 import { registerAllEPSG, isRegisteredEPSG, normalizeCode } from './epsgRegistry.js';
 
-export { closestPointOnArc, arcPolygonEdges, getArcParameters, pointOnArc, tessellateArc };
+export {
+  closestPointOnArc,
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
+};
 
 // Register pre-compiled EPSG projection definitions
 if (proj4 && proj4.defs) {
@@ -51,8 +67,6 @@ function tryProj4(sDef, tDef, pt) {
 function safeProj4(sDef, tDef, pt) {
   return tryProj4(sDef, tDef, pt) || [pt[0], pt[1]];
 }
-
-const crsDefCache = new Map();
 
 class SpatialCache {
   constructor(maxSize = 2000) {
@@ -105,18 +119,23 @@ class SpatialCache {
 
 export const reprojectionCache = new SpatialCache();
 
+const crsDefCache = new Map();
+
 function resolveCRSDef(crs) {
   if (!crs) return 'EPSG:4326';
   if (typeof crs === 'string') {
-    let cached = crsDefCache.get(crs);
-    if (cached !== undefined) return cached;
+    const hit = crsDefCache.get(crs);
+    if (hit !== undefined) return hit;
     const upper = crs.trim().toUpperCase();
-    cached =
+    const resolved =
       upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES'
         ? 'PLAN'
         : normalizeCode(crs) || 'EPSG:4326';
-    if (crsDefCache.size < 256) crsDefCache.set(crs, cached);
-    return cached;
+    if (crsDefCache.size >= 256) {
+      crsDefCache.delete(crsDefCache.keys().next().value);
+    }
+    crsDefCache.set(crs, resolved);
+    return resolved;
   }
   if (typeof crs === 'object') {
     if (crs.proj4) return crs.proj4;
@@ -799,6 +818,35 @@ export function wallSeg(room, wall) {
 
 export const wallLength = (room, wall) => wallSeg(room, wall).len;
 
+export function getWallBulge(room, wall) {
+  if (!room) return 0;
+  const pts = getRoomPoints(room);
+  const idx = resolveWallIndex(wall) % pts.length;
+  const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
+  if (room.bulges) {
+    if (typeof room.bulges[wall] === 'number') return room.bulges[wall];
+    if (typeof room.bulges[wallKey] === 'number') return room.bulges[wallKey];
+    if (Array.isArray(room.bulges) && typeof room.bulges[idx] === 'number') return room.bulges[idx];
+    if (typeof room.bulges[idx] === 'number') return room.bulges[idx];
+  }
+  const rawPts = room.points || room.corners || room.vertices;
+  if (Array.isArray(rawPts) && typeof rawPts[idx]?.bulge === 'number') {
+    return rawPts[idx].bulge;
+  }
+  return 0;
+}
+
+export function getWallEdgeSegment(room, wall) {
+  const pts = getRoomPoints(room);
+  const idx = resolveWallIndex(wall) % pts.length;
+  const start = pts[idx];
+  const end = pts[(idx + 1) % pts.length];
+  const chordLen = Math.hypot(end.x - start.x, end.y - start.y);
+  const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
+  const bulge = getWallBulge(room, wall);
+  return { start, end, chordLen, bulge, index: idx, wall: wallKey };
+}
+
 export function wallArcLength(room, wall) {
   if (!room) return 0;
   const s = wallSeg(room, wall);
@@ -1257,15 +1305,10 @@ export function extractRoomEdges(rooms) {
     } else {
       const roomPts = getRoomPoints(r);
       for (let i = 0; i < roomPts.length; i++) {
-        const s = wallSeg(r, i);
-        const start = { x: s.ax, y: s.ay };
-        const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+        const start = roomPts[i];
+        const end = roomPts[(i + 1) % roomPts.length];
         const wall = roomPts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
-        let bulge = 0;
-        if (r.bulges) {
-          if (typeof r.bulges[wall] === 'number') bulge = r.bulges[wall];
-          else if (Array.isArray(r.bulges) && typeof r.bulges[i] === 'number') bulge = r.bulges[i];
-        }
+        const bulge = getWallBulge(r, i);
         edges.push({ start, end, bulge, index: index++, roomId: r.id, wall, edgeIndex: i });
       }
     }

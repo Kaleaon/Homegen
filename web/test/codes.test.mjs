@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as m from '../js/model.js';
 import * as c from '../js/codes.js';
-import { ROOM_KITS, FURNITURE_KITS } from '../js/catalog.js';
+import { ROOM_KITS, FURNITURE_KITS, OPENING_BY_ID, openingMetrics } from '../js/catalog.js';
 
 const rules = (s) => c.evaluate(s).violations.map((v) => v.rule);
 
@@ -584,6 +584,191 @@ test('daylight calculation validates egress sill height against EGRESS.maxSill a
   const d2 = c.daylight(s, room);
   assert.equal(d2.egress, true);
   assert.equal(d2.maxSillOk, true);
+});
+
+test('openingMetrics deducts outer frame, meeting rail, and mullion profile loss across window catalog definitions', () => {
+  // Picture (fixed) 48x48: 1x1 pane, outer frame fw=1.6" only -> 44.8 * 44.8 = 2007.04 sq in
+  const pic = openingMetrics(OPENING_BY_ID.win_picture_48x48);
+  assert.ok(Math.abs(pic.glaze - 2007.04) < 1e-6);
+  assert.equal(pic.operable, 0);
+  assert.equal(pic.clearW, 0);
+  assert.equal(pic.clearH, 0);
+
+  // Casement 30x48: 2x2 mullions (mw=0.75"), no meeting rail -> inner 26.8x44.8 = 1200.64 - 53.1375 = 1147.5025 sq in
+  const casement = openingMetrics(OPENING_BY_ID.win_casement_30x48);
+  assert.ok(Math.abs(casement.glaze - 1147.5025) < 1e-6);
+  assert.equal(casement.clearW, 26);
+  assert.equal(casement.clearH, 44);
+  assert.equal(casement.operable, 26 * 44);
+
+  // Double-hung 30x48: 2x2 mullions + horizontal meeting rail (26.8 * 1.6 = 42.88) -> 1147.5025 - 42.88 = 1104.6225 sq in
+  const hung30 = openingMetrics(OPENING_BY_ID.win_hung_30x48);
+  assert.ok(Math.abs(hung30.glaze - 1104.6225) < 1e-6);
+  assert.equal(hung30.clearW, 27);
+  assert.equal(hung30.clearH, 22.5);
+  assert.equal(hung30.operable, 27 * 22.5);
+
+  // Double-hung 36x60: 2x3 mullions + horizontal meeting rail (32.8 * 1.6 = 52.48) -> 1863.04 - 52.48 - 90.675 = 1719.885 sq in
+  const hung36 = openingMetrics(OPENING_BY_ID.win_hung_36x60);
+  assert.ok(Math.abs(hung36.glaze - 1719.885) < 1e-6);
+
+  // Slider 60x36: 3x2 mullions + vertical meeting rail (32.8 * 1.6 = 52.48) -> 1863.04 - 52.48 - 90.675 = 1719.885 sq in
+  const slider60 = openingMetrics(OPENING_BY_ID.win_slider_60x36);
+  assert.ok(Math.abs(slider60.glaze - 1719.885) < 1e-6);
+  assert.equal(slider60.clearW, 28);
+  assert.equal(slider60.clearH, 32);
+
+  // Bath slider 36x24: 2x1 mullions + vertical meeting rail (20.8 * 1.6 = 33.28) -> 682.24 - 33.28 - 15.6 = 633.36 sq in
+  const bathSlider = openingMetrics(OPENING_BY_ID.win_bath_slider_36x24);
+  assert.ok(Math.abs(bathSlider.glaze - 633.36) < 1e-6);
+});
+
+test('openingMetrics handles small dimensions, missing style/mullion defaults, and door glazing compatibility', () => {
+  // Small window smaller than outer frame width clamps to 0
+  assert.equal(openingMetrics({ kind: 'window', w: 2, h: 2, style: 'hung' }).glaze, 0);
+  // Small window where meeting rail + mullions exceed inner area clamps to 0
+  assert.equal(
+    openingMetrics({ kind: 'window', w: 4, h: 4, style: 'hung', mullions: { cols: 3, rows: 3 } })
+      .glaze,
+    0
+  );
+
+  // Missing mullions and style falls back to single-pane (1 col, 1 row) outer-frame-deducted area
+  const custom = openingMetrics({ kind: 'window', w: 23.2, h: 33.2 });
+  // innerW = 20, innerH = 30 -> 600 sq in
+  assert.ok(Math.abs(custom.glaze - 600) < 1e-6);
+  assert.equal(custom.operable, 0);
+
+  // Doors retain 0.8 net factor model for glass doors and 0 for solid doors
+  const patio = openingMetrics(OPENING_BY_ID.door_patio_slider);
+  assert.equal(patio.glaze, 72 * 80 * 0.8);
+  const solidDoor = openingMetrics(OPENING_BY_ID.door_entry_36);
+  assert.equal(solidDoor.glaze, 0);
+});
+
+test('IRC R303.1 daylight check flags rooms near 8% threshold when frame loss drops net glazing below requirement', () => {
+  const s = m.newState();
+  // Outer 150 x 126 -> interior 145.5 x 121.5 = 17,678.25 sq in (122.77 sq ft)
+  // Required 8% glazing = 1,414.26 sq in (9.82 sq ft).
+  // A single 30x48 double-hung window has 1,440 sq in (10.0 sq ft) gross, which would falsely pass,
+  // but only 1,104.6225 sq in (7.67 sq ft) net glazed area after frame, rail, and mullion deductions.
+  const room = m.createRoom(s, 'living', 0, 0, 150, 126);
+  m.addOpening(s, room, 'win_hung_30x48', 'N', 48);
+
+  const dl = c.daylight(s, room);
+  assert.ok(30 * 48 >= dl.needGlaze, 'gross window area exceeds 8% floor area requirement');
+  assert.ok(dl.glaze < dl.needGlaze, 'net glazed area after frame loss is below 8% requirement');
+
+  const rep = c.evaluate(s);
+  const lightViolation = rep.violations.find((v) => v.rule === 'light' && v.roomId === room.id);
+  assert.ok(lightViolation, 'IRC R303.1 light violation must be reported');
+  assert.equal(lightViolation.ref, 'IRC R303.1');
+});
+
+test('outletSegments uses precomputed wallIntervals without recalculating wall keys or doors', () => {
+  const s = m.newState();
+  const room = m.createRoom(s, 'bedroom', 0, 0, 180, 144);
+  m.addOpening(s, room, 'door_entry_36', 'S', 60);
+  m.addItem(s, room, 'outlet', { wall: 'N', offset: 48 });
+  m.addItem(s, room, 'outlet', { wall: 'N', offset: 132 });
+
+  const precomputed = c.computeWallIntervals(s, room);
+  const segsDefault = c.outletSegments(s, room);
+  const segsPrecomputed = c.outletSegments(s, room, precomputed);
+  assert.deepEqual(segsPrecomputed, segsDefault);
+
+  // Passing null state when wallIntervals is provided proves wallOpenings(state, ...) is skipped
+  const segsWithoutState = c.outletSegments(null, room, precomputed);
+  assert.deepEqual(segsWithoutState, segsDefault);
+});
+
+test('autoComply with precomputed wall intervals places outlets in rooms without doors', () => {
+  const s = m.newState();
+  s.levels = 2;
+  // Upper-level habitable room has no exterior door added on level 1 and no neighbors -> zero doors
+  const room = m.createRoom(s, 'bedroom', 0, 0, 144, 144, { level: 1 });
+
+  c.autoComply(s);
+  const updated = s.rooms.find((r) => r.id === room.id);
+  assert.equal(
+    updated.openings.filter((o) => o.kind === 'door').length,
+    0,
+    'upper isolated room stays without doors'
+  );
+
+  const segs = c.outletSegments(s, updated);
+  assert.equal(segs.length, 4, 'all four unbroken walls require coverage');
+  assert.ok(
+    segs.every((seg) => seg.covered),
+    'every wall segment is covered by placed outlets'
+  );
+  const outletViolations = c
+    .evaluate(s)
+    .violations.filter((v) => v.rule === 'outlets' && v.roomId === room.id);
+  assert.equal(outletViolations.length, 0);
+});
+
+test('autoComply handles rooms with wall-spanning doors leaving < 24 in wall remnants', () => {
+  const s = m.newState();
+  // 96" wide x 144" deep office; place two 36" entry doors on N wall leaving < 24" segments:
+  // Wall N usable range is [3, 93]. Doors at [6, 42] and [54, 90] leave [3, 6], [42, 54], [90, 93] (all < 24").
+  const room = m.createRoom(s, 'office', 0, 0, 96, 144);
+  m.addOpening(s, room, 'door_entry_36', 'N', 6);
+  m.addOpening(s, room, 'door_entry_36', 'N', 54);
+
+  const intervals = c.computeWallIntervals(s, room);
+  const northIntervals = intervals.find((entry) => entry.wall === 'N');
+  assert.ok(
+    northIntervals.intervals.every(([a, b]) => b - a < 24),
+    'north wall has no >= 24 in unbroken space'
+  );
+
+  c.autoComply(s);
+  const updated = s.rooms.find((r) => r.id === room.id);
+  const outletsOnNorth = updated.items.filter((i) => i.wall === 'N' && /outlet/.test(i.type));
+  assert.equal(outletsOnNorth.length, 0, 'no outlet placed on door-spanned north wall');
+
+  for (const wall of ['E', 'S', 'W']) {
+    assert.ok(
+      updated.items.some((i) => i.wall === wall && i.type === 'outlet'),
+      `expected outlet on ${wall} wall`
+    );
+  }
+  const roomErrors = c
+    .evaluate(s)
+    .violations.filter((v) => v.roomId === room.id && v.severity === 'error');
+  assert.equal(roomErrors.length, 0);
+});
+
+test('autoComply places multiple outlets across distinct long walls and GFCI outlets in laundry', () => {
+  const s = m.newState();
+  // Large 320" x 280" living room needs multiple outlets per wall (> 144" each) across all 4 walls
+  const living = m.createRoom(s, 'living', 0, 0, 320, 280);
+  // Adjacent 160" x 120" laundry room requires GFCI outlets across distinct walls
+  const laundry = m.createRoom(s, 'laundry', 320, 0, 160, 120);
+
+  c.autoComply(s);
+
+  const livingAfter = s.rooms.find((r) => r.id === living.id);
+  const livingOutlets = livingAfter.items.filter((i) => i.type === 'outlet');
+  assert.ok(
+    livingOutlets.length >= 8,
+    `expected >= 8 outlets in large living room, got ${livingOutlets.length}`
+  );
+  for (const wall of ['N', 'E', 'S', 'W']) {
+    const countOnWall = livingOutlets.filter((i) => i.wall === wall).length;
+    assert.ok(countOnWall >= 2, `expected >= 2 outlets on ${wall} wall, got ${countOnWall}`);
+  }
+  assert.ok(c.outletSegments(s, livingAfter).every((seg) => seg.covered));
+
+  const laundryAfter = s.rooms.find((r) => r.id === laundry.id);
+  const laundryOutlets = laundryAfter.items.filter((i) => /outlet/.test(i.type));
+  assert.ok(laundryOutlets.length >= 3);
+  assert.ok(laundryOutlets.every((i) => i.type === 'outlet_gfci'));
+  assert.ok(c.outletSegments(s, laundryAfter).every((seg) => seg.covered));
+
+  const outletViolations = c.evaluate(s).violations.filter((v) => v.rule === 'outlets');
+  assert.equal(outletViolations.length, 0);
 });
 
 test('autoComply remediates non-compliant moisture finishes across all numeric segments of polygonal wet rooms', () => {

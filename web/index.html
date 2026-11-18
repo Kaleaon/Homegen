@@ -117,6 +117,29 @@
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
       <button type="button" id="walk-exit-btn" class="hud-exit-btn k-target-min-size" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
+    <div id="curve-drafting-hud" class="curve-drafting-hud k-overlay-hud" role="region" aria-label="Parametric Curve Drafting Controls" hidden>
+      <span class="hud-title"><span aria-hidden="true">⌒</span> Curve Wall</span>
+      <div class="curve-hud-field">
+        <label for="hud-curve-edge">Segment</label>
+        <select id="hud-curve-edge"></select>
+      </div>
+      <div class="curve-hud-field">
+        <label for="hud-curve-radius">Radius (in)</label>
+        <input id="hud-curve-radius" type="text" inputmode="decimal" placeholder="∞ (Linear)" autocomplete="off">
+      </div>
+      <div class="curve-hud-field">
+        <label for="hud-curve-sagitta">Sagitta (in)</label>
+        <input id="hud-curve-sagitta" type="number" step="0.5" value="0">
+      </div>
+      <div class="curve-hud-field">
+        <label for="hud-curve-bulge">Bulge</label>
+        <input id="hud-curve-bulge" type="number" step="0.05" value="0">
+      </div>
+      <span id="hud-curve-chord" class="curve-hud-meta" aria-live="polite">Chord: 0"</span>
+      <button type="button" id="hud-curve-invert" class="k-target-min-size" title="Invert curve concavity (toggle bulge sign)">⇄ Invert</button>
+      <button type="button" id="hud-curve-reset" class="k-target-min-size" title="Reset edge to linear wall (zero bulge)">Linear</button>
+      <div id="hud-curve-error" class="curve-input-error" role="alert" aria-live="assertive" hidden></div>
+    </div>
     <div id="toast" role="status" aria-live="polite">
       <span class="toast-msg"></span>
       <button type="button" class="toast-dismiss" aria-label="Dismiss notification"><span aria-hidden="true">✕</span></button>
@@ -182,9 +205,16 @@
     <button value="close" aria-label="Close elevation dialog"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
-    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals and 3D vertex displacement scale.</p>
+    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals, elevation units, and 3D vertex displacement scale.</p>
     <div class="row">
-      <label for="elevation-contour-interval">Contour Interval (meters)</label>
+      <label for="elevation-unit">Elevation Unit</label>
+      <select id="elevation-unit">
+        <option value="m" selected>Meters (m)</option>
+        <option value="ft">Feet (ft)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label id="elevation-contour-interval-label" for="elevation-contour-interval">Contour Interval (m)</label>
       <input id="elevation-contour-interval" type="number" min="0.1" max="50" step="0.5" value="1.0" />
     </div>
     <div class="row">
@@ -776,6 +806,10 @@
     <button value="close" aria-label="Close keyboard shortcuts"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body shortcut-body">
+    <div class="shortcut-settings">
+      <label class="toggle shortcut-preference-toggle" for="disable-single-key-shortcuts"><input type="checkbox" id="disable-single-key-shortcuts" role="switch" aria-checked="false"> Disable single-character shortcuts</label>
+      <p class="shortcut-settings-note">Modifier shortcuts (Ctrl/Cmd) and arrow keys remain active.</p>
+    </div>
     <input id="shortcut-search"
            type="search"
            placeholder="Search shortcuts or keys..."

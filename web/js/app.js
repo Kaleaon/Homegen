@@ -15,6 +15,13 @@ import {
   reproject,
   getRoomPoints,
   getRoomBoundingBox,
+  getWallEdgeSegment,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
   polygonArea,
   parseWorldfile,
   solveAffineTransform,
@@ -40,7 +47,12 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
-import { parseElevationRaster, computeContoursAsync, ElevationGrid } from './elevationEngine.js';
+import {
+  parseElevationRaster,
+  computeContoursAsync,
+  ElevationGrid,
+  normalizeElevationUnit,
+} from './elevationEngine.js';
 import {
   evaluate,
   blockingIds,
@@ -66,6 +78,10 @@ import {
   resolveWallAssembly,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
+import {
+  isSingleKeyShortcutDisabled as readSingleKeyShortcutDisabled,
+  writeSingleKeyShortcutDisabled,
+} from './shortcutPrefs.js';
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
@@ -103,10 +119,39 @@ import {
 
 const onboardingTour = new OnboardingTour();
 
-const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
+const $ = (s) =>
+  typeof document !== 'undefined' && typeof document.querySelector === 'function'
+    ? document.querySelector(s)
+    : null;
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
 const ctx = canvas ? canvas.getContext('2d') : null;
 const STORE = 'homegen.plan.v1';
+
+export const SINGLE_KEY_SHORTCUTS_KEY = 'homegen_disable_single_key_shortcuts';
+
+export function isSingleKeyShortcutDisabled() {
+  return readSingleKeyShortcutDisabled();
+}
+
+function syncShortcutToggleUI(disabled) {
+  const toggleEl = $('#disable-single-key-shortcuts');
+  if (toggleEl) {
+    toggleEl.checked = disabled;
+    toggleEl.setAttribute?.('aria-checked', String(disabled));
+  }
+}
+
+export function setSingleKeyShortcutDisabled(disabled) {
+  const next = writeSingleKeyShortcutDisabled(disabled);
+  if (next && typeof window !== 'undefined' && window.__scene3d?.walkKeys) {
+    window.__scene3d.walkKeys.forward = false;
+    window.__scene3d.walkKeys.backward = false;
+    window.__scene3d.walkKeys.left = false;
+    window.__scene3d.walkKeys.right = false;
+  }
+  syncShortcutToggleUI(next);
+  return next;
+}
 
 const interaction = new InteractionLayer({
   gridSettings: {
@@ -175,6 +220,240 @@ let catalogMaxWidth = '';
 let catalogMaxDepth = '';
 let distSpacingInput = '';
 let distSpacingType = 'center';
+let activeDraftCurveEdge = null;
+let draftConcavitySign = 1;
+let inspectorConcavitySign = 1;
+
+function formatCurveNumber(val, decimals = 2) {
+  if (!Number.isFinite(val)) return '';
+  const rounded = Number(val.toFixed(decimals));
+  return Object.is(rounded, -0) ? '0' : String(rounded);
+}
+
+function formatCurveRadiusDisplay(chordLen, bulge) {
+  if (!bulge || Math.abs(bulge) < 1e-9 || !Number.isFinite(chordLen) || chordLen <= 1e-9) {
+    return '';
+  }
+  const r = radiusFromBulge(chordLen, bulge);
+  return Number.isFinite(r) ? formatCurveNumber(r, 2) : '';
+}
+
+function getDraftCurveSegments() {
+  const pts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (!pts || pts.length === 0) return [];
+  const segments = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const start = pts[i];
+    const end = pts[i + 1];
+    const chordLen = Math.hypot(end.x - start.x, end.y - start.y);
+    segments.push({
+      key: String(i),
+      edgeIndex: i,
+      label: `Wall ${i + 1} (${i + 1}→${i + 2})`,
+      start,
+      end,
+      chordLen,
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(i) : 0,
+    });
+  }
+  if (pts.length >= 3) {
+    const closeIdx = pts.length - 1;
+    const start = pts[closeIdx];
+    const end = pts[0];
+    segments.push({
+      key: `close:${closeIdx}`,
+      edgeIndex: closeIdx,
+      label: `Closing (${pts.length}→1)`,
+      start,
+      end,
+      chordLen: Math.hypot(end.x - start.x, end.y - start.y),
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(closeIdx) : 0,
+    });
+  } else {
+    const activeIdx = pts.length - 1;
+    const start = pts[activeIdx];
+    const end = hover || { x: start.x + 120, y: start.y };
+    const rawChord = Math.hypot(end.x - start.x, end.y - start.y);
+    segments.push({
+      key: `preview:${activeIdx}`,
+      edgeIndex: activeIdx,
+      label: `Active (${pts.length}→Next)`,
+      start,
+      end,
+      chordLen: rawChord > 1e-6 ? rawChord : 120,
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(activeIdx) : 0,
+    });
+  }
+  return segments;
+}
+
+function setCurveErrorUI(errEl, inputEls, message) {
+  if (!errEl) return;
+  if (message) {
+    errEl.textContent = message;
+    errEl.hidden = false;
+  } else {
+    errEl.textContent = '';
+    errEl.hidden = true;
+    inputEls.forEach((el) => el?.removeAttribute('aria-invalid'));
+  }
+}
+
+function syncDraftingCurveHud(options = {}) {
+  const hud = $('#curve-drafting-hud');
+  if (!hud) return;
+  const pts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (tool.kind !== 'room' || !pts || pts.length === 0) {
+    hud.hidden = true;
+    activeDraftCurveEdge = null;
+    return;
+  }
+  hud.hidden = false;
+  const segments = getDraftCurveSegments();
+  if (!segments.length) return;
+
+  const edgeSel = $('#hud-curve-edge');
+  const radiusEl = $('#hud-curve-radius');
+  const sagittaEl = $('#hud-curve-sagitta');
+  const bulgeEl = $('#hud-curve-bulge');
+  const chordEl = $('#hud-curve-chord');
+  const errEl = $('#hud-curve-error');
+
+  let selectedSeg =
+    activeDraftCurveEdge !== null
+      ? segments.find((s) => s.edgeIndex === activeDraftCurveEdge)
+      : null;
+  if (!selectedSeg) {
+    selectedSeg = pts.length >= 2 ? segments[pts.length - 2] : segments[0];
+    activeDraftCurveEdge = selectedSeg.edgeIndex;
+  }
+
+  if (edgeSel && document.activeElement !== edgeSel) {
+    edgeSel.innerHTML = segments
+      .map((s) => {
+        const mark = Math.abs(s.bulge) > 1e-9 ? ' ⌒' : '';
+        return `<option value="${s.edgeIndex}" ${s.edgeIndex === selectedSeg.edgeIndex ? 'selected' : ''}>${esc(s.label)}${mark}</option>`;
+      })
+      .join('');
+  }
+
+  if (chordEl) {
+    chordEl.textContent = `Chord: ${formatCurveNumber(selectedSeg.chordLen, 1)}"`;
+  }
+
+  const preserveField = options.preserveField || null;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (radiusEl && preserveField !== 'radius' && activeEl !== radiusEl) {
+    radiusEl.value = formatCurveRadiusDisplay(selectedSeg.chordLen, selectedSeg.bulge);
+  }
+  if (sagittaEl && preserveField !== 'sagitta' && activeEl !== sagittaEl) {
+    sagittaEl.value = formatCurveNumber(
+      sagittaFromBulge(selectedSeg.chordLen, selectedSeg.bulge),
+      2
+    );
+  }
+  if (bulgeEl && preserveField !== 'bulge' && activeEl !== bulgeEl) {
+    bulgeEl.value = formatCurveNumber(selectedSeg.bulge, 4);
+  }
+  if (!options.keepError) {
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+  }
+}
+
+function setupDraftingCurveHud() {
+  const edgeSel = $('#hud-curve-edge');
+  const radiusEl = $('#hud-curve-radius');
+  const sagittaEl = $('#hud-curve-sagitta');
+  const bulgeEl = $('#hud-curve-bulge');
+  const invertBtn = $('#hud-curve-invert');
+  const resetBtn = $('#hud-curve-reset');
+  const errEl = $('#hud-curve-error');
+
+  if (!edgeSel || !radiusEl || !sagittaEl || !bulgeEl) return;
+
+  edgeSel.addEventListener('change', (e) => {
+    activeDraftCurveEdge = parseInt(e.target.value, 10) || 0;
+    const curB = interaction.getEdgeBulge(activeDraftCurveEdge);
+    if (curB !== 0) draftConcavitySign = curB < 0 ? -1 : 1;
+    syncDraftingCurveHud();
+    redraw();
+  });
+
+  const handleHudFieldInput = (field, inputEl, commitNormalize = false) => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    const seg = segments.find((s) => s.edgeIndex === edgeIdx) || {
+      edgeIndex: edgeIdx,
+      chordLen: 120,
+      bulge: interaction.getEdgeBulge(edgeIdx),
+    };
+    const signHint = seg.bulge !== 0 ? seg.bulge : draftConcavitySign < 0 ? -1e-6 : 0;
+    const res = parseCurveHudInput(field, inputEl.value, seg.chordLen, signHint);
+
+    if (!res.ok) {
+      inputEl.setAttribute('aria-invalid', 'true');
+      setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], res.error);
+      return;
+    }
+
+    inputEl.removeAttribute('aria-invalid');
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    if (res.bulge !== 0) {
+      draftConcavitySign = res.bulge < 0 ? -1 : 1;
+    }
+    interaction.setEdgeBulge(edgeIdx, res.bulge);
+
+    if (commitNormalize) {
+      radiusEl.value = formatCurveRadiusDisplay(seg.chordLen, res.bulge);
+      sagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, res.bulge), 2);
+      bulgeEl.value = formatCurveNumber(res.bulge, 4);
+    } else {
+      syncDraftingCurveHud({ preserveField: field });
+    }
+    redraw();
+  };
+
+  radiusEl.addEventListener('input', () => handleHudFieldInput('radius', radiusEl, false));
+  radiusEl.addEventListener('change', () => handleHudFieldInput('radius', radiusEl, true));
+  sagittaEl.addEventListener('input', () => handleHudFieldInput('sagitta', sagittaEl, false));
+  sagittaEl.addEventListener('change', () => handleHudFieldInput('sagitta', sagittaEl, true));
+  bulgeEl.addEventListener('input', () => handleHudFieldInput('bulge', bulgeEl, false));
+  bulgeEl.addEventListener('change', () => handleHudFieldInput('bulge', bulgeEl, true));
+
+  invertBtn?.addEventListener('click', () => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    const cur = interaction.getEdgeBulge(edgeIdx);
+    draftConcavitySign = cur !== 0 ? (cur > 0 ? -1 : 1) : -draftConcavitySign;
+    if (cur !== 0) {
+      interaction.setEdgeBulge(edgeIdx, -cur);
+    }
+    const seg = segments.find((s) => s.edgeIndex === edgeIdx);
+    const nextB = interaction.getEdgeBulge(edgeIdx);
+    if (seg) {
+      radiusEl.value = formatCurveRadiusDisplay(seg.chordLen, nextB);
+      sagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, nextB), 2);
+      bulgeEl.value = formatCurveNumber(nextB, 4);
+    }
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    redraw();
+  });
+
+  resetBtn?.addEventListener('click', () => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    draftConcavitySign = 1;
+    interaction.setEdgeBulge(edgeIdx, 0);
+    radiusEl.value = '';
+    sagittaEl.value = '0';
+    bulgeEl.value = '0';
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    redraw();
+  });
+}
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -188,7 +467,7 @@ const snappingBridge = new SnappingBridge({
   },
 });
 
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
   document.querySelectorAll('[data-view]').forEach((b) => {
     b.addEventListener('click', () => {
       if (b.dataset.view === '3d') {
@@ -1202,12 +1481,53 @@ function drawOverlay(c, _state) {
     c.beginPath();
     c.moveTo(sequentialPts[0].x, sequentialPts[0].y);
     for (let i = 1; i < sequentialPts.length; i++) {
-      c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+      const segBulge = interaction.getEdgeBulge ? interaction.getEdgeBulge(i - 1) : 0;
+      if (Math.abs(segBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[i - 1], sequentialPts[i], segBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+      }
     }
     if (hover) {
-      c.lineTo(hover.x, hover.y);
+      const lastIdx = sequentialPts.length - 1;
+      const previewBulge =
+        sequentialPts.length < 3 && interaction.getEdgeBulge
+          ? interaction.getEdgeBulge(lastIdx)
+          : 0;
+      if (Math.abs(previewBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[lastIdx], hover, previewBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(hover.x, hover.y);
+      }
     }
     c.stroke();
+
+    if (sequentialPts.length >= 3) {
+      const closeIdx = sequentialPts.length - 1;
+      const closeBulge = interaction.getEdgeBulge ? interaction.getEdgeBulge(closeIdx) : 0;
+      c.save();
+      c.setLineDash([5 / view.scale, 4 / view.scale]);
+      c.globalAlpha = 0.75;
+      c.beginPath();
+      c.moveTo(sequentialPts[closeIdx].x, sequentialPts[closeIdx].y);
+      if (Math.abs(closeBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[closeIdx], sequentialPts[0], closeBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(sequentialPts[0].x, sequentialPts[0].y);
+      }
+      c.stroke();
+      c.restore();
+    }
+
     for (const pt of sequentialPts) {
       c.beginPath();
       c.arc(pt.x, pt.y, 4 / view.scale, 0, Math.PI * 2);
@@ -1677,6 +1997,20 @@ function renderInspector() {
         ? `Custom Texture (${wallFinishId.slice(0, 10)})`
         : wallFinishId;
 
+    const roomPts = getRoomPoints(room);
+    const curveWallKeys =
+      roomPts.length === 4 ? ['N', 'E', 'S', 'W'] : roomPts.map((_, idx) => String(idx));
+    if (!window.__activeCurveWall || !curveWallKeys.includes(String(window.__activeCurveWall))) {
+      const firstCurved = curveWallKeys.find((wk) => Math.abs(M.getWallBulge(room, wk)) > 1e-9);
+      window.__activeCurveWall = firstCurved || curveWallKeys[0];
+    }
+    const activeCurveWall = window.__activeCurveWall;
+    const curveSeg = getWallEdgeSegment(room, activeCurveWall);
+    const curBulge = curveSeg.bulge;
+    const curChord = curveSeg.chordLen;
+    const curSagitta = sagittaFromBulge(curChord, curBulge);
+    const curRadiusStr = formatCurveRadiusDisplay(curChord, curBulge);
+
     el.innerHTML = `<h3>${esc(room.name)}</h3>
       ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
       ${formRow(
@@ -1692,6 +2026,47 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      <div class="curve-inspector-group">
+        <div class="curve-inspector-head">
+          <h4>Parametric Wall Curve</h4>
+          <span id="i-curve-chord" class="curve-chord-badge">Chord: ${formatCurveNumber(curChord, 1)}"</span>
+        </div>
+        ${formRow(
+          'i-curve-wall',
+          'Wall Segment',
+          `<select id="i-curve-wall">${curveWallKeys
+            .map((wk, idx) => {
+              const wb = M.getWallBulge(room, wk);
+              const tag = Math.abs(wb) > 1e-9 ? ' ⌒' : '';
+              const label =
+                roomPts.length === 4
+                  ? `${{ N: 'North (N)', E: 'East (E)', S: 'South (S)', W: 'West (W)' }[wk]}${tag}`
+                  : `Wall ${idx + 1}${tag}`;
+              return `<option value="${wk}" ${String(wk) === String(activeCurveWall) ? 'selected' : ''}>${label}</option>`;
+            })
+            .join('')}</select>`
+        )}
+        ${formRow(
+          'i-curve-radius',
+          'Arc Radius (in)',
+          `<input id="i-curve-radius" type="text" inputmode="decimal" placeholder="∞ (Linear)" value="${esc(curRadiusStr)}" autocomplete="off">`
+        )}
+        ${formRow(
+          'i-curve-sagitta',
+          'Sagitta (in)',
+          `<input id="i-curve-sagitta" type="number" step="0.5" value="${formatCurveNumber(curSagitta, 2)}">`
+        )}
+        ${formRow(
+          'i-curve-bulge',
+          'Bulge Factor',
+          `<input id="i-curve-bulge" type="number" step="0.05" value="${formatCurveNumber(curBulge, 4)}">`
+        )}
+        <div class="btns curve-inspector-actions">
+          <button type="button" id="i-curve-invert" title="Invert curve concavity">⇄ Invert Concavity</button>
+          <button type="button" id="i-curve-reset" title="Reset wall to linear (zero bulge)">Linear Wall</button>
+        </div>
+        <div id="i-curve-error" class="curve-input-error" role="alert" aria-live="assertive" hidden></div>
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
@@ -1950,6 +2325,119 @@ function renderInspector() {
     $('#i-uv-wall')?.addEventListener('change', (e) => {
       window.__activeUVWall = e.target.value;
       renderInspector();
+    });
+
+    const iCurveWallEl = $('#i-curve-wall');
+    const iCurveRadiusEl = $('#i-curve-radius');
+    const iCurveSagittaEl = $('#i-curve-sagitta');
+    const iCurveBulgeEl = $('#i-curve-bulge');
+    const iCurveErrEl = $('#i-curve-error');
+
+    iCurveWallEl?.addEventListener('change', (e) => {
+      window.__activeCurveWall = e.target.value;
+      const wb = M.getWallBulge(roomOf(doc, room.id), window.__activeCurveWall);
+      if (wb !== 0) inspectorConcavitySign = wb < 0 ? -1 : 1;
+      renderInspector();
+      redraw();
+    });
+
+    const handleInspectorCurveEdit = (field, inputEl, commitChange = false) => {
+      const latestRoom = roomOf(doc, room.id);
+      if (!latestRoom) return;
+      const wallId = window.__activeCurveWall || activeCurveWall;
+      const seg = getWallEdgeSegment(latestRoom, wallId);
+      const signHint = seg.bulge !== 0 ? seg.bulge : inspectorConcavitySign < 0 ? -1e-6 : 0;
+      const res = parseCurveHudInput(field, inputEl.value, seg.chordLen, signHint);
+
+      if (!res.ok) {
+        inputEl.setAttribute('aria-invalid', 'true');
+        setCurveErrorUI(iCurveErrEl, [iCurveRadiusEl, iCurveSagittaEl, iCurveBulgeEl], res.error);
+        preview = null;
+        redraw();
+        return;
+      }
+
+      inputEl.removeAttribute('aria-invalid');
+      setCurveErrorUI(iCurveErrEl, [iCurveRadiusEl, iCurveSagittaEl, iCurveBulgeEl], null);
+      if (res.bulge !== 0) {
+        inspectorConcavitySign = res.bulge < 0 ? -1 : 1;
+      }
+
+      if (commitChange) {
+        preview = null;
+        apply(
+          (n) => {
+            const r = roomOf(n, room.id);
+            M.setWallBulge(r, wallId, res.bulge, n);
+          },
+          { quiet: true, label: 'Update Wall Curve' }
+        );
+      } else {
+        if (iCurveRadiusEl && field !== 'radius') {
+          iCurveRadiusEl.value = formatCurveRadiusDisplay(seg.chordLen, res.bulge);
+        }
+        if (iCurveSagittaEl && field !== 'sagitta') {
+          iCurveSagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, res.bulge), 2);
+        }
+        if (iCurveBulgeEl && field !== 'bulge') {
+          iCurveBulgeEl.value = formatCurveNumber(res.bulge, 4);
+        }
+        preview = tryPreview((n) => {
+          const r = roomOf(n, room.id);
+          M.setWallBulge(r, wallId, res.bulge, n);
+        });
+        redraw();
+      }
+    };
+
+    iCurveRadiusEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('radius', iCurveRadiusEl, false)
+    );
+    iCurveRadiusEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('radius', iCurveRadiusEl, true)
+    );
+    iCurveSagittaEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('sagitta', iCurveSagittaEl, false)
+    );
+    iCurveSagittaEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('sagitta', iCurveSagittaEl, true)
+    );
+    iCurveBulgeEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('bulge', iCurveBulgeEl, false)
+    );
+    iCurveBulgeEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('bulge', iCurveBulgeEl, true)
+    );
+
+    $('#i-curve-invert')?.addEventListener('click', () => {
+      const latestRoom = roomOf(doc, room.id);
+      if (!latestRoom) return;
+      const wallId = window.__activeCurveWall || activeCurveWall;
+      const wb = M.getWallBulge(latestRoom, wallId);
+      inspectorConcavitySign = wb !== 0 ? (wb > 0 ? -1 : 1) : -inspectorConcavitySign;
+      if (wb !== 0) {
+        preview = null;
+        apply(
+          (n) => {
+            const r = roomOf(n, room.id);
+            M.setWallBulge(r, wallId, -wb, n);
+          },
+          { quiet: true, label: 'Invert Wall Curve' }
+        );
+      }
+    });
+
+    $('#i-curve-reset')?.addEventListener('click', () => {
+      const wallId = window.__activeCurveWall || activeCurveWall;
+      inspectorConcavitySign = 1;
+      preview = null;
+      apply(
+        (n) => {
+          const r = roomOf(n, room.id);
+          M.setWallBulge(r, wallId, 0, n);
+        },
+        { quiet: true, label: 'Reset Wall Curve' }
+      );
     });
 
     $('#i-custom-tex-btn')?.addEventListener('click', () => {
@@ -3190,10 +3678,17 @@ const HINTS = {
 };
 
 function setTool(t) {
+  const prevKind = tool?.kind;
   tool = t;
   preview = null;
   drag = null;
   if (t.kind !== 'calibrate') calibPoints = [];
+  if (t.kind !== 'room' && prevKind === 'room') {
+    if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+    const btnClose = $('#btn-close-room');
+    if (btnClose) btnClose.hidden = true;
+  }
+  syncDraftingCurveHud();
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.classList.toggle('on', b.dataset.tool === t.kind));
@@ -3297,7 +3792,21 @@ canvas?.addEventListener('pointerdown', (e) => {
         break;
       }
       if (!isSelected(id)) {
+        const preHit = M.findOwner(doc, id);
+        if (preHit && preHit.kind === 'room') {
+          const nw = nearestWall(p, 18, preHit.room);
+          if (nw) window.__activeCurveWall = nw.wall;
+        }
         select(id);
+      } else {
+        const preHit = M.findOwner(doc, id);
+        if (preHit && preHit.kind === 'room') {
+          const nw = nearestWall(p, 18, preHit.room);
+          if (nw && window.__activeCurveWall !== nw.wall) {
+            window.__activeCurveWall = nw.wall;
+            renderInspector();
+          }
+        }
       }
       const hit = M.findOwner(doc, id);
       if (hit.kind === 'item') {
@@ -3618,6 +4127,9 @@ canvas?.addEventListener('pointermove', (e) => {
     return;
   }
   updatePreview();
+  if (tool.kind === 'room' && interaction.getCornerCount && interaction.getCornerCount() > 0) {
+    syncDraftingCurveHud({ keepError: true });
+  }
 
   // Hover violation tooltip detection
   if (p) {
@@ -3669,9 +4181,12 @@ function handleCloseRoom() {
     toast('At least 3 corners are required to close a room.', true);
     return;
   }
-  const closeRes = interaction.closeRoom({ existingRooms: levelRooms() });
+  const closeRes = interaction.closeRoom({
+    existingRooms: levelRooms().map(roomToPolygon),
+  });
   if (closeRes.ok && closeRes.room?.corners) {
     const pts = closeRes.room.corners;
+    const roomBulges = closeRes.room.bulges;
     const minX = Math.min(...pts.map((pt) => pt.x));
     const maxX = Math.max(...pts.map((pt) => pt.x));
     const minY = Math.min(...pts.map((pt) => pt.y));
@@ -3680,16 +4195,29 @@ function handleCloseRoom() {
     const h = Math.max(24, maxY - minY);
     const x = minX;
     const y = minY;
-    const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
+    const roomType = tool.kind === 'room' && tool.type ? tool.type : 'living';
+    let createdId = null;
+    const r = apply((n) => {
+      const created = M.addRoom(n, x, y, w, h, roomType, {
+        level: curLevel,
+        points: pts,
+        bulges: roomBulges,
+      });
+      createdId = created.id;
+    }, 'Close Room');
     if (r.ok) {
       announceToLiveRegion(
-        `Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+        `${ROOM_TYPES[roomType]?.name || 'Living'} room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
       );
       interaction.resetRoomDrawing();
+      activeDraftCurveEdge = null;
+      draftConcavitySign = 1;
+      syncDraftingCurveHud();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
       if (hint) hint.textContent = '';
+      if (createdId) select(createdId);
       redraw();
     }
   } else {
@@ -3806,8 +4334,13 @@ canvas?.addEventListener('pointerup', () => {
       if (!r.ok) select(null);
     } else {
       const p = hover || { x: d.x0, y: d.y0 };
-      interaction.addRoomCorner(p, { existingRooms: levelRooms() });
+      interaction.addRoomCorner(p, {
+        edges: extractRoomEdges(levelRooms()),
+        existingRooms: levelRooms().map(roomToPolygon),
+      });
       const count = interaction.getCornerCount();
+      activeDraftCurveEdge = count >= 2 ? count - 2 : 0;
+      syncDraftingCurveHud();
       const hint = $('#tool-hint');
       if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
       const btnClose = $('#btn-close-room');
@@ -4438,8 +4971,34 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
 }
 
 $('#load')?.addEventListener('click', () => $('#file').click());
+function updateElevationIntervalLabel(unit) {
+  const lbl = $('#elevation-contour-interval-label');
+  if (lbl) {
+    lbl.textContent = `Contour Interval (${normalizeElevationUnit(unit)})`;
+  }
+}
+
+function syncElevationDialog(grid) {
+  const unit = normalizeElevationUnit(grid?.elevationUnit);
+  const unitEl = $('#elevation-unit');
+  const intervalEl = $('#elevation-contour-interval');
+  const scaleEl = $('#elevation-vertical-scale');
+  const visibleEl = $('#elevation-visible');
+
+  if (unitEl) unitEl.value = unit;
+  if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
+  if (scaleEl) scaleEl.value = String(grid?.verticalScale ?? 1.0);
+  if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
+  updateElevationIntervalLabel(unit);
+}
+
+$('#elevation-unit')?.addEventListener('change', (e) => {
+  updateElevationIntervalLabel(e.target.value);
+});
+
 $('#import-elevation')?.addEventListener('click', () => {
   if (doc.elevationGrid) {
+    syncElevationDialog(doc.elevationGrid);
     $('#dlg-elevation')?.showModal();
   } else {
     $('#elevation-file')?.click();
@@ -4478,11 +5037,14 @@ $('#elevation-file')?.addEventListener('change', async (e) => {
       inputData = c;
     }
 
-    const grid = await parseElevationRaster(inputData);
+    const selectedUnit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
+    const grid = await parseElevationRaster(inputData, { elevationUnit: selectedUnit });
     doc.elevationGrid = grid;
     doc._cachedContours = await computeContoursAsync(grid);
+    syncElevationDialog(grid);
     window.__scene3d?.update();
     redraw();
+    persist();
     toast(`Imported terrain elevation grid (${grid.width}x${grid.height}).`);
   } catch (err) {
     toast(`Failed to import elevation data: ${err.message}`, true);
@@ -4494,15 +5056,19 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
   if (!doc.elevationGrid) return;
   const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
   const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
+  const unit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
   const visible = $('#elevation-visible')?.checked !== false;
 
   doc.elevationGrid.contourInterval = interval;
   doc.elevationGrid.verticalScale = scale;
+  doc.elevationGrid.elevationUnit = unit;
   doc.elevationGrid.visible = visible;
+  updateElevationIntervalLabel(unit);
 
   doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
   window.__scene3d?.update();
   redraw();
+  persist();
   $('#dlg-elevation')?.close();
   toast('Updated elevation terrain settings.');
 });
@@ -4510,8 +5076,10 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
 $('#btn-clear-elevation')?.addEventListener('click', () => {
   doc.elevationGrid = null;
   doc._cachedContours = null;
+  syncElevationDialog(null);
   window.__scene3d?.update();
   redraw();
+  persist();
   $('#dlg-elevation')?.close();
   toast('Cleared terrain elevation data.');
 });
@@ -5333,6 +5901,8 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
+export { renderGISSegments };
+
 function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
@@ -5363,7 +5933,7 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
-export { renderGISSegments };
+
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -5541,10 +6111,11 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   }
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   initCommandPaletteUI();
   initShortcutOverlayUI();
   setupAddRoomDimsModal();
+  setupDraftingCurveHud();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
   window.addEventListener('keydown', (e) => {
@@ -5577,13 +6148,18 @@ if (typeof window !== 'undefined') {
     )
       return;
 
-    if (k === '?') {
-      e.preventDefault();
-      const shortcutDlg = $('#shortcut-overlay');
-      if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
-        closeShortcutOverlay();
-      } else {
-        openShortcutOverlay();
+    const singleKeyDisabled = isSingleKeyShortcutDisabled();
+    const hasCmdModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
+
+    if (k === '?' && !hasCmdModifier) {
+      if (!singleKeyDisabled) {
+        e.preventDefault();
+        const shortcutDlg = $('#shortcut-overlay');
+        if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
+          closeShortcutOverlay();
+        } else {
+          openShortcutOverlay();
+        }
       }
       return;
     }
@@ -5612,8 +6188,7 @@ if (typeof window !== 'undefined') {
     } else if ((e.ctrlKey || e.metaKey) && lk === 'y') {
       e.preventDefault();
       $('#redo').click();
-    } else if (lk === 'r') rotateSelected();
-    else if (lk === 'escape') {
+    } else if (lk === 'escape') {
       const historyPopover = $('#history-popover');
       const hasOpenHistory = Boolean(historyPopover && !historyPopover.hidden);
       if (toast._state?.active && !selection && tool.kind === 'select' && !hasOpenHistory) {
@@ -5622,6 +6197,9 @@ if (typeof window !== 'undefined') {
         return;
       }
       if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+      activeDraftCurveEdge = null;
+      draftConcavitySign = 1;
+      syncDraftingCurveHud();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
@@ -5647,11 +6225,14 @@ if (typeof window !== 'undefined') {
         select(null);
         toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
       }
-    } else if (lk === 'v') setTool({ kind: 'select' });
-    else if (lk === 'x') setTool({ kind: 'erase' });
-    else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in')?.click();
-    else if (k === '-') $('#zoom-out')?.click();
+    } else if (!singleKeyDisabled && !hasCmdModifier) {
+      if (lk === 'r') rotateSelected();
+      else if (lk === 'v') setTool({ kind: 'select' });
+      else if (lk === 'x') setTool({ kind: 'erase' });
+      else if (lk === 'i') setTool({ kind: 'eyedropper' });
+      else if (k === '+' || k === '=') $('#zoom-in')?.click();
+      else if (k === '-') $('#zoom-out')?.click();
+    }
   });
 
   window.addEventListener('resize', resize);
@@ -6549,6 +7130,7 @@ export function filterShortcuts(query = '') {
 export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  syncShortcutToggleUI(isSingleKeyShortcutDisabled());
   const searchInput =
     $('#shortcut-search') ||
     (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
@@ -6714,6 +7296,14 @@ function initCommandPaletteUI() {
 }
 
 function initShortcutOverlayUI() {
+  const toggleEl = $('#disable-single-key-shortcuts');
+  if (toggleEl) {
+    syncShortcutToggleUI(isSingleKeyShortcutDisabled());
+    toggleEl.addEventListener?.('change', (e) => {
+      const next = Boolean(e?.target ? e.target.checked : toggleEl.checked);
+      setSingleKeyShortcutDisabled(next);
+    });
+  }
   const dlg = $('#shortcut-overlay');
   const searchInput =
     $('#shortcut-search') ||
@@ -6744,6 +7334,9 @@ if (typeof window !== 'undefined')
     get doc() {
       return doc;
     },
+    get tool() {
+      return tool;
+    },
     get report() {
       return report;
     },
@@ -6761,6 +7354,12 @@ if (typeof window !== 'undefined')
     moveSelectedSpatial,
     getSpatialElements,
     interaction,
+    syncDraftingCurveHud,
+    parseCurveHudInput,
+    bulgeFromRadius,
+    radiusFromBulge,
+    bulgeFromSagitta,
+    sagittaFromBulge,
     renderSnapToggles,
     generatePDF,
     applyCalibration,
@@ -6783,6 +7382,9 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    SINGLE_KEY_SHORTCUTS_KEY,
+    isSingleKeyShortcutDisabled,
+    setSingleKeyShortcutDisabled,
     filterShortcuts,
     renderCommandList,
     trapFocus,
