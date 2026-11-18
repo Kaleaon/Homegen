@@ -565,80 +565,61 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                         : -1
                     : -1;
 
-                const normScale = rangeElev / maxUnsignedSample;
-                let voidMask = null;
+                const byteStrip =
+                  bytesPerSample === 1
+                    ? isSignedSample
+                      ? new Int8Array(arrayBuffer, stripOffset, total)
+                      : new Uint8Array(arrayBuffer, stripOffset, total)
+                    : null;
 
-                if (bytesPerSample === 1 && !hasNumericNoData && stdSentinelVal < 0) {
-                  const byteView = isSignedSample
-                    ? new Int8Array(arrayBuffer, stripOffset, total)
-                    : new Uint8Array(arrayBuffer, stripOffset, total);
-                  if (isUnsignedNormalized) {
-                    for (let k = 0; k < total; k++) {
-                      const elev = baseMin + byteView[k] * normScale;
-                      data[k] = elev;
-                      if (elev < minE) minE = elev;
-                      if (elev > maxE) maxE = elev;
-                    }
-                  } else {
-                    for (let k = 0; k < total; k++) {
-                      const elev = byteView[k];
-                      data[k] = elev;
-                      if (elev < minE) minE = elev;
-                      if (elev > maxE) maxE = elev;
-                    }
-                  }
-                } else {
-                  let readSample;
-                  if (bytesPerSample === 8) {
-                    readSample = (k) => view.getFloat64(stripOffset + k * 8, littleEndian);
+                let voidMask = null;
+                for (let k = 0; k < total; k++) {
+                  let rawVal = 0;
+                  if (byteStrip !== null) {
+                    rawVal = byteStrip[k];
+                  } else if (bytesPerSample === 8) {
+                    rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
                   } else if (bytesPerSample === 4) {
                     if (isFloatSample) {
-                      readSample = (k) => view.getFloat32(stripOffset + k * 4, littleEndian);
+                      rawVal = view.getFloat32(stripOffset + k * 4, littleEndian);
                     } else if (isSignedSample) {
-                      readSample = (k) => view.getInt32(stripOffset + k * 4, littleEndian);
+                      rawVal = view.getInt32(stripOffset + k * 4, littleEndian);
                     } else {
-                      readSample = (k) => view.getUint32(stripOffset + k * 4, littleEndian);
+                      rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
                     }
-                  } else if (bytesPerSample === 2) {
-                    readSample = isSignedSample
-                      ? (k) => view.getInt16(stripOffset + k * 2, littleEndian)
-                      : (k) => view.getUint16(stripOffset + k * 2, littleEndian);
                   } else {
-                    const byteView = isSignedSample
-                      ? new Int8Array(arrayBuffer, stripOffset, total)
-                      : new Uint8Array(arrayBuffer, stripOffset, total);
-                    readSample = (k) => byteView[k];
+                    rawVal = isSignedSample
+                      ? view.getInt16(stripOffset + k * 2, littleEndian)
+                      : view.getUint16(stripOffset + k * 2, littleEndian);
                   }
 
-                  for (let k = 0; k < total; k++) {
-                    const rawVal = readSample(k);
-
-                    let isVoid = !Number.isFinite(rawVal);
-                    if (!isVoid && hasNumericNoData) {
-                      if (isFloatSample) {
-                        isVoid =
-                          rawVal === effectiveNoData ||
-                          (bytesPerSample === 4 && rawVal === noDataF32) ||
-                          Math.abs(rawVal - effectiveNoData) <= noDataTol;
-                      } else {
-                        isVoid = rawVal === effectiveNoData;
-                      }
+                  let isVoid = !Number.isFinite(rawVal);
+                  if (!isVoid && hasNumericNoData) {
+                    if (isFloatSample) {
+                      isVoid =
+                        rawVal === effectiveNoData ||
+                        (bytesPerSample === 4 && rawVal === noDataF32) ||
+                        Math.abs(rawVal - effectiveNoData) <= noDataTol;
+                    } else {
+                      isVoid = rawVal === effectiveNoData;
                     }
-                    if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
-                      isVoid = true;
-                    }
-
-                    if (isVoid) {
-                      if (!voidMask) voidMask = new Uint8Array(total);
-                      voidMask[k] = 1;
-                      continue;
-                    }
-
-                    const elev = isUnsignedNormalized ? baseMin + rawVal * normScale : rawVal;
-                    data[k] = elev;
-                    if (elev < minE) minE = elev;
-                    if (elev > maxE) maxE = elev;
                   }
+                  if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
+                    isVoid = true;
+                  }
+
+                  if (isVoid) {
+                    if (!voidMask) voidMask = new Uint8Array(total);
+                    voidMask[k] = 1;
+                    continue;
+                  }
+
+                  const elev = isUnsignedNormalized
+                    ? baseMin + (rawVal / maxUnsignedSample) * rangeElev
+                    : rawVal;
+                  data[k] = elev;
+                  if (elev < minE) minE = elev;
+                  if (elev > maxE) maxE = elev;
                 }
 
                 if (minE === Infinity || maxE === -Infinity) {

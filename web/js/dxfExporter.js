@@ -19,86 +19,113 @@ import { computeMarchingSquares } from './elevationEngine.js';
 function stitchSegmentsToPolylines(lines) {
   if (!lines || lines.length === 0) return [];
   const n = lines.length;
-  const TOL = 1e-4;
-  const INV_CELL = 1e3; // 1e-3 cell size >= 10x matching tolerance (1e-4)
-  const buckets = new Map();
+  const used = new Uint8Array(n);
+  const INV_EPS = 1e4;
 
-  const addEndpoint = (x, y, packed) => {
-    const key = `${Math.floor(x * INV_CELL)},${Math.floor(y * INV_CELL)}`;
-    let bucket = buckets.get(key);
+  const grid = new Map();
+  const addEndpoint = (x, y, idx) => {
+    const gx = Math.floor(x * INV_EPS);
+    const gy = Math.floor(y * INV_EPS);
+    let col = grid.get(gx);
+    if (!col) {
+      col = new Map();
+      grid.set(gx, col);
+    }
+    let bucket = col.get(gy);
     if (!bucket) {
       bucket = [];
-      buckets.set(key, bucket);
+      col.set(gy, bucket);
     }
-    bucket.push(packed);
+    if (bucket[bucket.length - 1] !== idx) {
+      bucket.push(idx);
+    }
   };
 
   for (let i = 0; i < n; i++) {
-    const seg = lines[i];
-    addEndpoint(seg.x1, seg.y1, i * 2);
-    addEndpoint(seg.x2, seg.y2, i * 2 + 1);
+    const l = lines[i];
+    addEndpoint(l.x1, l.y1, i);
+    addEndpoint(l.x2, l.y2, i);
   }
 
-  const used = new Uint8Array(n);
-  const popMatchingEndpoint = (px, py) => {
-    const cx = Math.floor(px * INV_CELL);
-    const cy = Math.floor(py * INV_CELL);
+  const findLowestMatch = (px, py) => {
+    const gx = Math.floor(px * INV_EPS);
+    const gy = Math.floor(py * INV_EPS);
+    let bestIdx = -1;
     for (let dx = -1; dx <= 1; dx++) {
+      const col = grid.get(gx + dx);
+      if (!col) continue;
       for (let dy = -1; dy <= 1; dy++) {
-        const bucket = buckets.get(`${cx + dx},${cy + dy}`);
+        const bucket = col.get(gy + dy);
         if (!bucket) continue;
-        for (let k = 0; k < bucket.length; k++) {
-          const packed = bucket[k];
-          const idx = Math.floor(packed / 2);
+        for (let b = 0; b < bucket.length; b++) {
+          const idx = bucket[b];
           if (used[idx]) continue;
-          const end = packed & 1;
+          if (bestIdx !== -1 && idx >= bestIdx) break;
           const seg = lines[idx];
-          const sx = end === 0 ? seg.x1 : seg.x2;
-          const sy = end === 0 ? seg.y1 : seg.y2;
-          if (Math.hypot(px - sx, py - sy) < TOL) {
-            used[idx] = 1;
-            return end === 0 ? { x: seg.x2, y: seg.y2 } : { x: seg.x1, y: seg.y1 };
+          if (
+            Math.hypot(px - seg.x1, py - seg.y1) < 1e-4 ||
+            Math.hypot(px - seg.x2, py - seg.y2) < 1e-4
+          ) {
+            bestIdx = idx;
+            break;
           }
         }
       }
     }
-    return null;
+    return bestIdx;
   };
 
   const polylines = [];
-
-  for (let i = n - 1; i >= 0; i--) {
-    if (used[i]) continue;
-    used[i] = 1;
-    const first = lines[i];
-
-    const tailPts = [];
-    let tail = { x: first.x2, y: first.y2 };
-    for (;;) {
-      const next = popMatchingEndpoint(tail.x, tail.y);
-      if (!next) break;
-      tailPts.push(next);
-      tail = next;
-    }
-
+  for (let seedIdx = n - 1; seedIdx >= 0; seedIdx--) {
+    if (used[seedIdx]) continue;
+    used[seedIdx] = 1;
+    const first = lines[seedIdx];
     const headPts = [];
-    let head = { x: first.x1, y: first.y1 };
+    const tailPts = [
+      { x: first.x1, y: first.y1 },
+      { x: first.x2, y: first.y2 },
+    ];
+
     for (;;) {
-      const prev = popMatchingEndpoint(head.x, head.y);
-      if (!prev) break;
-      headPts.push(prev);
-      head = prev;
+      const head = headPts.length > 0 ? headPts[headPts.length - 1] : tailPts[0];
+      const tail = tailPts[tailPts.length - 1];
+
+      const tailIdx = findLowestMatch(tail.x, tail.y);
+      const headIdx = findLowestMatch(head.x, head.y);
+      if (tailIdx === -1 && headIdx === -1) break;
+
+      if (tailIdx !== -1 && (headIdx === -1 || tailIdx <= headIdx)) {
+        const seg = lines[tailIdx];
+        used[tailIdx] = 1;
+        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
+          tailPts.push({ x: seg.x2, y: seg.y2 });
+        } else {
+          tailPts.push({ x: seg.x1, y: seg.y1 });
+        }
+      } else {
+        const seg = lines[headIdx];
+        used[headIdx] = 1;
+        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
+          headPts.push({ x: seg.x1, y: seg.y1 });
+        } else {
+          headPts.push({ x: seg.x2, y: seg.y2 });
+        }
+      }
     }
 
-    headPts.reverse();
-    const pts = headPts;
-    pts.push({ x: first.x1, y: first.y1 }, { x: first.x2, y: first.y2 }, ...tailPts);
+    let pts;
+    if (headPts.length > 0) {
+      headPts.reverse();
+      pts = headPts.concat(tailPts);
+    } else {
+      pts = tailPts;
+    }
 
     let isClosed = false;
     if (pts.length > 2) {
-      const firstPt = pts[0];
-      const lastPt = pts[pts.length - 1];
-      if (Math.hypot(firstPt.x - lastPt.x, firstPt.y - lastPt.y) < TOL) {
+      const head = pts[0];
+      const tail = pts[pts.length - 1];
+      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
         isClosed = true;
         pts.pop();
       }
