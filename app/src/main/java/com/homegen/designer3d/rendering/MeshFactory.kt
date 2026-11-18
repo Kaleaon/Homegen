@@ -8,8 +8,6 @@ import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
 import com.google.android.filament.VertexBuffer
 import com.homegen.designer3d.math.Vector3
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Creates procedural Filament meshes for walls, floors, boxes, and grid planes.
@@ -75,16 +73,16 @@ object MeshFactory {
             .attribute(VertexBuffer.VertexAttribute.UV0, 2, VertexBuffer.AttributeType.FLOAT2, 0, 8)
             .build(engine)
 
-        vertexBuffer.setBufferAt(engine, 0, toFloatBuffer(positions))
-        vertexBuffer.setBufferAt(engine, 1, toFloatBuffer(normals))
-        vertexBuffer.setBufferAt(engine, 2, toFloatBuffer(uvs))
+        vertexBuffer.setBufferAt(engine, 0, BufferUtils.toFloatBuffer(positions))
+        vertexBuffer.setBufferAt(engine, 1, BufferUtils.toFloatBuffer(normals))
+        vertexBuffer.setBufferAt(engine, 2, BufferUtils.toFloatBuffer(uvs))
 
         val indexBuffer = IndexBuffer.Builder()
             .indexCount(36)
             .bufferType(IndexBuffer.Builder.IndexType.USHORT)
             .build(engine)
 
-        indexBuffer.setBuffer(engine, toShortBuffer(indices))
+        indexBuffer.setBuffer(engine, BufferUtils.toShortBuffer(indices))
 
         val entity = EntityManager.get().create()
         RenderableManager.Builder(1)
@@ -204,9 +202,9 @@ object MeshFactory {
             .attribute(VertexBuffer.VertexAttribute.UV0, 2, VertexBuffer.AttributeType.FLOAT2, 0, 8)
             .build(engine)
 
-        vertexBuffer.setBufferAt(engine, 0, toFloatBuffer(positions))
-        vertexBuffer.setBufferAt(engine, 1, toFloatBuffer(normals))
-        vertexBuffer.setBufferAt(engine, 2, toFloatBuffer(uvs))
+        vertexBuffer.setBufferAt(engine, 0, BufferUtils.toFloatBuffer(positions))
+        vertexBuffer.setBufferAt(engine, 1, BufferUtils.toFloatBuffer(normals))
+        vertexBuffer.setBufferAt(engine, 2, BufferUtils.toFloatBuffer(uvs))
 
         val indexBuffer = IndexBuffer.Builder()
             .indexCount(indexCount)
@@ -214,13 +212,10 @@ object MeshFactory {
             .build(engine)
 
         if (useIntIndices) {
-            val buf = ByteBuffer.allocateDirect(indices.size * 4).order(ByteOrder.nativeOrder())
-            buf.asIntBuffer().put(indices)
-            buf.rewind()
-            indexBuffer.setBuffer(engine, buf)
+            indexBuffer.setBuffer(engine, BufferUtils.toIntBuffer(indices))
         } else {
             val shortIndices = ShortArray(indexCount) { indices[it].toShort() }
-            indexBuffer.setBuffer(engine, toShortBuffer(shortIndices))
+            indexBuffer.setBuffer(engine, BufferUtils.toShortBuffer(shortIndices))
         }
 
         val entity = EntityManager.get().create()
@@ -335,9 +330,9 @@ object MeshFactory {
             .attribute(VertexBuffer.VertexAttribute.UV0, 2, VertexBuffer.AttributeType.FLOAT2, 0, 8)
             .build(engine)
 
-        vertexBuffer.setBufferAt(engine, 0, toFloatBuffer(positions))
-        vertexBuffer.setBufferAt(engine, 1, toFloatBuffer(normals))
-        vertexBuffer.setBufferAt(engine, 2, toFloatBuffer(texCoords))
+        vertexBuffer.setBufferAt(engine, 0, BufferUtils.toFloatBuffer(positions))
+        vertexBuffer.setBufferAt(engine, 1, BufferUtils.toFloatBuffer(normals))
+        vertexBuffer.setBufferAt(engine, 2, BufferUtils.toFloatBuffer(texCoords))
 
         val indexBuffer = IndexBuffer.Builder()
             .indexCount(indexCount)
@@ -345,13 +340,10 @@ object MeshFactory {
             .build(engine)
 
         if (useIntIndices) {
-            val buf = ByteBuffer.allocateDirect(indices.size * 4).order(ByteOrder.nativeOrder())
-            buf.asIntBuffer().put(indices)
-            buf.rewind()
-            indexBuffer.setBuffer(engine, buf)
+            indexBuffer.setBuffer(engine, BufferUtils.toIntBuffer(indices))
         } else {
             val shortIndices = ShortArray(indexCount) { indices[it].toShort() }
-            indexBuffer.setBuffer(engine, toShortBuffer(shortIndices))
+            indexBuffer.setBuffer(engine, BufferUtils.toShortBuffer(shortIndices))
         }
 
         val entity = EntityManager.get().create()
@@ -364,19 +356,5 @@ object MeshFactory {
             .build(engine, entity)
 
         return entity
-    }
-
-    private fun toFloatBuffer(data: FloatArray): ByteBuffer {
-        val buf = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
-        buf.asFloatBuffer().put(data)
-        buf.rewind()
-        return buf
-    }
-
-    private fun toShortBuffer(data: ShortArray): ByteBuffer {
-        val buf = ByteBuffer.allocateDirect(data.size * 2).order(ByteOrder.nativeOrder())
-        buf.asShortBuffer().put(data)
-        buf.rewind()
-        return buf
     }
 }

@@ -1,7 +1,7 @@
 // Composite ZIP archive export and import for Homegen project files and IndexedDB textures.
 import JSZip from '#jszip';
 import { serialize, deserialize } from './model.js';
-import { getAllTextureBlobs, saveTextureBlob } from './textureStore.js';
+import { getAllTextureBlobs, saveTextureBlobsBatch } from './textureStore.js';
 
 /**
  * Packages plan JSON and IndexedDB binary texture assets into a single ZIP Blob.
@@ -74,31 +74,57 @@ export async function importProjectZip(zipSource) {
     }
   }
 
-  // 3. Extract and save texture assets
-  const manifestById = new Map(manifest.map((m) => [m.id, m]));
-  const texFiles = zip.file(/^textures\//);
-
-  for (const entry of texFiles) {
-    if (entry.dir) continue;
+  // 3. Extract and save texture assets concurrently in a single batch
+  const manifestList = Array.isArray(manifest) ? manifest : [];
+  const manifestById = new Map(manifestList.map((m) => [m.id, m]));
+  const texFiles = zip.file(/^textures\//).filter((entry) => {
+    if (entry.dir) return false;
     const pathParts = entry.name.split('/');
     const basename = pathParts[pathParts.length - 1];
-    if (!basename) continue;
+    return Boolean(basename);
+  });
 
-    const idFromFilename = basename.replace(/\.[^/.]+$/, '');
-    const meta = manifestById.get(idFromFilename) || {};
-    const textureId = meta.id || idFromFilename;
+  if (texFiles.length > 0) {
+    const extracted = await Promise.all(
+      texFiles.map(async (entry) => {
+        const pathParts = entry.name.split('/');
+        const basename = pathParts[pathParts.length - 1];
+        const idFromFilename = basename.replace(/\.[^/.]+$/, '');
+        const meta = manifestById.get(idFromFilename) || {};
+        const textureId = meta.id || idFromFilename;
 
-    const blobData = await entry.async('blob');
-    let mimeType = meta.mimeType || 'image/png';
-    if (basename.endsWith('.jpg') || basename.endsWith('.jpeg')) mimeType = 'image/jpeg';
-    else if (basename.endsWith('.webp')) mimeType = 'image/webp';
-    else if (basename.endsWith('.svg')) mimeType = 'image/svg+xml';
+        try {
+          const blobData = await entry.async('blob');
+          const lowerName = basename.toLowerCase();
+          let mimeType = meta.mimeType || 'image/png';
+          if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+            mimeType = 'image/jpeg';
+          } else if (lowerName.endsWith('.webp')) {
+            mimeType = 'image/webp';
+          } else if (lowerName.endsWith('.svg')) {
+            mimeType = 'image/svg+xml';
+          }
 
-    const typedBlob = new Blob([blobData], { type: mimeType });
-    await saveTextureBlob(textureId, typedBlob, {
-      name: meta.name || textureId,
-      mimeType,
-    });
+          const typedBlob = new Blob([blobData], { type: mimeType });
+          const name = meta.name || textureId;
+          return {
+            id: textureId,
+            blob: typedBlob,
+            name,
+            mimeType,
+            metadata: { name, mimeType },
+          };
+        } catch (err) {
+          console.warn(`Could not extract texture "${entry.name}" in ZIP:`, err);
+          return null;
+        }
+      })
+    );
+
+    const validRecords = extracted.filter(Boolean);
+    if (validRecords.length > 0) {
+      await saveTextureBlobsBatch(validRecords);
+    }
   }
 
   // 4. Deserialize and return plan state
