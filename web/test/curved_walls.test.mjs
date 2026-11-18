@@ -11,7 +11,7 @@ import {
   wallArcLength,
 } from '../js/geometry.js';
 import { newState, createRoom, addItem, addOpening } from '../js/model.js';
-import { outletSegments, evaluate, autoComply } from '../js/codes.js';
+import { evaluate, autoComply } from '../js/codes.js';
 
 test('extractRoomEdges extracts optional bulge parameters from room objects', () => {
   const rooms = [
@@ -147,16 +147,12 @@ test('curved wall with insufficient outlets fails NEC 210.52 while properly spac
 
   // Curve N wall with bulge = 1 (arc length = 60 * pi ~= 188.50", corner reach ~92" > 72")
   room.bulges = { N: 1, E: 0, S: 0, W: 0 };
-  const segsFail = outletSegments(state, room);
-  const nSegFail = segsFail.find((s) => s.wall === 'N');
-  assert.ok(nSegFail);
-  assert.equal(nSegFail.covered, false);
-  assert.equal(nSegFail.need, 2);
-
   const repFail = evaluate(state);
   const outletViolations = repFail.violations.filter((v) => v.rule === 'outlets');
   assert.equal(outletViolations.length, 1);
   assert.equal(outletViolations[0].ref, 'NEC 210.52');
+  assert.ok(outletViolations[0].id.startsWith(`outlets:${room.id}:N:`));
+  assert.match(outletViolations[0].msg, /N wall space needs 2 outlet\(s\)/);
 
   // Negative bulge produces identical arc-length violation
   room.bulges.N = -1;
@@ -168,10 +164,6 @@ test('curved wall with insufficient outlets fails NEC 210.52 while properly spac
   addItem(state, room, 'outlet', { wall: 'N', offset: 30 });
   addItem(state, room, 'outlet', { wall: 'N', offset: 90 });
 
-  const segsPass = outletSegments(state, room);
-  const nSegPass = segsPass.find((s) => s.wall === 'N');
-  assert.ok(nSegPass);
-  assert.equal(nSegPass.covered, true);
   assert.equal(evaluate(state).violations.filter((v) => v.rule === 'outlets').length, 0);
 
   // Verify 144-inch inter-outlet spacing along arc:
@@ -187,9 +179,9 @@ test('curved wall with insufficient outlets fails NEC 210.52 while properly spac
   addItem(spacingState, wideRoom, 'outlet', { wall: 'N', offset: 18 });
   addItem(spacingState, wideRoom, 'outlet', { wall: 'N', offset: 126 });
 
-  const spacingSegFail = outletSegments(spacingState, wideRoom).find((s) => s.wall === 'N');
-  assert.equal(spacingSegFail.covered, false);
-  assert.equal(evaluate(spacingState).violations.filter((v) => v.rule === 'outlets').length, 1);
+  const spacingViolations = evaluate(spacingState).violations.filter((v) => v.rule === 'outlets');
+  assert.equal(spacingViolations.length, 1);
+  assert.ok(spacingViolations[0].id.startsWith(`outlets:${wideRoom.id}:N:`));
 
   // Moving outlets to chord 36" and 108" (~99.6" arc spacing <= 144", ~47.5" reach <= 72") passes
   wideRoom.items = wideRoom.items.filter((i) => i.wall !== 'N');
@@ -207,9 +199,10 @@ test('curved wall scales door openings and autoComply places outlets in wall coo
   addOpening(state, room, 'door_entry_36', 'N', 6);
   addItem(state, room, 'outlet', { wall: 'N', offset: 46 });
 
-  const nSegBefore = outletSegments(state, room).find((s) => s.wall === 'N');
-  assert.ok(nSegBefore);
-  assert.equal(nSegBefore.covered, false);
+  const nViolationsBefore = evaluate(state).violations.filter(
+    (v) => v.rule === 'outlets' && v.id.startsWith(`outlets:${room.id}:N:`)
+  );
+  assert.equal(nViolationsBefore.length, 1);
 
   // Reset outlets and let autoComply populate compliant receptacles across curved walls
   room.items = [];

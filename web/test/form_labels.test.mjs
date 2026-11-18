@@ -2,10 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SAMPLE_MUNICIPAL_GIS, formRow } from '../js/app.js';
-import { projectGeoJSON } from '../js/gisBridge.js';
+import { formRow } from '../js/app.js';
 import { KInput } from '../js/k-components.js';
-import { newState, serialize } from '../js/model.js';
 
 const htmlPath = resolve('index.html');
 const appJsPath = resolve('js/app.js');
@@ -225,64 +223,126 @@ test('k-input component forwards aria-label and aria-labelledby attributes to in
 });
 
 test('renderGISSegments generates accessible aria-label attributes with segment name or id fallback and inches unit', async () => {
+  const prevWindow = global.window;
   const prevDocument = global.document;
   const prevStorage = global.localStorage;
+  const prevNavigator = global.navigator;
 
-  const state = newState();
-  state.site = projectGeoJSON(SAMPLE_MUNICIPAL_GIS, { x: 50, y: 50, w: 1100, h: 800 });
-  // Include a segment without a label to verify fallback to seg.id
-  state.site.segments.push({
-    id: 'seg-custom-5',
-    p1: { x: 50, y: 50 },
-    p2: { x: 150, y: 50 },
-    setback: 48,
-    label: '',
-  });
+  const elements = {};
+  const makeEl = (id = '') => {
+    const attrs = new Map();
+    const listeners = {};
+    const el = {
+      id,
+      value: '',
+      open: false,
+      innerHTML: '',
+      focused: false,
+      dataset: {},
+      style: {},
+      classList: {
+        add: () => {},
+        remove: () => {},
+        toggle: () => {},
+        contains: () => false,
+      },
+      setAttribute: (k, v) => attrs.set(k, String(v)),
+      getAttribute: (k) => attrs.get(k) ?? null,
+      removeAttribute: (k) => attrs.delete(k),
+      hasAttribute: (k) => attrs.has(k),
+      addEventListener: (evt, fn) => {
+        if (!listeners[evt]) listeners[evt] = [];
+        listeners[evt].push(fn);
+      },
+      dispatchEvent: (evt) => {
+        const type = typeof evt === 'string' ? evt : evt.type;
+        if (listeners[type]) listeners[type].forEach((fn) => fn(evt));
+      },
+      focus: () => {
+        el.focused = true;
+      },
+      showModal() {
+        this.open = true;
+      },
+      close() {
+        this.open = false;
+      },
+      getContext: () =>
+        new Proxy(
+          {
+            canvas: { width: 800, height: 600 },
+            measureText: () => ({ width: 20 }),
+          },
+          {
+            get(target, prop) {
+              if (prop in target) return target[prop];
+              return () => {};
+            },
+          }
+        ),
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    };
+    return el;
+  };
 
-  const storeData = new Map([['homegen.plan.v1', serialize(state)]]);
+  const getEl = (id) => {
+    if (!elements[id]) elements[id] = makeEl(id);
+    return elements[id];
+  };
+
+  const storeData = new Map();
   global.localStorage = {
     getItem: (key) => storeData.get(key) ?? null,
     setItem: (key, val) => storeData.set(key, String(val)),
   };
 
   try {
-    // Import fresh module instance while document is undefined so doc initializes from localStorage
-    if (typeof global.document !== 'undefined') delete global.document;
-    const gisApp = await import('../js/app.js?gis-aria-label-test=1');
-
-    const attachedInputs = [];
-    const container = {
-      innerHTML: '',
-      querySelectorAll(selector) {
-        if (selector === '.gis-setback-input') return attachedInputs;
-        return [];
-      },
-    };
-    const dialog = {
-      open: false,
-      showModal() {
-        this.open = true;
-      },
-    };
-
     global.document = {
-      querySelector(selector) {
-        if (selector === '#gis-segment-list') return container;
-        if (selector === '#dlg-gis') return dialog;
-        return null;
-      },
-      getElementById() {
-        return null;
-      },
+      activeElement: makeEl('body'),
+      getElementById: (id) => getEl(id),
+      querySelector: (s) => getEl(s.replace(/^#/, '')),
+      querySelectorAll: () => [],
+      addEventListener: () => {},
     };
+    global.window = {
+      devicePixelRatio: 1,
+      addEventListener: () => {},
+      location: { href: '' },
+      navigator: { userAgent: 'node' },
+      atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+      btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
+    };
+    Object.defineProperty(global, 'navigator', {
+      value: global.window.navigator,
+      configurable: true,
+      writable: true,
+    });
 
-    gisApp.renderGISSegments();
+    await import('../js/app.js?gis-aria-label-test=1');
+    const homegen = global.window.__homegen;
+    assert.ok(homegen, '__homegen test hook must be initialized');
 
-    const expectedLabels = state.site.segments.map(
+    const container = getEl('gis-segment-list');
+    homegen.loadGISSubsystem(homegen.SAMPLE_MUNICIPAL_GIS);
+    // Include a segment without a label to verify fallback to seg.id
+    homegen.doc.site.segments.push({
+      id: 'seg-custom-5',
+      p1: { x: 50, y: 50 },
+      p2: { x: 150, y: 50 },
+      setback: 48,
+      label: '',
+    });
+
+    container.innerHTML = '';
+    homegen.openGISDialog();
+
+    const expectedLabels = homegen.doc.site.segments.map(
       (seg) => `${seg.label || seg.id} setback (inches)`
     );
     const labelMatches = [...container.innerHTML.matchAll(/<k-input\b[^>]*aria-label="([^"]+)"/g)];
-    assert.equal(labelMatches.length, state.site.segments.length);
+    assert.equal(labelMatches.length, homegen.doc.site.segments.length);
     assert.deepEqual(
       labelMatches.map((m) => m[1]),
       expectedLabels
@@ -295,7 +355,7 @@ test('renderGISSegments generates accessible aria-label attributes with segment 
 
     // Verify re-rendering via openGISDialog retains valid aria-label attributes
     container.innerHTML = '';
-    gisApp.openGISDialog();
+    homegen.openGISDialog();
     const rerenderedMatches = [
       ...container.innerHTML.matchAll(/<k-input\b[^>]*aria-label="([^"]+)"/g),
     ];
@@ -303,7 +363,19 @@ test('renderGISSegments generates accessible aria-label attributes with segment 
       rerenderedMatches.map((m) => m[1]),
       expectedLabels
     );
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
   } finally {
+    Object.defineProperty(global, 'navigator', {
+      value: prevNavigator,
+      configurable: true,
+      writable: true,
+    });
+    if (typeof prevWindow === 'undefined') {
+      delete global.window;
+    } else {
+      global.window = prevWindow;
+    }
     if (typeof prevDocument === 'undefined') {
       delete global.document;
     } else {
