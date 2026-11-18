@@ -47,7 +47,12 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
-import { parseElevationRaster, computeContoursAsync, ElevationGrid } from './elevationEngine.js';
+import {
+  parseElevationRaster,
+  computeContoursAsync,
+  ElevationGrid,
+  normalizeElevationUnit,
+} from './elevationEngine.js';
 import {
   evaluate,
   blockingIds,
@@ -4966,8 +4971,34 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
 }
 
 $('#load')?.addEventListener('click', () => $('#file').click());
+function updateElevationIntervalLabel(unit) {
+  const lbl = $('#elevation-contour-interval-label');
+  if (lbl) {
+    lbl.textContent = `Contour Interval (${normalizeElevationUnit(unit)})`;
+  }
+}
+
+function syncElevationDialog(grid) {
+  const unit = normalizeElevationUnit(grid?.elevationUnit);
+  const unitEl = $('#elevation-unit');
+  const intervalEl = $('#elevation-contour-interval');
+  const scaleEl = $('#elevation-vertical-scale');
+  const visibleEl = $('#elevation-visible');
+
+  if (unitEl) unitEl.value = unit;
+  if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
+  if (scaleEl) scaleEl.value = String(grid?.verticalScale ?? 1.0);
+  if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
+  updateElevationIntervalLabel(unit);
+}
+
+$('#elevation-unit')?.addEventListener('change', (e) => {
+  updateElevationIntervalLabel(e.target.value);
+});
+
 $('#import-elevation')?.addEventListener('click', () => {
   if (doc.elevationGrid) {
+    syncElevationDialog(doc.elevationGrid);
     $('#dlg-elevation')?.showModal();
   } else {
     $('#elevation-file')?.click();
@@ -5006,11 +5037,14 @@ $('#elevation-file')?.addEventListener('change', async (e) => {
       inputData = c;
     }
 
-    const grid = await parseElevationRaster(inputData);
+    const selectedUnit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
+    const grid = await parseElevationRaster(inputData, { elevationUnit: selectedUnit });
     doc.elevationGrid = grid;
     doc._cachedContours = await computeContoursAsync(grid);
+    syncElevationDialog(grid);
     window.__scene3d?.update();
     redraw();
+    persist();
     toast(`Imported terrain elevation grid (${grid.width}x${grid.height}).`);
   } catch (err) {
     toast(`Failed to import elevation data: ${err.message}`, true);
@@ -5022,15 +5056,19 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
   if (!doc.elevationGrid) return;
   const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
   const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
+  const unit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
   const visible = $('#elevation-visible')?.checked !== false;
 
   doc.elevationGrid.contourInterval = interval;
   doc.elevationGrid.verticalScale = scale;
+  doc.elevationGrid.elevationUnit = unit;
   doc.elevationGrid.visible = visible;
+  updateElevationIntervalLabel(unit);
 
   doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
   window.__scene3d?.update();
   redraw();
+  persist();
   $('#dlg-elevation')?.close();
   toast('Updated elevation terrain settings.');
 });
@@ -5038,8 +5076,10 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
 $('#btn-clear-elevation')?.addEventListener('click', () => {
   doc.elevationGrid = null;
   doc._cachedContours = null;
+  syncElevationDialog(null);
   window.__scene3d?.update();
   redraw();
+  persist();
   $('#dlg-elevation')?.close();
   toast('Cleared terrain elevation data.');
 });

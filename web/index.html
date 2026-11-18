@@ -205,9 +205,16 @@
     <button value="close" aria-label="Close elevation dialog"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
-    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals and 3D vertex displacement scale.</p>
+    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals, elevation units, and 3D vertex displacement scale.</p>
     <div class="row">
-      <label for="elevation-contour-interval">Contour Interval (meters)</label>
+      <label for="elevation-unit">Elevation Unit</label>
+      <select id="elevation-unit">
+        <option value="m" selected>Meters (m)</option>
+        <option value="ft">Feet (ft)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label id="elevation-contour-interval-label" for="elevation-contour-interval">Contour Interval (m)</label>
       <input id="elevation-contour-interval" type="number" min="0.1" max="50" step="0.5" value="1.0" />
     </div>
     <div class="row">
