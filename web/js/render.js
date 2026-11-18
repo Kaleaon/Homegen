@@ -1864,12 +1864,13 @@ function drawSnapGuides(ctx, snapResult, view) {
     return;
   }
   const { snap, guideLines, indicator } = snapResult;
+  const scale = view?.scale || 1;
   ctx.save();
 
   // Draw guide lines
   if (guideLines && guideLines.length) {
-    ctx.lineWidth = 1.5 / view.scale;
-    ctx.setLineDash([4 / view.scale, 4 / view.scale]);
+    ctx.lineWidth = 1.5 / scale;
+    ctx.setLineDash([4 / scale, 4 / scale]);
 
     for (const g of guideLines) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
@@ -1890,8 +1891,8 @@ function drawSnapGuides(ctx, snapResult, view) {
   // Draw magnetic indicator points
   if (indicator) {
     ctx.setLineDash([]);
-    const rOuter = 8 / view.scale;
-    const rInner = 3.5 / view.scale;
+    const rOuter = 8 / scale;
+    const rInner = 3.5 / scale;
 
     let color = getToken('--ktheme-accent', '#3b82f6');
     if (snap?.type === 'midpoint') color = getToken('--ktheme-info', '#a855f7');
@@ -1899,7 +1900,7 @@ function drawSnapGuides(ctx, snapResult, view) {
     else if (snap?.type === 'grid') color = getToken('--ktheme-success', '#10b981');
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2 / view.scale;
+    ctx.lineWidth = 2 / scale;
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rOuter, 0, 2 * Math.PI);
     ctx.stroke();
@@ -1908,6 +1909,61 @@ function drawSnapGuides(ctx, snapResult, view) {
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rInner, 0, 2 * Math.PI);
     ctx.fill();
+  }
+
+  // Draw angle degree status badge overlay when angle snapping is active
+  const badgeAnchor = indicator || snap?.point;
+  if (
+    snap?.type === 'angle' &&
+    typeof snap.angleDegrees === 'number' &&
+    Number.isFinite(snap.angleDegrees) &&
+    badgeAnchor
+  ) {
+    const normalizedDeg = Object.is(snap.angleDegrees, -0) ? 0 : snap.angleDegrees;
+    const badgeText = `${normalizedDeg}°`;
+    const fontSize = 11 / scale;
+    const padX = 6 / scale;
+    const boxH = 20 / scale;
+    const radius = 5 / scale;
+
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.font = `600 ${fontSize}px ${getToken('--font-family-sans', 'sans-serif')}`;
+    const measured = typeof ctx.measureText === 'function' ? ctx.measureText(badgeText) : null;
+    const textWidth =
+      measured && typeof measured.width === 'number'
+        ? measured.width
+        : badgeText.length * fontSize * 0.6;
+    const boxW = textWidth + padX * 2;
+    const boxX = badgeAnchor.x + 12 / scale;
+    const boxY = badgeAnchor.y - 10 / scale - boxH;
+
+    ctx.fillStyle = getToken('--ktheme-bg-surface', 'rgba(15, 23, 42, 0.92)');
+    ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
+    ctx.lineWidth = 1.25 / scale;
+
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+      ctx.fill();
+      ctx.stroke();
+    } else if (typeof ctx.rect === 'function') {
+      ctx.beginPath();
+      ctx.rect(boxX, boxY, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      if (typeof ctx.fillRect === 'function') ctx.fillRect(boxX, boxY, boxW, boxH);
+      if (typeof ctx.strokeRect === 'function') ctx.strokeRect(boxX, boxY, boxW, boxH);
+    }
+
+    ctx.fillStyle = getToken('--ktheme-on-primary', '#ffffff');
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (typeof ctx.fillText === 'function') {
+      ctx.fillText(badgeText, boxX + boxW / 2, boxY + boxH / 2);
+    }
+    ctx.restore();
   }
 
   ctx.restore();

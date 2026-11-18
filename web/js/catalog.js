@@ -28,6 +28,7 @@ const win = (id, name, w, h, sill, style, presetKey, extra = {}) => ({
   frameColor: '#ffffff',
   mullions: { cols: 2, rows: 2 },
   casing: { width: 2, depth: 0.75 },
+  unitPrice: 0,
   ...extra,
 });
 const door = (id, name, w, clear, extra = {}) => ({
@@ -38,65 +39,86 @@ const door = (id, name, w, clear, extra = {}) => ({
   h: 80,
   clear,
   sill: 0,
+  unitPrice: 0,
   ...extra,
 });
 
 export const OPENINGS = [
-  door('door_interior_30', 'Interior door 30"', 30, 28, { presetKey: 'standard_default' }),
-  door('door_interior_32', 'Interior door 32"', 32, 30, { presetKey: 'standard_default' }),
-  door('door_pocket_32', 'Pocket door 32"', 32, 30, { pocket: true, presetKey: 'modern_flush' }),
+  door('door_interior_30', 'Interior door 30"', 30, 28, {
+    presetKey: 'standard_default',
+    unitPrice: 180,
+  }),
+  door('door_interior_32', 'Interior door 32"', 32, 30, {
+    presetKey: 'standard_default',
+    unitPrice: 195,
+  }),
+  door('door_pocket_32', 'Pocket door 32"', 32, 30, {
+    pocket: true,
+    presetKey: 'modern_flush',
+    unitPrice: 320,
+  }),
   door('door_closet_24', 'Closet door 24"', 24, 22, {
     closet: true,
     presetKey: 'standard_default',
+    unitPrice: 140,
   }),
   door('door_entry_36', 'Entry door 36"', 36, 32.5, {
     exterior: true,
     presetKey: 'craftsman_2panel',
+    unitPrice: 650,
   }),
   door('door_entry_double', 'Double entry 60"', 60, 56, {
     exterior: true,
     presetKey: 'colonial_6panel',
+    unitPrice: 1250,
   }),
   door('door_patio_slider', 'Patio slider 72"', 72, 34, {
     exterior: true,
     glass: true,
     presetKey: 'french_glass',
+    unitPrice: 1100,
   }),
   win('win_hung_36x60', 'Double-hung 36×60', 36, 60, 24, 'hung', 'colonial_white', {
     frameMaterial: 'vinyl',
     frameColor: '#ffffff',
     mullions: { cols: 2, rows: 3 },
     casing: { width: 2.5, depth: 1.0 },
+    unitPrice: 380,
   }),
   win('win_hung_30x48', 'Double-hung 30×48', 30, 48, 30, 'hung', 'craftsman_wood', {
     frameMaterial: 'wood',
     frameColor: '#4a3728',
     mullions: { cols: 2, rows: 2 },
     casing: { width: 2.5, depth: 1.0 },
+    unitPrice: 340,
   }),
   win('win_casement_30x48', 'Casement 30×48', 30, 48, 30, 'casement', 'modern_black', {
     frameMaterial: 'aluminum',
     frameColor: '#2f3338',
     mullions: { cols: 2, rows: 2 },
     casing: { width: 2.0, depth: 0.75 },
+    unitPrice: 420,
   }),
   win('win_slider_60x36', 'Slider 60×36', 60, 36, 36, 'slider', 'colonial_white', {
     frameMaterial: 'vinyl',
     frameColor: '#ffffff',
     mullions: { cols: 3, rows: 2 },
     casing: { width: 2.0, depth: 0.75 },
+    unitPrice: 460,
   }),
   win('win_picture_48x48', 'Picture (fixed) 48×48', 48, 48, 30, 'fixed', 'industrial_bronze', {
     frameMaterial: 'bronze',
     frameColor: '#1a1a1a',
     mullions: { cols: 1, rows: 1 },
     casing: { width: 3.0, depth: 1.2 },
+    unitPrice: 490,
   }),
   win('win_bath_slider_36x24', 'Bath slider 36×24', 36, 24, 60, 'slider', 'modern_black', {
     frameMaterial: 'vinyl',
     frameColor: '#f3f1ea',
     mullions: { cols: 2, rows: 1 },
     casing: { width: 2.0, depth: 0.75 },
+    unitPrice: 280,
   }),
 ];
 export const OPENING_BY_ID = Object.fromEntries(OPENINGS.map((o) => [o.id, o]));
@@ -142,6 +164,7 @@ const f = (id, name, cat, w, d, h, color, shape, extra = {}) => ({
   h,
   color,
   shape,
+  unitPrice: 0,
   ...extra,
 });
 const wallItem = (id, name, w, color, shape, extra = {}) => ({
@@ -154,6 +177,7 @@ const wallItem = (id, name, w, color, shape, extra = {}) => ({
   h: 4,
   color,
   shape,
+  unitPrice: 0,
   ...extra,
 });
 const ceil = (id, name, w, color, shape, extra = {}) => ({
@@ -166,6 +190,7 @@ const ceil = (id, name, w, color, shape, extra = {}) => ({
   h: 2,
   color,
   shape,
+  unitPrice: 0,
   ...extra,
 });
 
@@ -193,146 +218,187 @@ export const SYNONYM_MAP = {
 
 export const ITEMS = [
   f('bed_twin', 'Twin bed', 'bedroom', 39, 75, 24, '#8fa3c7', 'bed', {
+    unitPrice: 350,
     tags: ['bed', 'single', 'mattress', 'sleeping'],
   }),
   f('bed_full', 'Full bed', 'bedroom', 54, 75, 24, '#8fa3c7', 'bed', {
+    unitPrice: 450,
     tags: ['bed', 'double', 'mattress', 'sleeping'],
   }),
   f('bed_queen', 'Queen bed', 'bedroom', 60, 80, 24, '#7f95bd', 'bed', {
+    unitPrice: 600,
     tags: ['bed', 'mattress', 'sleeping'],
   }),
   f('bed_king', 'King bed', 'bedroom', 76, 80, 24, '#7f95bd', 'bed', {
+    unitPrice: 800,
     tags: ['bed', 'mattress', 'sleeping'],
   }),
   f('nightstand', 'Nightstand', 'bedroom', 18, 16, 24, '#a8805a', 'box', {
+    unitPrice: 120,
     tags: ['night table', 'side table'],
   }),
   f('dresser', 'Dresser', 'bedroom', 60, 18, 32, '#a8805a', 'box', {
+    unitPrice: 420,
     tags: ['drawers', 'bureau', 'chest', 'storage'],
   }),
   f('wardrobe', 'Wardrobe', 'bedroom', 48, 24, 78, '#9a7650', 'box', {
+    unitPrice: 550,
     tags: ['closet', 'armoire', 'cabinet', 'storage'],
   }),
   f('sofa', 'Sofa', 'living', 84, 36, 32, '#6f8f84', 'sofa', {
+    unitPrice: 950,
     tags: ['couch', 'seating', 'davenport', 'furniture'],
   }),
   f('loveseat', 'Loveseat', 'living', 58, 36, 32, '#6f8f84', 'sofa', {
+    unitPrice: 720,
     tags: ['couch', 'seating', 'settee'],
   }),
   f('armchair', 'Armchair', 'living', 32, 34, 32, '#b06a5b', 'sofa', {
+    unitPrice: 380,
     tags: ['seating', 'recliner', 'lounge'],
   }),
   f('coffee_table', 'Coffee table', 'living', 48, 24, 18, '#a8805a', 'box', {
+    unitPrice: 220,
     tags: ['table', 'center table', 'living room'],
   }),
   f('tv_stand', 'TV stand', 'living', 60, 18, 24, '#4b4b52', 'box', {
+    unitPrice: 280,
     tags: ['entertainment', 'media console', 'television', 'credenza'],
   }),
   f('bookshelf', 'Bookshelf', 'living', 36, 12, 72, '#8b6945', 'shelf', {
+    unitPrice: 240,
     tags: ['bookcase', 'shelving', 'storage', 'library'],
   }),
   f('rug_large', 'Area rug 8×5', 'decor', 96, 60, 1, '#c9a98f', 'rug', {
     flat: true,
+    unitPrice: 260,
     tags: ['carpet', 'mat', 'flooring'],
   }),
   f('plant', 'Plant', 'decor', 18, 18, 36, '#5f9b5f', 'plant', {
+    unitPrice: 65,
     tags: ['greenery', 'houseplant', 'flower', 'decoration'],
   }),
   f('dining_table', 'Dining table', 'dining', 60, 36, 30, '#a8805a', 'table', {
+    unitPrice: 580,
     tags: ['table', 'eating', 'dinner table'],
   }),
   f('dining_chair', 'Dining chair', 'dining', 18, 18, 18, '#8b6945', 'chair', {
     tucks: true,
+    unitPrice: 110,
     tags: ['seating', 'eating'],
   }),
   f('desk', 'Desk', 'office', 48, 24, 30, '#a8805a', 'box', {
+    unitPrice: 320,
     tags: ['worktable', 'workstation', 'writing desk', 'office table'],
   }),
   f('office_chair', 'Office chair', 'office', 22, 22, 36, '#4b4b52', 'chair', {
     tucks: true,
+    unitPrice: 250,
     tags: ['desk chair', 'seating', 'task chair'],
   }),
   f('fridge', 'Refrigerator', 'kitchen', 36, 30, 70, '#cfd6da', 'fridge', {
+    unitPrice: 1400,
     tags: ['fridge', 'freezer', 'appliance', 'cold storage'],
   }),
   f('range_gas', 'Gas range', 'kitchen', 30, 26, 36, '#9aa3a8', 'range', {
     fuel: true,
     cooking: true,
+    unitPrice: 950,
     tags: ['stove', 'cooktop', 'oven', 'appliance'],
   }),
   f('range_electric', 'Electric range', 'kitchen', 30, 26, 36, '#9aa3a8', 'range', {
     cooking: true,
+    unitPrice: 850,
     tags: ['stove', 'cooktop', 'oven', 'appliance'],
   }),
   f('sink_kitchen', 'Kitchen sink cabinet', 'kitchen', 36, 24, 36, '#b9c3c8', 'sink', {
     fixture: 'kitchen_sink',
+    unitPrice: 520,
     tags: ['sink', 'washbasin', 'basin', 'plumbing'],
   }),
   f('dishwasher', 'Dishwasher', 'kitchen', 24, 24, 34, '#b9c3c8', 'box', {
+    unitPrice: 680,
     tags: ['appliance', 'dish washing'],
   }),
   f('counter_36', 'Counter 36"', 'kitchen', 36, 24, 36, '#d8cdb8', 'box', {
+    unitPrice: 360,
     tags: ['countertop', 'island', 'cabinet', 'worktop'],
   }),
   f('counter_24', 'Counter 24"', 'kitchen', 24, 24, 36, '#d8cdb8', 'box', {
+    unitPrice: 260,
     tags: ['countertop', 'island', 'cabinet', 'worktop'],
   }),
   f('toilet', 'Toilet', 'bath', 20, 28, 30, '#f2f4f5', 'toilet', {
     fixture: 'toilet',
     clearance: true,
+    unitPrice: 240,
     tags: ['commode', 'wc', 'water closet', 'bathroom fixture', 'plumbing'],
   }),
   f('vanity', 'Lavatory vanity', 'bath', 30, 21, 34, '#e5e9ec', 'sink', {
     fixture: 'lavatory',
     clearance: true,
+    unitPrice: 480,
     tags: ['sink', 'bathroom sink', 'washbasin', 'basin', 'plumbing'],
   }),
   f('tub', 'Bathtub 60×30', 'bath', 60, 30, 20, '#f2f4f5', 'tub', {
     fixture: 'tub',
+    unitPrice: 650,
     tags: ['bath', 'soaker', 'plumbing'],
   }),
   f('shower', 'Shower 36×36', 'bath', 36, 36, 80, '#dbeaf0', 'shower', {
     fixture: 'shower',
+    unitPrice: 780,
     tags: ['shower stall', 'bath', 'plumbing'],
   }),
   f('washer', 'Washer', 'laundry', 27, 28, 38, '#dfe3e6', 'box', {
+    unitPrice: 750,
     tags: ['washing machine', 'laundry', 'appliance'],
   }),
   f('dryer', 'Dryer', 'laundry', 27, 28, 38, '#dfe3e6', 'box', {
+    unitPrice: 720,
     tags: ['clothes dryer', 'laundry', 'appliance'],
   }),
   f('water_heater_gas', 'Gas water heater', 'laundry', 22, 22, 60, '#c9ccd1', 'round', {
     fuel: true,
+    unitPrice: 980,
     tags: ['boiler', 'water heater', 'appliance', 'plumbing'],
   }),
   wallItem('outlet', 'Outlet', 12, '#444', 'outlet', {
+    unitPrice: 18,
     tags: ['receptacle', 'plug', 'power', 'socket', 'electric'],
   }),
   wallItem('outlet_gfci', 'GFCI outlet', 12, '#2a7', 'outlet', {
     gfci: true,
+    unitPrice: 35,
     tags: ['receptacle', 'plug', 'power', 'socket', 'gfci', 'electric'],
   }),
   wallItem('switch', 'Light switch', 12, '#444', 'switch', {
+    unitPrice: 16,
     tags: ['toggle', 'wall switch', 'electric'],
   }),
   ceil('light_ceiling', 'Ceiling light', 14, '#f2c94c', 'light', {
     func: ['light'],
+    unitPrice: 95,
     tags: ['lamp', 'fixture', 'lighting', 'electric'],
   }),
   ceil('fan_exhaust', 'Exhaust fan', 14, '#9aa', 'fan', {
     func: ['fan'],
+    unitPrice: 130,
     tags: ['vent', 'ventilation', 'fan'],
   }),
   ceil('smoke_alarm', 'Smoke alarm', 8, '#d94', 'alarm', {
     func: ['smoke'],
+    unitPrice: 40,
     tags: ['smoke detector', 'safety', 'alarm'],
   }),
   ceil('co_alarm', 'CO alarm', 8, '#49d', 'alarm', {
     func: ['co'],
+    unitPrice: 45,
     tags: ['carbon monoxide', 'safety', 'alarm'],
   }),
   ceil('smoke_co_alarm', 'Smoke + CO alarm', 8, '#a6c', 'alarm', {
     func: ['smoke', 'co'],
+    unitPrice: 65,
     tags: ['smoke detector', 'carbon monoxide', 'safety', 'alarm'],
   }),
 ];
@@ -359,6 +425,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 1.5,
   },
   {
     id: 'paint_beige',
@@ -368,6 +435,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 1.5,
   },
   {
     id: 'paint_sage',
@@ -377,6 +445,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 1.5,
   },
   {
     id: 'paint_navy',
@@ -386,6 +455,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 1.5,
   },
   {
     id: 'paint_blush',
@@ -395,6 +465,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 1.5,
   },
   {
     id: 'paint_charcoal',
@@ -404,6 +475,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 1.5,
   },
   {
     id: 'wp_stripe_blue',
@@ -413,6 +485,7 @@ export const WALL_FINISHES = [
     c2: '#9db6d3',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.25,
   },
   {
     id: 'wp_stripe_cream',
@@ -422,6 +495,7 @@ export const WALL_FINISHES = [
     c2: '#d9c9a5',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.25,
   },
   {
     id: 'wp_floral',
@@ -431,6 +505,7 @@ export const WALL_FINISHES = [
     c2: '#c76f7b',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.25,
   },
   {
     id: 'wp_damask',
@@ -440,6 +515,7 @@ export const WALL_FINISHES = [
     c2: '#b79c58',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.25,
   },
   {
     id: 'wp_geo',
@@ -449,6 +525,7 @@ export const WALL_FINISHES = [
     c2: '#4f8f86',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.25,
   },
   {
     id: 'wp_dots',
@@ -458,6 +535,7 @@ export const WALL_FINISHES = [
     c2: '#d2796b',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.25,
   },
   {
     id: 'wp_vinyl_leaf',
@@ -468,6 +546,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 3.75,
   },
   {
     id: 'wall_brick',
@@ -481,6 +560,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 14.0,
   },
   {
     id: 'wall_stucco',
@@ -494,6 +574,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.5,
+    unitPrice: 9.5,
   },
   {
     id: 'wall_stone',
@@ -507,6 +588,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 18.0,
   },
   {
     id: 'wall_siding',
@@ -520,6 +602,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 8.5,
   },
   {
     id: 'wall_wainscot',
@@ -529,6 +612,7 @@ export const WALL_FINISHES = [
     c2: '#cfc4ae',
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 11.0,
   },
   {
     id: 'wall_tile_white',
@@ -539,6 +623,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 9.0,
   },
   {
     id: 'wall_tile_teal',
@@ -549,6 +634,7 @@ export const WALL_FINISHES = [
     wet: true,
     layerThickness: 0.5,
     studDepth: 3.5,
+    unitPrice: 10.5,
   },
   {
     id: 'cladding_board_batten',
@@ -562,6 +648,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 9.25,
   },
   {
     id: 'cladding_siding_white',
@@ -575,6 +662,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 6.5,
   },
   {
     id: 'cladding_siding_gray',
@@ -588,6 +676,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 6.75,
   },
   {
     id: 'cladding_siding_blue',
@@ -601,6 +690,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 7.0,
   },
   {
     id: 'cladding_stone',
@@ -614,6 +704,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.75,
+    unitPrice: 17.5,
   },
   {
     id: 'cladding_stucco',
@@ -626,6 +717,7 @@ export const WALL_FINISHES = [
     studDepth: 5.5,
     sheathingThickness: 0.5,
     claddingOffset: 0.5,
+    unitPrice: 9.5,
   },
 ];
 export const WALL_BY_ID = Object.fromEntries(WALL_FINISHES.map((w) => [w.id, w]));
@@ -643,22 +735,45 @@ const WINDOW_FRAMES = [
 export const WINDOW_FRAME_BY_ID = Object.fromEntries(WINDOW_FRAMES.map((f) => [f.id, f]));
 
 export const FLOOR_FINISHES = [
-  { id: 'floor_oak', name: 'Oak plank', pattern: 'planks', c1: '#c79a62', c2: '#a97d49' },
-  { id: 'floor_walnut', name: 'Walnut plank', pattern: 'planks', c1: '#7a5538', c2: '#5e4029' },
+  {
+    id: 'floor_oak',
+    name: 'Oak plank',
+    pattern: 'planks',
+    c1: '#c79a62',
+    c2: '#a97d49',
+    unitPrice: 7.5,
+  },
+  {
+    id: 'floor_walnut',
+    name: 'Walnut plank',
+    pattern: 'planks',
+    c1: '#7a5538',
+    c2: '#5e4029',
+    unitPrice: 9.5,
+  },
   {
     id: 'floor_herringbone',
     name: 'Herringbone',
     pattern: 'herring',
     c1: '#b98c5a',
     c2: '#8f6a3f',
+    unitPrice: 12.0,
   },
-  { id: 'floor_carpet_gray', name: 'Gray carpet', pattern: 'carpet', c1: '#a9adb3', c2: '#9a9ea5' },
+  {
+    id: 'floor_carpet_gray',
+    name: 'Gray carpet',
+    pattern: 'carpet',
+    c1: '#a9adb3',
+    c2: '#9a9ea5',
+    unitPrice: 4.25,
+  },
   {
     id: 'floor_carpet_cream',
     name: 'Cream carpet',
     pattern: 'carpet',
     c1: '#ece3d0',
     c2: '#ddd2ba',
+    unitPrice: 4.5,
   },
   {
     id: 'floor_tile_gray',
@@ -667,6 +782,7 @@ export const FLOOR_FINISHES = [
     c1: '#c6c9cc',
     c2: '#a7abae',
     wet: true,
+    unitPrice: 6.75,
   },
   {
     id: 'floor_checker',
@@ -675,6 +791,7 @@ export const FLOOR_FINISHES = [
     c1: '#f2f2f2',
     c2: '#2f3338',
     wet: true,
+    unitPrice: 7.25,
   },
   {
     id: 'floor_marble',
@@ -683,6 +800,7 @@ export const FLOOR_FINISHES = [
     c1: '#eceff1',
     c2: '#b9c1c7',
     wet: true,
+    unitPrice: 16.0,
   },
   {
     id: 'floor_vinyl',
@@ -691,8 +809,16 @@ export const FLOOR_FINISHES = [
     c1: '#b7a58e',
     c2: '#9d8b75',
     wet: true,
+    unitPrice: 5.0,
   },
-  { id: 'floor_concrete', name: 'Polished concrete', pattern: 'solid', c1: '#a8aaab', wet: true },
+  {
+    id: 'floor_concrete',
+    name: 'Polished concrete',
+    pattern: 'solid',
+    c1: '#a8aaab',
+    wet: true,
+    unitPrice: 6.0,
+  },
 ];
 export const FLOOR_BY_ID = Object.fromEntries(FLOOR_FINISHES.map((w) => [w.id, w]));
 

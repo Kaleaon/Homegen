@@ -192,3 +192,197 @@ test('renderSnapToggles popover menu renders unified k-button trigger with badge
   assert.deepEqual(basicIds, ['grid', 'edge']);
   assert.deepEqual(advancedIds, ['midpoint', 'perpendicular']);
 });
+
+test('renderSnapToggles binds Grid & Angle Increments k-input controls via buildGridSettingsViewModel', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const { InteractionLayer, buildGridSettingsViewModel } =
+    await import('../../designer3d/tools/index.mjs');
+
+  const appJsContent = readFileSync(resolve('js/app.js'), 'utf8');
+  assert.match(appJsContent, /Grid &amp; Angle Increments/);
+  assert.match(appJsContent, /<k-input[^>]*id="snap-unit-size"[^>]*type="number"/);
+  assert.match(appJsContent, /<k-input[^>]*id="snap-angle-degrees"[^>]*type="number"/);
+
+  const layer = new InteractionLayer({
+    gridSettings: { unitSize: 6, angleSnapDegrees: 15, magneticThreshold: 14 },
+  });
+  const gridVm = buildGridSettingsViewModel(layer);
+
+  assert.equal(gridVm.unitSize, 6);
+  assert.equal(gridVm.angleSnapDegrees, 15);
+
+  assert.ok(gridVm.onUnitSizeChange('12'));
+  assert.equal(layer.gridSettings.unitSize, 12);
+
+  assert.ok(gridVm.onAngleSnapDegreesChange('45'));
+  assert.equal(layer.gridSettings.angleSnapDegrees, 45);
+
+  assert.equal(gridVm.onUnitSizeChange('0'), null);
+  assert.equal(gridVm.onAngleSnapDegreesChange('-15'), null);
+  assert.equal(gridVm.onUnitSizeChange(''), null);
+  assert.equal(layer.gridSettings.unitSize, 12);
+  assert.equal(layer.gridSettings.angleSnapDegrees, 45);
+});
+
+test('renderSnapToggles in app.js updates interaction.gridSettings on input/change and preserves popover open and focus state', async () => {
+  const elements = {};
+  const makeEl = (id = '') => {
+    const attrs = new Map();
+    const listeners = {};
+    const el = {
+      id,
+      value: '',
+      open: false,
+      innerHTML: '',
+      focused: false,
+      dataset: {},
+      style: {},
+      classList: {
+        add: () => {},
+        remove: () => {},
+        toggle: () => {},
+        contains: () => false,
+      },
+      setAttribute: (k, v) => attrs.set(k, String(v)),
+      getAttribute: (k) => attrs.get(k) ?? null,
+      removeAttribute: (k) => attrs.delete(k),
+      hasAttribute: (k) => attrs.has(k),
+      addEventListener: (evt, fn) => {
+        if (!listeners[evt]) listeners[evt] = [];
+        listeners[evt].push(fn);
+      },
+      dispatchEvent: (evt) => {
+        const type = typeof evt === 'string' ? evt : evt.type;
+        if (listeners[type]) listeners[type].forEach((fn) => fn(evt));
+      },
+      focus: () => {
+        el.focused = true;
+        global.document.activeElement = el;
+      },
+      getContext: () => ({
+        save: () => {},
+        restore: () => {},
+        clearRect: () => {},
+        fillRect: () => {},
+        strokeRect: () => {},
+        beginPath: () => {},
+        moveTo: () => {},
+        lineTo: () => {},
+        stroke: () => {},
+        fill: () => {},
+        arc: () => {},
+        closePath: () => {},
+        setTransform: () => {},
+        scale: () => {},
+        translate: () => {},
+        setLineDash: () => {},
+        fillText: () => {},
+        measureText: () => ({ width: 20 }),
+        canvas: { width: 800, height: 600 },
+      }),
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    };
+    return el;
+  };
+
+  const getEl = (id) => {
+    if (!elements[id]) elements[id] = makeEl(id);
+    return elements[id];
+  };
+
+  const snapPopover = makeEl('snap-popover');
+  const unitInput = makeEl('snap-unit-size');
+  const angleInput = makeEl('snap-angle-degrees');
+  const unitLabel = makeEl('snap-unit-size-label');
+  const angleLabel = makeEl('snap-angle-degrees-label');
+
+  const snapContainer = makeEl('snap-toggles');
+  snapContainer.contains = (target) => target === unitInput || target === angleInput;
+  snapContainer.querySelector = (sel) => {
+    if (!snapContainer.innerHTML) return null;
+    if (sel === 'k-popover') return snapPopover;
+    if (sel === '#snap-unit-size') return unitInput;
+    if (sel === '#snap-angle-degrees') return angleInput;
+    if (sel === 'label[for="snap-unit-size"]') return unitLabel;
+    if (sel === 'label[for="snap-angle-degrees"]') return angleLabel;
+    return null;
+  };
+  snapContainer.querySelectorAll = () => [];
+  elements['snap-toggles'] = snapContainer;
+
+  const prevDoc = global.document;
+  const prevWin = global.window;
+
+  try {
+    global.document = {
+      activeElement: makeEl('body'),
+      getElementById: (id) => getEl(id),
+      querySelector: (s) => getEl(s.replace(/^#/, '')),
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    };
+    global.window = {
+      devicePixelRatio: 1,
+      addEventListener: () => {},
+      location: { href: '' },
+      navigator: { userAgent: 'node' },
+      atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+      btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
+    };
+    Object.defineProperty(global, 'navigator', {
+      value: global.window.navigator,
+      configurable: true,
+      writable: true,
+    });
+
+    await import(`../js/app.js?t=${Date.now()}`);
+    const { interaction, renderSnapToggles } = global.window.__homegen;
+
+    assert.equal(interaction.gridSettings.unitSize, 6);
+    assert.equal(interaction.gridSettings.angleSnapDegrees, 15);
+    assert.match(snapContainer.innerHTML, /Grid &amp; Angle Increments/);
+
+    // Simulate opening popover and focusing unitSize input
+    snapPopover.open = true;
+    unitInput.focus();
+
+    // Real-time valid input update
+    unitInput.value = '12';
+    unitInput.dispatchEvent({ type: 'input', detail: { value: '12' } });
+    assert.equal(interaction.gridSettings.unitSize, 12);
+    assert.equal(unitInput.hasAttribute('aria-invalid'), false);
+    assert.equal(snapPopover.open, true);
+
+    // Invalid input during typing marks aria-invalid without throwing or mutating settings
+    unitInput.value = '-4';
+    unitInput.dispatchEvent({ type: 'input', detail: { value: '-4' } });
+    assert.equal(interaction.gridSettings.unitSize, 12);
+    assert.equal(unitInput.getAttribute('aria-invalid'), 'true');
+
+    // Invalid value on change reverts input display to active setting
+    unitInput.dispatchEvent({ type: 'change', detail: { value: '-4' } });
+    assert.equal(interaction.gridSettings.unitSize, 12);
+    assert.equal(unitInput.value, '12');
+    assert.equal(unitInput.hasAttribute('aria-invalid'), false);
+
+    // Valid angle snap change update
+    angleInput.value = '30';
+    angleInput.dispatchEvent({ type: 'change', detail: { value: '30' } });
+    assert.equal(interaction.gridSettings.angleSnapDegrees, 30);
+
+    // Full re-render preserves open popover and active input focus
+    unitInput.focused = false;
+    global.document.activeElement = unitInput;
+    renderSnapToggles();
+    assert.equal(snapPopover.open, true);
+    assert.equal(unitInput.focused, true);
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } finally {
+    global.document = prevDoc;
+    global.window = prevWin;
+  }
+});
