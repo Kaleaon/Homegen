@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../js/model.js';
 import { commit } from '../js/codes.js';
-import { generatePDF, SCALE_OPTIONS, fmtLen } from '../js/pdfEngine.js';
+import {
+  generatePDF,
+  resolvePDFAttributionAndLicensing,
+  SCALE_OPTIONS,
+  fmtLen,
+} from '../js/pdfEngine.js';
 
 test('pdfEngine scale options map 1/4"=1\'0" scale correctly', () => {
   const scaleOpt = SCALE_OPTIONS['1/4"=1\'0"'];
@@ -56,6 +61,94 @@ test('generatePDF creates valid vector PDF for a sample home', () => {
   // Verify page count (Floorplan + Room Schedule)
   const pageCount = pdf.getNumberOfPages();
   assert.ok(pageCount >= 2, 'PDF must contain floorplan page and room schedule page');
+
+  const rawPdf = Buffer.from(buf).toString('latin1');
+  assert.ok(
+    rawPdf.includes('CRS: EPSG:4326 \\(37.7749° N, 122.4194° W\\)'),
+    'Floorplan and schedule title blocks must render default CRS EPSG and origin coordinates'
+  );
+  assert.ok(
+    rawPdf.includes('/Subject (Architectural Floor Plan'),
+    'Generated PDF metadata must include CRS subject descriptor'
+  );
+});
+
+test('generatePDF renders custom CRS EPSG identifiers, origin formats, and unprojected fallbacks in title block', () => {
+  let doc = M.newState();
+  doc.name = 'Georeferenced Survey Home';
+  const r1 = commit(doc, (n) => M.placeRoomKit(n, 'kit_living', 0, 0, 0));
+  if (r1.ok) doc = r1.state;
+
+  // Custom California State Plane Zone 3 with Southern/Eastern test & standard object origin
+  doc.crs = {
+    epsg: 'EPSG:2227',
+    origin: { latitude: 37.8044, longitude: -122.2712 },
+    units: 'us-ft',
+  };
+
+  const resolvedCustom = resolvePDFAttributionAndLicensing(doc);
+  assert.equal(resolvedCustom.crsText, 'EPSG:2227 (37.8044° N, 122.2712° W)');
+
+  const pdfCustom = generatePDF(doc, {
+    includeTitleBlock: true,
+    includeRoomSchedule: true,
+  });
+  const page1Stream = pdfCustom.internal.pages[1].join('\n');
+  const page2Stream = pdfCustom.internal.pages[2].join('\n');
+  assert.ok(
+    page1Stream.includes('CRS: EPSG:2227 \\(37.8044° N, 122.2712° W\\)'),
+    'Floor plan page title block must include custom CRS EPSG and origin'
+  );
+  assert.ok(
+    page2Stream.includes('CRS: EPSG:2227 \\(37.8044° N, 122.2712° W\\)'),
+    'Room schedule page title block must include custom CRS EPSG and origin'
+  );
+
+  // Non-standard array origin [lon, lat] and numeric EPSG string
+  doc.crs = {
+    epsg: '32756',
+    origin: [151.2093, -33.8688],
+  };
+  assert.equal(
+    resolvePDFAttributionAndLicensing(doc).crsText,
+    'EPSG:32756 (33.8688° S, 151.2093° E)'
+  );
+
+  // Non-standard { x, y } origin object (geographic and projected)
+  doc.crs = {
+    epsg: 'EPSG:3857',
+    origin: { x: -122.4194, y: 37.7749 },
+  };
+  assert.equal(
+    resolvePDFAttributionAndLicensing(doc).crsText,
+    'EPSG:3857 (37.7749° N, 122.4194° W)'
+  );
+
+  doc.crs = {
+    epsg: 'EPSG:2227',
+    origin: { x: 6012345.5, y: 2112345.25 },
+  };
+  assert.equal(
+    resolvePDFAttributionAndLicensing(doc).crsText,
+    'EPSG:2227 (6012345.50, 2112345.25)'
+  );
+
+  // Missing docState.crs and unprojected PLAN fallback
+  delete doc.crs;
+  assert.equal(resolvePDFAttributionAndLicensing(doc).crsText, 'PLAN (Local Plan Coordinates)');
+
+  const pdfUnprojected = generatePDF(doc, {
+    includeTitleBlock: true,
+    includeRoomSchedule: false,
+  });
+  const unprojectedStream = pdfUnprojected.internal.pages[1].join('\n');
+  assert.ok(
+    unprojectedStream.includes('CRS: PLAN \\(Local Plan Coordinates\\)'),
+    'Missing CRS must fall back cleanly to PLAN (Local Plan Coordinates) in title block'
+  );
+
+  doc.crs = { epsg: 'PLAN' };
+  assert.equal(resolvePDFAttributionAndLicensing(doc).crsText, 'PLAN (Local Plan Coordinates)');
 });
 
 test('generatePDF supports Fit to Page scale option', () => {

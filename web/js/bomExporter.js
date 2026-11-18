@@ -58,6 +58,49 @@ export function fmtLen(inches) {
 }
 
 /**
+ * Rounds a numeric currency amount to 2 decimal places.
+ * Missing, non-finite, or negative inputs safely normalize to 0.
+ *
+ * @param {*} val Currency value to round.
+ * @returns {number} Two-decimal rounded currency amount.
+ */
+export function roundCurrency(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  const num = Number(val);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  return Math.round((num + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Formats a numeric price/cost value as a two-decimal string (e.g. "0.00", "249.50").
+ * Missing or invalid values output "0.00".
+ *
+ * @param {*} val Currency value to format.
+ * @returns {string} Two-decimal currency string.
+ */
+export function formatCurrency(val) {
+  return roundCurrency(val).toFixed(2);
+}
+
+/**
+ * Resolves the first valid non-negative numeric unit price from candidates, falling back to 0.
+ *
+ * @param  {...*} candidates Candidate price values in priority order.
+ * @returns {number} Resolved numeric unit price.
+ */
+function resolveUnitPrice(...candidates) {
+  for (const val of candidates) {
+    if (val !== null && val !== undefined && val !== '') {
+      const num = Number(val);
+      if (Number.isFinite(num) && num >= 0) {
+        return roundCurrency(num);
+      }
+    }
+  }
+  return 0;
+}
+
+/**
  * Generates an RFC 4180 compliant CSV text string representing the Bill of Materials (BOM)
  * schedule extracted immutably from docState.
  *
@@ -68,6 +111,7 @@ export function fmtLen(inches) {
  * @param {boolean} [options.includeOpenings=true] Include Doors & Windows schedule.
  * @param {boolean} [options.includeFinishes=true] Include Finishes schedule.
  * @param {boolean} [options.includeRooms=true] Include Room Area Summary schedule.
+ * @param {boolean} [options.includePricing=true] Include item unit prices, extended totals, and BOM cost summary rollup.
  * @returns {string} Complete RFC 4180 formatted CSV text string with UTF-8 line endings.
  */
 export function generateBOMCSV(docState, options = {}) {
@@ -77,6 +121,7 @@ export function generateBOMCSV(docState, options = {}) {
     includeOpenings: true,
     includeFinishes: true,
     includeRooms: true,
+    includePricing: true,
     ...options,
   };
 
@@ -92,6 +137,10 @@ export function generateBOMCSV(docState, options = {}) {
 
   // Calculate total net floor area across all rooms
   const totalNetFloorArea = rooms.reduce((sum, r) => sum + floorAreaSqFt(r), 0);
+
+  let furnitureSubtotal = 0;
+  let openingsSubtotal = 0;
+  let finishesSubtotal = 0;
 
   // 1. PROJECT METADATA
   if (opts.includeMetadata) {
@@ -109,7 +158,7 @@ export function generateBOMCSV(docState, options = {}) {
   if (opts.includeFurniture) {
     appendSeparator();
     csv += formatCSVRow(['=== FURNITURE & FIXTURES ===']);
-    csv += formatCSVRow([
+    const furnitureHeaders = [
       'Item ID',
       'Name',
       'Category',
@@ -118,7 +167,11 @@ export function generateBOMCSV(docState, options = {}) {
       'Depth (in)',
       'Height (in)',
       'Rooms',
-    ]);
+    ];
+    if (opts.includePricing) {
+      furnitureHeaders.push('Unit Price (USD)', 'Total Cost (USD)');
+    }
+    csv += formatCSVRow(furnitureHeaders);
 
     const itemMap = new Map();
 
@@ -128,9 +181,13 @@ export function generateBOMCSV(docState, options = {}) {
         const typeId = it.type || it.id;
         if (!typeId) continue;
         const def = ITEM_BY_ID[typeId] || {};
+        const defaultPrice = resolveUnitPrice(def.unitPrice);
+        const unitPrice = resolveUnitPrice(it.unitPrice, def.unitPrice);
+        const groupKey =
+          opts.includePricing && unitPrice !== defaultPrice ? `${typeId}@${unitPrice}` : typeId;
 
-        if (!itemMap.has(typeId)) {
-          itemMap.set(typeId, {
+        if (!itemMap.has(groupKey)) {
+          itemMap.set(groupKey, {
             id: typeId,
             name: def.name || it.name || typeId,
             category: def.cat || 'other',
@@ -138,18 +195,19 @@ export function generateBOMCSV(docState, options = {}) {
             w: it.w ?? def.w ?? '',
             d: it.d ?? def.d ?? '',
             h: it.h ?? def.h ?? '',
+            unitPrice,
             rooms: new Set(),
           });
         }
 
-        const entry = itemMap.get(typeId);
+        const entry = itemMap.get(groupKey);
         entry.qty += 1;
         entry.rooms.add(roomName);
       }
     }
 
     for (const entry of itemMap.values()) {
-      csv += formatCSVRow([
+      const row = [
         entry.id,
         entry.name,
         entry.category,
@@ -158,6 +216,27 @@ export function generateBOMCSV(docState, options = {}) {
         entry.d,
         entry.h,
         Array.from(entry.rooms).join('; '),
+      ];
+      if (opts.includePricing) {
+        const lineCost = roundCurrency(entry.qty * entry.unitPrice);
+        furnitureSubtotal = roundCurrency(furnitureSubtotal + lineCost);
+        row.push(formatCurrency(entry.unitPrice), formatCurrency(lineCost));
+      }
+      csv += formatCSVRow(row);
+    }
+
+    if (opts.includePricing) {
+      csv += formatCSVRow([
+        'Furniture & Fixtures Subtotal',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        formatCurrency(furnitureSubtotal),
       ]);
     }
   }
@@ -166,7 +245,7 @@ export function generateBOMCSV(docState, options = {}) {
   if (opts.includeOpenings) {
     appendSeparator();
     csv += formatCSVRow(['=== DOORS & WINDOWS ===']);
-    csv += formatCSVRow([
+    const openingHeaders = [
       'Opening ID',
       'Name',
       'Kind',
@@ -177,7 +256,11 @@ export function generateBOMCSV(docState, options = {}) {
       'Glazed Area (sq ft)',
       'Operable Area (sq ft)',
       'Rooms',
-    ]);
+    ];
+    if (opts.includePricing) {
+      openingHeaders.push('Unit Price (USD)', 'Total Cost (USD)');
+    }
+    csv += formatCSVRow(openingHeaders);
 
     const openingMap = new Map();
 
@@ -188,12 +271,16 @@ export function generateBOMCSV(docState, options = {}) {
         if (!typeId) continue;
         const def = OPENING_BY_ID[typeId] || {};
         const metrics = openingMetrics(def);
+        const defaultPrice = resolveUnitPrice(def.unitPrice);
+        const unitPrice = resolveUnitPrice(o.unitPrice, def.unitPrice);
+        const groupKey =
+          opts.includePricing && unitPrice !== defaultPrice ? `${typeId}@${unitPrice}` : typeId;
 
-        if (!openingMap.has(typeId)) {
+        if (!openingMap.has(groupKey)) {
           const kindStr = def.kind
             ? def.kind.charAt(0).toUpperCase() + def.kind.slice(1)
             : 'Opening';
-          openingMap.set(typeId, {
+          openingMap.set(groupKey, {
             id: typeId,
             name: def.name || typeId,
             kind: kindStr,
@@ -203,18 +290,19 @@ export function generateBOMCSV(docState, options = {}) {
             sill: def.sill ?? 0,
             glazeSqFt: metrics.glaze / 144,
             operableSqFt: metrics.operable / 144,
+            unitPrice,
             rooms: new Set(),
           });
         }
 
-        const entry = openingMap.get(typeId);
+        const entry = openingMap.get(groupKey);
         entry.qty += 1;
         entry.rooms.add(roomName);
       }
     }
 
     for (const entry of openingMap.values()) {
-      csv += formatCSVRow([
+      const row = [
         entry.id,
         entry.name,
         entry.kind,
@@ -225,6 +313,29 @@ export function generateBOMCSV(docState, options = {}) {
         entry.glazeSqFt.toFixed(2),
         entry.operableSqFt.toFixed(2),
         Array.from(entry.rooms).join('; '),
+      ];
+      if (opts.includePricing) {
+        const lineCost = roundCurrency(entry.qty * entry.unitPrice);
+        openingsSubtotal = roundCurrency(openingsSubtotal + lineCost);
+        row.push(formatCurrency(entry.unitPrice), formatCurrency(lineCost));
+      }
+      csv += formatCSVRow(row);
+    }
+
+    if (opts.includePricing) {
+      csv += formatCSVRow([
+        'Doors & Windows Subtotal',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        formatCurrency(openingsSubtotal),
       ]);
     }
   }
@@ -233,14 +344,18 @@ export function generateBOMCSV(docState, options = {}) {
   if (opts.includeFinishes) {
     appendSeparator();
     csv += formatCSVRow(['=== FINISHES SCHEDULE ===']);
-    csv += formatCSVRow([
+    const finishHeaders = [
       'Finish Scope',
       'Finish ID',
       'Name',
       'Pattern',
       'Moisture Rated',
       'Coverage Area (sq ft)',
-    ]);
+    ];
+    if (opts.includePricing) {
+      finishHeaders.push('Unit Price (USD/sq ft)', 'Total Cost (USD)');
+    }
+    csv += formatCSVRow(finishHeaders);
 
     const floorMap = new Map();
     const wallMap = new Map();
@@ -257,6 +372,7 @@ export function generateBOMCSV(docState, options = {}) {
           name: floorDef.name || floorId,
           pattern: floorDef.pattern || 'solid',
           wet: floorDef.wet ? 'Yes' : 'No',
+          unitPrice: resolveUnitPrice(floorDef.unitPrice),
           areaSqFt: 0,
         });
       }
@@ -288,6 +404,7 @@ export function generateBOMCSV(docState, options = {}) {
           name: wallDef.name || wallId,
           pattern: wallDef.pattern || 'solid',
           wet: wallDef.wet ? 'Yes' : 'No',
+          unitPrice: resolveUnitPrice(wallDef.unitPrice),
           areaSqFt: 0,
         });
       }
@@ -295,24 +412,49 @@ export function generateBOMCSV(docState, options = {}) {
     }
 
     for (const entry of floorMap.values()) {
-      csv += formatCSVRow([
+      const row = [
         'Floor',
         entry.id,
         entry.name,
         entry.pattern,
         entry.wet,
         entry.areaSqFt.toFixed(2),
-      ]);
+      ];
+      if (opts.includePricing) {
+        const lineCost = roundCurrency(entry.areaSqFt * entry.unitPrice);
+        finishesSubtotal = roundCurrency(finishesSubtotal + lineCost);
+        row.push(formatCurrency(entry.unitPrice), formatCurrency(lineCost));
+      }
+      csv += formatCSVRow(row);
     }
 
     for (const entry of wallMap.values()) {
-      csv += formatCSVRow([
+      const row = [
         'Wall',
         entry.id,
         entry.name,
         entry.pattern,
         entry.wet,
         entry.areaSqFt.toFixed(2),
+      ];
+      if (opts.includePricing) {
+        const lineCost = roundCurrency(entry.areaSqFt * entry.unitPrice);
+        finishesSubtotal = roundCurrency(finishesSubtotal + lineCost);
+        row.push(formatCurrency(entry.unitPrice), formatCurrency(lineCost));
+      }
+      csv += formatCSVRow(row);
+    }
+
+    if (opts.includePricing) {
+      csv += formatCSVRow([
+        'Finishes Subtotal',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        formatCurrency(finishesSubtotal),
       ]);
     }
   }
@@ -348,6 +490,29 @@ export function generateBOMCSV(docState, options = {}) {
     }
 
     csv += formatCSVRow(['Total Net Floor Area', '', '', '', '', totalNetFloorArea.toFixed(2)]);
+  }
+
+  // 6. BOM COST SUMMARY ROLLUP
+  if (opts.includePricing) {
+    appendSeparator();
+    csv += formatCSVRow(['=== BOM COST SUMMARY ===']);
+    csv += formatCSVRow(['Category', 'Amount (USD)']);
+
+    if (opts.includeFurniture) {
+      csv += formatCSVRow(['Furniture & Fixtures', formatCurrency(furnitureSubtotal)]);
+    }
+    if (opts.includeOpenings) {
+      csv += formatCSVRow(['Doors & Windows', formatCurrency(openingsSubtotal)]);
+    }
+    if (opts.includeFinishes) {
+      csv += formatCSVRow(['Finishes (Floors & Walls)', formatCurrency(finishesSubtotal)]);
+    }
+
+    const grandTotal = roundCurrency(furnitureSubtotal + openingsSubtotal + finishesSubtotal);
+    const costPerSqFt = totalNetFloorArea > 0 ? roundCurrency(grandTotal / totalNetFloorArea) : 0;
+
+    csv += formatCSVRow(['Total Estimated Cost (USD)', formatCurrency(grandTotal)]);
+    csv += formatCSVRow(['Estimated Cost per Sq Ft (USD)', formatCurrency(costPerSqFt)]);
   }
 
   return csv;

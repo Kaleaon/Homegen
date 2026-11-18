@@ -71,6 +71,76 @@ export const SCALE_OPTIONS = {
 
 export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
 
+function formatOriginCoordinates(origin) {
+  if (!origin) return '';
+
+  let lon;
+  let lat;
+
+  if (Array.isArray(origin) && origin.length >= 2) {
+    lon = Number(origin[0]);
+    lat = Number(origin[1]);
+  } else if (typeof origin === 'object') {
+    const rawLon = origin.longitude ?? origin.lon ?? origin.lng ?? origin.x;
+    const rawLat = origin.latitude ?? origin.lat ?? origin.y;
+    if (rawLon !== undefined && rawLon !== null && rawLon !== '') lon = Number(rawLon);
+    if (rawLat !== undefined && rawLat !== null && rawLat !== '') lat = Number(rawLat);
+  }
+
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return '';
+  }
+
+  if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+    const latHem = lat >= 0 ? 'N' : 'S';
+    const lonHem = lon >= 0 ? 'E' : 'W';
+    return `${Math.abs(lat).toFixed(4)}° ${latHem}, ${Math.abs(lon).toFixed(4)}° ${lonHem}`;
+  }
+
+  return `${lon.toFixed(2)}, ${lat.toFixed(2)}`;
+}
+
+function formatCRSMetadata(crs, options = {}) {
+  if (typeof options.crsText === 'string' && options.crsText.trim()) {
+    return options.crsText.trim();
+  }
+
+  const resolvedCRS = options.crs !== undefined ? options.crs : crs;
+  if (!resolvedCRS) {
+    return 'PLAN (Local Plan Coordinates)';
+  }
+
+  if (typeof resolvedCRS === 'string') {
+    const code = resolvedCRS.trim().toUpperCase();
+    if (!code || code === 'PLAN' || code === 'LOCAL' || code === 'INCHES' || code === 'NONE') {
+      return 'PLAN (Local Plan Coordinates)';
+    }
+    return /^\d+$/.test(code) ? `EPSG:${code}` : code;
+  }
+
+  if (typeof resolvedCRS === 'object') {
+    const rawEpsg =
+      resolvedCRS.epsg !== undefined && resolvedCRS.epsg !== null
+        ? String(resolvedCRS.epsg).trim().toUpperCase()
+        : '';
+    if (
+      !rawEpsg ||
+      rawEpsg === 'PLAN' ||
+      rawEpsg === 'LOCAL' ||
+      rawEpsg === 'INCHES' ||
+      rawEpsg === 'NONE'
+    ) {
+      return 'PLAN (Local Plan Coordinates)';
+    }
+
+    const epsgCode = /^\d+$/.test(rawEpsg) ? `EPSG:${rawEpsg}` : rawEpsg;
+    const originText = formatOriginCoordinates(resolvedCRS.origin);
+    return originText ? `${epsgCode} (${originText})` : epsgCode;
+  }
+
+  return 'PLAN (Local Plan Coordinates)';
+}
+
 export function resolvePDFAttributionAndLicensing(docState, options = {}) {
   const attributions = [];
   const licenses = [];
@@ -100,11 +170,13 @@ export function resolvePDFAttributionAndLicensing(docState, options = {}) {
   const combinedAttribution = attributions.join(' · ');
   const combinedLicense = licenses.join(' · ');
   const fullNotice = [combinedAttribution, combinedLicense].filter(Boolean).join(' | ');
+  const crsText = formatCRSMetadata(docState?.crs, options);
 
   return {
     attribution: combinedAttribution,
     licenseNotice: combinedLicense,
     fullNotice,
+    crsText,
   };
 }
 
@@ -174,6 +246,16 @@ export function generatePDF(docState, options = {}) {
   const incWatermark = options.includeWatermark !== undefined ? options.includeWatermark : true;
 
   const pdfAttr = resolvePDFAttributionAndLicensing(docState, options);
+  const resolvedProjectTitle = options.projectTitle || docState.name || 'Untitled Home';
+  const resolvedDesigner = options.designer || 'Homegen Designer';
+
+  pdf.setProperties({
+    title: resolvedProjectTitle,
+    author: resolvedDesigner,
+    subject: `Architectural Floor Plan - CRS: ${pdfAttr.crsText}`,
+    keywords: `Homegen, Floor Plan, CRS: ${pdfAttr.crsText}`,
+    creator: 'Homegen Vector PDF Engine',
+  });
 
   for (let i = 0; i < levelsToDraw.length; i++) {
     const lvl = levelsToDraw[i];
@@ -194,7 +276,7 @@ export function generatePDF(docState, options = {}) {
     let titleBlockBox = null;
     if (includeTitleBlock) {
       const tbWidth = Math.min(220, borderRect.w * 0.35);
-      const tbHeight = 64;
+      const tbHeight = 72;
       titleBlockBox = {
         x: borderRect.x + borderRect.w - tbWidth,
         y: borderRect.y + borderRect.h - tbHeight,
@@ -272,12 +354,13 @@ export function generatePDF(docState, options = {}) {
     // Draw Title Block
     if (includeTitleBlock && titleBlockBox) {
       drawTitleBlock(pdf, titleBlockBox, {
-        projectTitle: options.projectTitle || docState.name || 'Untitled Home',
-        designer: options.designer || 'Homegen Designer',
+        projectTitle: resolvedProjectTitle,
+        designer: resolvedDesigner,
         date: options.date || new Date().toISOString().slice(0, 10),
         sheetTitle: options.sheetTitle || `FLOOR PLAN - LEVEL ${lvl + 1}`,
         sheetNumber: `A-10${lvl + 1}`,
         scaleLabel: actualRatioStr,
+        crsText: pdfAttr.crsText,
         notes: options.notes || '',
         attribution: pdfAttr.attribution,
         licenseNotice: pdfAttr.licenseNotice,
@@ -320,10 +403,11 @@ export function generatePDF(docState, options = {}) {
       pageHeight,
       margin,
       orientation,
-      projectTitle: options.projectTitle || docState.name || 'Untitled Home',
-      designer: options.designer || 'Homegen Designer',
+      projectTitle: resolvedProjectTitle,
+      designer: resolvedDesigner,
       date: options.date || new Date().toISOString().slice(0, 10),
       includeTitleBlock,
+      crsText: pdfAttr.crsText,
       attribution: pdfAttr.attribution,
       licenseNotice: pdfAttr.licenseNotice,
       fullNotice: pdfAttr.fullNotice,
@@ -697,9 +781,11 @@ function drawTitleBlock(pdf, box, info) {
   pdf.line(box.x, box.y + 18, box.x + box.w, box.y + 18);
   pdf.line(box.x, box.y + 36, box.x + box.w, box.y + 36);
 
-  // Vertical divisions on second row
-  pdf.line(box.x + box.w * 0.5, box.y + 18, box.x + box.w * 0.5, box.y + 36);
-  pdf.line(box.x + box.w * 0.5, box.y + 36, box.x + box.w * 0.5, box.y + box.h);
+  // Vertical divisions on second and third rows
+  const row2SplitX = box.x + box.w * 0.5;
+  const row3SplitX = box.x + box.w * 0.62;
+  pdf.line(row2SplitX, box.y + 18, row2SplitX, box.y + 36);
+  pdf.line(row3SplitX, box.y + 36, row3SplitX, box.y + box.h);
 
   // Text formatting
   pdf.setFont('helvetica', 'bold');
@@ -711,20 +797,33 @@ function drawTitleBlock(pdf, box, info) {
   pdf.setFontSize(6);
   pdf.setTextColor('#444444');
   pdf.text(`DESIGNER: ${info.designer}`, box.x + 6, box.y + 28);
-  pdf.text(`DATE: ${info.date}`, box.x + box.w * 0.5 + 4, box.y + 28);
+  pdf.text(`DATE: ${info.date}`, row2SplitX + 4, box.y + 28);
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(7);
   pdf.setTextColor('#111111');
-  pdf.text(info.sheetTitle, box.x + 6, box.y + 48);
+  pdf.text(info.sheetTitle, box.x + 6, box.y + 46);
 
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(6);
-  pdf.text(`SCALE: ${info.scaleLabel}`, box.x + 6, box.y + 58);
+  pdf.text(`SCALE: ${info.scaleLabel}`, box.x + 6, box.y + 56);
+
+  const crsLabel = info.crsText || 'PLAN (Local Plan Coordinates)';
+  const crsLine = `CRS: ${crsLabel}`;
+  const leftMaxWidth = box.w * 0.62 - 10;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(5.2);
+  pdf.setTextColor('#333333');
+  if (pdf.getTextWidth(crsLine) > leftMaxWidth) {
+    pdf.text(crsLine, box.x + 6, box.y + 66, { maxWidth: leftMaxWidth });
+  } else {
+    pdf.text(crsLine, box.x + 6, box.y + 66);
+  }
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(9);
-  pdf.text(info.sheetNumber, box.x + box.w * 0.5 + 4, box.y + 48);
+  pdf.setTextColor('#111111');
+  pdf.text(info.sheetNumber, row3SplitX + 4, box.y + 46);
 
   const noticeStr =
     info.fullNotice || [info.attribution, info.licenseNotice].filter(Boolean).join(' | ');
@@ -732,7 +831,7 @@ function drawTitleBlock(pdf, box, info) {
     pdf.setFont('helvetica', 'italic');
     pdf.setFontSize(5);
     pdf.setTextColor('#555555');
-    pdf.text(noticeStr, box.x + box.w * 0.5 + 4, box.y + 58, { maxWidth: box.w * 0.48 });
+    pdf.text(noticeStr, row3SplitX + 4, box.y + 56, { maxWidth: box.w * 0.38 - 8 });
   }
 }
 
@@ -789,6 +888,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
     designer,
     date,
     includeTitleBlock,
+    crsText,
     attribution,
     licenseNotice,
     fullNotice,
@@ -809,7 +909,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
 
   if (includeTitleBlock) {
     const tbWidth = Math.min(220, borderRect.w * 0.35);
-    const tbHeight = 64;
+    const tbHeight = 72;
     drawTitleBlock(
       pdf,
       {
@@ -825,6 +925,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
         sheetTitle: 'ROOM SCHEDULE',
         sheetNumber: 'A-201',
         scaleLabel: 'N/A (SCHEDULE)',
+        crsText,
         notes: '',
         attribution,
         licenseNotice,
@@ -872,7 +973,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
   currentY += rowHeight;
 
   let totalArea = 0;
-  const maxTableY = borderRect.y + borderRect.h - 80;
+  const maxTableY = borderRect.y + borderRect.h - 88;
 
   for (let idx = 0; idx < docState.rooms.length; idx++) {
     const room = docState.rooms[idx];
@@ -889,7 +990,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
       }
       if (includeTitleBlock) {
         const tbWidth = Math.min(220, borderRect.w * 0.35);
-        const tbHeight = 64;
+        const tbHeight = 72;
         drawTitleBlock(
           pdf,
           {
@@ -905,6 +1006,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
             sheetTitle: 'ROOM SCHEDULE (CONT.)',
             sheetNumber: 'A-202',
             scaleLabel: 'N/A (SCHEDULE)',
+            crsText,
             notes: '',
             attribution,
             licenseNotice,
