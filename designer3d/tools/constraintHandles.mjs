@@ -164,7 +164,7 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
   const isValid = dimValidation.isValid && collisionValid;
   const dimensionText = fmtDimensionText(newW, newH);
 
-  const resolveToken = typeof options.getToken === 'function' ? options.getToken : defaultGetToken;
+  const resolveToken = typeof options?.getToken === 'function' ? options.getToken : defaultGetToken;
   const safeGetToken = (name, fallback) => {
     if (typeof resolveToken === 'function') {
       try {
@@ -178,11 +178,11 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
 
   const color = isValid
     ? safeGetToken('--ktheme-info', '#2a7fff')
-    : safeGetToken('--ktheme-critical', '#f87171');
+    : safeGetToken('--ktheme-critical', '#e84040');
 
   const handleColor = isValid
     ? safeGetToken('--ktheme-on-primary', '#ffffff')
-    : safeGetToken('--ktheme-critical', '#f87171');
+    : safeGetToken('--ktheme-critical', '#e84040');
 
   return {
     rect,

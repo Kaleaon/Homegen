@@ -71,7 +71,7 @@ export class InteractionLayer {
         y: p.y + offset.y,
       }));
       const validation = validatePlacement(movedPolygon, context.existingPolygons);
-      result.placementFeedback = createPlacementFeedback(movedPolygon, validation);
+      result.placementFeedback = createPlacementFeedback(movedPolygon, validation, context);
     }
 
     return result;
@@ -107,7 +107,7 @@ export class InteractionLayer {
         y: entity.position.y + (p.y - entity.position.y) * scaleFactor,
       }));
       const validation = validatePlacement(scaledPolygon, context.existingPolygons);
-      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation);
+      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation, context);
     }
 
     return result;
