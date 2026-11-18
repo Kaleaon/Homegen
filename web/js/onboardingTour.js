@@ -88,6 +88,7 @@ export class OnboardingTour {
     this.pathEl = null;
     this.ringEl = null;
     this.previousFocusEl = null;
+    this.focusTimer = null;
 
     this.onKeyDown = this.onKeyDown.bind(this);
     this.onResize = this.onResize.bind(this);
@@ -151,6 +152,33 @@ export class OnboardingTour {
     this.pathEl = overlay.querySelector('.onboarding-mask-path');
     this.ringEl = overlay.querySelector('.onboarding-focus-ring');
 
+    const absorbBackdropEvent = (e) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+    };
+
+    const handleOverlayEvent = (e) => {
+      const path = typeof e?.composedPath === 'function' ? e.composedPath() : null;
+      const isInsidePopover =
+        Boolean(this.popoverEl) &&
+        ((Array.isArray(path) && path.includes(this.popoverEl)) ||
+          e?.target === this.popoverEl ||
+          (typeof this.popoverEl.contains === 'function' &&
+            Boolean(e?.target) &&
+            this.popoverEl.contains(e.target)));
+
+      if (!isInsidePopover) {
+        e?.preventDefault?.();
+      }
+      e?.stopPropagation?.();
+    };
+
+    for (const evtType of ['click', 'pointerdown', 'mousedown', 'touchstart']) {
+      this.svgEl?.addEventListener(evtType, absorbBackdropEvent);
+      this.popoverEl?.addEventListener(evtType, (e) => e?.stopPropagation?.());
+      overlay.addEventListener(evtType, handleOverlayEvent);
+    }
+
     const closeBtn = overlay.querySelector('.spotlight-close');
     const skipBtn = overlay.querySelector('.spotlight-btn-skip');
     const backBtn = overlay.querySelector('.spotlight-btn-back');
@@ -208,8 +236,14 @@ export class OnboardingTour {
     this.updatePosition();
 
     // Set focus to next button for accessibility
-    setTimeout(() => {
-      if (nextBtn) nextBtn.focus();
+    if (this.focusTimer) {
+      clearTimeout(this.focusTimer);
+    }
+    this.focusTimer = setTimeout(() => {
+      this.focusTimer = null;
+      if (this.active && typeof nextBtn?.focus === 'function') {
+        nextBtn.focus();
+      }
     }, 50);
   }
 
@@ -393,6 +427,11 @@ export class OnboardingTour {
     if (!this.active) return;
     this.active = false;
 
+    if (this.focusTimer) {
+      clearTimeout(this.focusTimer);
+      this.focusTimer = null;
+    }
+
     window.removeEventListener('keydown', this.onKeyDown, true);
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('scroll', this.onResize, true);
@@ -401,6 +440,10 @@ export class OnboardingTour {
       this.overlayEl.remove();
       this.overlayEl = null;
     }
+    this.popoverEl = null;
+    this.svgEl = null;
+    this.pathEl = null;
+    this.ringEl = null;
 
     setOnboardingStatus(status);
 
