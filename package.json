@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "prepare": "husky",
-    "lint": "npm --prefix web run lint && npm --prefix web run lint:css && npm --prefix designer3d/tools run lint",
+    "check:syntax": "sh -c 'if [ \"$#\" -gt 0 ]; then for f in \"$@\"; do node --check \"$f\" || exit 1; done; else find web designer3d/tools .lintstagedrc.mjs -name node_modules -prune -o -path web/vendor -prune -o \\( -name \"*.js\" -o -name \"*.mjs\" \\) -print0 | xargs -0 -n 1 node --check; fi' sh",
+    "lint": "npm run check:syntax && npm --prefix web run lint && npm --prefix web run lint:css && npm --prefix designer3d/tools run lint",
     "lint:style": "npm --prefix web run lint:css",
     "format": "npm --prefix web run format && npm --prefix designer3d/tools run format",
     "format:check": "npm --prefix web run format:check && npm --prefix designer3d/tools run format:check && npm run format:kotlin",
