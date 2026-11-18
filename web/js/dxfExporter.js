@@ -17,57 +17,108 @@ import { computeMarchingSquares } from './elevationEngine.js';
  * Stitches marching squares disconnected line segments into continuous polyline chains.
  */
 function stitchSegmentsToPolylines(lines) {
-  if (!lines || lines.length === 0) return [];
-  const remaining = lines.map((l) => ({ ...l }));
+  const n = lines ? lines.length : 0;
+  if (n === 0) return [];
+
+  const EPS_SQ = 1e-8;
+  const INV_CELL = 10000;
+  const grid = new Map();
+
+  const addEndpoint = (x, y, ref) => {
+    const cx = Math.floor(x * INV_CELL);
+    const cy = Math.floor(y * INV_CELL);
+    let row = grid.get(cx);
+    if (!row) {
+      row = new Map();
+      grid.set(cx, row);
+    }
+    let bucket = row.get(cy);
+    if (!bucket) {
+      bucket = [];
+      row.set(cy, bucket);
+    }
+    bucket.push(ref);
+  };
+
+  for (let i = 0; i < n; i++) {
+    const seg = lines[i];
+    addEndpoint(seg.x1, seg.y1, i * 2);
+    addEndpoint(seg.x2, seg.y2, i * 2 + 1);
+  }
+
+  const used = new Uint8Array(n);
+  const findNext = (x, y) => {
+    const cx = Math.floor(x * INV_CELL);
+    const cy = Math.floor(y * INV_CELL);
+    for (let dx = -1; dx <= 1; dx++) {
+      const row = grid.get(cx + dx);
+      if (!row) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = row.get(cy + dy);
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const ref = bucket[k];
+          const idx = ref >>> 1;
+          if (used[idx]) continue;
+          const seg = lines[idx];
+          const isEnd2 = (ref & 1) === 1;
+          const sx = isEnd2 ? seg.x2 : seg.x1;
+          const sy = isEnd2 ? seg.y2 : seg.y1;
+          const ddx = x - sx;
+          const ddy = y - sy;
+          if (ddx * ddx + ddy * ddy < EPS_SQ) {
+            used[idx] = 1;
+            return isEnd2 ? { x: seg.x1, y: seg.y1 } : { x: seg.x2, y: seg.y2 };
+          }
+        }
+      }
+    }
+    return null;
+  };
+
   const polylines = [];
 
-  while (remaining.length > 0) {
-    const first = remaining.pop();
-    const pts = [
+  for (let startIdx = n - 1; startIdx >= 0; startIdx--) {
+    if (used[startIdx]) continue;
+    used[startIdx] = 1;
+    const first = lines[startIdx];
+    const headPts = [];
+    const tailPts = [
       { x: first.x1, y: first.y1 },
       { x: first.x2, y: first.y2 },
     ];
 
-    let extended = true;
-    while (extended) {
-      extended = false;
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
+    let tail = tailPts[1];
+    for (;;) {
+      const next = findNext(tail.x, tail.y);
+      if (!next) break;
+      tailPts.push(next);
+      tail = next;
+    }
 
-      for (let i = 0; i < remaining.length; i++) {
-        const seg = remaining[i];
-        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
-          pts.push({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(tail.x - seg.x2, tail.y - seg.y2) < 1e-4) {
-          pts.push({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
-          pts.unshift({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x1, head.y - seg.y1) < 1e-4) {
-          pts.unshift({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-      }
+    let head = tailPts[0];
+    for (;;) {
+      const prev = findNext(head.x, head.y);
+      if (!prev) break;
+      headPts.push(prev);
+      head = prev;
+    }
+
+    let pts;
+    if (headPts.length > 0) {
+      headPts.reverse();
+      pts = headPts.concat(tailPts);
+    } else {
+      pts = tailPts;
     }
 
     let isClosed = false;
     if (pts.length > 2) {
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
-      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
+      const h = pts[0];
+      const t = pts[pts.length - 1];
+      const ddx = h.x - t.x;
+      const ddy = h.y - t.y;
+      if (ddx * ddx + ddy * ddy < EPS_SQ) {
         isClosed = true;
         pts.pop();
       }

@@ -390,144 +390,215 @@ function readDoubleArray(view, offset, count, littleEndian) {
   }
 }
 
+const HOST_IS_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
+function parseGeoTIFFSync(arrayBuffer, options) {
+  const byteLength = arrayBuffer.byteLength;
+  if (byteLength < 8) return null;
+
+  const view = new DataView(arrayBuffer);
+  const magic = view.getUint16(0, false);
+  if (magic !== 0x4949 && magic !== 0x4d4d) return null; // "II" or "MM"
+
+  const littleEndian = magic === 0x4949;
+  if (view.getUint16(2, littleEndian) !== 42) return null;
+
+  const firstIFD = view.getUint32(4, littleEndian);
+  if (firstIFD <= 0 || firstIFD >= byteLength - 2) return null;
+
+  const numEntries = view.getUint16(firstIFD, littleEndian);
+  let imgWidth = 0;
+  let imgHeight = 0;
+  let stripOffset = 0;
+  let bitsPerSample = 8;
+  let modelPixelScale = null;
+  let modelTiepoint = null;
+  let modelTransformation = null;
+
+  for (let i = 0; i < numEntries; i++) {
+    const entryOffset = firstIFD + 2 + i * 12;
+    if (entryOffset + 12 > byteLength) break;
+    const tag = view.getUint16(entryOffset, littleEndian);
+    const type = view.getUint16(entryOffset + 2, littleEndian);
+    const count = view.getUint32(entryOffset + 4, littleEndian);
+    const val = view.getUint32(entryOffset + 8, littleEndian);
+
+    if (tag === 256) imgWidth = val;
+    else if (tag === 257) imgHeight = val;
+    else if (tag === 258) bitsPerSample = val & 0xffff;
+    else if (tag === 273) stripOffset = val;
+    else if (tag === 33550 && type === 12) {
+      modelPixelScale = readDoubleArray(view, val, count, littleEndian);
+    } else if (tag === 33922 && type === 12) {
+      modelTiepoint = readDoubleArray(view, val, count, littleEndian);
+    } else if (tag === 34264 && type === 12) {
+      modelTransformation = readDoubleArray(view, val, count, littleEndian);
+    }
+  }
+
+  if (imgWidth <= 0 || imgHeight <= 0 || stripOffset <= 0) return null;
+
+  const total = imgWidth * imgHeight;
+  const bytesPerSample = bitsPerSample === 16 ? 2 : 1;
+  if (stripOffset + total * bytesPerSample > byteLength) return null;
+
+  const data = new Float32Array(total);
+  const minOpt = options.minElevation ?? 0;
+  const rangeOpt = (options.maxElevation ?? 10) - minOpt;
+  let minE = Infinity;
+  let maxE = -Infinity;
+
+  if (bytesPerSample === 1) {
+    const samples = new Uint8Array(arrayBuffer, stripOffset, total);
+    const lut = new Float64Array(256);
+    for (let v = 0; v < 256; v++) {
+      lut[v] = minOpt + (v / 255) * rangeOpt;
+    }
+    const zeroElev = lut[0];
+    if (zeroElev !== 0) {
+      data.fill(zeroElev);
+    }
+    let minRaw = 255;
+    let maxRaw = 0;
+    let k = 0;
+    const limit8 = total - 7;
+    for (; k < limit8; k += 8) {
+      const b0 = samples[k];
+      const b1 = samples[k + 1];
+      const b2 = samples[k + 2];
+      const b3 = samples[k + 3];
+      const b4 = samples[k + 4];
+      const b5 = samples[k + 5];
+      const b6 = samples[k + 6];
+      const b7 = samples[k + 7];
+      if ((b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7) === 0) {
+        if (0 < minRaw) minRaw = 0;
+        if (0 > maxRaw) maxRaw = 0;
+        continue;
+      }
+      data[k] = lut[b0];
+      data[k + 1] = lut[b1];
+      data[k + 2] = lut[b2];
+      data[k + 3] = lut[b3];
+      data[k + 4] = lut[b4];
+      data[k + 5] = lut[b5];
+      data[k + 6] = lut[b6];
+      data[k + 7] = lut[b7];
+      let lo = b0 < b1 ? b0 : b1;
+      if (b2 < lo) lo = b2;
+      if (b3 < lo) lo = b3;
+      if (b4 < lo) lo = b4;
+      if (b5 < lo) lo = b5;
+      if (b6 < lo) lo = b6;
+      if (b7 < lo) lo = b7;
+      if (lo < minRaw) minRaw = lo;
+      let hi = b0 > b1 ? b0 : b1;
+      if (b2 > hi) hi = b2;
+      if (b3 > hi) hi = b3;
+      if (b4 > hi) hi = b4;
+      if (b5 > hi) hi = b5;
+      if (b6 > hi) hi = b6;
+      if (b7 > hi) hi = b7;
+      if (hi > maxRaw) maxRaw = hi;
+    }
+    for (; k < total; k++) {
+      const b = samples[k];
+      if (b !== 0) data[k] = lut[b];
+      if (b < minRaw) minRaw = b;
+      if (b > maxRaw) maxRaw = b;
+    }
+    const eA = lut[minRaw];
+    const eB = lut[maxRaw];
+    minE = eA <= eB ? eA : eB;
+    maxE = eA <= eB ? eB : eA;
+  } else if (littleEndian === HOST_IS_LITTLE_ENDIAN && (stripOffset & 1) === 0) {
+    const samples = new Uint16Array(arrayBuffer, stripOffset, total);
+    for (let k = 0; k < total; k++) {
+      const elev = minOpt + (samples[k] / 65535) * rangeOpt;
+      data[k] = elev;
+      if (elev < minE) minE = elev;
+      if (elev > maxE) maxE = elev;
+    }
+  } else {
+    for (let k = 0; k < total; k++) {
+      const rawVal = view.getUint16(stripOffset + k * 2, littleEndian);
+      const elev = minOpt + (rawVal / 65535) * rangeOpt;
+      data[k] = elev;
+      if (elev < minE) minE = elev;
+      if (elev > maxE) maxE = elev;
+    }
+  }
+
+  let computedBounds = null;
+  if (
+    modelTiepoint &&
+    modelTiepoint.length >= 6 &&
+    modelPixelScale &&
+    modelPixelScale.length >= 2
+  ) {
+    const scaleX = modelPixelScale[0];
+    const scaleY = modelPixelScale[1];
+    const tieI = modelTiepoint[0];
+    const tieJ = modelTiepoint[1];
+    const tieX = modelTiepoint[3];
+    const tieY = modelTiepoint[4];
+
+    if (
+      scaleX > 0 &&
+      scaleY > 0 &&
+      !isNaN(scaleX) &&
+      !isNaN(scaleY) &&
+      !isNaN(tieX) &&
+      !isNaN(tieY)
+    ) {
+      const xOrigin = tieX - tieI * scaleX;
+      const yOrigin = tieY + tieJ * scaleY;
+      computedBounds = {
+        minX: xOrigin,
+        maxX: xOrigin + imgWidth * scaleX,
+        minY: yOrigin - imgHeight * scaleY,
+        maxY: yOrigin,
+      };
+    }
+  } else if (modelTransformation && modelTransformation.length >= 16) {
+    const m = modelTransformation;
+    const x00 = m[3];
+    const y00 = m[7];
+    const xW0 = m[0] * imgWidth + m[3];
+    const yW0 = m[4] * imgWidth + m[7];
+    const x0H = m[1] * imgHeight + m[3];
+    const y0H = m[5] * imgHeight + m[7];
+    const xWH = m[0] * imgWidth + m[1] * imgHeight + m[3];
+    const yWH = m[4] * imgWidth + m[5] * imgHeight + m[7];
+
+    const minX = Math.min(x00, xW0, x0H, xWH);
+    const maxX = Math.max(x00, xW0, x0H, xWH);
+    const minY = Math.min(y00, yW0, y0H, yWH);
+    const maxY = Math.max(y00, yW0, y0H, yWH);
+
+    if (!isNaN(minX) && !isNaN(maxX) && !isNaN(minY) && !isNaN(maxY)) {
+      computedBounds = { minX, maxX, minY, maxY };
+    }
+  }
+
+  return new ElevationGrid({
+    width: imgWidth,
+    height: imgHeight,
+    data,
+    minElevation: minE,
+    maxElevation: maxE,
+    bounds: options.bounds ?? computedBounds ?? undefined,
+    contourInterval: options.contourInterval ?? 1.0,
+  });
+}
+
 /**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
 export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
   try {
-    const view = new DataView(arrayBuffer);
-    if (arrayBuffer.byteLength >= 4) {
-      const magic = view.getUint16(0, false);
-      const isTIFF = magic === 0x4949 || magic === 0x4d4d; // "II" or "MM"
-      if (isTIFF) {
-        // Attempt simple uncompressed grayscale TIFF tag parsing if present
-        const littleEndian = magic === 0x4949;
-        const version = view.getUint16(2, littleEndian);
-        if (version === 42) {
-          const firstIFD = view.getUint32(4, littleEndian);
-          if (firstIFD > 0 && firstIFD < arrayBuffer.byteLength - 2) {
-            const numEntries = view.getUint16(firstIFD, littleEndian);
-            let imgWidth = 0,
-              imgHeight = 0,
-              stripOffset = 0,
-              bitsPerSample = 8;
-            let modelPixelScale = null;
-            let modelTiepoint = null;
-            let modelTransformation = null;
-
-            for (let i = 0; i < numEntries; i++) {
-              const entryOffset = firstIFD + 2 + i * 12;
-              if (entryOffset + 12 > arrayBuffer.byteLength) break;
-              const tag = view.getUint16(entryOffset, littleEndian);
-              const type = view.getUint16(entryOffset + 2, littleEndian);
-              const count = view.getUint32(entryOffset + 4, littleEndian);
-              const val = view.getUint32(entryOffset + 8, littleEndian);
-
-              if (tag === 256)
-                imgWidth = val; // ImageWidth
-              else if (tag === 257)
-                imgHeight = val; // ImageLength
-              else if (tag === 258) bitsPerSample = val & 0xffff;
-              else if (tag === 273)
-                stripOffset = val; // StripOffsets
-              else if (tag === 33550 && type === 12) {
-                modelPixelScale = readDoubleArray(view, val, count, littleEndian);
-              } else if (tag === 33922 && type === 12) {
-                modelTiepoint = readDoubleArray(view, val, count, littleEndian);
-              } else if (tag === 34264 && type === 12) {
-                modelTransformation = readDoubleArray(view, val, count, littleEndian);
-              }
-            }
-            if (imgWidth > 0 && imgHeight > 0 && stripOffset > 0) {
-              const total = imgWidth * imgHeight;
-              const data = new Float32Array(total);
-              let minE = Infinity,
-                maxE = -Infinity;
-              const bytesPerSample = bitsPerSample === 16 ? 2 : 1;
-              if (stripOffset + total * bytesPerSample <= arrayBuffer.byteLength) {
-                for (let k = 0; k < total; k++) {
-                  let rawVal = 0;
-                  if (bytesPerSample === 2) {
-                    rawVal = view.getUint16(stripOffset + k * 2, littleEndian);
-                  } else {
-                    rawVal = view.getUint8(stripOffset + k);
-                  }
-                  const norm = rawVal / (bytesPerSample === 2 ? 65535 : 255);
-                  const elev =
-                    (options.minElevation ?? 0) +
-                    norm * ((options.maxElevation ?? 10) - (options.minElevation ?? 0));
-                  data[k] = elev;
-                  if (elev < minE) minE = elev;
-                  if (elev > maxE) maxE = elev;
-                }
-
-                let computedBounds = null;
-                if (
-                  modelTiepoint &&
-                  modelTiepoint.length >= 6 &&
-                  modelPixelScale &&
-                  modelPixelScale.length >= 2
-                ) {
-                  const scaleX = modelPixelScale[0];
-                  const scaleY = modelPixelScale[1];
-                  const tieI = modelTiepoint[0];
-                  const tieJ = modelTiepoint[1];
-                  const tieX = modelTiepoint[3];
-                  const tieY = modelTiepoint[4];
-
-                  if (
-                    scaleX > 0 &&
-                    scaleY > 0 &&
-                    !isNaN(scaleX) &&
-                    !isNaN(scaleY) &&
-                    !isNaN(tieX) &&
-                    !isNaN(tieY)
-                  ) {
-                    const xOrigin = tieX - tieI * scaleX;
-                    const yOrigin = tieY + tieJ * scaleY;
-                    computedBounds = {
-                      minX: xOrigin,
-                      maxX: xOrigin + imgWidth * scaleX,
-                      minY: yOrigin - imgHeight * scaleY,
-                      maxY: yOrigin,
-                    };
-                  }
-                } else if (modelTransformation && modelTransformation.length >= 16) {
-                  const m = modelTransformation;
-                  const x00 = m[3];
-                  const y00 = m[7];
-                  const xW0 = m[0] * imgWidth + m[3];
-                  const yW0 = m[4] * imgWidth + m[7];
-                  const x0H = m[1] * imgHeight + m[3];
-                  const y0H = m[5] * imgHeight + m[7];
-                  const xWH = m[0] * imgWidth + m[1] * imgHeight + m[3];
-                  const yWH = m[4] * imgWidth + m[5] * imgHeight + m[7];
-
-                  const minX = Math.min(x00, xW0, x0H, xWH);
-                  const maxX = Math.max(x00, xW0, x0H, xWH);
-                  const minY = Math.min(y00, yW0, y0H, yWH);
-                  const maxY = Math.max(y00, yW0, y0H, yWH);
-
-                  if (!isNaN(minX) && !isNaN(maxX) && !isNaN(minY) && !isNaN(maxY)) {
-                    computedBounds = { minX, maxX, minY, maxY };
-                  }
-                }
-
-                return new ElevationGrid({
-                  width: imgWidth,
-                  height: imgHeight,
-                  data,
-                  minElevation: minE,
-                  maxElevation: maxE,
-                  bounds: options.bounds ?? computedBounds ?? undefined,
-                  contourInterval: options.contourInterval ?? 1.0,
-                });
-              }
-            }
-          }
-        }
-      }
-    }
+    const grid = parseGeoTIFFSync(arrayBuffer, options);
+    if (grid) return grid;
   } catch {
     // Fall through to image fallback
   }

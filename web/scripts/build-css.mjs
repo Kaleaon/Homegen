@@ -206,8 +206,13 @@ async function build() {
   const appCssPath = path.resolve(webRoot, 'css/style.css');
 
   fs.mkdirSync(path.dirname(distCssPath), { recursive: true });
-  fs.writeFileSync(distCssPath, compiledOutput, 'utf8');
-  fs.writeFileSync(appCssPath, compiledOutput, 'utf8');
+  const writeAtomic = (targetPath, content) => {
+    const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmpPath, content, 'utf8');
+    fs.renameSync(tmpPath, targetPath);
+  };
+  writeAtomic(distCssPath, compiledOutput);
+  writeAtomic(appCssPath, compiledOutput);
 
   console.log(`✅ CSS compiled successfully!`);
   console.log(`  - Output: ${distCssPath}`);
