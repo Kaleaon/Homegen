@@ -529,16 +529,79 @@ export function getRoomBoundingBox(points) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-export function polygonArea(points) {
+export function getBounds(pts) {
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  if (Array.isArray(pts)) {
+    for (const p of pts) {
+      if (!p) continue;
+      const x = p.x ?? p[0];
+      const y = p.y ?? p[1];
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  } else if (pts && typeof pts === 'object') {
+    minX = pts.x ?? pts.minX ?? 0;
+    minY = pts.y ?? pts.minY ?? 0;
+    maxX = pts.w !== undefined ? minX + pts.w : (pts.maxX ?? minX);
+    maxY = pts.h !== undefined ? minY + pts.h : (pts.maxY ?? minY);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export function boundsOverlap(a, b, eps = 0.001) {
+  if (!a || !b) return false;
+  return (
+    a.minX < b.maxX + eps && a.maxX > b.minX - eps && a.minY < b.maxY + eps && a.maxY > b.minY - eps
+  );
+}
+
+export function lineIntersection(a1, a2, b1, b2) {
+  if (!a1 || !a2 || !b1 || !b2) return null;
+  const a1x = a1.x ?? a1[0];
+  const a1y = a1.y ?? a1[1];
+  const a2x = a2.x ?? a2[0];
+  const a2y = a2.y ?? a2[1];
+  const b1x = b1.x ?? b1[0];
+  const b1y = b1.y ?? b1[1];
+  const b2x = b2.x ?? b2[0];
+  const b2y = b2.y ?? b2[1];
+
+  const dx1 = a2x - a1x;
+  const dy1 = a2y - a1y;
+  const dx2 = b2x - b1x;
+  const dy2 = b2y - b1y;
+
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-9) return null;
+
+  const t1 = ((b1x - a1x) * dy2 - (b1y - a1y) * dx2) / denom;
+  return {
+    x: a1x + t1 * dx1,
+    y: a1y + t1 * dy1,
+  };
+}
+
+export function polygonArea(points, signed = false) {
   if (!points || points.length < 3) return 0;
   let area = 0;
   const n = points.length;
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    area += points[i].x * points[j].y;
-    area -= points[j].x * points[i].y;
+    const pi = points[i];
+    const pj = points[j];
+    const xi = pi.x ?? pi[0];
+    const yi = pi.y ?? pi[1];
+    const xj = pj.x ?? pj[0];
+    const yj = pj.y ?? pj[1];
+    area += xi * yj - xj * yi;
   }
-  return Math.abs(area) / 2;
+  const signedArea = area / 2 || 0;
+  return signed ? signedArea : Math.abs(signedArea);
 }
 
 export function polygonPerimeter(points) {
@@ -921,14 +984,17 @@ export const rectInside = (inner, outer, eps = 0.01) =>
   inner.y + inner.h <= outer.y + outer.h + eps;
 
 export function pointInPolygon(p, polygon) {
+  if (!p || !polygon || polygon.length < 3) return false;
   let inside = false;
+  const px = p.x ?? p[0];
+  const py = p.y ?? p[1];
   const n = polygon.length;
   for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = polygon[i].x,
-      yi = polygon[i].y;
-    const xj = polygon[j].x,
-      yj = polygon[j].y;
-    const intersect = yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi;
+    const xi = polygon[i].x ?? polygon[i][0];
+    const yi = polygon[i].y ?? polygon[i][1];
+    const xj = polygon[j].x ?? polygon[j][0];
+    const yj = polygon[j].y ?? polygon[j][1];
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
   return inside;

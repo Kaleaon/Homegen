@@ -5,7 +5,19 @@ import {
   SpatialRTree,
   projectGeoJSON,
   computeVariableBuffers,
+  getBounds,
+  boundsOverlap,
+  pointInPolygon,
+  lineIntersection,
+  polygonArea,
 } from '../js/gisBridge.js';
+import {
+  getBounds as geomGetBounds,
+  boundsOverlap as geomBoundsOverlap,
+  pointInPolygon as geomPointInPolygon,
+  lineIntersection as geomLineIntersection,
+  polygonArea as geomPolygonArea,
+} from '../js/geometry.js';
 import { newState } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
 import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
@@ -212,5 +224,115 @@ test('Requirement 4: projectGeoJSON transforms regional State Plane GeoJSON with
     assert.ok(!isNaN(pt.y), `pt.y (${pt.y}) must not be NaN`);
     assert.ok(pt.x >= targetBounds.x - 1, `pt.x (${pt.x}) should be within target bounds`);
     assert.ok(pt.y >= targetBounds.y - 1, `pt.y (${pt.y}) should be within target bounds`);
+  }
+});
+
+test('Shared geometry consolidation: gisBridge re-exports canonical geometry.js functions', () => {
+  assert.strictEqual(getBounds, geomGetBounds);
+  assert.strictEqual(boundsOverlap, geomBoundsOverlap);
+  assert.strictEqual(pointInPolygon, geomPointInPolygon);
+  assert.strictEqual(lineIntersection, geomLineIntersection);
+  assert.strictEqual(polygonArea, geomPolygonArea);
+});
+
+test('Shared geometry: pointInPolygon supports object {x, y}, array [x, y], and mixed coordinates', () => {
+  const objectPoly = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ];
+  const arrayPoly = [
+    [0, 0],
+    [100, 0],
+    [100, 100],
+    [0, 100],
+  ];
+  const mixedPoly = [{ x: 0, y: 0 }, [100, 0], { x: 100, y: 100 }, [0, 100]];
+
+  // Inside point in both formats against all polygon formats
+  assert.equal(pointInPolygon({ x: 50, y: 50 }, objectPoly), true);
+  assert.equal(pointInPolygon([50, 50], objectPoly), true);
+  assert.equal(pointInPolygon({ x: 50, y: 50 }, arrayPoly), true);
+  assert.equal(pointInPolygon([50, 50], arrayPoly), true);
+  assert.equal(pointInPolygon([50, 50], mixedPoly), true);
+
+  // Outside point in both formats
+  assert.equal(pointInPolygon({ x: 150, y: 50 }, objectPoly), false);
+  assert.equal(pointInPolygon([150, 50], arrayPoly), false);
+  assert.equal(pointInPolygon([0, -10], mixedPoly), false);
+});
+
+test('Shared geometry: polygonArea supports unsigned default and signed winding across object and array formats', () => {
+  const ccwObjects = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 50 },
+    { x: 0, y: 50 },
+  ];
+  const cwObjects = [...ccwObjects].reverse();
+  const ccwArrays = [
+    [0, 0],
+    [100, 0],
+    [100, 50],
+    [0, 50],
+  ];
+  const cwArrays = [...ccwArrays].reverse();
+
+  // Default signed = false returns positive absolute area
+  assert.equal(polygonArea(ccwObjects), 5000);
+  assert.equal(polygonArea(cwObjects), 5000);
+  assert.equal(polygonArea(ccwArrays), 5000);
+  assert.equal(polygonArea(cwArrays), 5000);
+
+  // signed = true preserves winding sign
+  assert.equal(polygonArea(ccwObjects, true), 5000);
+  assert.equal(polygonArea(cwObjects, true), -5000);
+  assert.equal(polygonArea(ccwArrays, true), 5000);
+  assert.equal(polygonArea(cwArrays, true), -5000);
+});
+
+test('Shared geometry: getBounds, boundsOverlap, lineIntersection, and CW computeVariableBuffers', () => {
+  assert.deepEqual(getBounds([[10, 20], { x: 50, y: 80 }, [0, 40]]), {
+    minX: 0,
+    minY: 20,
+    maxX: 50,
+    maxY: 80,
+  });
+  assert.deepEqual(getBounds({ x: 10, y: 20, w: 30, h: 40 }), {
+    minX: 10,
+    minY: 20,
+    maxX: 40,
+    maxY: 60,
+  });
+
+  const b1 = { minX: 0, minY: 0, maxX: 10, maxY: 10 };
+  const b2 = { minX: 5, minY: 5, maxX: 15, maxY: 15 };
+  const b3 = { minX: 20, minY: 20, maxX: 30, maxY: 30 };
+  assert.equal(boundsOverlap(b1, b2), true);
+  assert.equal(boundsOverlap(b1, b3), false);
+
+  const interObj = lineIntersection(
+    { x: 0, y: 0 },
+    { x: 10, y: 10 },
+    { x: 0, y: 10 },
+    { x: 10, y: 0 }
+  );
+  assert.deepEqual(interObj, { x: 5, y: 5 });
+  const interArr = lineIntersection([0, 0], [10, 10], [0, 10], [10, 0]);
+  assert.deepEqual(interArr, { x: 5, y: 5 });
+  assert.equal(lineIntersection([0, 0], [10, 0], [0, 5], [10, 5]), null);
+
+  // Verify computeVariableBuffers shifts inward even when segment winding is reversed (negative signed area)
+  const reversedSegments = [
+    { id: 'r1', p1: { x: 0, y: 0 }, p2: { x: 0, y: 400 }, setback: 24, label: 'West' },
+    { id: 'r2', p1: { x: 0, y: 400 }, p2: { x: 500, y: 400 }, setback: 36, label: 'South' },
+    { id: 'r3', p1: { x: 500, y: 400 }, p2: { x: 500, y: 0 }, setback: 48, label: 'East' },
+    { id: 'r4', p1: { x: 500, y: 0 }, p2: { x: 0, y: 0 }, setback: 24, label: 'North' },
+  ];
+  const reversedBuffer = computeVariableBuffers(reversedSegments);
+  for (const pt of reversedBuffer.innerPoints) {
+    assert.ok(pt.x > 0 && pt.x < 500, `Inner x (${pt.x}) should be shifted inward inside (0, 500)`);
+    assert.ok(pt.y > 0 && pt.y < 400, `Inner y (${pt.y}) should be shifted inward inside (0, 400)`);
   }
 });

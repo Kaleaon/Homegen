@@ -4,84 +4,16 @@
  * variable segment setbacks, and site layer scene graph geometries.
  */
 
-import { reproject } from './geometry.js';
+import {
+  reproject,
+  getBounds,
+  boundsOverlap,
+  pointInPolygon,
+  lineIntersection,
+  polygonArea,
+} from './geometry.js';
 
-/**
- * 2D Minimum Bounding Rectangle helper.
- */
-export function getBounds(pts) {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  if (Array.isArray(pts)) {
-    for (const p of pts) {
-      const x = p.x !== undefined ? p.x : p[0];
-      const y = p.y !== undefined ? p.y : p[1];
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  } else if (pts && typeof pts === 'object') {
-    minX = pts.x ?? pts.minX ?? 0;
-    minY = pts.y ?? pts.minY ?? 0;
-    maxX = pts.w !== undefined ? minX + pts.w : (pts.maxX ?? minX);
-    maxY = pts.h !== undefined ? minY + pts.h : (pts.maxY ?? minY);
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-export function boundsOverlap(a, b, eps = 0.001) {
-  return (
-    a.minX < b.maxX + eps && a.maxX > b.minX - eps && a.minY < b.maxY + eps && a.maxY > b.minY - eps
-  );
-}
-
-export function pointInPolygon(p, poly) {
-  let inside = false;
-  const px = p.x ?? p[0];
-  const py = p.y ?? p[1];
-  const n = poly.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = poly[i].x ?? poly[i][0];
-    const yi = poly[i].y ?? poly[i][1];
-    const xj = poly[j].x ?? poly[j][0];
-    const yj = poly[j].y ?? poly[j][1];
-
-    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-export function lineIntersection(a1, a2, b1, b2) {
-  const dx1 = a2.x - a1.x;
-  const dy1 = a2.y - a1.y;
-  const dx2 = b2.x - b1.x;
-  const dy2 = b2.y - b1.y;
-
-  const denom = dx1 * dy2 - dy1 * dx2;
-  if (Math.abs(denom) < 1e-9) return null;
-
-  const t1 = ((b1.x - a1.x) * dy2 - (b1.y - a1.y) * dx2) / denom;
-  return {
-    x: a1.x + t1 * dx1,
-    y: a1.y + t1 * dy1,
-  };
-}
-
-export function polygonArea(poly) {
-  let area = 0;
-  const n = poly.length;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const pi = poly[i];
-    const pj = poly[j];
-    area += pi.x * pj.y - pj.x * pi.y;
-  }
-  return area / 2;
-}
+export { getBounds, boundsOverlap, pointInPolygon, lineIntersection, polygonArea };
 
 /**
  * 2D R-tree spatial index implementation.
@@ -503,7 +435,7 @@ export function computeVariableBuffers(segments) {
 
   // Construct outer polygon from segments
   const outerPoints = segments.map((s) => s.p1);
-  const isCCW = polygonArea(outerPoints) > 0;
+  const isCCW = polygonArea(outerPoints, true) > 0;
 
   // Compute offset lines for each segment
   const offsetLines = segments.map((s) => {
