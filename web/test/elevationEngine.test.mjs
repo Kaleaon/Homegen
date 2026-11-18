@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   ElevationGrid,
+  normalizeElevationUnit,
   parseGoogleElevationJson,
   parseImageHeightmap,
   parseGeoTIFFWithFallback,
@@ -13,6 +16,7 @@ import {
 } from '../js/elevationEngine.js';
 import { newState, serialize, deserialize } from '../js/model.js';
 import { drawContours } from '../js/render.js';
+import { createScene3D } from '../js/scene3d.js';
 
 test('ElevationGrid initializes with default values and performs bilinear height interpolation', () => {
   const grid = new ElevationGrid({
@@ -429,4 +433,291 @@ test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', as
   const duration = performance.now() - start;
 
   assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
+});
+
+test('ElevationGrid initializes elevationUnit to m by default, accepts ft, and falls back on unrecognized strings', () => {
+  const defaultGrid = new ElevationGrid({ width: 2, height: 2, data: [0, 1, 2, 3] });
+  assert.equal(defaultGrid.elevationUnit, 'm');
+
+  const feetGrid = new ElevationGrid({
+    width: 2,
+    height: 2,
+    data: [0, 10, 20, 30],
+    elevationUnit: 'ft',
+  });
+  assert.equal(feetGrid.elevationUnit, 'ft');
+
+  const unitAliasGrid = new ElevationGrid({
+    width: 2,
+    height: 2,
+    data: [0, 10, 20, 30],
+    unit: 'ft',
+  });
+  assert.equal(unitAliasGrid.elevationUnit, 'ft');
+
+  const unknownUnitGrid = new ElevationGrid({
+    width: 2,
+    height: 2,
+    data: [0, 1, 2, 3],
+    elevationUnit: 'furlongs',
+  });
+  assert.equal(unknownUnitGrid.elevationUnit, 'm');
+  assert.equal(normalizeElevationUnit(null), 'm');
+  assert.equal(normalizeElevationUnit(''), 'm');
+  assert.equal(normalizeElevationUnit('FT'), 'ft');
+});
+
+test('ElevationGrid serialization and deserialization roundtrip elevationUnit and preserve legacy defaults', () => {
+  const ftGrid = new ElevationGrid({
+    width: 2,
+    height: 2,
+    data: [10, 20, 30, 40],
+    minElevation: 10,
+    maxElevation: 40,
+    elevationUnit: 'ft',
+  });
+
+  const jsonObj = ftGrid.toJSON();
+  assert.equal(jsonObj.elevationUnit, 'ft');
+
+  const serialized = serializeElevationGrid(ftGrid);
+  assert.equal(serialized.elevationUnit, 'ft');
+
+  const restored = deserializeElevationGrid(serialized);
+  assert.equal(restored.elevationUnit, 'ft');
+
+  // Full plan state roundtrip
+  const state = newState();
+  state.elevationGrid = ftGrid;
+  const loadedState = deserialize(serialize(state));
+  assert.equal(loadedState.elevationGrid.elevationUnit, 'ft');
+
+  // Legacy payload without elevationUnit defaults safely to 'm'
+  const legacyPayload = {
+    width: 2,
+    height: 2,
+    data: [1, 2, 3, 4],
+    minElevation: 1,
+    maxElevation: 4,
+    contourInterval: 1.0,
+    verticalScale: 1.0,
+  };
+  const legacyGrid = deserializeElevationGrid(legacyPayload);
+  assert.equal(legacyGrid.elevationUnit, 'm');
+
+  // Corrupted/unknown unit in serialized payload defaults safely to 'm'
+  const unknownPayload = { ...legacyPayload, elevationUnit: 'cubits' };
+  assert.equal(deserializeElevationGrid(unknownPayload).elevationUnit, 'm');
+});
+
+test('Raster parsers pass through options.elevationUnit and options.unit while defaulting Google API to m', async () => {
+  const googlePayload = {
+    status: 'OK',
+    results: [{ elevation: 10 }, { elevation: 20 }, { elevation: 30 }, { elevation: 40 }],
+  };
+
+  // Default Google API import -> 'm'
+  const googleDefault = parseGoogleElevationJson(googlePayload);
+  assert.equal(googleDefault.elevationUnit, 'm');
+
+  // Explicit override on Google API import
+  const googleFeet = parseGoogleElevationJson(googlePayload, { elevationUnit: 'ft' });
+  assert.equal(googleFeet.elevationUnit, 'ft');
+
+  const googleUnitAlias = await parseElevationRaster(JSON.stringify(googlePayload), { unit: 'ft' });
+  assert.equal(googleUnitAlias.elevationUnit, 'ft');
+
+  // Image heightmap parser
+  const pixels = new Uint8ClampedArray(16).fill(128);
+  const imageData = { width: 2, height: 2, data: pixels };
+  assert.equal(parseImageHeightmap(imageData).elevationUnit, 'm');
+  assert.equal(parseImageHeightmap(imageData, { elevationUnit: 'ft' }).elevationUnit, 'ft');
+  assert.equal((await parseElevationRaster(imageData, { unit: 'ft' })).elevationUnit, 'ft');
+
+  // GeoTIFF parser
+  const tiffBuf = createSyntheticGeoTIFF({ width: 2, height: 2 });
+  assert.equal((await parseGeoTIFFWithFallback(tiffBuf)).elevationUnit, 'm');
+  assert.equal(
+    (await parseGeoTIFFWithFallback(tiffBuf, { elevationUnit: 'ft' })).elevationUnit,
+    'ft'
+  );
+  assert.equal((await parseElevationRaster(tiffBuf, { unit: 'ft' })).elevationUnit, 'ft');
+  assert.equal(
+    (await parseElevationRaster(tiffBuf, { elevationUnit: 'invalid_unit' })).elevationUnit,
+    'm'
+  );
+});
+
+test('drawContours formats 2D contour altitude labels according to grid.elevationUnit', () => {
+  const collectLabels = (elevationUnit) => {
+    const grid = new ElevationGrid({
+      width: 2,
+      height: 2,
+      data: [0, 10, 10, 20],
+      minElevation: 0,
+      maxElevation: 20,
+      contourInterval: 10.0,
+      elevationUnit,
+    });
+    if (elevationUnit === 'corrupt_after_init') {
+      grid.elevationUnit = 'corrupt_after_init';
+    }
+    const contours = computeMarchingSquares(grid);
+    const labels = [];
+    const mockCtx = {
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      stroke: () => {},
+      strokeText: () => {},
+      fillText: (t) => labels.push(t),
+    };
+    drawContours(mockCtx, { elevationGrid: grid }, { scale: 1 }, { contours });
+    return labels;
+  };
+
+  assert.ok(collectLabels('m').includes('10.0m'));
+  assert.ok(collectLabels('ft').includes('10.0ft'));
+  assert.ok(collectLabels('corrupt_after_init').includes('10.0m'));
+});
+
+test('3D terrain mesh scales heights by 3.28084 for meters, 1.0 for feet, and updates dynamically on unit switch', () => {
+  const prevRAF = globalThis.requestAnimationFrame;
+  const prevCAF = globalThis.cancelAnimationFrame;
+  const prevWin = globalThis.window;
+  const prevDoc = globalThis.document;
+  const prevRO = globalThis.ResizeObserver;
+
+  globalThis.cancelAnimationFrame = () => {};
+  globalThis.requestAnimationFrame = () => 1;
+
+  const baseCtx = {
+    canvas: { width: 400, height: 300 },
+    getParameter: () => 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
+    getExtension: () => null,
+    getShaderPrecisionFormat: () => ({ precision: 1, rangeMin: 1, rangeMax: 1 }),
+    checkFramebufferStatus: () => 36053,
+    createFramebuffer: () => ({ id: 1 }),
+    createRenderbuffer: () => ({ id: 2 }),
+    createTexture: () => ({ id: 3 }),
+    createBuffer: () => ({ id: 4 }),
+    createProgram: () => ({ id: 5 }),
+    createShader: () => ({ id: 6 }),
+    createVertexArray: () => ({ id: 7 }),
+    TRIANGLES: 4,
+  };
+  const mockCtx = new Proxy(baseCtx, {
+    get(target, prop) {
+      return prop in target ? target[prop] : () => {};
+    },
+  });
+  const mock2d = {
+    fillRect: () => {},
+    beginPath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    stroke: () => {},
+    arc: () => {},
+    fill: () => {},
+    scale: () => {},
+    save: () => {},
+    restore: () => {},
+    setTransform: () => {},
+    drawImage: () => {},
+    translate: () => {},
+    strokeRect: () => {},
+    createLinearGradient: () => ({ addColorStop: () => {} }),
+  };
+  const mockDoc = {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    createElement: () => ({ width: 64, height: 64, getContext: () => mock2d }),
+  };
+  const mockCanvas = {
+    width: 400,
+    height: 300,
+    ownerDocument: mockDoc,
+    getRootNode: () => mockDoc,
+    getBoundingClientRect: () => ({ width: 400, height: 300, left: 0, top: 0 }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    style: {},
+    getContext: (type) => (type === '2d' ? mock2d : mockCtx),
+  };
+
+  globalThis.window = { devicePixelRatio: 1 };
+  globalThis.document = mockDoc;
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+
+  try {
+    const state = newState();
+    state.elevationGrid = new ElevationGrid({
+      width: 2,
+      height: 2,
+      data: [10, 10, 10, 10],
+      minElevation: 10,
+      maxElevation: 10,
+      verticalScale: 1.5,
+      elevationUnit: 'm',
+    });
+    const originalDataRef = state.elevationGrid.data;
+
+    const api = createScene3D(
+      mockCanvas,
+      () => state,
+      () => 0
+    );
+    api.show();
+
+    const ground = api.scene.children.find((ch) => ch.userData && ch.userData.isGridTerrain);
+    assert.ok(ground, '3D ground terrain mesh should exist');
+
+    const zMeters = ground.geometry.attributes.position.getZ(0);
+    assert.ok(
+      Math.abs(zMeters - 10 * 1.5 * 3.28084) < 1e-3,
+      `Expected meter-scaled vertex Z (~${(10 * 1.5 * 3.28084).toFixed(4)}), got ${zMeters}`
+    );
+
+    // Switch unit to feet in place without re-parsing raster buffer
+    state.elevationGrid.elevationUnit = 'ft';
+    api.update();
+
+    const zFeet = ground.geometry.attributes.position.getZ(0);
+    assert.ok(
+      Math.abs(zFeet - 10 * 1.5) < 1e-3,
+      `Expected feet-scaled vertex Z (15.0), got ${zFeet}`
+    );
+    assert.strictEqual(
+      state.elevationGrid.data,
+      originalDataRef,
+      'Raw Float32Array raster buffer should remain untouched on unit switch'
+    );
+
+    api.destroy();
+  } finally {
+    globalThis.requestAnimationFrame = prevRAF;
+    globalThis.cancelAnimationFrame = prevCAF;
+    globalThis.window = prevWin;
+    globalThis.document = prevDoc;
+    globalThis.ResizeObserver = prevRO;
+  }
+});
+
+test('Terrain dialog (#dlg-elevation) exposes accessible #elevation-unit selector wired in app.js', () => {
+  const html = readFileSync(resolve('index.html'), 'utf8');
+  const appJs = readFileSync(resolve('js/app.js'), 'utf8');
+
+  assert.match(
+    html,
+    /<label for="elevation-unit">Elevation Unit<\/label>\s*<select id="elevation-unit">/
+  );
+  assert.match(html, /<option value="m"[^>]*>Meters \(m\)<\/option>/);
+  assert.match(html, /<option value="ft"[^>]*>Feet \(ft\)<\/option>/);
+  assert.ok(appJs.includes('doc.elevationGrid.elevationUnit = unit;'));
 });

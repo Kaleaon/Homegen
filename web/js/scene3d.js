@@ -18,7 +18,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -41,6 +40,7 @@ import { buildWindow3DMesh } from './windowBuilder.js';
 import { buildDoor3DMesh } from './doorBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
+import { normalizeElevationUnit } from './elevationEngine.js';
 import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
 import {
@@ -1519,15 +1519,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const halfW = worldWidth / 2;
       const halfH = worldDepth / 2;
 
+      const verticalScale = grid.verticalScale ?? 1.0;
+      const unitToFeet = normalizeElevationUnit(grid.elevationUnit) === 'ft' ? 1.0 : 3.28084;
+
       for (let i = 0; i < vertCount; i++) {
         const lx = posAttr.getX(i);
         const ly = posAttr.getY(i);
         const u = (lx + halfW) / worldWidth;
         const v = (halfH - ly) / worldDepth;
 
-        let elev = grid.getElevationAt(u, v) * (grid.verticalScale ?? 1.0);
-        // Convert elevation in meters to 3D feet
-        const elevFeet = elev * 3.28084;
+        const elev = grid.getElevationAt(u, v);
+        const elevFeet = elev * verticalScale * unitToFeet;
         posAttr.setZ(i, elevFeet);
       }
       posAttr.needsUpdate = true;
