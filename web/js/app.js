@@ -337,6 +337,12 @@ function renderBgToolbar() {
 function renderHistoryTimeline() {
   const listEl = $('#history-list');
   if (!listEl) return;
+  const focusedIndex =
+    typeof document !== 'undefined' &&
+    document.activeElement?.classList?.contains?.('history-item') &&
+    (typeof listEl.contains !== 'function' || listEl.contains(document.activeElement))
+      ? document.activeElement.dataset?.index
+      : null;
   const timeline = hist.getTimeline();
   listEl.innerHTML = timeline
     .map((item) => {
@@ -379,6 +385,14 @@ function renderHistoryTimeline() {
       }
     });
   });
+
+  if (focusedIndex !== null && focusedIndex !== undefined) {
+    const popover = $('#history-popover');
+    if (popover && !popover.hidden) {
+      const nextFocusEl = listEl.querySelector(`.history-item[data-index="${focusedIndex}"]`);
+      nextFocusEl?.focus();
+    }
+  }
 }
 
 function refresh() {
@@ -3299,27 +3313,45 @@ function setDoc(next, label) {
   refresh();
 }
 
+let activeDiffDrawerCleanup = null;
+let activeHistoryPopoverCleanup = null;
+
 function trapFocus(containerEl, returnFocusEl) {
+  if (!containerEl) return () => {};
   const focusableSelector =
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-  const focusableElements = Array.from(containerEl.querySelectorAll(focusableSelector));
-  if (!focusableElements.length) return () => {};
+  const getFocusableElements = () =>
+    Array.from(containerEl.querySelectorAll(focusableSelector)).filter((el) => {
+      if (el.disabled || el.hidden) return false;
+      let cur = el.parentElement;
+      while (cur && cur !== containerEl) {
+        if (cur.hidden) return false;
+        cur = cur.parentElement;
+      }
+      return true;
+    });
 
-  const firstEl = focusableElements[0];
-  const lastEl = focusableElements[focusableElements.length - 1];
-
-  firstEl.focus();
+  const initialFocusable = getFocusableElements();
+  if (initialFocusable.length) {
+    initialFocusable[0].focus();
+  }
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      containerEl.removeEventListener('keydown', handleKeyDown);
       if (typeof containerEl.close === 'function') {
         containerEl.close();
       } else {
         containerEl.hidden = true;
         if (containerEl.id === 'diff-drawer') {
+          activeDiffDrawerCleanup = null;
           autoFixDiffs = [];
           hoveredDiffIndex = null;
           redraw();
+        } else if (containerEl.id === 'history-popover') {
+          activeHistoryPopoverCleanup = null;
+          $('#history-btn')?.setAttribute('aria-expanded', 'false');
         }
       }
       if (returnFocusEl) returnFocusEl.focus();
@@ -3328,13 +3360,24 @@ function trapFocus(containerEl, returnFocusEl) {
 
     if (e.key !== 'Tab') return;
 
+    const focusableElements = getFocusableElements();
+    if (!focusableElements.length) {
+      e.preventDefault();
+      return;
+    }
+
+    const firstEl = focusableElements[0];
+    const lastEl = focusableElements[focusableElements.length - 1];
+    const activeOutside =
+      typeof containerEl.contains === 'function' && !containerEl.contains(document.activeElement);
+
     if (e.shiftKey) {
-      if (document.activeElement === firstEl) {
+      if (document.activeElement === firstEl || activeOutside) {
         e.preventDefault();
         lastEl.focus();
       }
     } else {
-      if (document.activeElement === lastEl) {
+      if (document.activeElement === lastEl || activeOutside) {
         e.preventDefault();
         firstEl.focus();
       }
@@ -3347,8 +3390,6 @@ function trapFocus(containerEl, returnFocusEl) {
     if (returnFocusEl) returnFocusEl.focus();
   };
 }
-
-let activeDiffDrawerCleanup = null;
 
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
@@ -4637,6 +4678,12 @@ if (typeof window !== 'undefined') {
       if (historyPopover && !historyPopover.hidden) {
         historyPopover.hidden = true;
         $('#history-btn')?.setAttribute('aria-expanded', 'false');
+        if (activeHistoryPopoverCleanup) {
+          activeHistoryPopoverCleanup();
+          activeHistoryPopoverCleanup = null;
+        } else {
+          $('#history-btn')?.focus();
+        }
       }
       setTool({ kind: 'select' });
       select(null);
@@ -4671,20 +4718,18 @@ if (typeof window !== 'undefined') {
     snappingBridge,
   });
 
-  function toggleHistoryPopover() {
-    const popover = $('#history-popover');
-    const btn = $('#history-btn');
-    if (!popover) return;
-    const isHidden = popover.hidden;
-    popover.hidden = !isHidden;
-    if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-  }
-
   $('#history-btn')?.addEventListener('click', toggleHistoryPopover);
   $('#history-close')?.addEventListener('click', () => {
     const popover = $('#history-popover');
+    const btn = $('#history-btn');
     if (popover) popover.hidden = true;
-    $('#history-btn')?.setAttribute('aria-expanded', 'false');
+    btn?.setAttribute('aria-expanded', 'false');
+    if (activeHistoryPopoverCleanup) {
+      activeHistoryPopoverCleanup();
+      activeHistoryPopoverCleanup = null;
+    } else {
+      btn?.focus();
+    }
   });
 
   renderPalette();
@@ -4697,6 +4742,24 @@ if (typeof window !== 'undefined') {
     openWelcomeWizard();
   });
 }
+function toggleHistoryPopover() {
+  const popover = $('#history-popover');
+  const btn = $('#history-btn');
+  if (!popover) return;
+  const isHidden = popover.hidden;
+  popover.hidden = !isHidden;
+  if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+  if (isHidden) {
+    if (activeHistoryPopoverCleanup) activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = trapFocus(popover, btn);
+  } else if (activeHistoryPopoverCleanup) {
+    activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = null;
+  } else {
+    btn?.focus();
+  }
+}
+
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (distPx <= 0) {
@@ -5657,6 +5720,7 @@ if (typeof window !== 'undefined')
     closeShortcutOverlay,
     renderCommandList,
     trapFocus,
+    toggleHistoryPopover,
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
