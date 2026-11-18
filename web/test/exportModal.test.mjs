@@ -15,7 +15,7 @@ import {
 import { generatePDF } from '../js/pdfEngine.js';
 import { generateBOMCSV } from '../js/bomExporter.js';
 import { exportDXF } from '../js/dxfExporter.js';
-import { buildStudio } from '../js/templates.js';
+import { TEMPLATE_BY_ID } from '../js/templates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(__dirname, '..');
@@ -470,7 +470,7 @@ test('app.js wires initExportModalTierState and bindUpgradeTriggerLinks into #ex
   );
 
   // Verify existing file generation functions remain unchanged and operational
-  const sampleState = buildStudio();
+  const sampleState = TEMPLATE_BY_ID('studio').createState();
   const pdf = generatePDF(sampleState, { pageSize: 'Letter', orientation: 'landscape' });
   assert.ok(pdf.output('arraybuffer').byteLength > 500, 'generatePDF continues to work');
 

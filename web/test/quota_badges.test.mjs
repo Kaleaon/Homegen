@@ -135,7 +135,7 @@ test('Header and Photoreal quota badges reflect initial full capacity, consumpti
 
   const limiter = new RateLimiter({
     capacity: 5,
-    refillRate: 40, // 25ms per token
+    refillRate: 5, // 200ms per token; refills tested deterministically below
     maxConcurrency: 2,
     fetchImpl: async (url) => {
       if (url.startsWith('/hold')) {
@@ -165,6 +165,7 @@ test('Header and Photoreal quota badges reflect initial full capacity, consumpti
     assert.equal(dom.el('photo-quota-upgrade-wrap').hidden, false);
 
     // 2. Consume 2 tokens & enqueue 2 more (exceeding maxConcurrency = 2)
+    limiter.lastRefill = Date.now() + 5000;
     const p1 = limiter.fetch('/hold-1');
     const p2 = limiter.fetch('/hold-2');
     const p3 = limiter.fetch('/queued-1');
@@ -203,7 +204,7 @@ test('Header and Photoreal quota badges reflect initial full capacity, consumpti
     assert.equal(dom.el('photo-quota-badge').dataset.quotaState, 'low');
 
     // 5. Simulate refill back to full capacity
-    limiter.lastRefill = Date.now() - 1000;
+    limiter.lastRefill = Date.now() - 5000;
     limiter._refillTokens();
     assert.equal(dom.el('header-quota-count').textContent, '5 / 5 credits');
     assert.equal(dom.el('photo-quota-count').textContent, '5 / 5 credits');

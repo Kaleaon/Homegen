@@ -18,56 +18,87 @@ import { computeMarchingSquares } from './elevationEngine.js';
  */
 function stitchSegmentsToPolylines(lines) {
   if (!lines || lines.length === 0) return [];
-  const remaining = lines.map((l) => ({ ...l }));
-  const polylines = [];
+  const n = lines.length;
+  const TOL = 1e-4;
+  const INV_CELL = 1e3; // 1e-3 cell size >= 10x matching tolerance (1e-4)
+  const buckets = new Map();
 
-  while (remaining.length > 0) {
-    const first = remaining.pop();
-    const pts = [
-      { x: first.x1, y: first.y1 },
-      { x: first.x2, y: first.y2 },
-    ];
+  const addEndpoint = (x, y, packed) => {
+    const key = `${Math.floor(x * INV_CELL)},${Math.floor(y * INV_CELL)}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+    }
+    bucket.push(packed);
+  };
 
-    let extended = true;
-    while (extended) {
-      extended = false;
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
+  for (let i = 0; i < n; i++) {
+    const seg = lines[i];
+    addEndpoint(seg.x1, seg.y1, i * 2);
+    addEndpoint(seg.x2, seg.y2, i * 2 + 1);
+  }
 
-      for (let i = 0; i < remaining.length; i++) {
-        const seg = remaining[i];
-        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
-          pts.push({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(tail.x - seg.x2, tail.y - seg.y2) < 1e-4) {
-          pts.push({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
-          pts.unshift({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x1, head.y - seg.y1) < 1e-4) {
-          pts.unshift({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
+  const used = new Uint8Array(n);
+  const popMatchingEndpoint = (px, py) => {
+    const cx = Math.floor(px * INV_CELL);
+    const cy = Math.floor(py * INV_CELL);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = buckets.get(`${cx + dx},${cy + dy}`);
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const packed = bucket[k];
+          const idx = Math.floor(packed / 2);
+          if (used[idx]) continue;
+          const end = packed & 1;
+          const seg = lines[idx];
+          const sx = end === 0 ? seg.x1 : seg.x2;
+          const sy = end === 0 ? seg.y1 : seg.y2;
+          if (Math.hypot(px - sx, py - sy) < TOL) {
+            used[idx] = 1;
+            return end === 0 ? { x: seg.x2, y: seg.y2 } : { x: seg.x1, y: seg.y1 };
+          }
         }
       }
     }
+    return null;
+  };
+
+  const polylines = [];
+
+  for (let i = n - 1; i >= 0; i--) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const first = lines[i];
+
+    const tailPts = [];
+    let tail = { x: first.x2, y: first.y2 };
+    for (;;) {
+      const next = popMatchingEndpoint(tail.x, tail.y);
+      if (!next) break;
+      tailPts.push(next);
+      tail = next;
+    }
+
+    const headPts = [];
+    let head = { x: first.x1, y: first.y1 };
+    for (;;) {
+      const prev = popMatchingEndpoint(head.x, head.y);
+      if (!prev) break;
+      headPts.push(prev);
+      head = prev;
+    }
+
+    headPts.reverse();
+    const pts = headPts;
+    pts.push({ x: first.x1, y: first.y1 }, { x: first.x2, y: first.y2 }, ...tailPts);
 
     let isClosed = false;
     if (pts.length > 2) {
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
-      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
+      const firstPt = pts[0];
+      const lastPt = pts[pts.length - 1];
+      if (Math.hypot(firstPt.x - lastPt.x, firstPt.y - lastPt.y) < TOL) {
         isClosed = true;
         pts.pop();
       }

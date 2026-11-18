@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWebpDataUrl } from '../js/photoreal.js';
-import { hordeRender, HordeError } from '../js/photoreal.js';
+import {
+  RESOLUTION_TIERS,
+  hordeWidth,
+  isAnonymousKey,
+  resolveResolutionTier,
+  toWebpDataUrl,
+  hordeRender,
+  HordeError,
+  DEFAULT_RETRY_DELAYS,
+} from '../js/photoreal.js';
+import { defaultRateLimiter } from '../js/rateLimiter.js';
 
 function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) {
   const origImage = globalThis.Image;
@@ -385,5 +394,317 @@ test('hordeRender abort signal cancels polling cleanly and sends delete request'
   assert.ok(
     deletedJobs.some((u) => u.includes('/generate/status/job-abort')),
     'sent DELETE request to cancel job on Horde'
+  );
+});
+
+test('RESOLUTION_TIERS defines SD Free, HD Pro, and 4K Enterprise tiers with badges and 64px-aligned dimensions', () => {
+  assert.deepEqual(Object.keys(RESOLUTION_TIERS), ['sd', 'hd', '4k']);
+
+  assert.equal(RESOLUTION_TIERS.sd.plan, 'Free');
+  assert.equal(RESOLUTION_TIERS.sd.badge, 'Free');
+  assert.equal(RESOLUTION_TIERS.sd.locked, false);
+  assert.equal(RESOLUTION_TIERS.sd.width, 576);
+  assert.equal(RESOLUTION_TIERS.sd.width % 64, 0);
+  assert.equal(RESOLUTION_TIERS.sd.height % 64, 0);
+
+  assert.equal(RESOLUTION_TIERS.hd.plan, 'Pro');
+  assert.equal(RESOLUTION_TIERS.hd.badge, 'Pro 🔒');
+  assert.equal(RESOLUTION_TIERS.hd.locked, true);
+  assert.equal(RESOLUTION_TIERS.hd.width, 1024);
+  assert.equal(RESOLUTION_TIERS.hd.width % 64, 0);
+  assert.equal(RESOLUTION_TIERS.hd.height % 64, 0);
+
+  assert.equal(RESOLUTION_TIERS['4k'].plan, 'Enterprise');
+  assert.equal(RESOLUTION_TIERS['4k'].badge, 'Enterprise 🔒');
+  assert.equal(RESOLUTION_TIERS['4k'].locked, true);
+  assert.equal(RESOLUTION_TIERS['4k'].width, 2048);
+  assert.equal(RESOLUTION_TIERS['4k'].width % 64, 0);
+  assert.equal(RESOLUTION_TIERS['4k'].height % 64, 0);
+});
+
+test('hordeWidth and resolveResolutionTier enforce free SD fallback for anonymous keys and unlock HD/4K for paid keys', () => {
+  assert.equal(isAnonymousKey(''), true);
+  assert.equal(isAnonymousKey('0000000000'), true);
+  assert.equal(isAnonymousKey('  0000000000  '), true);
+  assert.equal(isAnonymousKey('paid-horde-key-123'), false);
+
+  // Default & anonymous fallback behavior
+  assert.equal(hordeWidth(), 576);
+  assert.equal(hordeWidth('0000000000'), 576);
+  assert.equal(hordeWidth('0000000000', 'sd'), 576);
+  assert.equal(hordeWidth('0000000000', 'hd'), 576);
+  assert.equal(hordeWidth('0000000000', '4k'), 576);
+  assert.equal(hordeWidth('', '4k'), 576);
+
+  const anonHd = resolveResolutionTier('hd', '0000000000');
+  assert.equal(anonHd.requested.id, 'hd');
+  assert.equal(anonHd.effective.id, 'sd');
+  assert.equal(anonHd.downgraded, true);
+
+  // Paid / registered key unlocks HD and 4K
+  assert.equal(hordeWidth('paid-horde-key-123'), 576);
+  assert.equal(hordeWidth('paid-horde-key-123', 'sd'), 576);
+  assert.equal(hordeWidth('paid-horde-key-123', 'hd'), 1024);
+  assert.equal(hordeWidth('paid-horde-key-123', '4k'), 2048);
+  assert.equal(hordeWidth('paid-horde-key-123', 'unknown-tier'), 576);
+
+  const paid4k = resolveResolutionTier('4k', 'paid-horde-key-123');
+  assert.equal(paid4k.requested.id, '4k');
+  assert.equal(paid4k.effective.id, '4k');
+  assert.equal(paid4k.downgraded, false);
+});
+
+test('hordeRender derives request dimensions from selected tier width when depthWebp.size is omitted', async () => {
+  let submittedBody = null;
+  const fakeFetch = async (url, opts = {}) => {
+    const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+    if (url.endsWith('/generate/async')) {
+      submittedBody = JSON.parse(opts.body);
+      return ok({ id: 'job-hd-tier' });
+    }
+    if (url.includes('/generate/check/'))
+      return ok({ done: true, queue_position: 0, wait_time: 0 });
+    if (url.includes('/generate/status/')) {
+      return ok({ generations: [{ img: 'https://example.test/hd.webp', censored: false }] });
+    }
+    return ok({});
+  };
+
+  const out = await hordeRender({
+    prompt: 'modern kitchen',
+    depthWebp: { url: 'data:image/webp;base64,QUJD' },
+    width: RESOLUTION_TIERS.hd.width,
+    apikey: 'paid-pro-key',
+    fetchImpl: fakeFetch,
+    pollIntervalMs: 1,
+  });
+
+  assert.equal(out.url, 'https://example.test/hd.webp');
+  assert.equal(submittedBody.params.width, 1024);
+  assert.equal(submittedBody.params.height, 768);
+  assert.equal(submittedBody.params.steps, 28);
+});
+
+test('hordeRender executes initial check immediately without sleeping pollIntervalMs', async () => {
+  const events = [];
+  const origSetTimeout = globalThis.setTimeout;
+  const scheduledPollDelays = [];
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms >= 1000) {
+      scheduledPollDelays.push(ms);
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+
+  try {
+    const fakeFetch = async (url) => {
+      const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+      if (url.endsWith('/generate/async')) {
+        events.push('async');
+        return ok({ id: 'job-fast-immediate' });
+      }
+      if (url.includes('/generate/check/')) {
+        events.push('check');
+        return ok({ done: true, queue_position: 0, wait_time: 0 });
+      }
+      if (url.includes('/generate/status/')) {
+        events.push('status');
+        return ok({
+          generations: [{ img: 'https://example.test/fast.webp', censored: false }],
+        });
+      }
+      return ok({});
+    };
+
+    const statuses = [];
+    const start = Date.now();
+    const out = await hordeRender({
+      prompt: 'modern kitchen',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 5000,
+      onStatus: (st) => statuses.push(st),
+    });
+    const elapsed = Date.now() - start;
+
+    assert.deepEqual(events, ['async', 'check', 'status']);
+    assert.deepEqual(scheduledPollDelays, [], 'no pollIntervalMs sleep before first check');
+    assert.ok(elapsed < 500, `expected immediate completion (<500ms), took ${elapsed}ms`);
+    assert.deepEqual(out, { url: 'https://example.test/fast.webp', censored: false });
+    assert.deepEqual(statuses, ['Queued (job job-fast)…', 'Finishing…']);
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('hordeRender sleeps pollIntervalMs only before subsequent polling iterations', async () => {
+  const timeline = [];
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms === 25) {
+      timeline.push(`sleep:${ms}`);
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+
+  try {
+    let checks = 0;
+    const fakeFetch = async (url) => {
+      const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+      if (url.endsWith('/generate/async')) {
+        timeline.push('async');
+        return ok({ id: 'job-multi-poll' });
+      }
+      if (url.includes('/generate/check/')) {
+        checks++;
+        timeline.push(`check:${checks}`);
+        if (checks < 3) {
+          return ok({ done: false, queue_position: 4 - checks, wait_time: 10 - checks * 3 });
+        }
+        return ok({ done: true, queue_position: 0, wait_time: 0 });
+      }
+      if (url.includes('/generate/status/')) {
+        timeline.push('status');
+        return ok({
+          generations: [{ img: 'https://example.test/multi.webp', censored: true }],
+        });
+      }
+      return ok({});
+    };
+
+    const statuses = [];
+    const out = await hordeRender({
+      prompt: 'scandi bedroom',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      apikey: 'registered-key',
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 25,
+      onStatus: (st) => statuses.push(st),
+    });
+
+    assert.deepEqual(timeline, [
+      'async',
+      'check:1',
+      'sleep:25',
+      'check:2',
+      'sleep:25',
+      'check:3',
+      'status',
+    ]);
+    assert.deepEqual(statuses, [
+      'Queued (job job-mult)…',
+      'Queue position 3 · ~7s',
+      'Queue position 2 · ~4s',
+      'Finishing…',
+    ]);
+    assert.deepEqual(out, { url: 'https://example.test/multi.webp', censored: true });
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('hordeRender uses exponential retry backoff delays and preserves onStatus across transient errors', async () => {
+  assert.deepEqual(DEFAULT_RETRY_DELAYS, [250, 500, 1000]);
+  defaultRateLimiter.clear();
+
+  const recordedSleeps = [];
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms >= 40) {
+      recordedSleeps.push(ms);
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+
+  try {
+    let checkCalls = 0;
+    const fakeFetch = async (url) => {
+      const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+      if (url.endsWith('/generate/async')) {
+        return ok({ id: 'job-exp-backoff' });
+      }
+      if (url.includes('/generate/check/')) {
+        checkCalls++;
+        // First check returns not done immediately
+        if (checkCalls === 1) {
+          return ok({ done: false, queue_position: 1, wait_time: 3 });
+        }
+        // Second poll experiences 3 transient network drops before succeeding on 4th attempt
+        if (checkCalls >= 2 && checkCalls <= 4) {
+          throw new TypeError('Transient network error');
+        }
+        return ok({ done: true, queue_position: 0, wait_time: 0 });
+      }
+      if (url.includes('/generate/status/')) {
+        return ok({
+          generations: [{ img: 'https://example.test/backoff.webp', censored: false }],
+        });
+      }
+      return ok({});
+    };
+
+    const statuses = [];
+    const out = await hordeRender({
+      prompt: 'industrial loft',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      apikey: 'registered-key',
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 45,
+      retryDelays: [40], // single base element scales exponentially: 40, 80, 160
+      onStatus: (st) => statuses.push(st),
+    });
+
+    assert.equal(out.url, 'https://example.test/backoff.webp');
+    assert.deepEqual(recordedSleeps, [45, 40, 80, 160]);
+    assert.deepEqual(statuses, ['Queued (job job-exp-)…', 'Queue position 1 · ~3s', 'Finishing…']);
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('hordeRender aborts cleanly during fetch retry backoff sleep and clears pending timers', async () => {
+  const deletedJobs = [];
+  let checkAttempts = 0;
+  const ac = new AbortController();
+
+  const fakeFetch = async (url, opts = {}) => {
+    if (opts.method === 'DELETE') {
+      deletedJobs.push(url);
+      return { ok: true, status: 200, json: async () => ({}) };
+    }
+    const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+    if (url.endsWith('/generate/async')) {
+      return ok({ id: 'job-retry-abort' });
+    }
+    if (url.includes('/generate/check/')) {
+      checkAttempts++;
+      setTimeout(() => ac.abort('user cancelled during retry sleep'), 10);
+      throw new TypeError('Network drop before abort');
+    }
+    return ok({});
+  };
+
+  const start = Date.now();
+  await assert.rejects(
+    hordeRender({
+      prompt: 'boho living room',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      signal: ac.signal,
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 5000,
+      retryDelays: [5000, 10000, 20000],
+    }),
+    (err) => {
+      assert.equal(err.name, 'AbortError');
+      return true;
+    }
+  );
+  const elapsed = Date.now() - start;
+
+  assert.equal(checkAttempts, 1, 'aborted during first retry sleep without further retry attempts');
+  assert.ok(elapsed < 500, `expected prompt abort cleanup (<500ms), took ${elapsed}ms`);
+  assert.ok(
+    deletedJobs.some((u) => u.includes('/generate/status/job-retry-abort')),
+    'sent DELETE request on abort during retry backoff'
   );
 });

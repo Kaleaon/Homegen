@@ -11,6 +11,7 @@ import {
   getRoomClearSpan,
   polygonsOverlap,
   wallLength,
+  wallArcLength,
   interior,
   interiorPolygonData,
   polygonContainsRect,
@@ -172,14 +173,16 @@ export function daylight(state, room) {
 }
 
 /** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
-function outletSegments(state, room) {
+export function outletSegments(state, room) {
   const segs = [];
   const walls = getRoomWallKeys(room);
   for (const wall of walls) {
-    const len = wallLength(room, wall);
-    let iv = [[WT / 2, len - WT / 2]];
+    const chordLen = wallLength(room, wall);
+    const arcLen = wallArcLength(room, wall);
+    const scale = chordLen > 0 ? arcLen / chordLen : 1;
+    let iv = [[WT / 2, arcLen - WT / 2]];
     for (const { o, from, to } of wallOpenings(state, room, wall))
-      if (o.kind === 'door') iv = subtractInterval(iv, [from, to]);
+      if (o.kind === 'door') iv = subtractInterval(iv, [from * scale, to * scale]);
     const outs = room.items.filter(
       (i) =>
         resolveWallIndex(i.wall) === resolveWallIndex(wall) &&
@@ -189,8 +192,8 @@ function outletSegments(state, room) {
     for (const [a, b] of iv) {
       if (b - a < 24) continue;
       const mine = outs
-        .filter((i) => i.offset >= a - EPS && i.offset <= b + EPS)
-        .map((i) => i.offset)
+        .map((i) => i.offset * scale)
+        .filter((off) => off >= a - EPS && off <= b + EPS)
         .sort((x, y) => x - y);
       let covered = mine.length > 0;
       if (covered) {
@@ -976,8 +979,8 @@ export function evaluate(state, options = {}) {
           'floor finish must be moisture-resistant.',
           { fixable: true }
         );
-      for (const w of WALLS)
-        if (!WALL_WET(room.walls[w]))
+      for (const w of getRoomWallKeys(room))
+        if (!WALL_WET(room.walls?.[w]))
           R(
             'wet-wall',
             'IRC R702.4 / practice',
@@ -1365,10 +1368,10 @@ export function autoComply(state, options = {}) {
     if (!checkTarget) return false;
     const t = String(targetId).toLowerCase();
     const c = String(checkTarget).toLowerCase();
-    if (t === 'home' || c === 'home') return true;
-    return (
-      c === t || t.includes(c) || c.includes(t) || t.startsWith(c + ':') || c.startsWith(t + ':')
-    );
+    if (t === 'home' || t.endsWith(':home') || c === 'home') return true;
+    if (c === t || t.endsWith(':' + c) || c.startsWith(t + ':')) return true;
+    if ((':' + t).includes(':outlets:' + c + ':')) return true;
+    return false;
   };
 
   const log = [];
@@ -1411,8 +1414,9 @@ export function autoComply(state, options = {}) {
           r.floor = 'floor_tile_gray';
           addDiff(r.id, 'modify', 'floor', `${r.name}: moisture-resistant floor`);
         }
-        for (const w of WALLS)
-          if (!WALL_WET(r.walls[w]) && shouldFix(`${r.id}:${w}`)) {
+        for (const w of getRoomWallKeys(r))
+          if (!WALL_WET(r.walls?.[w]) && shouldFix(`${r.id}:${w}`)) {
+            r.walls ||= {};
             r.walls[w] = r.type === 'bathroom' ? 'wall_tile_white' : 'paint_white';
             addDiff(
               `${r.id}:${w}`,
@@ -1666,24 +1670,29 @@ export function autoComply(state, options = {}) {
       const outType = t.wet ? 'outlet_gfci' : 'outlet';
       if (t.habitable || r.type === 'laundry') {
         for (let k = 0; k < 20; k++) {
-          const seg = outletSegments(state, get()).find((s) => !s.covered);
+          const curRoom = get();
+          const seg = outletSegments(state, curRoom).find((s) => !s.covered);
           if (!seg) break;
+          const chordLen = wallLength(curRoom, seg.wall);
+          const arcLen = wallArcLength(curRoom, seg.wall);
+          const scale = chordLen > 0 ? arcLen / chordLen : 1;
           const parts = seg.need;
           let placed = false;
           for (let p = 0; p < parts && !placed; p++) {
             const c = seg.from + ((p + 0.5) * (seg.to - seg.from)) / parts;
+            const cWall = c / scale;
             if (
-              get().items.some(
+              curRoom.items.some(
                 (i) =>
-                  i.wall === seg.wall &&
-                  Math.abs(i.offset - c) < 6 &&
+                  resolveWallIndex(i.wall) === resolveWallIndex(seg.wall) &&
+                  Math.abs(i.offset - cWall) < 6 &&
                   ITEM_BY_ID[i.type].shape === 'outlet'
               )
             )
               continue;
             for (const off of [c, c - 12, c + 12, c - 24, c + 24])
               if (off >= seg.from && off <= seg.to) {
-                const itemId = addWallItem(state, id, outType, seg.wall, off, rep());
+                const itemId = addWallItem(state, id, outType, seg.wall, off / scale, rep());
                 if (itemId) {
                   placed = true;
                   addDiff(itemId, 'add', 'item', `${r.name}: added outlet on ${seg.wall} wall`);

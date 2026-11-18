@@ -234,6 +234,7 @@ test('RateLimiter dispatches quota-change events on consume, enqueue, dequeue, c
   assert.equal(events.at(-1).queuedCount, 0);
 
   // 4. Enqueue another request and release active request
+  limiter.lastRefill = Date.now();
   const pNext = limiter.fetch('/next');
   assert.equal(events.at(-1).reason, 'enqueue');
   releaseActive();
@@ -249,7 +250,13 @@ test('RateLimiter dispatches quota-change events on consume, enqueue, dequeue, c
   );
 
   // 5. Wait for passive refill back to full capacity
-  await new Promise((r) => setTimeout(r, 110));
+  const refillDeadline = Date.now() + 1500;
+  while (
+    (limiter.tokens < 2 || !events.some((e) => e.reason === 'refill')) &&
+    Date.now() < refillDeadline
+  ) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
   assert.ok(
     events.some((e) => e.reason === 'refill'),
     'emitted refill event during token recovery'

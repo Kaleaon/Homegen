@@ -62,20 +62,52 @@ export function announce3DStateChange(message) {
   }
 }
 
+let cachedA11yDoc = null;
+let cachedA11yGetById = null;
+let cachedA11yContainer = null;
+let lastA11ySummaryText = null;
+
+function isA11yElementAttached(el, doc) {
+  if (!el || !doc || doc !== cachedA11yDoc || doc.getElementById !== cachedA11yGetById) {
+    return false;
+  }
+  if (el.ownerDocument && el.ownerDocument !== doc) return false;
+  if (typeof el.isConnected === 'boolean') return el.isConnected;
+  if (typeof doc.contains === 'function') return doc.contains(el);
+  if (el.parentNode != null || el.parentElement != null) return true;
+  return false;
+}
+
 export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
-  const container = document.getElementById('view3d-fallback-summary');
-  if (!container) return;
 
+  if (!isA11yElementAttached(cachedA11yContainer, document)) {
+    cachedA11yDoc = document;
+    cachedA11yGetById = document.getElementById;
+    cachedA11yContainer = document.getElementById('view3d-fallback-summary');
+    lastA11ySummaryText = null;
+  }
+  if (!cachedA11yContainer) return;
+
+  const level = typeof curLevel === 'number' && !Number.isNaN(curLevel) ? curLevel : 0;
   const modeLabel =
     cameraMode === 'walkthrough' || cameraMode === 'walk'
       ? 'First-Person Walkthrough'
       : 'Orbit View';
-  const roomCount = ((state && state.rooms) || []).filter(
-    (r) => (r.level || 0) === curLevel
-  ).length;
+  let roomCount = 0;
+  const rooms = state && Array.isArray(state.rooms) ? state.rooms : null;
+  if (rooms) {
+    for (let i = 0; i < rooms.length; i++) {
+      const r = rooms[i];
+      if (r && (r.level || 0) === level) roomCount++;
+    }
+  }
 
-  container.textContent = `3D Viewport in ${modeLabel} mode. Rendering Level ${curLevel + 1} with ${roomCount} room(s) and standard scene lighting.`;
+  const nextText = `3D Viewport in ${modeLabel} mode. Rendering Level ${level + 1} with ${roomCount} room(s) and standard scene lighting.`;
+  if (nextText === lastA11ySummaryText) return;
+
+  cachedA11yContainer.textContent = nextText;
+  lastA11ySummaryText = nextText;
 }
 
 export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
@@ -117,11 +149,35 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   focusOverlay.visible = false;
   scene.add(focusOverlay);
 
+  const MIN_WALK_HEIGHT = 12;
+  const MAX_WALK_HEIGHT = 180;
+  const DEFAULT_WALK_HEIGHT = 64;
+
   let cameraMode = 'orbit'; // 'orbit' | 'walk'
+  let walkHeight = DEFAULT_WALK_HEIGHT;
   let yaw = 0;
   let pitch = 0;
   const walkKeys = { forward: false, backward: false, left: false, right: false, sprint: false };
   let lastLoopTime = performance.now();
+
+  function getWalkHeight() {
+    return walkHeight;
+  }
+
+  function setWalkHeight(heightInInches) {
+    const num = Number(heightInInches);
+    if (!Number.isFinite(num)) return walkHeight;
+    walkHeight = Math.max(MIN_WALK_HEIGHT, Math.min(MAX_WALK_HEIGHT, num));
+    if (cameraMode === 'walk') {
+      const E = getActiveFloorElevation();
+      camera.position.y = (E + walkHeight) * S;
+      updateCameraRotation();
+      render();
+    }
+    const notifyHeight = callbacks.onWalkHeightChange || api?.onWalkHeightChange;
+    notifyHeight?.(walkHeight);
+    return walkHeight;
+  }
 
   function initWalkAnglesFromCamera() {
     const dir = new THREE.Vector3();
@@ -224,9 +280,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       clampWalkPosition(camera.position);
     }
 
-    // Height lock at (E + 64) * S relative to active floor
+    // Height lock at (E + walkHeight) * S relative to active floor
     const E = getActiveFloorElevation();
-    camera.position.y = (E + 64) * S;
+    camera.position.y = (E + walkHeight) * S;
 
     updateCameraRotation();
   }
@@ -251,17 +307,18 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       camera.updateProjectionMatrix();
 
       const E = getActiveFloorElevation();
-      const eyeHeight = (E + 64) * S;
+      const walkY = (E + walkHeight) * S;
 
       if (options.roomId) {
         api.eyeLevel(options.roomId);
+        return;
       } else if (options.initPos) {
         camera.position.copy(options.initPos);
-        camera.position.y = eyeHeight;
+        camera.position.y = walkY;
         initWalkAnglesFromCamera();
         updateCameraRotation();
       } else {
-        camera.position.y = eyeHeight;
+        camera.position.y = walkY;
         initWalkAnglesFromCamera();
         updateCameraRotation();
       }
@@ -294,6 +351,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   let active = false;
   let raf = 0;
   let framed = false;
+  let cachedHudParent = null;
+  let hudBadge = null;
+  let lastHudAttrText = null;
 
   async function fetchWithTimeout(url, timeoutMs = 8000) {
     const controller = new AbortController();
@@ -404,11 +464,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const plain = (color, rough = 0.85, extra = {}) =>
     new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...extra });
 
-  function proceduralTexture(finish, rx, ry) {
+  function getOrCreateTexture(finish, rx, ry, createFn) {
     const tileInches = finish.tileInches || 24;
     const key = `${finish.id}|${tileInches}|${rx.toFixed(2)}|${ry.toFixed(2)}`;
     if (texCache.has(key)) return texCache.get(key);
-    const t = new THREE.CanvasTexture(tileCanvasFor(finish));
+    const t = createFn();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(rx, ry);
     t.colorSpace = THREE.SRGBColorSpace;
@@ -417,24 +477,19 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return t;
   }
 
+  function proceduralTexture(finish, rx, ry) {
+    return getOrCreateTexture(finish, rx, ry, () => new THREE.CanvasTexture(tileCanvasFor(finish)));
+  }
+
   function customTexture(finish, rx, ry) {
-    const tileInches = finish.tileInches || 24;
-    const key = `${finish.id}|${tileInches}|${rx.toFixed(2)}|${ry.toFixed(2)}`;
-    if (texCache.has(key)) return texCache.get(key);
-    let t;
     if (finish.dataUrl) {
-      t = loader.load(finish.dataUrl, () => {
-        render();
-      });
-      t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      t.repeat.set(rx, ry);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 8;
-    } else {
-      t = proceduralTexture(finish, rx, ry);
+      return getOrCreateTexture(finish, rx, ry, () =>
+        loader.load(finish.dataUrl, () => {
+          render();
+        })
+      );
     }
-    texCache.set(key, t);
-    return t;
+    return proceduralTexture(finish, rx, ry);
   }
 
   const preloader = new MaterialPreloader(loader);
@@ -741,7 +796,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
     const extrudeSettings = { depth: height, bevelEnabled: false };
     const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geom.rotateX(Math.PI / 2);
+    geom.rotateX(-Math.PI / 2);
     const visMat = Array.isArray(material)
       ? material[0]
       : material.vis || material.base || material;
@@ -1372,17 +1427,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
             extFinId = room.walls[wall];
           }
-          const wallAssembly = resolveWallAssembly(
-            finishId,
-            extFinId,
-            room.wallAssemblyOverrides?.[wall]
-          );
+          const extFin = getCladdingMaterial(extFinId);
+          extFinId = extFin.id || extFinId || 'cladding_siding_white';
+          const wallOverrides = room.wallAssemblyOverrides?.[wall] || null;
+          const wallAssembly = resolveWallAssembly(finishId, extFinId, wallOverrides || {});
           const wallSig = JSON.stringify({
             pts,
             ceiling: room.ceiling,
             finish: finishId,
             cladding: extFinId,
             assembly: wallAssembly,
+            wallOverrides,
             uv: getWallUV(room, wall),
             e,
             wallH,
@@ -1441,7 +1496,12 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const t = it.offset;
             const y = def.shape === 'switch' ? 48 : 16;
             const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
-            const extFinId = room.cladding || room.exteriorCladding;
+            let extFinId = room.cladding || room.exteriorCladding;
+            if (!extFinId && room.walls[it.wall] && WALL_BY_ID[room.walls[it.wall]]?.exterior) {
+              extFinId = room.walls[it.wall];
+            }
+            const extFin = getCladdingMaterial(extFinId);
+            extFinId = extFin.id || extFinId || 'cladding_siding_white';
             const wAssembly = resolveWallAssembly(
               finishId,
               extFinId,
@@ -1565,7 +1625,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       frame();
       framed = true;
     }
+    if (cameraMode === 'walk') {
+      camera.position.y = (getActiveFloorElevation() + walkHeight) * S;
+      updateCameraRotation();
+    }
     updateFocusOverlay(selectedEntity);
+    const notifyScene = callbacks.onSceneUpdate || api?.onSceneUpdate;
+    notifyScene?.();
     render();
   }
 
@@ -2116,11 +2182,24 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const s = wallSeg(room, it.wall);
       const t = it.offset;
       const y = def.shape === 'switch' ? 48 : 16;
+      const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
+      let extFinId = room.cladding || room.exteriorCladding;
+      if (!extFinId && room.walls[it.wall] && WALL_BY_ID[room.walls[it.wall]]?.exterior) {
+        extFinId = room.walls[it.wall];
+      }
+      const extFin = getCladdingMaterial(extFinId);
+      extFinId = extFin.id || extFinId || 'cladding_siding_white';
+      const wAssembly = resolveWallAssembly(
+        finishId,
+        extFinId,
+        room.wallAssemblyOverrides?.[it.wall]
+      );
+      const itemDepthOff = wAssembly.totalThickness / 2 + 0.3;
       const m = wallAlignedBox(room, it.wall, 2.8, 4.5, 0.6, plain('#f5f3ee', 0.5));
       m.position.set(
-        (s.ax + s.dx * t + s.nx * (WT / 2 + 0.3)) * S,
+        (s.ax + s.dx * t + s.nx * itemDepthOff) * S,
         (e + y) * S,
-        (s.ay + s.dy * t + s.ny * (WT / 2 + 0.3)) * S
+        (s.ay + s.dy * t + s.ny * itemDepthOff) * S
       );
       return m;
     }
@@ -2466,32 +2545,63 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return parts.join(' | ');
   }
 
+  function isHudBadgeAttached(badge, parent) {
+    if (!badge || !parent || parent !== cachedHudParent) return false;
+    if (badge.parentElement !== undefined) return badge.parentElement === parent;
+    if (typeof parent.contains === 'function') return parent.contains(badge);
+    if (badge.isConnected === false) return false;
+    return true;
+  }
+
   function updateHudAttribution() {
     if (typeof document === 'undefined') return;
+    const parent = canvas?.parentElement || null;
+    if (!parent) {
+      cachedHudParent = null;
+      hudBadge = null;
+      lastHudAttrText = null;
+      return;
+    }
+
+    if (parent !== cachedHudParent || (hudBadge && !isHudBadgeAttached(hudBadge, parent))) {
+      cachedHudParent = parent;
+      hudBadge = null;
+      lastHudAttrText = null;
+    }
+
     const attrText = get3DAttributionText();
-    let hudBadge = canvas?.parentElement?.querySelector('.scene3d-hud-attribution');
+    if (attrText === lastHudAttrText) return;
+
+    if (!hudBadge && typeof parent.querySelector === 'function') {
+      hudBadge = parent.querySelector('.scene3d-hud-attribution');
+    }
+
     if (attrText) {
-      if (!hudBadge && canvas?.parentElement) {
+      if (!hudBadge && typeof document.createElement === 'function') {
         hudBadge = document.createElement('div');
         hudBadge.className = 'scene3d-hud-attribution';
-        hudBadge.style.cssText =
-          'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
         try {
-          if (getComputedStyle(canvas.parentElement).position === 'static') {
-            canvas.parentElement.style.position = 'relative';
+          if (getComputedStyle(parent).position === 'static') {
+            parent.style.position = 'relative';
           }
         } catch {
           // ignore computed style check error in headless environments
         }
-        canvas.parentElement.appendChild(hudBadge);
+        parent.appendChild(hudBadge);
       }
       if (hudBadge) {
-        hudBadge.style.display = 'block';
+        if (hudBadge.style.display !== 'block') {
+          hudBadge.style.display = 'block';
+        }
         hudBadge.textContent = attrText;
       }
     } else if (hudBadge) {
-      hudBadge.style.display = 'none';
+      if (hudBadge.style.display !== 'none') {
+        hudBadge.style.display = 'none';
+      }
     }
+
+    lastHudAttrText = attrText;
   }
 
   function render() {
@@ -2546,12 +2656,16 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     getCameraMode: () => cameraMode,
     setCameraMode,
     toggleCameraMode,
+    getWalkHeight,
+    setWalkHeight,
     lookWalkBy,
     updateWalkMovement,
     onError: callbacks.onError,
     onEnvChange: callbacks.onEnvChange,
     onHDChange: callbacks.onHDChange,
     onCameraModeChange: callbacks.onCameraModeChange,
+    onWalkHeightChange: callbacks.onWalkHeightChange,
+    onSceneUpdate: callbacks.onSceneUpdate,
     show() {
       active = true;
       resize();
@@ -2628,10 +2742,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const pz = long ? cy : ir.y + 14;
 
       cameraMode = 'walk';
+      walkHeight = DEFAULT_WALK_HEIGHT;
       controls.enabled = false;
       camera.fov = 70;
       camera.updateProjectionMatrix();
-      camera.position.set(px * S, (e + 64) * S, pz * S);
+      camera.position.set(px * S, (e + walkHeight) * S, pz * S);
 
       const targetX = (long ? cx + 40 : cx) * S;
       const targetZ = (long ? cy : cy + 40) * S;
@@ -2642,6 +2757,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       pitch = 0;
       updateCameraRotation();
 
+      const notifyHeight = callbacks.onWalkHeightChange || api?.onWalkHeightChange;
+      notifyHeight?.(walkHeight);
       const notifyMode = callbacks.onCameraModeChange || api?.onCameraModeChange;
       notifyMode?.(cameraMode);
 
@@ -2722,6 +2839,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     destroy() {
       active = false;
       cancelAnimationFrame(raf);
+      cachedHudParent = null;
+      hudBadge = null;
+      lastHudAttrText = null;
       if (typeof unsubscribe === 'function') {
         unsubscribe();
       }

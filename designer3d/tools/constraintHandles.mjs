@@ -1,13 +1,12 @@
 import { validatePlacement } from './collision.mjs';
 import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
+import { formatFractionalInches } from '../../web/js/dimensionFormatter.js';
 
 /**
  * Format length in inches to feet/inches string (e.g. 144 -> 12' 0").
  */
 export function fmtLenInches(inches) {
-  const ft = Math.floor(inches / 12);
-  const inch = Math.round(inches % 12);
-  return `${ft}'${inch ? ` ${inch}"` : ' 0"'}`;
+  return formatFractionalInches(inches, { includeZeroInches: true });
 }
 
 /**
@@ -164,7 +163,7 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
   const isValid = dimValidation.isValid && collisionValid;
   const dimensionText = fmtDimensionText(newW, newH);
 
-  const resolveToken = typeof options.getToken === 'function' ? options.getToken : defaultGetToken;
+  const resolveToken = typeof options?.getToken === 'function' ? options.getToken : defaultGetToken;
   const safeGetToken = (name, fallback) => {
     if (typeof resolveToken === 'function') {
       try {
@@ -178,11 +177,11 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
 
   const color = isValid
     ? safeGetToken('--ktheme-info', '#2a7fff')
-    : safeGetToken('--ktheme-critical', '#f87171');
+    : safeGetToken('--ktheme-critical', '#e84040');
 
   const handleColor = isValid
     ? safeGetToken('--ktheme-on-primary', '#ffffff')
-    : safeGetToken('--ktheme-critical', '#f87171');
+    : safeGetToken('--ktheme-critical', '#e84040');
 
   return {
     rect,
