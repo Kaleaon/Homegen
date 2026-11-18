@@ -1126,7 +1126,40 @@ kbd {
   width: min(640px, 92vw);
 }
 .shortcut-body {
-  padding: 16px;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+#shortcut-search {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: var(--font-size-md);
+  border: 1px solid var(--ktheme-border);
+  border-radius: var(--radius-md);
+  background: var(--ktheme-bg);
+  color: var(--ktheme-text);
+  box-sizing: border-box;
+}
+#shortcut-search:focus {
+  border-color: var(--ktheme-accent);
+}
+#shortcut-search:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+.shortcut-no-results,
+#shortcut-no-results {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--ktheme-text-muted);
+  font-size: 13px;
+}
+.shortcut-grid[hidden],
+.shortcut-group[hidden],
+.shortcut-row[hidden],
+#shortcut-no-results[hidden] {
+  display: none;
 }
 .shortcut-grid {
   display: grid;
