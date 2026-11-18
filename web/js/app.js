@@ -3570,19 +3570,24 @@ function setDoc(next, label) {
   refresh();
 }
 
-function trapFocus(containerEl, returnFocusEl) {
+export function trapFocus(containerEl, returnFocusEl) {
   const focusableSelector =
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-  const focusableElements = Array.from(containerEl.querySelectorAll(focusableSelector));
-  if (!focusableElements.length) return () => {};
+  const getVisibleFocusables = () =>
+    Array.from(containerEl.querySelectorAll(focusableSelector)).filter(
+      (el) =>
+        !el.hidden && !el.disabled && !(typeof el.closest === 'function' && el.closest('[hidden]'))
+    );
 
-  const firstEl = focusableElements[0];
-  const lastEl = focusableElements[focusableElements.length - 1];
+  const initialFocusables = getVisibleFocusables();
+  if (!initialFocusables.length) return () => {};
 
-  firstEl.focus();
+  initialFocusables[0].focus();
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
       if (typeof containerEl.close === 'function') {
         containerEl.close();
       } else {
@@ -3593,19 +3598,27 @@ function trapFocus(containerEl, returnFocusEl) {
           redraw();
         }
       }
-      if (returnFocusEl) returnFocusEl.focus();
+      if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
       return;
     }
 
     if (e.key !== 'Tab') return;
 
+    const focusableElements = getVisibleFocusables();
+    if (!focusableElements.length) return;
+    const firstEl = focusableElements[0];
+    const lastEl = focusableElements[focusableElements.length - 1];
+    const activeEl =
+      (containerEl.ownerDocument && containerEl.ownerDocument.activeElement) ||
+      (typeof document !== 'undefined' ? document.activeElement : null);
+
     if (e.shiftKey) {
-      if (document.activeElement === firstEl) {
+      if (activeEl === firstEl) {
         e.preventDefault();
         lastEl.focus();
       }
     } else {
-      if (document.activeElement === lastEl) {
+      if (activeEl === lastEl) {
         e.preventDefault();
         firstEl.focus();
       }
@@ -3615,7 +3628,7 @@ function trapFocus(containerEl, returnFocusEl) {
   containerEl.addEventListener('keydown', handleKeyDown);
   return () => {
     containerEl.removeEventListener('keydown', handleKeyDown);
-    if (returnFocusEl) returnFocusEl.focus();
+    if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
   };
 }
 
@@ -4124,6 +4137,250 @@ $('#png')?.addEventListener('click', () => {
     a.click();
   });
 });
+export const PLAN_TIER_RANKS = {
+  free: 0,
+  plus: 1,
+  pro: 2,
+};
+
+const EXPORT_UPGRADE_MESSAGES = {
+  pdf: 'Upgrade to Homegen Pro to unlock multi-page scaled Vector PDF sheets, custom branding logos, and approval stamps.',
+  csv: 'Upgrade to Homegen Plus or Pro to unlock full Bill of Materials CSV schedules, finish takeoffs, and room area metrics.',
+  dxf: 'Upgrade to Homegen Pro to unlock layered AutoCAD DXF geometry, SI metric scaling, and multi-story CAD exchange.',
+  export:
+    'Compare Homegen Plus and Pro plans for architectural PDF sheets, BOM schedules, and CAD exports.',
+};
+
+export function getCurrentPlanTier(state = doc) {
+  const fromState = state?.settings?.planTier;
+  if (typeof fromState === 'string' && PLAN_TIER_RANKS[fromState.toLowerCase()] !== undefined) {
+    return fromState.toLowerCase();
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('homegen.planTier');
+      if (stored && PLAN_TIER_RANKS[stored.toLowerCase()] !== undefined) {
+        return stored.toLowerCase();
+      }
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return 'free';
+}
+
+export function initExportModalTierState(modalEl, currentTier = getCurrentPlanTier()) {
+  if (!modalEl) return null;
+  const normalizedTier =
+    typeof currentTier === 'string' && PLAN_TIER_RANKS[currentTier.toLowerCase()] !== undefined
+      ? currentTier.toLowerCase()
+      : 'free';
+  const currentRank = PLAN_TIER_RANKS[normalizedTier];
+
+  if (modalEl.dataset) {
+    modalEl.dataset.activePlanTier = normalizedTier;
+  } else if (typeof modalEl.setAttribute === 'function') {
+    modalEl.setAttribute('data-active-plan-tier', normalizedTier);
+  }
+
+  const badges = Array.from(modalEl.querySelectorAll?.('.plan-tier-badge') || []);
+  for (const badge of badges) {
+    const rawTier =
+      badge.dataset?.tier ||
+      badge.getAttribute?.('data-tier') ||
+      (badge.classList?.contains('plan-tier-pro') ? 'pro' : 'plus');
+    const badgeTier = rawTier === 'pro' ? 'pro' : 'plus';
+    const unlocked = currentRank >= PLAN_TIER_RANKS[badgeTier];
+    const tierLabel = badgeTier === 'pro' ? 'Pro' : 'Plus';
+
+    if (badge.dataset) {
+      badge.dataset.tier = badgeTier;
+      badge.dataset.tierState = unlocked ? 'unlocked' : 'locked';
+    }
+    if (typeof badge.setAttribute === 'function') {
+      badge.setAttribute('data-tier', badgeTier);
+      badge.setAttribute('data-tier-state', unlocked ? 'unlocked' : 'locked');
+      badge.setAttribute(
+        'aria-label',
+        unlocked ? `${tierLabel} plan feature (unlocked)` : `${tierLabel} plan feature`
+      );
+    }
+    badge.classList?.toggle('is-unlocked', unlocked);
+    badge.classList?.toggle('is-locked', !unlocked);
+    badge.hidden = false;
+  }
+
+  const banners = Array.from(modalEl.querySelectorAll?.('.upgrade-trigger-banner') || []);
+  for (const banner of banners) {
+    const reqRaw =
+      banner.dataset?.requiredTier || banner.getAttribute?.('data-required-tier') || 'pro';
+    const requiredTier = PLAN_TIER_RANKS[reqRaw] !== undefined ? reqRaw : 'pro';
+    const isProTier = currentRank >= PLAN_TIER_RANKS.pro;
+    banner.hidden = isProTier;
+
+    if (banner.dataset) {
+      banner.dataset.currentTier = normalizedTier;
+      banner.dataset.requiredTier = requiredTier;
+    } else if (typeof banner.setAttribute === 'function') {
+      banner.setAttribute('data-current-tier', normalizedTier);
+      banner.setAttribute('data-required-tier', requiredTier);
+    }
+
+    const link = banner.querySelector?.('.upgrade-trigger-link');
+    if (link && !isProTier) {
+      const targetTier =
+        currentRank >= PLAN_TIER_RANKS.plus && requiredTier === 'plus' ? 'pro' : requiredTier;
+      const targetLabel = targetTier === 'pro' ? 'Pro' : 'Plus';
+      if (link.dataset) link.dataset.upgradeTier = targetTier;
+      if (typeof link.setAttribute === 'function') {
+        link.setAttribute('data-upgrade-tier', targetTier);
+      }
+      link.textContent = `Upgrade to ${targetLabel}`;
+    }
+  }
+
+  return {
+    activePlanTier: normalizedTier,
+    badgeCount: badges.length,
+    bannerCount: banners.length,
+  };
+}
+
+export function openPlanUpgradePrompt(options = {}) {
+  const {
+    tier = 'pro',
+    exportType = 'export',
+    triggerEl = null,
+    root = typeof document !== 'undefined' ? document : null,
+  } = options;
+
+  const targetTier = tier === 'plus' ? 'plus' : 'pro';
+  const message = EXPORT_UPGRADE_MESSAGES[exportType] || EXPORT_UPGRADE_MESSAGES.export;
+  const upgradeDlg = root?.querySelector?.('#dlg-plan-upgrade') || null;
+
+  if (upgradeDlg) {
+    const contextEl = upgradeDlg.querySelector?.('#upgrade-prompt-context');
+    if (contextEl) contextEl.textContent = message;
+
+    if (upgradeDlg.dataset) {
+      upgradeDlg.dataset.requestedTier = targetTier;
+      upgradeDlg.dataset.exportContext = exportType;
+    }
+    if (typeof upgradeDlg.setAttribute === 'function') {
+      upgradeDlg.setAttribute('data-requested-tier', targetTier);
+      upgradeDlg.setAttribute('data-export-context', exportType);
+    }
+
+    const cards = Array.from(upgradeDlg.querySelectorAll?.('.upgrade-tier-card') || []);
+    for (const card of cards) {
+      const cardTier = card.dataset?.tier || card.getAttribute?.('data-tier');
+      const isHighlighted = cardTier === targetTier;
+      card.classList?.toggle('highlighted', isHighlighted);
+      if (card.dataset) card.dataset.highlighted = isHighlighted ? 'true' : 'false';
+      if (typeof card.setAttribute === 'function') {
+        card.setAttribute('data-highlighted', isHighlighted ? 'true' : 'false');
+      }
+    }
+
+    if (typeof upgradeDlg.showModal === 'function') {
+      try {
+        if (!upgradeDlg.open) upgradeDlg.showModal();
+      } catch {
+        upgradeDlg.setAttribute?.('open', '');
+        upgradeDlg.open = true;
+      }
+    } else {
+      upgradeDlg.setAttribute?.('open', '');
+      upgradeDlg.open = true;
+    }
+    upgradeDlg.hidden = false;
+
+    const cleanup = trapFocus(upgradeDlg, triggerEl);
+    upgradeDlg.addEventListener?.('close', () => cleanup(), { once: true });
+  } else if ($('#toast')) {
+    toast(message);
+  }
+
+  announceToLiveRegion(message);
+  return { tier: targetTier, exportType, message, dialogOpened: Boolean(upgradeDlg) };
+}
+
+export function bindUpgradeTriggerLinks(root = typeof document !== 'undefined' ? document : null) {
+  if (!root || typeof root.querySelectorAll !== 'function') return 0;
+  let boundCount = 0;
+
+  const links = Array.from(root.querySelectorAll('.upgrade-trigger-link'));
+  for (const link of links) {
+    const alreadyBound =
+      link.dataset?.upgradeBound === 'true' || link.getAttribute?.('data-upgrade-bound') === 'true';
+    if (alreadyBound) continue;
+
+    if (link.dataset) link.dataset.upgradeBound = 'true';
+    else link.setAttribute?.('data-upgrade-bound', 'true');
+
+    link.addEventListener('click', (e) => {
+      if (typeof e?.preventDefault === 'function') e.preventDefault();
+      const targetTier =
+        link.dataset?.upgradeTier || link.getAttribute?.('data-upgrade-tier') || 'pro';
+      const exportType =
+        link.dataset?.exportType || link.getAttribute?.('data-export-type') || 'export';
+      openPlanUpgradePrompt({
+        tier: targetTier,
+        exportType,
+        triggerEl: link,
+        root,
+      });
+    });
+    boundCount++;
+  }
+
+  const upgradeDlg = root.querySelector?.('#dlg-plan-upgrade');
+  if (upgradeDlg) {
+    const dlgAlreadyBound =
+      upgradeDlg.dataset?.upgradeControlsBound === 'true' ||
+      upgradeDlg.getAttribute?.('data-upgrade-controls-bound') === 'true';
+    if (!dlgAlreadyBound) {
+      if (upgradeDlg.dataset) upgradeDlg.dataset.upgradeControlsBound = 'true';
+      else upgradeDlg.setAttribute?.('data-upgrade-controls-bound', 'true');
+
+      const closeUpgradeModal = () => {
+        if (typeof upgradeDlg.close === 'function') {
+          upgradeDlg.close();
+        } else {
+          upgradeDlg.removeAttribute?.('open');
+          upgradeDlg.open = false;
+          upgradeDlg.hidden = true;
+        }
+      };
+
+      upgradeDlg
+        .querySelector?.('#btn-upgrade-close')
+        ?.addEventListener('click', closeUpgradeModal);
+
+      const tierButtons = Array.from(upgradeDlg.querySelectorAll?.('[data-select-tier]') || []);
+      for (const btn of tierButtons) {
+        btn.addEventListener('click', () => {
+          const selected =
+            btn.dataset?.selectTier || btn.getAttribute?.('data-select-tier') || 'pro';
+          const label = selected === 'plus' ? 'Plus' : 'Pro';
+          closeUpgradeModal();
+          if ($('#toast')) {
+            toast(
+              `Homegen ${label} upgrade selected. Visit billing settings to activate ${label}.`
+            );
+          }
+        });
+      }
+    }
+  }
+
+  return boundCount;
+}
+
+if (typeof document !== 'undefined') {
+  bindUpgradeTriggerLinks(document);
+}
+
 $('#export-pdf')?.addEventListener('click', (e) => {
   if (!doc.rooms || doc.rooms.length === 0) {
     toast('Cannot export PDF: add at least one room first.', true);
@@ -4160,6 +4417,8 @@ $('#export-pdf')?.addEventListener('click', (e) => {
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
   const dlg = $('#pdf-export');
   if (dlg) {
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4236,6 +4495,8 @@ $('#export-csv')?.addEventListener('click', (e) => {
   const returnFocusEl = e.currentTarget || document.activeElement;
   const dlg = $('#csv-export');
   if (dlg) {
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4300,6 +4561,8 @@ $('#export-dxf')?.addEventListener('click', (e) => {
         }
       }
     }
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4542,7 +4805,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-export const SAMPLE_MUNICIPAL_GIS = {
+const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -4583,7 +4846,7 @@ export const SAMPLE_MUNICIPAL_GIS = {
   ],
 };
 
-export function loadGISSubsystem(geojson, options = {}) {
+function loadGISSubsystem(geojson, options = {}) {
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.importGeoJSON(geojson, {
     targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
@@ -4597,7 +4860,7 @@ export function loadGISSubsystem(geojson, options = {}) {
   return doc.site;
 }
 
-export function setGISSegmentSetback(segmentId, setbackDistance) {
+function setGISSegmentSetback(segmentId, setbackDistance) {
   if (!doc.site) return null;
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
@@ -4608,7 +4871,7 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-export function openGISDialog() {
+function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisMapSelect = $('#gis-map-preset');
@@ -4618,14 +4881,14 @@ export function openGISDialog() {
   else dlg.setAttribute('open', '');
 }
 
-export function closeGISDialog() {
+function closeGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
 }
 
-export function renderGISSegments() {
+function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
   if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
@@ -5959,6 +6222,11 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     SAMPLE_MUNICIPAL_GIS,
+    PLAN_TIER_RANKS,
+    getCurrentPlanTier,
+    initExportModalTierState,
+    openPlanUpgradePrompt,
+    bindUpgradeTriggerLinks,
     getOpeningUnitMode,
     setOpeningUnitMode,
     commitOpeningOffsetInput,

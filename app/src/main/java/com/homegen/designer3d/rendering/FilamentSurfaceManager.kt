@@ -14,8 +14,6 @@ import com.google.android.filament.Viewport
 import com.google.android.filament.android.DisplayHelper
 import com.google.android.filament.android.UiHelper
 import com.homegen.designer3d.SceneController
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Encapsulates the Filament engine lifecycle: init, frame loop, destroy.
@@ -102,9 +100,7 @@ class FilamentSurfaceManager(context: Context) {
                     .format(Texture.InternalFormat.R32F)
                     .build(engine)
 
-                val buf = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
-                buf.asFloatBuffer().put(data)
-                buf.rewind()
+                val buf = BufferUtils.toFloatBuffer(data)
 
                 val pixelBuffer = Texture.PixelBufferDescriptor(
                     buf,
