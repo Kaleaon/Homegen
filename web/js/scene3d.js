@@ -18,7 +18,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -742,7 +741,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
     const extrudeSettings = { depth: height, bevelEnabled: false };
     const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geom.rotateX(Math.PI / 2);
+    geom.rotateX(-Math.PI / 2);
     const visMat = Array.isArray(material)
       ? material[0]
       : material.vis || material.base || material;
