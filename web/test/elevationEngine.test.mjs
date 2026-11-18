@@ -4,13 +4,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   ElevationGrid,
-  parseGoogleElevationJson,
-  parseImageHeightmap,
-  parseGeoTIFFWithFallback,
   parseElevationRaster,
   computeMarchingSquares,
   computeContoursAsync,
-  serializeElevationGrid,
   deserializeElevationGrid,
   sanitizeSlopePercent,
   sanitizeSlopeDirection,
@@ -37,7 +33,7 @@ test('ElevationGrid initializes with default values and performs bilinear height
   assert.equal(grid.getElevationAt(0.5, 0.5), 15);
 });
 
-test('parseGoogleElevationJson converts Google Elevation API responses into ElevationGrid', () => {
+test('parseElevationRaster converts Google Elevation API responses into ElevationGrid', async () => {
   const sampleJson = {
     status: 'OK',
     results: [
@@ -48,7 +44,7 @@ test('parseGoogleElevationJson converts Google Elevation API responses into Elev
     ],
   };
 
-  const grid = parseGoogleElevationJson(JSON.stringify(sampleJson));
+  const grid = await parseElevationRaster(JSON.stringify(sampleJson));
 
   assert.equal(grid.width, 2);
   assert.equal(grid.height, 2);
@@ -64,8 +60,8 @@ test('parseGoogleElevationJson converts Google Elevation API responses into Elev
   });
 });
 
-test('parseGoogleElevationJson supports longitude/latitude and x/y sample coordinates, identical points, missing locations, and options.bounds overrides', async () => {
-  const altKeysGrid = parseGoogleElevationJson({
+test('parseElevationRaster supports longitude/latitude and x/y sample coordinates, identical points, missing locations, and options.bounds overrides', async () => {
+  const altKeysGrid = await parseElevationRaster({
     status: 'OK',
     results: [
       { elevation: 5, location: { latitude: 0, longitude: 0 } },
@@ -81,19 +77,19 @@ test('parseGoogleElevationJson supports longitude/latitude and x/y sample coordi
     maxY: 10.5,
   });
 
-  const noCoordsGrid = parseGoogleElevationJson({
+  const noCoordsGrid = await parseElevationRaster({
     status: 'OK',
     results: [{ elevation: 10 }, { elevation: 20 }, { elevation: 30 }, { elevation: 40 }],
   });
   assert.deepEqual(noCoordsGrid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
 
-  const numericResultsGrid = parseGoogleElevationJson({
+  const numericResultsGrid = await parseElevationRaster({
     status: 'OK',
     results: [10, 20, 30, 40],
   });
   assert.deepEqual(numericResultsGrid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
 
-  const identicalCoordsGrid = parseGoogleElevationJson({
+  const identicalCoordsGrid = await parseElevationRaster({
     status: 'OK',
     results: [
       { elevation: 10, location: { lat: 37.75, lng: -122.45 } },
@@ -124,19 +120,19 @@ test('parseGoogleElevationJson supports longitude/latitude and x/y sample coordi
   assert.deepEqual(overriddenGrid.bounds, overrideBounds);
 });
 
-test('parseGoogleElevationJson throws descriptive error on bad status or empty results', () => {
-  assert.throws(
-    () => parseGoogleElevationJson({ status: 'INVALID_REQUEST', results: [] }),
+test('parseElevationRaster throws descriptive error on bad status or empty results', async () => {
+  await assert.rejects(
+    () => parseElevationRaster({ status: 'INVALID_REQUEST', results: [] }),
     /Google Maps Elevation API error status: INVALID_REQUEST/
   );
 
-  assert.throws(
-    () => parseGoogleElevationJson({ status: 'OK', results: [] }),
+  await assert.rejects(
+    () => parseElevationRaster({ status: 'OK', results: [] }),
     /No elevation results found in payload/
   );
 });
 
-test('parseImageHeightmap extracts height values from ImageData', () => {
+test('parseElevationRaster extracts height values from ImageData', async () => {
   // 2x2 pixels RGBA buffer
   // Black (0), Mid Gray (128), Full White (255), Full White (255)
   const pixels = new Uint8ClampedArray([
@@ -144,7 +140,7 @@ test('parseImageHeightmap extracts height values from ImageData', () => {
   ]);
   const imageData = { width: 2, height: 2, data: pixels };
 
-  const grid = parseImageHeightmap(imageData, { minElevation: 0, maxElevation: 100 });
+  const grid = await parseElevationRaster(imageData, { minElevation: 0, maxElevation: 100 });
 
   assert.equal(grid.width, 2);
   assert.equal(grid.height, 2);
@@ -267,7 +263,7 @@ test('drawContours renders isolines and altitude labels to 2D canvas context', (
   assert.ok(calls.some((c) => c.startsWith('fillText')));
 });
 
-test('serializeElevationGrid and deserializeElevationGrid roundtrip Grid instances', () => {
+test('ElevationGrid.toJSON and deserializeElevationGrid roundtrip Grid instances', () => {
   const grid = new ElevationGrid({
     width: 2,
     height: 2,
@@ -276,7 +272,7 @@ test('serializeElevationGrid and deserializeElevationGrid roundtrip Grid instanc
     maxElevation: 20,
   });
 
-  const serialized = serializeElevationGrid(grid);
+  const serialized = grid.toJSON();
   assert.equal(serialized.width, 2);
   assert.deepEqual(serialized.data, [5, 10, 15, 20]);
 
@@ -286,10 +282,10 @@ test('serializeElevationGrid and deserializeElevationGrid roundtrip Grid instanc
   assert.equal(deserialized.getElevationAt(1, 1), 20);
 });
 
-test('parseGeoTIFFWithFallback handles corrupt buffer by falling back or throwing descriptive error', async () => {
+test('parseElevationRaster handles corrupt GeoTIFF buffer by falling back or throwing descriptive error', async () => {
   const dummyBuffer = new Uint8Array([0x49, 0x49, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00]).buffer;
   await assert.rejects(
-    () => parseGeoTIFFWithFallback(dummyBuffer),
+    () => parseElevationRaster(dummyBuffer),
     /Failed to decode GeoTIFF binary data or fallback image heightmap/
   );
 });
@@ -393,7 +389,7 @@ function createSyntheticGeoTIFF({
   return buffer;
 }
 
-test('parseGeoTIFFWithFallback extracts ModelPixelScaleTag and ModelTiepointTag to compute bounds', async () => {
+test('parseElevationRaster extracts ModelPixelScaleTag and ModelTiepointTag to compute bounds', async () => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 4,
@@ -405,7 +401,7 @@ test('parseGeoTIFFWithFallback extracts ModelPixelScaleTag and ModelTiepointTag 
     ]),
   });
 
-  const grid = await parseGeoTIFFWithFallback(buffer, { minElevation: 0, maxElevation: 100 });
+  const grid = await parseElevationRaster(buffer, { minElevation: 0, maxElevation: 100 });
   assert.ok(grid instanceof ElevationGrid);
   assert.equal(grid.width, 4);
   assert.equal(grid.height, 4);
@@ -417,7 +413,7 @@ test('parseGeoTIFFWithFallback extracts ModelPixelScaleTag and ModelTiepointTag 
   });
 });
 
-test('parseGeoTIFFWithFallback calculates bounds correctly with non-zero tiepoint indices and Big-Endian encoding', async () => {
+test('parseElevationRaster calculates GeoTIFF bounds correctly with non-zero tiepoint indices and Big-Endian encoding', async () => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: false, // "MM"
     width: 10,
@@ -426,7 +422,7 @@ test('parseGeoTIFFWithFallback calculates bounds correctly with non-zero tiepoin
     tiepoint: [2.0, 1.0, 0.0, 520.0, 1080.0, 0.0],
   });
 
-  const grid = await parseGeoTIFFWithFallback(buffer);
+  const grid = await parseElevationRaster(buffer);
   // xOrigin = 520 - 2 * 10 = 500
   // yOrigin = 1080 + 1 * 20 = 1100
   // minX = 500, maxX = 500 + 10 * 10 = 600
@@ -439,7 +435,7 @@ test('parseGeoTIFFWithFallback calculates bounds correctly with non-zero tiepoin
   });
 });
 
-test('parseGeoTIFFWithFallback extracts ModelTransformationTag matrix when tiepoints are absent', async () => {
+test('parseElevationRaster extracts ModelTransformationTag matrix when tiepoints are absent', async () => {
   const transformation = [
     2.0, 0.0, 0.0, 500.0, 0.0, -3.0, 0.0, 1500.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
   ];
@@ -451,7 +447,7 @@ test('parseGeoTIFFWithFallback extracts ModelTransformationTag matrix when tiepo
     transformation,
   });
 
-  const grid = await parseGeoTIFFWithFallback(buffer);
+  const grid = await parseElevationRaster(buffer);
   assert.deepEqual(grid.bounds, {
     minX: 500.0,
     maxX: 520.0,
@@ -470,22 +466,22 @@ test('options.bounds takes precedence over parsed GeoTIFF metadata when explicit
   });
 
   const customBounds = { minX: -100, maxX: 100, minY: -100, maxY: 100 };
-  const grid = await parseGeoTIFFWithFallback(buffer, { bounds: customBounds });
+  const grid = await parseElevationRaster(buffer, { bounds: customBounds });
   assert.deepEqual(grid.bounds, customBounds);
 });
 
-test('parseGeoTIFFWithFallback falls back to default bounds when georeferencing tags are absent', async () => {
+test('parseElevationRaster falls back to default bounds when GeoTIFF georeferencing tags are absent', async () => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 2,
     height: 2,
   });
 
-  const grid = await parseGeoTIFFWithFallback(buffer);
+  const grid = await parseElevationRaster(buffer);
   assert.deepEqual(grid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
 });
 
-test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', async () => {
+test('parseElevationRaster performs GeoTIFF IFD parsing in under 5 milliseconds', async () => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 100,
@@ -495,7 +491,7 @@ test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', as
   });
 
   const start = performance.now();
-  await parseGeoTIFFWithFallback(buffer);
+  await parseElevationRaster(buffer);
   const duration = performance.now() - start;
 
   assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
@@ -519,7 +515,7 @@ test('ElevationGrid stores targetSlopePercent and slopeDirectionDeg properties a
   assert.equal(json.targetSlopePercent, 5);
   assert.equal(json.slopeDirectionDeg, 270);
 
-  const restored = deserializeElevationGrid(serializeElevationGrid(gradedGrid));
+  const restored = deserializeElevationGrid(gradedGrid.toJSON());
   assert.equal(restored.targetSlopePercent, 5);
   assert.equal(restored.slopeDirectionDeg, 270);
 });

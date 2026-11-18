@@ -12,6 +12,7 @@ import {
   getRoomPoints,
   reproject,
 } from './geometry.js';
+import { isRegisteredEPSG, normalizeCode } from './epsgRegistry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
 // import { openingInfo } from './codes.js';
@@ -308,6 +309,18 @@ export function draw(ctx, state, view, opts = {}) {
   else if (opts.snappingBridge?.getActiveSnap())
     drawSnapGuides(ctx, opts.snappingBridge.getActiveSnap(), view);
   if (opts.overlay) opts.overlay(ctx, view);
+  if (
+    opts.showSpatialOverlay !== false &&
+    (opts.showSpatialOverlay ||
+      opts.activeCRS ||
+      opts.crs ||
+      state?.crs ||
+      state?.site?.crs ||
+      state?.background?.isGeospatial ||
+      state?.background?.worldfileCRS)
+  ) {
+    drawSpatialReferenceOverlay(ctx, state, view, opts);
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (opts.showRulers !== false) {
     drawRulers(ctx, view, w / dpr, h / dpr, opts);
@@ -726,6 +739,293 @@ export function drawRulers(ctx, view, cw, ch, opts = {}) {
   ctx.globalAlpha = 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.restore();
+}
+
+const DEFAULT_PLAN_ORIGIN = [-122.4194, 37.7749];
+const INCH_TO_METER = 0.0254;
+
+function niceTickStep(rawStep) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 120;
+  const exp = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const frac = rawStep / exp;
+  if (frac <= 1.5) return exp;
+  if (frac <= 3.5) return 2.5 * exp;
+  if (frac <= 7.5) return 5 * exp;
+  return 10 * exp;
+}
+
+function resolveSpatialReference(state, opts = {}) {
+  const rawCRS =
+    opts.activeCRS ??
+    opts.crs ??
+    state?.crs ??
+    state?.site?.crs ??
+    state?.background?.worldfileCRS ??
+    null;
+
+  let isLocalPlan = false;
+  let epsg = 'EPSG:4326';
+
+  if (typeof rawCRS === 'string') {
+    const upper = rawCRS.trim().toUpperCase();
+    if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') {
+      isLocalPlan = true;
+      epsg = 'PLAN';
+    } else {
+      const normalized = normalizeCode(rawCRS);
+      epsg = normalized && isRegisteredEPSG(normalized) ? normalized : 'EPSG:4326';
+    }
+  } else if (typeof rawCRS === 'number') {
+    const normalized = `EPSG:${rawCRS}`;
+    epsg = isRegisteredEPSG(normalized) ? normalized : 'EPSG:4326';
+  } else if (rawCRS && typeof rawCRS === 'object') {
+    const rawCode = rawCRS.epsg ?? rawCRS.code ?? rawCRS.crs ?? '';
+    const upper = String(rawCode).trim().toUpperCase();
+    if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') {
+      isLocalPlan = true;
+      epsg = 'PLAN';
+    } else {
+      const normalized =
+        typeof rawCode === 'number' ? `EPSG:${rawCode}` : normalizeCode(String(rawCode));
+      epsg = normalized && isRegisteredEPSG(normalized) ? normalized : 'EPSG:4326';
+    }
+  }
+
+  let origin = DEFAULT_PLAN_ORIGIN;
+  const crsObj =
+    (opts.crs && typeof opts.crs === 'object' ? opts.crs : null) ||
+    (state?.crs && typeof state.crs === 'object' ? state.crs : null);
+  const rawOrigin = opts.origin ?? crsObj?.origin;
+  if (Array.isArray(rawOrigin) && rawOrigin.length >= 2) {
+    const lon = Number(rawOrigin[0]);
+    const lat = Number(rawOrigin[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      origin = [lon, lat];
+    }
+  } else if (rawOrigin && typeof rawOrigin === 'object') {
+    const lon = Number(
+      rawOrigin.longitude ?? rawOrigin.lon ?? rawOrigin.x ?? DEFAULT_PLAN_ORIGIN[0]
+    );
+    const lat = Number(
+      rawOrigin.latitude ?? rawOrigin.lat ?? rawOrigin.y ?? DEFAULT_PLAN_ORIGIN[1]
+    );
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      origin = [lon, lat];
+    }
+  }
+
+  return { isLocalPlan, epsg, origin };
+}
+
+function projectPlanCoord(planPt, originLonLat, epsg) {
+  try {
+    const isDefaultOrigin =
+      Math.abs(originLonLat[0] - DEFAULT_PLAN_ORIGIN[0]) < 1e-9 &&
+      Math.abs(originLonLat[1] - DEFAULT_PLAN_ORIGIN[1]) < 1e-9;
+    if (isDefaultOrigin) {
+      const res = reproject(planPt, 'PLAN', epsg);
+      if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+        return res;
+      }
+    } else {
+      const originMerc = reproject(originLonLat, 'EPSG:4326', 'EPSG:3857');
+      if (
+        Array.isArray(originMerc) &&
+        Number.isFinite(originMerc[0]) &&
+        Number.isFinite(originMerc[1])
+      ) {
+        const mercPt = [
+          originMerc[0] + planPt[0] * INCH_TO_METER,
+          originMerc[1] - planPt[1] * INCH_TO_METER,
+        ];
+        const res = epsg === 'EPSG:3857' ? mercPt : reproject(mercPt, 'EPSG:3857', epsg);
+        if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+          return res;
+        }
+      }
+    }
+  } catch {
+    // Fall back safely on reprojection failure
+  }
+  return originLonLat;
+}
+
+function formatProjectedTick(val, epsg) {
+  if (!Number.isFinite(val)) return '';
+  if (epsg === 'EPSG:4326') {
+    return `${val.toFixed(5)}°`;
+  }
+  return `${val.toFixed(1)}`;
+}
+
+export function drawSpatialReferenceOverlay(ctx, state, view, opts = {}) {
+  if (!ctx) return;
+  const canvasW = ctx.canvas?.width || 800;
+  const canvasH = ctx.canvas?.height || 600;
+  const dpr = opts.dpr || 1;
+  const scale = Number.isFinite(view?.scale) && view.scale > 0 ? view.scale : 1;
+  const ox = Number.isFinite(view?.ox) ? view.ox : 0;
+  const oy = Number.isFinite(view?.oy) ? view.oy : 0;
+
+  const { isLocalPlan, epsg, origin } = resolveSpatialReference(state, opts);
+
+  if (typeof ctx.save === 'function') ctx.save();
+  if (typeof ctx.setTransform === 'function') ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1.0;
+  if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+
+  // 1. Planar origin (0, 0) crosshairs in screen space
+  const originScreenX = ox * dpr;
+  const originScreenY = oy * dpr;
+  const crosshairArm = 10 * dpr;
+  const crosshairColor = getToken('--ktheme-info', '#2a7fff');
+
+  ctx.strokeStyle = crosshairColor;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.moveTo(originScreenX - crosshairArm, originScreenY);
+  ctx.lineTo(originScreenX + crosshairArm, originScreenY);
+  ctx.moveTo(originScreenX, originScreenY - crosshairArm);
+  ctx.lineTo(originScreenX, originScreenY + crosshairArm);
+  ctx.stroke();
+
+  if (typeof ctx.arc === 'function') {
+    ctx.beginPath();
+    ctx.arc(originScreenX, originScreenY, 4 * dpr, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Compute active CRS badge layout so left-margin tick labels never overlap it
+  let badgeText;
+  if (isLocalPlan) {
+    badgeText = 'CRS: PLAN (Local) · Origin (0, 0)';
+  } else {
+    const projOrigin = projectPlanCoord([0, 0], origin, epsg);
+    const originText =
+      epsg === 'EPSG:4326'
+        ? `${projOrigin[1].toFixed(4)}°, ${projOrigin[0].toFixed(4)}°`
+        : `${projOrigin[0].toFixed(1)}, ${projOrigin[1].toFixed(1)}`;
+    badgeText = `CRS: ${epsg} · Origin (${originText})`;
+  }
+
+  const badgeFontSize = 11 * dpr;
+  ctx.font = `${badgeFontSize}px sans-serif`;
+  const paddingX = 8 * dpr;
+  const paddingY = 5 * dpr;
+  const margin = 10 * dpr;
+  const badgeTextWidth =
+    typeof ctx.measureText === 'function'
+      ? ctx.measureText(badgeText).width
+      : badgeText.length * 6.5 * dpr;
+  const badgeWidth = badgeTextWidth + paddingX * 2;
+  const badgeHeight = badgeFontSize + paddingY * 2;
+  const badgeX = margin;
+  const badgeY = Math.max(margin, canvasH - margin - badgeHeight);
+
+  // 2. Projected coordinate tick marks along top and left viewport margins
+  if (!isLocalPlan) {
+    const viewW = canvasW / dpr;
+    const viewH = canvasH / dpr;
+    const x0 = -ox / scale;
+    const y0 = -oy / scale;
+    const x1 = x0 + viewW / scale;
+    const y1 = y0 + viewH / scale;
+
+    const minDim = Math.min(viewW, viewH);
+    const targetPx = opts.tickSpacing ?? Math.min(120, Math.max(36, minDim / 3));
+    const planStep = niceTickStep(targetPx / scale);
+    const tickLen = 6 * dpr;
+    const tickStrokeColor = getToken('--ktheme-text-muted', '#5f5950');
+    const tickLabelColor = getToken('--ktheme-text', '#2b2824');
+    const tickFontSize = 9.5 * dpr;
+
+    ctx.strokeStyle = tickStrokeColor;
+    ctx.lineWidth = 1 * dpr;
+    ctx.font = `${tickFontSize}px ${getToken('--font-family-mono', 'monospace')}`;
+    ctx.fillStyle = tickLabelColor;
+
+    const startXIdx = Math.ceil(x0 / planStep);
+    const endXIdx = Math.floor(x1 / planStep);
+    const startYIdx = Math.ceil(y0 / planStep);
+    const endYIdx = Math.floor(y1 / planStep);
+
+    ctx.beginPath();
+    for (let i = startXIdx; i <= endXIdx; i++) {
+      const planX = i * planStep;
+      const sx = (planX * scale + ox) * dpr;
+      if (sx < 0 || sx > canvasW) continue;
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, tickLen);
+    }
+    for (let j = startYIdx; j <= endYIdx; j++) {
+      const planY = j * planStep;
+      const sy = (planY * scale + oy) * dpr;
+      if (sy < 0 || sy > canvasH) continue;
+      ctx.moveTo(0, sy);
+      ctx.lineTo(tickLen, sy);
+    }
+    ctx.stroke();
+
+    if (typeof ctx.fillText === 'function') {
+      const minXPad = Math.min(18 * dpr, canvasW * 0.15);
+      const maxXPad = canvasW - Math.min(52 * dpr, canvasW * 0.35);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      for (let i = startXIdx; i <= endXIdx; i++) {
+        const planX = i * planStep;
+        const sx = (planX * scale + ox) * dpr;
+        if (sx < minXPad || sx > maxXPad) continue;
+        const proj = projectPlanCoord([planX, 0], origin, epsg);
+        const label = formatProjectedTick(proj[0], epsg);
+        if (label) {
+          ctx.fillText(label, sx + 3 * dpr, tickLen + 2 * dpr);
+        }
+      }
+
+      const minYPad = Math.min(22 * dpr, canvasH * 0.18);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      for (let j = startYIdx; j <= endYIdx; j++) {
+        const planY = j * planStep;
+        const sy = (planY * scale + oy) * dpr;
+        if (sy < minYPad || sy > badgeY - 8 * dpr) continue;
+        const proj = projectPlanCoord([0, planY], origin, epsg);
+        const label = formatProjectedTick(proj[1], epsg);
+        if (label) {
+          ctx.fillText(label, tickLen + 3 * dpr, sy);
+        }
+      }
+    }
+  }
+
+  // 3. Active CRS overlay badge in screen space (bottom-left)
+  ctx.font = `${badgeFontSize}px sans-serif`;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1 * dpr;
+
+  if (typeof ctx.roundRect === 'function' && typeof ctx.fill === 'function') {
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4 * dpr);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    if (typeof ctx.fillRect === 'function') {
+      ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    }
+    if (typeof ctx.strokeRect === 'function') {
+      ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    }
+  }
+
+  if (typeof ctx.fillText === 'function') {
+    ctx.fillStyle = '#f8fafc';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, badgeX + paddingX, badgeY + badgeHeight / 2);
+  }
+
+  if (typeof ctx.restore === 'function') ctx.restore();
 }
 
 function drawComplianceScene(ctx, complianceScene, view) {
@@ -1854,7 +2154,7 @@ function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   }
 }
 
-function drawSnapGuides(ctx, snapResult, view) {
+export function drawSnapGuides(ctx, snapResult, view) {
   if (!snapResult) return;
   if (
     !snapResult.snap &&

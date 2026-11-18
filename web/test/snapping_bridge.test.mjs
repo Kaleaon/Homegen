@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InteractionLayer, SNAP_MODES } from '../../designer3d/tools/index.mjs';
 import { SnappingBridge } from '../js/snapping-bridge.js';
-import { draw } from '../js/render.js';
+import { draw, drawSnapGuides } from '../js/render.js';
 import { getToken } from '../js/kthemeTokens.js';
 
 test('SnappingBridge computes snap points and guide lines during pointer move', () => {

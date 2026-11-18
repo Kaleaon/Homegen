@@ -375,7 +375,7 @@ function toFiniteCoord(val) {
  * Parses Google Maps Elevation API JSON responses.
  * Accepts string or object matching Google Maps Elevation API JSON response format.
  */
-export function parseGoogleElevationJson(input, options = {}) {
+function parseGoogleElevationJson(input, options = {}) {
   const json = typeof input === 'string' ? JSON.parse(input) : input;
   if (!json) {
     throw new Error('Invalid JSON payload');
@@ -456,7 +456,7 @@ export function parseGoogleElevationJson(input, options = {}) {
 /**
  * Parses image heightmap (grayscale/RGB) from ImageData or HTMLImageElement/Canvas.
  */
-export function parseImageHeightmap(imageInput, options = {}) {
+function parseImageHeightmap(imageInput, options = {}) {
   let width;
   let height;
   let pixels;
@@ -529,7 +529,7 @@ function readDoubleArray(view, offset, count, littleEndian) {
 /**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
-export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
+async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
   try {
     const view = new DataView(arrayBuffer);
     if (arrayBuffer.byteLength >= 4) {
@@ -924,34 +924,6 @@ export async function computeContoursAsync(grid, intervalOverride = null) {
   }
 
   return computeMarchingSquares(grid, intervalOverride);
-}
-
-/**
- * Serializes ElevationGrid instance to plain object for plan JSON state.
- */
-export function serializeElevationGrid(grid) {
-  if (!grid) return null;
-  if (typeof grid.toJSON === 'function') {
-    return grid.toJSON();
-  }
-  return {
-    width: grid.width,
-    height: grid.height,
-    data: Array.from(grid.data),
-    minElevation: grid.minElevation,
-    maxElevation: grid.maxElevation,
-    bounds: grid.bounds,
-    contourInterval: grid.contourInterval,
-    verticalScale: grid.verticalScale,
-    targetSlopePercent: sanitizeSlopePercent(grid.targetSlopePercent),
-    slopeDirectionDeg: sanitizeSlopeDirection(grid.slopeDirectionDeg),
-    visible: grid.visible !== false,
-    _slopeApplied: Boolean(grid._slopeApplied),
-    _appliedUnitScale:
-      Number.isFinite(grid._appliedUnitScale) && grid._appliedUnitScale > 0
-        ? grid._appliedUnitScale
-        : 1,
-  };
 }
 
 /**
