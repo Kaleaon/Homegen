@@ -21,7 +21,7 @@ import { patternFor } from './patterns.js';
 // import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
-import { computeMarchingSquares } from './elevationEngine.js';
+import { computeMarchingSquares, normalizeElevationUnit } from './elevationEngine.js';
 import { formatFractionalInches } from './dimensionFormatter.js';
 
 export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
@@ -2376,7 +2376,8 @@ export function drawContours(ctx, state, view, opts = {}) {
         const mx = (seg.x1 + seg.x2) / 2;
         const my = (seg.y1 + seg.y2) / 2;
 
-        const text = `${elev.toFixed(1)}m`;
+        const unitSuffix = normalizeElevationUnit(grid.elevationUnit);
+        const text = `${elev.toFixed(1)}${unitSuffix}`;
         ctx.font = `${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
