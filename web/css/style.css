@@ -1351,3 +1351,32 @@ k-button.on .snap-badge {
   font-weight: 600;
   margin-left: 8px;
 }
+
+.snap-increment-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snap-increment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.snap-increment-label {
+  font-size: var(--font-size-sm);
+  color: var(--ktheme-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.snap-increment-input {
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.snap-increment-input[aria-invalid='true'] {
+  --ktheme-border: var(--ktheme-critical);
+}
