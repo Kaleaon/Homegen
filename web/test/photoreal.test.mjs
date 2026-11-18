@@ -486,6 +486,7 @@ test('hordeRender derives request dimensions from selected tier width when depth
 });
 
 test('hordeRender executes initial check immediately without sleeping pollIntervalMs', async () => {
+  defaultRateLimiter.clear();
   const events = [];
   const origSetTimeout = globalThis.setTimeout;
   const scheduledPollDelays = [];
@@ -538,6 +539,7 @@ test('hordeRender executes initial check immediately without sleeping pollInterv
 });
 
 test('hordeRender sleeps pollIntervalMs only before subsequent polling iterations', async () => {
+  defaultRateLimiter.clear();
   const timeline = [];
   const origSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (fn, ms, ...args) => {

@@ -4,6 +4,11 @@ import {
   getArcParameters,
   pointOnArc,
   tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
 } from '../math2d.mjs';
 
 describe('math2d arc geometry functions', () => {
@@ -93,5 +98,54 @@ describe('math2d arc geometry functions', () => {
     expect(pts[2].x).toBeCloseTo(5);
     expect(pts[2].y).toBeCloseTo(5);
     expect(pts[4].x).toBeCloseTo(10);
+  });
+
+  test('sagittaFromBulge, bulgeFromSagitta, radiusFromBulge, and bulgeFromRadius convert bidirectionally', () => {
+    const chord = 120;
+    const b = 0.5;
+    const s = sagittaFromBulge(chord, b);
+    const r = radiusFromBulge(chord, b);
+
+    expect(s).toBeCloseTo(30);
+    expect(r).toBeCloseTo(75);
+    expect(bulgeFromSagitta(chord, s)).toBeCloseTo(b);
+
+    const fromR = bulgeFromRadius(chord, r);
+    expect(fromR.ok).toBe(true);
+    expect(fromR.bulge).toBeCloseTo(b);
+    expect(fromR.sagitta).toBeCloseTo(s);
+  });
+
+  test('bulgeFromRadius and parseCurveHudInput handle infinite radius, negative concavity, and L > 2R errors', () => {
+    const chord = 100;
+
+    // Infinite radius -> zero bulge linear wall fallback
+    expect(bulgeFromRadius(chord, Infinity)).toEqual({
+      ok: true,
+      isValid: true,
+      bulge: 0,
+      radius: Infinity,
+      sagitta: 0,
+      isLinear: true,
+      error: null,
+    });
+    expect(parseCurveHudInput('radius', '∞', chord, 0.5).bulge).toBe(0);
+    expect(parseCurveHudInput('radius', '', chord, 0.5).bulge).toBe(0);
+
+    // Negative bulge concavity inversion
+    const negRes = bulgeFromRadius(chord, -62.5);
+    expect(negRes.ok).toBe(true);
+    expect(negRes.bulge).toBeCloseTo(-0.5);
+    expect(negRes.sagitta).toBeCloseTo(-25);
+
+    const preservedNeg = parseCurveHudInput('radius', '62.5', chord, -0.2);
+    expect(preservedNeg.ok).toBe(true);
+    expect(preservedNeg.bulge).toBeCloseTo(-0.5);
+
+    // Chord length exceeds twice entered radius -> error feedback
+    const invalidRes = bulgeFromRadius(chord, 45);
+    expect(invalidRes.ok).toBe(false);
+    expect(invalidRes.isValid).toBe(false);
+    expect(invalidRes.error).toMatch(/exceeds twice/i);
   });
 });
