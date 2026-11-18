@@ -172,6 +172,8 @@ let calibPoints = [];
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
+let distSpacingInput = '';
+let distSpacingType = 'center';
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -1504,9 +1506,22 @@ function renderInspector() {
       </div>
       <div class="align-section" style="margin-top:10px">
         <div class="align-label">Distribute</div>
-        <div class="align-grid">
-          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 ? 'disabled' : ''}>Horizontal</button>
-          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 ? 'disabled' : ''}>Vertical</button>
+        ${formRow(
+          'dist-spacing-input',
+          'Spacing',
+          `<input id="dist-spacing-input" type="text" placeholder="Auto (e.g. 16&quot;, 2' 6&quot;)" value="${esc(distSpacingInput)}">`
+        )}
+        ${formRow(
+          'dist-spacing-type',
+          'Mode',
+          `<select id="dist-spacing-type">
+            <option value="center" ${distSpacingType === 'center' ? 'selected' : ''}>Center-to-Center</option>
+            <option value="gap" ${distSpacingType === 'gap' ? 'selected' : ''}>Edge-to-Edge Gap</option>
+          </select>`
+        )}
+        <div class="align-grid" style="margin-top:6px">
+          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Horizontal</button>
+          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Vertical</button>
         </div>
       </div>
       <div class="btns" style="margin-top:14px">
@@ -1532,12 +1547,44 @@ function renderInspector() {
       apply((n) => M.alignItems(n, selectedList, 'bottom'), 'Align Bottom')
     );
 
-    $('#dist-h')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'horizontal'), 'Distribute Horizontally')
-    );
-    $('#dist-v')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'vertical'), 'Distribute Vertically')
-    );
+    const syncDistControls = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const hasExplicit = typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0;
+      const canDistribute = selectedList.length >= 3 || (selectedList.length >= 2 && hasExplicit);
+      const btnH = $('#dist-h');
+      const btnV = $('#dist-v');
+      if (btnH) btnH.disabled = !canDistribute;
+      if (btnV) btnV.disabled = !canDistribute;
+    };
+
+    const readDistOptions = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const spacing =
+        typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      return { spacing, spacingType: distSpacingType };
+    };
+
+    $('#dist-spacing-input')?.addEventListener('input', syncDistControls);
+    $('#dist-spacing-type')?.addEventListener('change', syncDistControls);
+
+    $('#dist-h')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'horizontal', spacing, spacingType),
+        'Distribute Horizontally'
+      );
+    });
+    $('#dist-v')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'vertical', spacing, spacingType),
+        'Distribute Vertically'
+      );
+    });
 
     $('#i-del-all')?.addEventListener('click', () => {
       apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
@@ -6722,3 +6769,5 @@ if (typeof window !== 'undefined')
     setCatalogFilters,
     resetCatalogFilters,
   };
+
+export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };

@@ -2154,7 +2154,7 @@ function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   }
 }
 
-function drawSnapGuides(ctx, snapResult, view) {
+export function drawSnapGuides(ctx, snapResult, view) {
   if (!snapResult) return;
   if (
     !snapResult.snap &&
