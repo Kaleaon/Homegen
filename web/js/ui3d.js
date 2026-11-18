@@ -169,10 +169,29 @@ export function initView3D({
     if (hud) hud.hidden = next !== '3d' || api?.getCameraMode() !== 'walk';
     if (next === '3d') syncWalkthroughHUD();
 
+    const is3d = next === '3d';
     document.querySelectorAll('#toolbar [data-tool]').forEach((b) => {
-      b.disabled = next === '3d';
+      b.disabled = is3d;
     });
-    if (next === '3d') api.show();
+    const snapPopover = $('#snap-popover');
+    if (snapPopover && is3d) {
+      snapPopover.open = false;
+      if (typeof snapPopover.removeAttribute === 'function') {
+        snapPopover.removeAttribute('open');
+      }
+    }
+    const setControlDisabled = (el) => {
+      if (!el) return;
+      el.disabled = is3d;
+      if (is3d) {
+        if (typeof el.setAttribute === 'function') el.setAttribute('disabled', '');
+      } else if (typeof el.removeAttribute === 'function') {
+        el.removeAttribute('disabled');
+      }
+    };
+    setControlDisabled($('#snap-trigger'));
+    document.querySelectorAll('.snap-toggle-btn').forEach(setControlDisabled);
+    if (is3d) api.show();
     else api?.hide();
   }
   document
