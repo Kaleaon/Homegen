@@ -1196,9 +1196,9 @@ function renderInspector() {
           )
           .join('')}</select>`
       )}
-      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
-      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
-      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="text" value="${esc(fmtLen(room.w))}">`)}
+      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="text" value="${esc(fmtLen(room.h))}">`)}
+      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="text" value="${esc(fmtLen(room.ceiling))}">`)}
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
@@ -1345,27 +1345,40 @@ function renderInspector() {
         M.resizeRoom(r, r.x, r.y, clamped.w, clamped.h);
       }, 'Change Room Type')
     );
-    $('#i-w').addEventListener('change', (e) =>
+    $('#i-w').addEventListener('change', (e) => {
+      const targetW = M.parseDistanceInInches(e.target.value, { defaultUnit: 'ft' });
+      if (targetW === null || targetW <= 0) {
+        renderInspector();
+        return;
+      }
       apply((n) => {
         const r = roomOf(n, room.id);
-        const targetW = snap(e.target.value * 12);
         const clampedW = clampRoomWidth(r, targetW, r.h);
         M.resizeRoom(r, r.x, r.y, clampedW, r.h);
-      }, 'Resize Room Width')
-    );
-    $('#i-h').addEventListener('change', (e) =>
+      }, 'Resize Room Width');
+    });
+    $('#i-h').addEventListener('change', (e) => {
+      const targetH = M.parseDistanceInInches(e.target.value, { defaultUnit: 'ft' });
+      if (targetH === null || targetH <= 0) {
+        renderInspector();
+        return;
+      }
       apply((n) => {
         const r = roomOf(n, room.id);
-        const targetH = snap(e.target.value * 12);
         const clampedH = clampRoomDepth(r, targetH, r.w);
         M.resizeRoom(r, r.x, r.y, r.w, clampedH);
-      }, 'Resize Room Depth')
-    );
-    $('#i-ceil').addEventListener('change', (e) =>
+      }, 'Resize Room Depth');
+    });
+    $('#i-ceil').addEventListener('change', (e) => {
+      const targetCeil = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      if (targetCeil === null || targetCeil <= 0) {
+        renderInspector();
+        return;
+      }
       apply((n) => {
-        roomOf(n, room.id).ceiling = Number(e.target.value);
-      }, 'Change Ceiling Height')
-    );
+        roomOf(n, room.id).ceiling = targetCeil;
+      }, 'Change Ceiling Height');
+    });
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, room.id), 'Delete Room');
       select(null);
@@ -1730,8 +1743,16 @@ function renderInspector() {
       $('#i-win-mull-rows')?.addEventListener('change', updateMullions);
 
       const updateCasing = () => {
-        const width = parseFloat($('#i-win-casing-w')?.value || 2.0);
-        const depth = parseFloat($('#i-win-casing-d')?.value || 0.75);
+        const parsedW = M.parseDistanceInInches($('#i-win-casing-w')?.value ?? '2.0', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const parsedD = M.parseDistanceInInches($('#i-win-casing-d')?.value ?? '0.75', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const width = parsedW ?? 2.0;
+        const depth = parsedD ?? 0.75;
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.casing = { ...(target.casing || {}), width, depth };
@@ -1778,8 +1799,16 @@ function renderInspector() {
         }, 'Update Door Style')
       );
       const updateDoorCasing = () => {
-        const width = parseFloat($('#i-door-casing-w')?.value || 2.0);
-        const depth = parseFloat($('#i-door-casing-d')?.value || 0.75);
+        const parsedW = M.parseDistanceInInches($('#i-door-casing-w')?.value ?? '2.0', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const parsedD = M.parseDistanceInInches($('#i-door-casing-d')?.value ?? '0.75', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const width = parsedW ?? 2.0;
+        const depth = parsedD ?? 0.75;
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.casing = { ...(target.casing || {}), width, depth };
@@ -2072,20 +2101,24 @@ function renderLevelManagerRows() {
       lvl.name = e.target.value;
     });
     tr.querySelector('.lvl-elevation').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.elevation = isNaN(v) ? 0 : v;
+      const v = M.parseDistanceInInches(e.target.value, {
+        defaultUnit: 'in',
+        allowZero: true,
+        allowNegative: true,
+      });
+      lvl.elevation = v === null ? 0 : v;
     });
     tr.querySelector('.lvl-story').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.storyHeight = isNaN(v) ? M.DEFAULT_STORY_HEIGHT : v;
+      const v = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      lvl.storyHeight = v === null ? M.DEFAULT_STORY_HEIGHT : v;
     });
     tr.querySelector('.lvl-ceiling').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.ceilingHeight = isNaN(v) ? M.DEFAULT_CEILING_HEIGHT : v;
+      const v = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      lvl.ceilingHeight = v === null ? M.DEFAULT_CEILING_HEIGHT : v;
     });
     tr.querySelector('.lvl-slab').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.slabThickness = isNaN(v) ? M.DEFAULT_SLAB_THICKNESS : v;
+      const v = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      lvl.slabThickness = v === null ? M.DEFAULT_SLAB_THICKNESS : v;
     });
     tr.querySelector('.lvl-sub').addEventListener('change', (e) => {
       lvl.subterranean = e.target.checked;
@@ -3059,12 +3092,29 @@ function setupAddRoomDimsModal() {
 
   btnSubmit?.addEventListener('click', () => {
     const type = $('#room-dims-type')?.value || 'living';
-    const w = parseFloat($('#room-dims-width')?.value || '144');
-    const h = parseFloat($('#room-dims-depth')?.value || '144');
-    const x = parseFloat($('#room-dims-x')?.value || '0');
-    const y = parseFloat($('#room-dims-y')?.value || '0');
+    const rawW = $('#room-dims-width')?.value;
+    const rawH = $('#room-dims-depth')?.value;
+    const rawX = $('#room-dims-x')?.value;
+    const rawY = $('#room-dims-y')?.value;
 
-    if (isNaN(w) || w <= 0 || isNaN(h) || h <= 0) {
+    const w = M.parseDistanceInInches(rawW !== undefined && rawW !== '' ? rawW : '144', {
+      defaultUnit: 'in',
+    });
+    const h = M.parseDistanceInInches(rawH !== undefined && rawH !== '' ? rawH : '144', {
+      defaultUnit: 'in',
+    });
+    const x = M.parseDistanceInInches(rawX !== undefined && rawX !== '' ? rawX : '0', {
+      defaultUnit: 'in',
+      allowZero: true,
+      allowNegative: true,
+    });
+    const y = M.parseDistanceInInches(rawY !== undefined && rawY !== '' ? rawY : '0', {
+      defaultUnit: 'in',
+      allowZero: true,
+      allowNegative: true,
+    });
+
+    if (w === null || w <= 0 || h === null || h <= 0 || x === null || y === null) {
       toast('Please enter valid room dimensions (width and depth > 0).', true);
       return;
     }
@@ -3073,7 +3123,7 @@ function setupAddRoomDimsModal() {
     if (r.ok) {
       const typeName = ROOM_TYPES[type]?.name || type;
       announceToLiveRegion(
-        `${typeName} room added at (${x}", ${y}") with dimensions ${w}" × ${h}".`
+        `${typeName} room added at (${fmtLen(x)}, ${fmtLen(y)}) with dimensions ${fmtLen(w)} × ${fmtLen(h)}.`
       );
       closeAddRoomDimsModal();
     }

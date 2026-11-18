@@ -316,12 +316,22 @@ export function setLevelMetadata(state, metadataArray) {
 
 export function formatElevationBadge(inches) {
   if (typeof inches !== 'number' || isNaN(inches)) return '+0\' 0"';
-  const sign = inches >= 0 ? '+' : '-';
-  const abs = Math.abs(inches);
-  const ft = Math.floor(abs / 12);
-  const rem = abs % 12;
-  const remStr = rem.toFixed(rem % 1 === 0 ? 0 : 1);
-  return `${sign}${ft}' ${remStr}"`;
+  const roundedSixteenths = Math.round(Math.abs(inches) * 16);
+  const sign = inches < 0 && roundedSixteenths > 0 ? '-' : '+';
+  const ft = Math.floor(roundedSixteenths / 192);
+  const remSixteenths = roundedSixteenths % 192;
+  const wholeInches = Math.floor(remSixteenths / 16);
+  let num = remSixteenths % 16;
+  let den = 16;
+  while (num > 0 && num % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+  if (num === 0) {
+    return `${sign}${ft}' ${wholeInches}"`;
+  }
+  const inchPart = wholeInches > 0 ? `${wholeInches} ${num}/${den}` : `${num}/${den}`;
+  return `${sign}${ft}' ${inchPart}"`;
 }
 
 export function newState() {
@@ -947,44 +957,153 @@ export function deserialize(text) {
   return s;
 }
 
-export function parseDistanceInInches(str) {
-  if (!str) return null;
-  str = String(str).trim().toLowerCase();
-  if (!str) return null;
-  if (str.includes('m') && !str.includes('ft')) {
-    if (str.includes('cm')) return parseFloat(str) * 0.393701;
-    return parseFloat(str) * 39.3701;
+function parseMixedFractionToken(token) {
+  if (token == null) return null;
+  const s = String(token).trim();
+  if (!s) return null;
+  const mixedMatch = s.match(/^(\d+)(?:\s+|\s*-\s*)(\d+)\s*\/\s*(\d+)$/);
+  if (mixedMatch) {
+    const den = parseInt(mixedMatch[3], 10);
+    if (den === 0) return null;
+    return parseInt(mixedMatch[1], 10) + parseInt(mixedMatch[2], 10) / den;
   }
-  const hasFt = /'|ft|feet/.test(str);
-  const hasIn = /"|in|inches/.test(str);
-  if (hasFt) {
-    const ftMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:'|ft|feet)/);
-    const inMatch =
-      str.match(/(\d+(?:\.\d+)?)\s*(?:"|in|inches)/) ||
-      str.match(/(?:'|ft|feet)\s*(\d+(?:\.\d+)?)/);
-    const feet = ftMatch ? parseFloat(ftMatch[1]) : 0;
-    const inches = inMatch ? parseFloat(inMatch[1]) : 0;
-    return feet * 12 + inches;
+  const fracMatch = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fracMatch) {
+    const den = parseInt(fracMatch[2], 10);
+    if (den === 0) return null;
+    return parseInt(fracMatch[1], 10) / den;
   }
-  if (hasIn) {
-    const inMatch = str.match(/(\d+(?:\.\d+)?)/);
-    return inMatch ? parseFloat(inMatch[1]) : null;
+  const decMatch = s.match(/^(\d+(?:\.\d+)?|\.\d+)$/);
+  if (decMatch) {
+    return parseFloat(decMatch[1]);
   }
-  const num = parseFloat(str);
-  if (isNaN(num) || num <= 0) return null;
-  return num <= 50 ? num * 12 : num;
+  return null;
 }
 
-export function formatDistanceInInches(inches) {
-  if (typeof inches !== 'number' || isNaN(inches)) return '0"';
+export function parseDistanceInInches(str, options = {}) {
+  const { defaultUnit = 'auto', allowZero = false, allowNegative = false } = options;
+  if (str === null || str === undefined) return null;
+  if (typeof str === 'number') {
+    if (!Number.isFinite(str)) return null;
+    if (str < 0 && !allowNegative) return null;
+    if (str === 0 && !allowZero) return null;
+    const absNum = Math.abs(str);
+    const sign = str < 0 ? -1 : 1;
+    if (absNum === 0) return 0;
+    if (defaultUnit === 'in') return sign * absNum;
+    if (defaultUnit === 'ft') return sign * absNum * 12;
+    return sign * (absNum <= 50 ? absNum * 12 : absNum);
+  }
+  let s = String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u2032]/g, "'")
+    .replace(/[\u201c\u201d\u2033]/g, '"');
+  if (!s) return null;
+
+  let isNegative = false;
+  if (s.startsWith('-')) {
+    if (!allowNegative) return null;
+    isNegative = true;
+    s = s.slice(1).trim();
+  } else if (s.startsWith('+')) {
+    s = s.slice(1).trim();
+  }
+  if (!s) return null;
+
+  const applySign = (val) => {
+    if (val === null || !Number.isFinite(val)) return null;
+    if (val === 0) return 0;
+    return isNegative ? -val : val;
+  };
+
+  const metricMatch = s.match(/^(\d+(?:\.\d+)?|\.\d+)\s*(mm|cm|m)$/);
+  if (metricMatch) {
+    const val = parseFloat(metricMatch[1]);
+    if (val === 0) return allowZero ? 0 : null;
+    const unit = metricMatch[2];
+    if (unit === 'mm') return applySign(val * 0.0393701);
+    if (unit === 'cm') return applySign(val * 0.393701);
+    return applySign(val * 39.3701);
+  }
+
+  const hasFt = /'|feet|\bft\b|\d\s*ft/.test(s);
+  const hasIn = /"|inches|inch|\bin\b|\d\s*in/.test(s);
+
+  if (hasFt) {
+    const ftFullMatch = s.match(
+      /^(.+?)\s*(?:'|feet|ft)(?:(?:\s*-\s*|\s*)(.*?)\s*(?:"|inches|inch|in)?)?$/
+    );
+    if (!ftFullMatch) return null;
+    const feet = parseMixedFractionToken(ftFullMatch[1]);
+    if (feet === null) return null;
+    const rawIn = (ftFullMatch[2] || '').trim();
+    let inches = 0;
+    if (rawIn) {
+      const parsedIn = parseMixedFractionToken(rawIn);
+      if (parsedIn === null) return null;
+      inches = parsedIn;
+    }
+    return applySign(feet * 12 + inches);
+  }
+
+  if (hasIn) {
+    const inFullMatch = s.match(/^(.+?)\s*(?:"|inches|inch|in)$/);
+    if (!inFullMatch) return null;
+    const inches = parseMixedFractionToken(inFullMatch[1]);
+    if (inches === null) return null;
+    return applySign(inches);
+  }
+
+  if (s.includes('/')) {
+    const fracInches = parseMixedFractionToken(s);
+    if (fracInches === null) return null;
+    if (fracInches === 0 && !allowZero) return null;
+    return applySign(fracInches);
+  }
+
+  const num = parseMixedFractionToken(s);
+  if (num === null) return null;
+  if (num === 0) return allowZero ? 0 : null;
+  if (defaultUnit === 'in') return applySign(num);
+  if (defaultUnit === 'ft') return applySign(num * 12);
+  return applySign(num <= 50 ? num * 12 : num);
+}
+
+export function formatDistanceInInches(inches, options = {}) {
+  const { zeroInchesSuffix = false, emptyOnInvalid = false } = options;
+  if (inches === null || inches === undefined || typeof inches !== 'number' || isNaN(inches)) {
+    return emptyOnInvalid ? '' : zeroInchesSuffix ? '0\' 0"' : '0"';
+  }
+  const roundedSixteenths = Math.round(Math.abs(inches) * 16);
+  if (roundedSixteenths === 0) {
+    return zeroInchesSuffix ? '0\' 0"' : '0"';
+  }
   const sign = inches < 0 ? '-' : '';
-  const abs = Math.abs(inches);
-  const ft = Math.floor(abs / 12);
-  const rem = abs % 12;
-  const remStr = rem.toFixed(rem % 1 === 0 ? 0 : 1);
-  if (ft === 0) return `${sign}${remStr}"`;
-  if (rem === 0) return `${sign}${ft}'`;
-  return `${sign}${ft}' ${remStr}"`;
+  const ft = Math.floor(roundedSixteenths / 192);
+  const remSixteenths = roundedSixteenths % 192;
+  const wholeInches = Math.floor(remSixteenths / 16);
+  let num = remSixteenths % 16;
+  let den = 16;
+  while (num > 0 && num % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+
+  let inchStr = '';
+  if (remSixteenths > 0) {
+    if (num === 0) {
+      inchStr = `${wholeInches}"`;
+    } else if (wholeInches === 0) {
+      inchStr = `${num}/${den}"`;
+    } else {
+      inchStr = `${wholeInches} ${num}/${den}"`;
+    }
+  }
+
+  if (ft === 0) return `${sign}${inchStr}`;
+  if (remSixteenths === 0) return zeroInchesSuffix ? `${sign}${ft}' 0"` : `${sign}${ft}'`;
+  return `${sign}${ft}' ${inchStr}`;
 }
 
 export function parseElevationInInches(str) {

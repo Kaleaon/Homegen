@@ -36,6 +36,10 @@ test('fmtLen converts inches to feet and inches format', () => {
   assert.equal(fmtLen(6), '6"');
   assert.equal(fmtLen(0), '0"');
   assert.equal(fmtLen(null), '');
+  assert.equal(fmtLen(126.5), '10\' 6 1/2"');
+  assert.equal(fmtLen(6.125), '6 1/8"');
+  assert.equal(fmtLen(0.0625), '1/16"');
+  assert.equal(fmtLen(143.99), "12'");
 });
 
 test('generateBOMCSV generates complete RFC 4180 CSV for multi-room home', () => {

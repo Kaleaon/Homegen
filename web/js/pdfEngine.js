@@ -12,6 +12,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
+import { formatDistanceInInches } from './model.js';
 
 /**
  * Draws a closed vector polygon path from array of PDF points [{x, y}, ...].
@@ -68,11 +69,7 @@ export const SCALE_OPTIONS = {
   fit: { label: 'Fit to Page', fit: true, ratioStr: 'Fit to Page' },
 };
 
-const fmtLen = (inches) => {
-  const ft = Math.floor(inches / 12);
-  const inch = Math.round(inches % 12);
-  return `${ft}'${inch ? ` ${inch}"` : ''}`;
-};
+export const fmtLen = (inches) => formatDistanceInInches(inches);
 
 export function resolvePDFAttributionAndLicensing(docState, options = {}) {
   const attributions = [];

@@ -19,8 +19,9 @@ import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
 
-const fmt = (inches) =>
-  `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
+import { formatDistanceInInches } from './model.js';
+
+const fmt = (inches) => formatDistanceInInches(inches);
 export const fmtLen = fmt;
 
 let bgCache = { dataUrl: null, img: null };

@@ -2,12 +2,38 @@ import { validatePlacement } from './collision.mjs';
 import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
 
 /**
- * Format length in inches to feet/inches string (e.g. 144 -> 12' 0").
+ * Format length in inches to architectural feet/inches string with 1/16" precision
+ * (e.g. 144 -> 12' 0", 126.5 -> 10' 6 1/2", 6.125 -> 6 1/8").
  */
 export function fmtLenInches(inches) {
-  const ft = Math.floor(inches / 12);
-  const inch = Math.round(inches % 12);
-  return `${ft}'${inch ? ` ${inch}"` : ' 0"'}`;
+  if (inches == null || typeof inches !== 'number' || isNaN(inches)) return '0\' 0"';
+  const roundedSixteenths = Math.round(Math.abs(inches) * 16);
+  if (roundedSixteenths === 0) return '0\' 0"';
+  const sign = inches < 0 ? '-' : '';
+  const ft = Math.floor(roundedSixteenths / 192);
+  const remSixteenths = roundedSixteenths % 192;
+  const wholeInches = Math.floor(remSixteenths / 16);
+  let num = remSixteenths % 16;
+  let den = 16;
+  while (num > 0 && num % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+
+  let inchStr = '';
+  if (remSixteenths > 0) {
+    if (num === 0) {
+      inchStr = `${wholeInches}"`;
+    } else if (wholeInches === 0) {
+      inchStr = `${num}/${den}"`;
+    } else {
+      inchStr = `${wholeInches} ${num}/${den}"`;
+    }
+  }
+
+  if (ft === 0) return `${sign}${inchStr}`;
+  if (remSixteenths === 0) return `${sign}${ft}' 0"`;
+  return `${sign}${ft}' ${inchStr}`;
 }
 
 /**

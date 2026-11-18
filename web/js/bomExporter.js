@@ -8,6 +8,7 @@ import {
   openingMetrics,
 } from './catalog.js';
 import { interior, interiorPolygon, polygonPerimeter, floorAreaSqFt } from './geometry.js';
+import { formatDistanceInInches } from './model.js';
 
 /**
  * Escapes a single CSV field value per RFC 4180 standards.
@@ -37,18 +38,14 @@ export function formatCSVRow(fields) {
 }
 
 /**
- * Formats dimension in inches to feet-and-inches string (e.g. 144 -> 12', 150 -> 12' 6").
+ * Formats dimension in inches to feet-and-inches string with 1/16" precision
+ * (e.g. 144 -> 12', 150 -> 12' 6", 126.5 -> 10' 6 1/2", 6.125 -> 6 1/8").
  *
  * @param {number} inches Dimension in inches.
  * @returns {string} Formatted feet-and-inches string.
  */
 export function fmtLen(inches) {
-  if (inches == null || isNaN(inches)) return '';
-  const ft = Math.floor(inches / 12);
-  const inch = Math.round(inches % 12);
-  if (ft === 0) return `${inch}"`;
-  if (inch === 0) return `${ft}'`;
-  return `${ft}' ${inch}"`;
+  return formatDistanceInInches(inches, { emptyOnInvalid: true });
 }
 
 /**

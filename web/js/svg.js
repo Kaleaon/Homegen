@@ -5,9 +5,9 @@ import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geomet
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { getPalette } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
+import { formatDistanceInInches } from './model.js';
 
-const fmt = (inches) =>
-  `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
+const fmt = (inches) => formatDistanceInInches(inches);
 const escXml = (s) =>
   String(s ?? '')
     .replace(/&/g, '&amp;')
