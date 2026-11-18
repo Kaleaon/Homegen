@@ -327,3 +327,75 @@
   min-height: 24px;
   min-width: 24px;
 }
+
+/* 10. Empty-State Blueprint Canvas Dropzone Overlay */
+.blueprint-dropzone {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  pointer-events: none;
+  max-width: calc(100% - var(--space-8));
+}
+
+.blueprint-dropzone[hidden] {
+  display: none !important;
+}
+
+.blueprint-dropzone__card {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--overlay-bg);
+  border: 1.5px dashed var(--overlay-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--overlay-shadow);
+  color: var(--overlay-color);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  opacity: 0.92;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.blueprint-dropzone.drag-over .blueprint-dropzone__card {
+  border-color: var(--ktheme-accent);
+  background: var(--ktheme-accent-muted);
+  transform: scale(1.02);
+  opacity: 1;
+}
+
+.blueprint-dropzone__icon {
+  font-size: var(--font-size-lg);
+  line-height: 1;
+}
+
+.blueprint-dropzone__text {
+  font-size: var(--font-size-sm);
+  color: var(--ktheme-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blueprint-dropzone.drag-over .blueprint-dropzone__text {
+  color: var(--overlay-color);
+  font-weight: var(--font-weight-medium);
+}
+
+#blueprint-dropzone-btn {
+  pointer-events: auto;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-3);
+}
+
+.blueprint-dropzone.drag-over #blueprint-dropzone-btn {
+  pointer-events: none;
+}
