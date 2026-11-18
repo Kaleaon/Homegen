@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ElevationGrid,
   parseElevationRaster,
+  parseGeoTIFFWithFallback,
   computeMarchingSquares,
   computeContoursAsync,
   deserializeElevationGrid,
@@ -562,7 +563,7 @@ test('parseElevationRaster performs GeoTIFF IFD parsing in under 5 milliseconds'
   assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
 });
 
-test('parseElevationRaster parses GDAL_NODATA tag 42113 for uint16 65535 sentinels and prevents runaway isoline loops', async () => {
+test('parseGeoTIFFWithFallback parses GDAL_NODATA tag 42113 for uint16 65535 sentinels and prevents runaway isoline loops', async () => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 3,
@@ -572,7 +573,7 @@ test('parseElevationRaster parses GDAL_NODATA tag 42113 for uint16 65535 sentine
     pixelData: new Uint16Array([100, 105, 110, 102, 65535, 108, 65535, 106, 112]),
   });
 
-  const grid = await parseElevationRaster(buffer, {
+  const grid = await parseGeoTIFFWithFallback(buffer, {
     minElevation: 0,
     maxElevation: 65535,
     contourInterval: 2.0,
@@ -589,7 +590,7 @@ test('parseElevationRaster parses GDAL_NODATA tag 42113 for uint16 65535 sentine
   assert.ok(contours.every((c) => c.elevation >= 100 && c.elevation <= 112));
 });
 
-test('parseElevationRaster filters -9999 GDAL_NODATA sentinels in signed Int16 and Float32 rasters', async () => {
+test('parseGeoTIFFWithFallback filters -9999 GDAL_NODATA sentinels in signed Int16 and Float32 rasters', async () => {
   const int16Buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 3,
@@ -600,7 +601,7 @@ test('parseElevationRaster filters -9999 GDAL_NODATA sentinels in signed Int16 a
     pixelData: new Int16Array([240, 245, -9999, 242, 250, -9999]),
   });
 
-  const int16Grid = await parseElevationRaster(int16Buffer, { contourInterval: 2.0 });
+  const int16Grid = await parseGeoTIFFWithFallback(int16Buffer, { contourInterval: 2.0 });
   assert.equal(int16Grid.minElevation, 240);
   assert.equal(int16Grid.maxElevation, 250);
   assert.equal(int16Grid.data[2], 240);
@@ -620,7 +621,7 @@ test('parseElevationRaster filters -9999 GDAL_NODATA sentinels in signed Int16 a
     pixelData: new Float32Array([15.5, -9999.0, 18.5, 21.5]),
   });
 
-  const float32Grid = await parseElevationRaster(float32Buffer, { contourInterval: 1.0 });
+  const float32Grid = await parseGeoTIFFWithFallback(float32Buffer, { contourInterval: 1.0 });
   assert.equal(float32Grid.minElevation, 15.5);
   assert.equal(float32Grid.maxElevation, 21.5);
   assert.equal(float32Grid.data[1], 15.5);
@@ -629,7 +630,7 @@ test('parseElevationRaster filters -9999 GDAL_NODATA sentinels in signed Int16 a
   assert.ok(floatContours.length <= 6);
 });
 
-test('parseElevationRaster decodes inline (<= 4 byte) ASCII tag 42113 entries', async () => {
+test('parseGeoTIFFWithFallback decodes inline (<= 4 byte) ASCII tag 42113 entries', async () => {
   // 4-byte inline ASCII ("255\0", count = 4)
   const inline4Buffer = createSyntheticGeoTIFF({
     littleEndian: true,
@@ -641,7 +642,7 @@ test('parseElevationRaster decodes inline (<= 4 byte) ASCII tag 42113 entries', 
     pixelData: new Uint8Array([51, 102, 153, 255]),
   });
 
-  const grid4 = await parseElevationRaster(inline4Buffer, {
+  const grid4 = await parseGeoTIFFWithFallback(inline4Buffer, {
     minElevation: 0,
     maxElevation: 100,
   });
@@ -661,13 +662,13 @@ test('parseElevationRaster decodes inline (<= 4 byte) ASCII tag 42113 entries', 
     pixelData: new Int16Array([-9, 12, 16, 20]),
   });
 
-  const grid3 = await parseElevationRaster(inline3Buffer);
+  const grid3 = await parseGeoTIFFWithFallback(inline3Buffer);
   assert.equal(grid3.minElevation, 12);
   assert.equal(grid3.maxElevation, 20);
   assert.equal(grid3.data[0], 12);
 });
 
-test('parseElevationRaster supports options.noDataValue, options.noDataReplacement, and options.filterStandardSentinels', async () => {
+test('parseGeoTIFFWithFallback supports options.noDataValue, options.noDataReplacement, and options.filterStandardSentinels', async () => {
   const buffer = createSyntheticGeoTIFF({
     littleEndian: true,
     width: 2,
@@ -678,7 +679,7 @@ test('parseElevationRaster supports options.noDataValue, options.noDataReplaceme
   });
 
   // Override tag 42113 via options.noDataValue and customize replacement via options.noDataReplacement
-  const overriddenGrid = await parseElevationRaster(buffer, {
+  const overriddenGrid = await parseGeoTIFFWithFallback(buffer, {
     minElevation: 0,
     maxElevation: 65535,
     noDataValue: 9999,
@@ -696,7 +697,7 @@ test('parseElevationRaster supports options.noDataValue, options.noDataReplaceme
     bitsPerSample: 16,
     pixelData: new Uint16Array([500, 1000, 1500, 65535]),
   });
-  const sentinelGrid = await parseElevationRaster(untaggedBuffer, {
+  const sentinelGrid = await parseGeoTIFFWithFallback(untaggedBuffer, {
     minElevation: 0,
     maxElevation: 65535,
     filterStandardSentinels: true,
@@ -706,7 +707,7 @@ test('parseElevationRaster supports options.noDataValue, options.noDataReplaceme
   assert.equal(sentinelGrid.data[3], 500);
 });
 
-test('parseElevationRaster handles all-NoData rasters and corrupt tag 42113 strings gracefully', async () => {
+test('parseGeoTIFFWithFallback handles all-NoData rasters and corrupt tag 42113 strings gracefully', async () => {
   // All pixels match GDAL_NODATA -> falls back to default elevation range [0, 10]
   const allVoidBuffer = createSyntheticGeoTIFF({
     littleEndian: true,
@@ -718,7 +719,7 @@ test('parseElevationRaster handles all-NoData rasters and corrupt tag 42113 stri
     pixelData: new Int16Array([-9999, -9999, -9999, -9999]),
   });
 
-  const allVoidGrid = await parseElevationRaster(allVoidBuffer);
+  const allVoidGrid = await parseGeoTIFFWithFallback(allVoidBuffer);
   assert.equal(allVoidGrid.minElevation, 0);
   assert.equal(allVoidGrid.maxElevation, 10);
   assert.deepEqual(Array.from(allVoidGrid.data), [0, 0, 0, 0]);
@@ -734,7 +735,7 @@ test('parseElevationRaster handles all-NoData rasters and corrupt tag 42113 stri
     pixelData: new Uint8Array([0, 51, 102, 255]),
   });
 
-  const corruptTagGrid = await parseElevationRaster(corruptTagBuffer, {
+  const corruptTagGrid = await parseGeoTIFFWithFallback(corruptTagBuffer, {
     minElevation: 0,
     maxElevation: 100,
   });
@@ -751,7 +752,7 @@ test('parseElevationRaster handles all-NoData rasters and corrupt tag 42113 stri
     noDataOffsetOverride: 999999,
     pixelData: new Uint8Array([0, 128, 255, 255]),
   });
-  const badOffsetGrid = await parseElevationRaster(badOffsetBuffer, {
+  const badOffsetGrid = await parseGeoTIFFWithFallback(badOffsetBuffer, {
     minElevation: 0,
     maxElevation: 100,
   });
