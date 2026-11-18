@@ -588,6 +588,12 @@ export function renderBgToolbar(bg = doc.background) {
 function renderHistoryTimeline() {
   const listEl = $('#history-list');
   if (!listEl) return;
+  const focusedIndex =
+    typeof document !== 'undefined' &&
+    document.activeElement?.classList?.contains?.('history-item') &&
+    (typeof listEl.contains !== 'function' || listEl.contains(document.activeElement))
+      ? document.activeElement.dataset?.index
+      : null;
   const timeline = hist.getTimeline();
   listEl.innerHTML = timeline
     .map((item) => {
@@ -630,6 +636,14 @@ function renderHistoryTimeline() {
       }
     });
   });
+
+  if (focusedIndex !== null && focusedIndex !== undefined) {
+    const popover = $('#history-popover');
+    if (popover && !popover.hidden) {
+      const nextFocusEl = listEl.querySelector(`.history-item[data-index="${focusedIndex}"]`);
+      nextFocusEl?.focus();
+    }
+  }
 }
 
 function refresh() {
@@ -3551,32 +3565,50 @@ function setDoc(next, label) {
   refresh();
 }
 
+let activeDiffDrawerCleanup = null;
+let activeHistoryPopoverCleanup = null;
+
 export function trapFocus(containerEl, returnFocusEl) {
+  if (!containerEl) return () => {};
   const focusableSelector =
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   const getVisibleFocusables = () =>
-    Array.from(containerEl.querySelectorAll(focusableSelector)).filter(
-      (el) =>
-        !el.hidden && !el.disabled && !(typeof el.closest === 'function' && el.closest('[hidden]'))
-    );
+    Array.from(containerEl.querySelectorAll(focusableSelector)).filter((el) => {
+      if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
+      if (typeof el.closest === 'function') {
+        const hiddenAncestor = el.closest('[hidden]');
+        if (hiddenAncestor && hiddenAncestor !== containerEl) return false;
+      }
+      let cur = el.parentElement;
+      while (cur && cur !== containerEl) {
+        if (cur.hidden || cur.hasAttribute?.('hidden')) return false;
+        cur = cur.parentElement;
+      }
+      return true;
+    });
 
   const initialFocusables = getVisibleFocusables();
-  if (!initialFocusables.length) return () => {};
-
-  initialFocusables[0].focus();
+  if (initialFocusables.length) {
+    initialFocusables[0].focus();
+  }
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
       if (typeof e.preventDefault === 'function') e.preventDefault();
       if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      containerEl.removeEventListener('keydown', handleKeyDown);
       if (typeof containerEl.close === 'function') {
         containerEl.close();
       } else {
         containerEl.hidden = true;
         if (containerEl.id === 'diff-drawer') {
+          activeDiffDrawerCleanup = null;
           autoFixDiffs = [];
           hoveredDiffIndex = null;
           redraw();
+        } else if (containerEl.id === 'history-popover') {
+          activeHistoryPopoverCleanup = null;
+          $('#history-btn')?.setAttribute('aria-expanded', 'false');
         }
       }
       if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
@@ -3586,20 +3618,26 @@ export function trapFocus(containerEl, returnFocusEl) {
     if (e.key !== 'Tab') return;
 
     const focusableElements = getVisibleFocusables();
-    if (!focusableElements.length) return;
+    if (!focusableElements.length) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      return;
+    }
+
     const firstEl = focusableElements[0];
     const lastEl = focusableElements[focusableElements.length - 1];
     const activeEl =
       (containerEl.ownerDocument && containerEl.ownerDocument.activeElement) ||
       (typeof document !== 'undefined' ? document.activeElement : null);
+    const activeOutside =
+      typeof containerEl.contains === 'function' && !containerEl.contains(activeEl);
 
     if (e.shiftKey) {
-      if (activeEl === firstEl) {
+      if (activeEl === firstEl || activeOutside) {
         e.preventDefault();
         lastEl.focus();
       }
     } else {
-      if (activeEl === lastEl) {
+      if (activeEl === lastEl || activeOutside) {
         e.preventDefault();
         firstEl.focus();
       }
@@ -3612,8 +3650,6 @@ export function trapFocus(containerEl, returnFocusEl) {
     if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
   };
 }
-
-let activeDiffDrawerCleanup = null;
 
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
@@ -5158,6 +5194,12 @@ if (typeof window !== 'undefined') {
       if (hasOpenHistory) {
         historyPopover.hidden = true;
         $('#history-btn')?.setAttribute('aria-expanded', 'false');
+        if (activeHistoryPopoverCleanup) {
+          activeHistoryPopoverCleanup();
+          activeHistoryPopoverCleanup = null;
+        } else {
+          $('#history-btn')?.focus();
+        }
       }
       setTool({ kind: 'select' });
       select(null);
@@ -5192,20 +5234,18 @@ if (typeof window !== 'undefined') {
     snappingBridge,
   });
 
-  function toggleHistoryPopover() {
-    const popover = $('#history-popover');
-    const btn = $('#history-btn');
-    if (!popover) return;
-    const isHidden = popover.hidden;
-    popover.hidden = !isHidden;
-    if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-  }
-
   $('#history-btn')?.addEventListener('click', toggleHistoryPopover);
   $('#history-close')?.addEventListener('click', () => {
     const popover = $('#history-popover');
+    const btn = $('#history-btn');
     if (popover) popover.hidden = true;
-    $('#history-btn')?.setAttribute('aria-expanded', 'false');
+    btn?.setAttribute('aria-expanded', 'false');
+    if (activeHistoryPopoverCleanup) {
+      activeHistoryPopoverCleanup();
+      activeHistoryPopoverCleanup = null;
+    } else {
+      btn?.focus();
+    }
   });
 
   renderPalette();
@@ -5218,6 +5258,24 @@ if (typeof window !== 'undefined') {
     openWelcomeWizard();
   });
 }
+function toggleHistoryPopover() {
+  const popover = $('#history-popover');
+  const btn = $('#history-btn');
+  if (!popover) return;
+  const isHidden = popover.hidden;
+  popover.hidden = !isHidden;
+  if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+  if (isHidden) {
+    if (activeHistoryPopoverCleanup) activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = trapFocus(popover, btn);
+  } else if (activeHistoryPopoverCleanup) {
+    activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = null;
+  } else {
+    btn?.focus();
+  }
+}
+
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (distPx <= 0) {
@@ -6181,6 +6239,7 @@ if (typeof window !== 'undefined')
     closeShortcutOverlay,
     renderCommandList,
     trapFocus,
+    toggleHistoryPopover,
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
