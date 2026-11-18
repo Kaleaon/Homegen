@@ -18,7 +18,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -63,20 +62,53 @@ export function announce3DStateChange(message) {
   }
 }
 
+let cachedA11yDoc = null;
+let cachedA11yGetById = null;
+let cachedA11yContainer = null;
+let lastA11ySummaryText = null;
+
+function isA11yElementAttached(el, doc) {
+  if (!el || !doc || doc !== cachedA11yDoc || doc.getElementById !== cachedA11yGetById) {
+    return false;
+  }
+  if (el.ownerDocument && el.ownerDocument !== doc) return false;
+  if (typeof el.isConnected === 'boolean') return el.isConnected;
+  if (typeof doc.contains === 'function') return doc.contains(el);
+  if (el.parentNode !== undefined && el.parentNode === null) return false;
+  if (el.parentElement !== undefined && el.parentElement === null) return false;
+  return true;
+}
+
 export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
-  const container = document.getElementById('view3d-fallback-summary');
-  if (!container) return;
 
+  if (!isA11yElementAttached(cachedA11yContainer, document)) {
+    cachedA11yDoc = document;
+    cachedA11yGetById = document.getElementById;
+    cachedA11yContainer = document.getElementById('view3d-fallback-summary');
+    lastA11ySummaryText = null;
+  }
+  if (!cachedA11yContainer) return;
+
+  const level = typeof curLevel === 'number' && !Number.isNaN(curLevel) ? curLevel : 0;
   const modeLabel =
     cameraMode === 'walkthrough' || cameraMode === 'walk'
       ? 'First-Person Walkthrough'
       : 'Orbit View';
-  const roomCount = ((state && state.rooms) || []).filter(
-    (r) => (r.level || 0) === curLevel
-  ).length;
+  let roomCount = 0;
+  const rooms = state && Array.isArray(state.rooms) ? state.rooms : null;
+  if (rooms) {
+    for (let i = 0; i < rooms.length; i++) {
+      const r = rooms[i];
+      if (r && (r.level || 0) === level) roomCount++;
+    }
+  }
 
-  container.textContent = `3D Viewport in ${modeLabel} mode. Rendering Level ${curLevel + 1} with ${roomCount} room(s) and standard scene lighting.`;
+  const nextText = `3D Viewport in ${modeLabel} mode. Rendering Level ${level + 1} with ${roomCount} room(s) and standard scene lighting.`;
+  if (nextText === lastA11ySummaryText) return;
+
+  cachedA11yContainer.textContent = nextText;
+  lastA11ySummaryText = nextText;
 }
 
 export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
@@ -295,6 +327,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   let active = false;
   let raf = 0;
   let framed = false;
+  let cachedHudParent = null;
+  let cachedHudBadge = null;
+  let lastHudAttrText = null;
 
   async function fetchWithTimeout(url, timeoutMs = 8000) {
     const controller = new AbortController();
@@ -2467,32 +2502,68 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return parts.join(' | ');
   }
 
+  function isHudBadgeAttached(badge, parent) {
+    if (!badge || !parent || parent !== cachedHudParent) return false;
+    if (badge.parentElement !== undefined) return badge.parentElement === parent;
+    if (typeof parent.contains === 'function') return parent.contains(badge);
+    if (badge.isConnected === false) return false;
+    return true;
+  }
+
   function updateHudAttribution() {
     if (typeof document === 'undefined') return;
+    const parent = canvas?.parentElement || null;
+    if (!parent) {
+      cachedHudParent = null;
+      cachedHudBadge = null;
+      lastHudAttrText = null;
+      return;
+    }
+
+    if (
+      parent !== cachedHudParent ||
+      (cachedHudBadge && !isHudBadgeAttached(cachedHudBadge, parent))
+    ) {
+      cachedHudParent = parent;
+      cachedHudBadge = null;
+      lastHudAttrText = null;
+    }
+
     const attrText = get3DAttributionText();
-    let hudBadge = canvas?.parentElement?.querySelector('.scene3d-hud-attribution');
+    if (attrText === lastHudAttrText) return;
+
+    if (!cachedHudBadge && typeof parent.querySelector === 'function') {
+      cachedHudBadge = parent.querySelector('.scene3d-hud-attribution');
+    }
+
     if (attrText) {
-      if (!hudBadge && canvas?.parentElement) {
-        hudBadge = document.createElement('div');
-        hudBadge.className = 'scene3d-hud-attribution';
-        hudBadge.style.cssText =
+      if (!cachedHudBadge && typeof document.createElement === 'function') {
+        cachedHudBadge = document.createElement('div');
+        cachedHudBadge.className = 'scene3d-hud-attribution';
+        cachedHudBadge.style.cssText =
           'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
         try {
-          if (getComputedStyle(canvas.parentElement).position === 'static') {
-            canvas.parentElement.style.position = 'relative';
+          if (getComputedStyle(parent).position === 'static') {
+            parent.style.position = 'relative';
           }
         } catch {
           // ignore computed style check error in headless environments
         }
-        canvas.parentElement.appendChild(hudBadge);
+        parent.appendChild(cachedHudBadge);
       }
-      if (hudBadge) {
-        hudBadge.style.display = 'block';
-        hudBadge.textContent = attrText;
+      if (cachedHudBadge) {
+        if (cachedHudBadge.style.display !== 'block') {
+          cachedHudBadge.style.display = 'block';
+        }
+        cachedHudBadge.textContent = attrText;
       }
-    } else if (hudBadge) {
-      hudBadge.style.display = 'none';
+    } else if (cachedHudBadge) {
+      if (cachedHudBadge.style.display !== 'none') {
+        cachedHudBadge.style.display = 'none';
+      }
     }
+
+    lastHudAttrText = attrText;
   }
 
   function render() {
@@ -2723,6 +2794,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     destroy() {
       active = false;
       cancelAnimationFrame(raf);
+      cachedHudParent = null;
+      cachedHudBadge = null;
+      lastHudAttrText = null;
       if (typeof unsubscribe === 'function') {
         unsubscribe();
       }
