@@ -86,6 +86,7 @@ export function getArcParameters(start, end, bulge = 0) {
       radius: 0,
       startAngle: 0,
       sweepAngle: 0,
+      sagitta: 0,
       bulge: 0,
     };
   }
@@ -199,4 +200,294 @@ export function tessellateArc(start, end, bulge = 0, numSegments = 16) {
     points.push(pointOnArc(start, end, bulge, t));
   }
   return points;
+}
+
+const LINEAR_EPS = 1e-12;
+const MAX_FINITE_ARC_RADIUS = 1e9;
+const CHORD_RADIUS_TOLERANCE = 1e-7;
+
+export function sagittaFromBulge(chordLen, bulge = 0) {
+  if (
+    !Number.isFinite(chordLen) ||
+    chordLen <= LINEAR_EPS ||
+    !bulge ||
+    Math.abs(bulge) < LINEAR_EPS
+  ) {
+    return 0;
+  }
+  return (bulge * chordLen) / 2;
+}
+
+export function bulgeFromSagitta(chordLen, sagitta = 0) {
+  if (
+    !Number.isFinite(chordLen) ||
+    chordLen <= LINEAR_EPS ||
+    !Number.isFinite(sagitta) ||
+    Math.abs(sagitta) < LINEAR_EPS
+  ) {
+    return 0;
+  }
+  return (2 * sagitta) / chordLen;
+}
+
+export function radiusFromBulge(chordLen, bulge = 0) {
+  if (
+    !Number.isFinite(chordLen) ||
+    chordLen <= LINEAR_EPS ||
+    !bulge ||
+    Math.abs(bulge) < LINEAR_EPS
+  ) {
+    return Infinity;
+  }
+  const absB = Math.abs(bulge);
+  return (chordLen * (1 + bulge * bulge)) / (4 * absB);
+}
+
+export function bulgeFromRadius(chordLen, radius, options = {}) {
+  if (
+    radius === Infinity ||
+    radius === -Infinity ||
+    (typeof radius === 'string' &&
+      /^(?:[+-]?\s*(?:inf(?:inity)?|∞)|linear|none)$/i.test(radius.trim()))
+  ) {
+    return {
+      ok: true,
+      isValid: true,
+      bulge: 0,
+      radius: Infinity,
+      sagitta: 0,
+      isLinear: true,
+      error: null,
+    };
+  }
+
+  if (
+    radius === null ||
+    radius === undefined ||
+    typeof radius === 'boolean' ||
+    (typeof radius === 'string' && radius.trim() === '')
+  ) {
+    return {
+      ok: false,
+      isValid: false,
+      bulge: null,
+      radius: NaN,
+      sagitta: null,
+      isLinear: false,
+      error: 'Arc radius must be a valid number.',
+    };
+  }
+
+  const numR = typeof radius === 'number' ? radius : Number(radius);
+  if (Number.isNaN(numR)) {
+    return {
+      ok: false,
+      isValid: false,
+      bulge: null,
+      radius: NaN,
+      sagitta: null,
+      isLinear: false,
+      error: 'Arc radius must be a valid number.',
+    };
+  }
+
+  if (
+    !Number.isFinite(chordLen) ||
+    chordLen <= LINEAR_EPS ||
+    !Number.isFinite(numR) ||
+    Math.abs(numR) >= MAX_FINITE_ARC_RADIUS
+  ) {
+    return {
+      ok: true,
+      isValid: true,
+      bulge: 0,
+      radius: Infinity,
+      sagitta: 0,
+      isLinear: true,
+      error: null,
+    };
+  }
+
+  const absR = Math.abs(numR);
+  if (chordLen - 2 * absR > CHORD_RADIUS_TOLERANCE) {
+    return {
+      ok: false,
+      isValid: false,
+      bulge: null,
+      radius: absR,
+      sagitta: null,
+      isLinear: false,
+      error: `Chord length (${chordLen.toFixed(1)}") exceeds twice the entered arc radius (${(2 * absR).toFixed(1)}").`,
+    };
+  }
+
+  const disc = Math.max(0, 4 * absR * absR - chordLen * chordLen);
+  const sqrtDisc = Math.sqrt(disc);
+  const absBulge = options.majorArc
+    ? (2 * absR + sqrtDisc) / chordLen
+    : chordLen / (2 * absR + sqrtDisc);
+
+  if (!Number.isFinite(absBulge) || absBulge < 1e-9) {
+    return {
+      ok: true,
+      isValid: true,
+      bulge: 0,
+      radius: Infinity,
+      sagitta: 0,
+      isLinear: true,
+      error: null,
+    };
+  }
+
+  let sign = 1;
+  if (numR < 0) {
+    sign = -1;
+  } else if (typeof options.sign === 'number' && options.sign !== 0) {
+    sign = options.sign < 0 ? -1 : 1;
+  } else if (typeof options.currentBulge === 'number' && options.currentBulge < 0) {
+    sign = -1;
+  }
+
+  const bulge = sign * absBulge;
+  return {
+    ok: true,
+    isValid: true,
+    bulge,
+    radius: absR,
+    sagitta: sagittaFromBulge(chordLen, bulge),
+    isLinear: false,
+    error: null,
+  };
+}
+
+function parseLengthValueInches(raw) {
+  if (typeof raw === 'number') return raw;
+  if (typeof raw !== 'string') return NaN;
+  const s = raw.trim();
+  if (!s) return NaN;
+  const ftInMatch = s.match(
+    /^([+-]?\d+(?:\.\d+)?)\s*(?:'|ft|feet)\s*(?:(\d+(?:\.\d+)?)\s*(?:"|in|inches)?)?$/i
+  );
+  if (ftInMatch) {
+    const ft = parseFloat(ftInMatch[1]);
+    const inch = ftInMatch[2] ? parseFloat(ftInMatch[2]) : 0;
+    const sign = ft < 0 || s.startsWith('-') ? -1 : 1;
+    return sign * (Math.abs(ft) * 12 + inch);
+  }
+  const inMatch = s.match(/^([+-]?\d+(?:\.\d+)?)\s*(?:"|in|inches)$/i);
+  if (inMatch) {
+    return parseFloat(inMatch[1]);
+  }
+  return Number(s);
+}
+
+export function parseCurveHudInput(field, rawValue, chordLen, currentBulge = 0) {
+  const str = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
+
+  if (field === 'radius') {
+    if (
+      str === '' ||
+      str === null ||
+      str === undefined ||
+      str === Infinity ||
+      str === -Infinity ||
+      (typeof str === 'string' && /^(?:[+-]?\s*(?:inf(?:inity)?|∞)|linear|none)$/i.test(str))
+    ) {
+      return {
+        ok: true,
+        isValid: true,
+        bulge: 0,
+        radius: Infinity,
+        sagitta: 0,
+        isLinear: true,
+        error: null,
+      };
+    }
+    const parsedR = parseLengthValueInches(str);
+    return bulgeFromRadius(chordLen, parsedR, { currentBulge });
+  }
+
+  if (field === 'sagitta') {
+    if (str === '' || str === null || str === undefined) {
+      return {
+        ok: true,
+        isValid: true,
+        bulge: 0,
+        radius: Infinity,
+        sagitta: 0,
+        isLinear: true,
+        error: null,
+      };
+    }
+    const parsedS = parseLengthValueInches(str);
+    if (Number.isNaN(parsedS) || !Number.isFinite(parsedS)) {
+      return {
+        ok: false,
+        isValid: false,
+        bulge: null,
+        radius: NaN,
+        sagitta: NaN,
+        isLinear: false,
+        error: 'Sagitta must be a finite number.',
+      };
+    }
+    const bulge = bulgeFromSagitta(chordLen, parsedS);
+    const isLinear = Math.abs(bulge) < LINEAR_EPS;
+    return {
+      ok: true,
+      isValid: true,
+      bulge: isLinear ? 0 : bulge,
+      radius: isLinear ? Infinity : radiusFromBulge(chordLen, bulge),
+      sagitta: isLinear ? 0 : sagittaFromBulge(chordLen, bulge),
+      isLinear,
+      error: null,
+    };
+  }
+
+  if (field === 'bulge') {
+    if (str === '' || str === null || str === undefined) {
+      return {
+        ok: true,
+        isValid: true,
+        bulge: 0,
+        radius: Infinity,
+        sagitta: 0,
+        isLinear: true,
+        error: null,
+      };
+    }
+    const parsedB = typeof str === 'number' ? str : Number(str);
+    if (Number.isNaN(parsedB) || !Number.isFinite(parsedB)) {
+      return {
+        ok: false,
+        isValid: false,
+        bulge: null,
+        radius: NaN,
+        sagitta: NaN,
+        isLinear: false,
+        error: 'Bulge factor must be a finite number.',
+      };
+    }
+    const isLinear = Math.abs(parsedB) < 1e-9;
+    const bulge = isLinear ? 0 : parsedB;
+    return {
+      ok: true,
+      isValid: true,
+      bulge,
+      radius: isLinear ? Infinity : radiusFromBulge(chordLen, bulge),
+      sagitta: isLinear ? 0 : sagittaFromBulge(chordLen, bulge),
+      isLinear,
+      error: null,
+    };
+  }
+
+  return {
+    ok: false,
+    isValid: false,
+    bulge: null,
+    radius: NaN,
+    sagitta: NaN,
+    isLinear: false,
+    error: `Unsupported curve parameter "${field}".`,
+  };
 }
