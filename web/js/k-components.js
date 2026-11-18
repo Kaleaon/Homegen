@@ -24,7 +24,7 @@ const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 /**
  * <k-button>
  */
-export class KButton extends BaseElement {
+class KButton extends BaseElement {
   static get observedAttributes() {
     return ['disabled', 'primary', 'active', 'on', 'title', 'type'];
   }
@@ -362,7 +362,7 @@ export class KInput extends BaseElement {
 /**
  * <k-tab>
  */
-export class KTab extends BaseElement {
+class KTab extends BaseElement {
   static get observedAttributes() {
     return ['active', 'selected', 'disabled', 'data-tab'];
   }
@@ -475,7 +475,7 @@ export class KTab extends BaseElement {
 /**
  * <k-card>
  */
-export class KCard extends BaseElement {
+class KCard extends BaseElement {
   static get observedAttributes() {
     return ['active', 'selected', 'primary', 'disabled'];
   }

@@ -384,7 +384,9 @@ test('KButton delegates focus() and blur() to internal shadow button', async () 
       get: (name) => registry.get(name),
     };
   }
-  const { KButton } = await import('../js/k-components.js');
+  await import(`../js/k-components.js?t=${Date.now()}`);
+  const KButton = customElements.get('k-button');
+  assert.ok(KButton, 'k-button custom element must be registered');
   let focused = false;
   let blurred = false;
   const inst = Object.create(KButton.prototype);
