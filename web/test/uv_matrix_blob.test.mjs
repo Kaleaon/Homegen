@@ -1,9 +1,11 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '#three';
+import JSZip from '#jszip';
 
 import {
   saveTextureBlob,
+  saveTextureBlobsBatch,
   getTextureBlob,
   listTextures,
   deleteTextureBlob,
@@ -55,6 +57,114 @@ describe('IndexedDB Blob Texture Store', () => {
     await deleteTextureBlob('tex_del_1');
     list = await listTextures();
     assert.equal(list.length, 0);
+  });
+
+  it('batch-saves multiple texture blobs synchronously into fallback memoryStore', async () => {
+    const items = [
+      {
+        id: 'tex_batch_1',
+        blob: new Blob(['brick bytes'], { type: 'image/png' }),
+        metadata: { name: 'Red Brick' },
+      },
+      {
+        id: 'tex_batch_2',
+        blob: new Blob(['oak bytes'], { type: 'image/jpeg' }),
+        name: 'White Oak',
+        mimeType: 'image/jpeg',
+      },
+      {
+        id: 'tex_batch_3',
+        blob: new Blob(['marble bytes'], { type: 'image/webp' }),
+        metadata: { name: 'Carrara Marble', mimeType: 'image/webp' },
+      },
+    ];
+
+    // Verify synchronous fallback update when IndexedDB is unavailable
+    const batchPromise = saveTextureBlobsBatch(items);
+    const immediateCheck = await listTextures();
+    assert.equal(immediateCheck.length, 3);
+
+    const savedIds = await batchPromise;
+    assert.deepEqual(savedIds, ['tex_batch_1', 'tex_batch_2', 'tex_batch_3']);
+
+    const b1 = await getTextureBlob('tex_batch_1');
+    const b2 = await getTextureBlob('tex_batch_2');
+    const b3 = await getTextureBlob('tex_batch_3');
+    assert.equal(b1.type, 'image/png');
+    assert.equal(b2.type, 'image/jpeg');
+    assert.equal(b3.type, 'image/webp');
+
+    const byId = new Map((await listTextures()).map((t) => [t.id, t]));
+    assert.equal(byId.get('tex_batch_1').name, 'Red Brick');
+    assert.equal(byId.get('tex_batch_2').name, 'White Oak');
+    assert.equal(byId.get('tex_batch_3').name, 'Carrara Marble');
+
+    // Empty batch is a safe no-op
+    assert.deepEqual(await saveTextureBlobsBatch([]), []);
+  });
+
+  it('persists all batch items within a single IndexedDB readwrite transaction', async () => {
+    const idbRecords = new Map();
+    let transactionCount = 0;
+
+    const mockDB = {
+      objectStoreNames: { contains: () => true },
+      createObjectStore: () => ({}),
+      transaction(storeName, mode) {
+        assert.equal(storeName, 'homegen_textures');
+        assert.equal(mode, 'readwrite');
+        transactionCount += 1;
+        const tx = {
+          oncomplete: null,
+          onerror: null,
+          onabort: null,
+          objectStore() {
+            return {
+              put(record) {
+                idbRecords.set(record.id, record);
+                return {};
+              },
+            };
+          },
+        };
+        queueMicrotask(() => {
+          if (tx.oncomplete) tx.oncomplete();
+        });
+        return tx;
+      },
+    };
+
+    const prevWindow = globalThis.window;
+    globalThis.window = {
+      indexedDB: {
+        open() {
+          const req = { result: mockDB, onupgradeneeded: null, onsuccess: null, onerror: null };
+          queueMicrotask(() => {
+            if (req.onsuccess) req.onsuccess();
+          });
+          return req;
+        },
+      },
+    };
+
+    try {
+      const ids = await saveTextureBlobsBatch([
+        { id: 'idb_1', blob: new Blob(['a'], { type: 'image/png' }), name: 'Tex A' },
+        { id: 'idb_2', blob: new Blob(['b'], { type: 'image/jpeg' }), name: 'Tex B' },
+        { id: 'idb_3', blob: new Blob(['c'], { type: 'image/webp' }), name: 'Tex C' },
+      ]);
+
+      assert.deepEqual(ids, ['idb_1', 'idb_2', 'idb_3']);
+      assert.equal(transactionCount, 1, 'Expected exactly 1 readwrite transaction for batch');
+      assert.equal(idbRecords.size, 3);
+      assert.equal(idbRecords.get('idb_2').name, 'Tex B');
+    } finally {
+      if (prevWindow === undefined) {
+        delete globalThis.window;
+      } else {
+        globalThis.window = prevWindow;
+      }
+    }
   });
 });
 
@@ -200,5 +310,114 @@ describe('Composite ZIP Export & Import Archiving', () => {
     const restoredBlob = await getTextureBlob(texId);
     assert.ok(restoredBlob);
     assert.equal(restoredBlob.type, 'image/jpeg');
+  });
+
+  it('exports and imports archives containing multiple custom texture assets across formats', async () => {
+    const state = newState();
+    const room = createRoom(state, 'living', 0, 0, 180, 144);
+
+    const assets = [
+      {
+        id: 'tex_multi_png',
+        data: 'png-binary',
+        type: 'image/png',
+        name: 'Plaster.png',
+        wall: 'N',
+      },
+      { id: 'tex_multi_jpg', data: 'jpg-binary', type: 'image/jpeg', name: 'Cedar.jpg', wall: 'E' },
+      {
+        id: 'tex_multi_webp',
+        data: 'webp-binary',
+        type: 'image/webp',
+        name: 'Slate.webp',
+        wall: 'S',
+      },
+      {
+        id: 'tex_multi_svg',
+        data: '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+        type: 'image/svg+xml',
+        name: 'Pattern.svg',
+        wall: 'W',
+      },
+    ];
+
+    await saveTextureBlobsBatch(
+      assets.map((a) => ({
+        id: a.id,
+        blob: new Blob([a.data], { type: a.type }),
+        metadata: { name: a.name, mimeType: a.type },
+      }))
+    );
+
+    for (const a of assets) {
+      room.walls[a.wall] = a.id;
+    }
+
+    const zipBlob = await exportProjectZip(state);
+    await clearTextures();
+    assert.equal((await listTextures()).length, 0);
+
+    const importedState = await importProjectZip(zipBlob);
+    assert.ok(importedState);
+    for (const a of assets) {
+      assert.equal(importedState.rooms[0].walls[a.wall], a.id);
+    }
+
+    const importedList = await listTextures();
+    assert.equal(importedList.length, 4);
+    const metaById = new Map(importedList.map((t) => [t.id, t]));
+
+    for (const a of assets) {
+      assert.ok(metaById.has(a.id), `Missing texture metadata for ${a.id}`);
+      assert.equal(metaById.get(a.id).name, a.name);
+      assert.equal(metaById.get(a.id).mimeType, a.type);
+
+      const blob = await getTextureBlob(a.id);
+      assert.ok(blob);
+      assert.equal(blob.type, a.type);
+      assert.equal(await blob.text(), a.data);
+    }
+  });
+
+  it('handles empty textures folder and skips corrupted individual texture entries gracefully', async () => {
+    const state = newState();
+    createRoom(state, 'kitchen', 0, 0, 120, 120);
+
+    // 1. Archive with an empty textures/ directory
+    const emptyTexZip = new JSZip();
+    emptyTexZip.file('plan.json', serialize(state));
+    emptyTexZip.folder('textures');
+    const emptyZipBlob = await emptyTexZip.generateAsync({ type: 'blob' });
+
+    const importedEmpty = await importProjectZip(emptyZipBlob);
+    assert.equal(importedEmpty.rooms.length, 1);
+    assert.equal((await listTextures()).length, 0);
+
+    // 2. Archive where one texture entry rejects during parallel extraction
+    const mixedZip = new JSZip();
+    mixedZip.file('plan.json', serialize(state));
+    mixedZip.file('textures/tex_good.png', new Blob(['valid-png'], { type: 'image/png' }));
+    mixedZip.file('textures/tex_corrupt.png', new Blob(['corrupt'], { type: 'image/png' }));
+    const mixedBuffer = await mixedZip.generateAsync({ type: 'arraybuffer' });
+
+    const origLoadAsync = JSZip.loadAsync.bind(JSZip);
+    JSZip.loadAsync = async (src) => {
+      const loaded = await origLoadAsync(src);
+      const badEntry = loaded.file('textures/tex_corrupt.png');
+      badEntry.async = async () => {
+        throw new Error('Corrupted deflate stream');
+      };
+      return loaded;
+    };
+
+    try {
+      const importedMixed = await importProjectZip(mixedBuffer);
+      assert.equal(importedMixed.rooms.length, 1);
+      const saved = await listTextures();
+      assert.equal(saved.length, 1);
+      assert.equal(saved[0].id, 'tex_good');
+    } finally {
+      JSZip.loadAsync = origLoadAsync;
+    }
   });
 });
