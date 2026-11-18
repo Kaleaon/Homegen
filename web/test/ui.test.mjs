@@ -193,6 +193,53 @@ test('renderSnapToggles popover menu renders unified k-button trigger with badge
   assert.deepEqual(advancedIds, ['midpoint', 'perpendicular']);
 });
 
+test('KPopover ignores trigger click when trigger button is disabled', async () => {
+  if (typeof customElements === 'undefined') {
+    const registry = new Map();
+    globalThis.customElements = {
+      define: (name, constructor) => registry.set(name, constructor),
+      get: (name) => registry.get(name),
+    };
+  }
+  const { KPopover } = await import('../js/k-components.js');
+
+  const attrs = new Map();
+  let triggerDisabled = false;
+  const triggerAttrs = new Map();
+  const mockTrigger = {
+    get disabled() {
+      return triggerDisabled;
+    },
+    set disabled(v) {
+      triggerDisabled = Boolean(v);
+      if (triggerDisabled) triggerAttrs.set('disabled', '');
+      else triggerAttrs.delete('disabled');
+    },
+    setAttribute: (k, v) => triggerAttrs.set(k, v),
+    removeAttribute: (k) => triggerAttrs.delete(k),
+    hasAttribute: (k) => triggerAttrs.has(k),
+  };
+
+  const popover = Object.create(KPopover.prototype);
+  popover.setAttribute = (k, v) => attrs.set(k, v);
+  popover.removeAttribute = (k) => attrs.delete(k);
+  popover.hasAttribute = (k) => attrs.has(k);
+  popover.getAttribute = (k) => attrs.get(k) ?? null;
+  popover.dispatchEvent = () => true;
+  popover._getTriggerElement = () => mockTrigger;
+
+  // Enabled trigger opens and closes popover
+  popover._onTriggerClick({ stopPropagation: () => {}, preventDefault: () => {} });
+  assert.equal(popover.open, true);
+  popover._onTriggerClick({ stopPropagation: () => {}, preventDefault: () => {} });
+  assert.equal(popover.open, false);
+
+  // Disabled trigger does not open popover
+  mockTrigger.disabled = true;
+  popover._onTriggerClick({ stopPropagation: () => {}, preventDefault: () => {} });
+  assert.equal(popover.open, false);
+});
+
 test('renderSnapToggles binds Grid & Angle Increments k-input controls via buildGridSettingsViewModel', async () => {
   const { readFileSync } = await import('node:fs');
   const { resolve } = await import('node:path');
