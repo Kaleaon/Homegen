@@ -261,6 +261,24 @@ export function handleCadWorkerMessage(e) {
             end: res.point,
             type: 'perpendicular',
           });
+        } else if (res.snap.type === 'angle') {
+          guideLines.push({
+            start: anchor,
+            end: res.point,
+            type: 'angle',
+          });
+          if (res.snap.edgeIndex !== undefined) {
+            const edge =
+              edges.find((eItem) => eItem.index === res.snap.edgeIndex) ||
+              edges[res.snap.edgeIndex];
+            if (edge) {
+              guideLines.push({
+                start: edge.start,
+                end: edge.end,
+                type: 'angle_reference',
+              });
+            }
+          }
         }
       }
 
