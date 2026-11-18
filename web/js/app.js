@@ -5332,8 +5332,6 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
-export { renderGISSegments, openGISDialog };
-
 function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
