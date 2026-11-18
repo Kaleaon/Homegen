@@ -15,7 +15,7 @@ import {
   getRoomBoundingBox,
   computeGeoBounds,
 } from './geometry.js';
-import { isRegisteredEPSG } from './epsgRegistry.js';
+import { isRegisteredEPSG, normalizeCode, getEPSGDefinition } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
@@ -62,8 +62,7 @@ export function defaultCRS() {
 
 export function isValidEPSGCode(code) {
   if (!code || typeof code !== 'string') return false;
-  const trimmed = code.trim().toUpperCase();
-  const normalized = trimmed.startsWith('EPSG:') ? trimmed : `EPSG:${trimmed}`;
+  const normalized = normalizeCode(code);
   if (!/^EPSG:\d+$/.test(normalized)) return false;
   return isRegisteredEPSG(normalized);
 }
@@ -71,9 +70,8 @@ export function isValidEPSGCode(code) {
 export function normalizeEPSGCode(code) {
   if (code == null) return 'EPSG:4326';
   if (typeof code === 'number') return `EPSG:${code}`;
-  const str = String(code).trim().toUpperCase();
-  if (/^\d+$/.test(str)) return `EPSG:${str}`;
-  if (/^EPSG:\d+$/.test(str)) return str;
+  const normalized = normalizeCode(String(code));
+  if (/^EPSG:\d+$/.test(normalized)) return normalized;
   return 'EPSG:4326';
 }
 
@@ -867,7 +865,7 @@ export function deserialize(text) {
   } else {
     const fallback = defaultCRS();
     s.crs.epsg = normalizeEPSGCode(s.crs.epsg);
-    s.crs.proj4 = s.crs.proj4 || fallback.proj4;
+    s.crs.proj4 = s.crs.proj4 || getEPSGDefinition(s.crs.epsg) || fallback.proj4;
     s.crs.wkt = s.crs.wkt || fallback.wkt;
     s.crs.origin = s.crs.origin || fallback.origin;
     s.crs.units = s.crs.units || fallback.units;
@@ -947,58 +945,106 @@ export function deserialize(text) {
   return s;
 }
 
-function parseNumericToken(token) {
-  if (!token) return null;
-  const t = token.trim().replace(/^\+/, '');
-  const mixed = t.match(/^(\d+)\s*(?:\s+|-)\s*(\d+)\s*\/\s*(\d+)$/);
-  if (mixed) {
-    const den = parseFloat(mixed[3]);
-    return den !== 0 ? parseFloat(mixed[1]) + parseFloat(mixed[2]) / den : null;
+const UNICODE_FRACTIONS = {
+  '¼': ' 1/4',
+  '½': ' 1/2',
+  '¾': ' 3/4',
+  '⅓': ' 1/3',
+  '⅔': ' 2/3',
+  '⅛': ' 1/8',
+  '⅜': ' 3/8',
+  '⅝': ' 5/8',
+  '⅞': ' 7/8',
+};
+
+const DISTANCE_NUM_PATTERN =
+  '(?:\\d+\\s*(?:\\s+|-)\\s*\\d+\\s*\\/\\s*\\d+|\\d+\\s*\\/\\s*\\d+|\\d+(?:\\.\\d+)?|\\.\\d+)';
+const FT_UNIT_PATTERN = "(?:'|feet(?![a-z])|foot(?![a-z])|ft(?:\\.(?!\\d))?(?![a-z]))";
+const IN_UNIT_PATTERN = '(?:"|inches(?![a-z])|inch(?![a-z])|in(?:\\.(?!\\d))?(?![a-z]))';
+
+const FT_IN_DISTANCE_RE = new RegExp(
+  `^(${DISTANCE_NUM_PATTERN})\\s*${FT_UNIT_PATTERN}(?:\\s*(?:-\\s*)?(${DISTANCE_NUM_PATTERN})\\s*(?:${IN_UNIT_PATTERN})?\\s*)?$`
+);
+const IN_ONLY_DISTANCE_RE = new RegExp(`^(${DISTANCE_NUM_PATTERN})\\s*${IN_UNIT_PATTERN}$`);
+const METRIC_DISTANCE_RE = new RegExp(
+  `^(${DISTANCE_NUM_PATTERN})\\s*(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|m|met(?:er|re)s?)$`
+);
+const UNITLESS_DISTANCE_RE = new RegExp(`^(${DISTANCE_NUM_PATTERN})$`);
+
+function parseNumericToken(raw) {
+  const s = raw.trim();
+  const mixedMatch = s.match(/^(\d+)\s*(?:\s+|-)\s*(\d+)\s*\/\s*(\d+)$/);
+  if (mixedMatch) {
+    const whole = parseInt(mixedMatch[1], 10);
+    const num = parseInt(mixedMatch[2], 10);
+    const den = parseInt(mixedMatch[3], 10);
+    if (den === 0) return NaN;
+    return whole + num / den;
   }
-  const frac = t.match(/^(\d+)\s*\/\s*(\d+)$/);
-  if (frac) {
-    const den = parseFloat(frac[2]);
-    return den !== 0 ? parseFloat(frac[1]) / den : null;
+  const fracMatch = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fracMatch) {
+    const num = parseInt(fracMatch[1], 10);
+    const den = parseInt(fracMatch[2], 10);
+    if (den === 0) return NaN;
+    return num / den;
   }
-  const dec = t.match(/^(\d+(?:\.\d+)?)$/);
-  if (dec) return parseFloat(dec[1]);
-  return null;
+  const val = Number(s);
+  return Number.isFinite(val) ? val : NaN;
 }
 
-const DIST_NUM_SRC =
-  '(?:\\+?\\d+\\s*(?:\\s+|-)\\s*\\d+\\s*\\/\\s*\\d+|\\+?\\d+\\s*\\/\\s*\\d+|\\+?\\d+(?:\\.\\d+)?)';
-
-export function parseDistanceInInches(str) {
+export function parseDistanceInInches(str, { defaultUnit = null } = {}) {
   if (str === null || str === undefined || str === '') return null;
-  str = String(str).trim().toLowerCase();
-  if (!str || str.startsWith('-')) return null;
-  const metricMatch = str.match(/^(\+?\d+(?:\.\d+)?)\s*(cm|mm|m)\b/);
-  if (metricMatch && !str.includes('ft')) {
-    const val = parseFloat(metricMatch[1]);
-    if (isNaN(val) || val <= 0) return null;
-    if (metricMatch[2] === 'cm') return val * 0.393701;
-    if (metricMatch[2] === 'mm') return val * 0.0393701;
+  if (typeof str === 'number' && (!Number.isFinite(str) || str <= 0)) return null;
+
+  let normalized = String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/[’‘′]/g, "'")
+    .replace(/[”“″]/g, '"')
+    .replace(/''/g, '"')
+    .replace(/[¼½¾⅓⅔⅛⅜⅝⅞]/g, (ch) => UNICODE_FRACTIONS[ch] || ch)
+    .trim();
+
+  if (!normalized || normalized.startsWith('-')) return null;
+  if (normalized.startsWith('+')) {
+    normalized = normalized.slice(1).trim();
+    if (!normalized) return null;
+  }
+
+  const metricMatch = normalized.match(METRIC_DISTANCE_RE);
+  if (metricMatch) {
+    const val = parseNumericToken(metricMatch[1]);
+    if (isNaN(val)) return null;
+    const unit = metricMatch[2];
+    if (unit === 'mm' || unit.startsWith('millimet')) return val * 0.0393701;
+    if (unit === 'cm' || unit.startsWith('centimet')) return val * 0.393701;
     return val * 39.3701;
   }
-  const hasFt = /'|ft\b|feet\b/.test(str);
-  const hasIn = /"|in\b|inches\b/.test(str);
-  if (hasFt) {
-    const ftMatch = str.match(new RegExp(`(${DIST_NUM_SRC})\\s*(?:'|ft\\b|feet\\b)`));
-    const inMatch =
-      str.match(new RegExp(`(${DIST_NUM_SRC})\\s*(?:"|in\\b|inches\\b)`)) ||
-      str.match(new RegExp(`(?:'|ft\\b|feet\\b)\\s*(${DIST_NUM_SRC})`));
-    if (!ftMatch && !inMatch) return null;
-    const feet = ftMatch ? (parseNumericToken(ftMatch[1]) ?? 0) : 0;
-    const inches = inMatch ? (parseNumericToken(inMatch[1]) ?? 0) : 0;
+
+  const ftInMatch = normalized.match(FT_IN_DISTANCE_RE);
+  if (ftInMatch) {
+    const feet = parseNumericToken(ftInMatch[1]);
+    const inches = ftInMatch[2] !== undefined ? parseNumericToken(ftInMatch[2]) : 0;
+    if (isNaN(feet) || isNaN(inches)) return null;
     return feet * 12 + inches;
   }
-  if (hasIn) {
-    const inMatch = str.match(new RegExp(`(${DIST_NUM_SRC})\\s*(?:"|in\\b|inches\\b)`));
-    return inMatch ? parseNumericToken(inMatch[1]) : null;
+
+  const inMatch = normalized.match(IN_ONLY_DISTANCE_RE);
+  if (inMatch) {
+    const inches = parseNumericToken(inMatch[1]);
+    return isNaN(inches) ? null : inches;
   }
-  const num = parseNumericToken(str);
-  if (num === null || isNaN(num) || num <= 0) return null;
-  return num <= 50 ? num * 12 : num;
+
+  const unitlessMatch = normalized.match(UNITLESS_DISTANCE_RE);
+  if (unitlessMatch) {
+    const num = parseNumericToken(unitlessMatch[1]);
+    if (isNaN(num) || num <= 0) return null;
+    if (defaultUnit === 'ft') return num * 12;
+    if (defaultUnit === 'in') return num;
+    return num <= 50 ? num * 12 : num;
+  }
+
+  return null;
 }
 
 export function formatDistanceInInches(inches) {
