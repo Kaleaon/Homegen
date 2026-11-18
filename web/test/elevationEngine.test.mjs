@@ -291,6 +291,11 @@ function createSyntheticGeoTIFF({
   width = 2,
   height = 2,
   bitsPerSample = 8,
+  sampleFormat = null,
+  noData = null,
+  noDataIncludeNull = true,
+  noDataCountOverride = null,
+  noDataOffsetOverride = null,
   pixelScale = null,
   tiepoint = null,
   transformation = null,
@@ -301,13 +306,33 @@ function createSyntheticGeoTIFF({
     { tag: 257, type: 4, count: 1, val: height },
     { tag: 258, type: 3, count: 1, val: bitsPerSample },
   ];
+  if (sampleFormat !== null) {
+    entries.push({ tag: 339, type: 3, count: 1, val: sampleFormat });
+  }
 
-  let currentOffset =
-    8 +
-    2 +
-    (entries.length + (pixelScale ? 1 : 0) + (tiepoint ? 1 : 0) + (transformation ? 1 : 0) + 1) *
-      12 +
-    4;
+  let noDataBytes = null;
+  let noDataCount = 0;
+  if (noData !== null) {
+    const str = String(noData);
+    const len = str.length + (noDataIncludeNull ? 1 : 0);
+    noDataBytes = new Uint8Array(len);
+    for (let i = 0; i < str.length; i++) {
+      noDataBytes[i] = str.charCodeAt(i);
+    }
+    if (noDataIncludeNull) {
+      noDataBytes[str.length] = 0;
+    }
+    noDataCount = noDataCountOverride ?? noDataBytes.length;
+  }
+
+  const extraEntries =
+    (pixelScale ? 1 : 0) +
+    (tiepoint ? 1 : 0) +
+    (transformation ? 1 : 0) +
+    (noDataBytes ? 1 : 0) +
+    1; // StripOffsets
+
+  let currentOffset = 8 + 2 + (entries.length + extraEntries) * 12 + 4;
   currentOffset = Math.ceil(currentOffset / 8) * 8;
 
   let pixelScaleOffset = 0;
@@ -331,10 +356,27 @@ function createSyntheticGeoTIFF({
     currentOffset += transformation.length * 8;
   }
 
+  let noDataOffset = 0;
+  if (noDataBytes) {
+    if (noDataCount <= 4 && noDataOffsetOverride === null) {
+      entries.push({ tag: 42113, type: 2, count: noDataCount, val: 0, inlineBytes: noDataBytes });
+    } else {
+      noDataOffset = currentOffset;
+      entries.push({
+        tag: 42113,
+        type: 2,
+        count: noDataCount,
+        val: noDataOffsetOverride ?? noDataOffset,
+      });
+      currentOffset += Math.ceil(noDataBytes.length / 8) * 8;
+    }
+  }
+
   const stripOffset = currentOffset;
   entries.push({ tag: 273, type: 4, count: 1, val: stripOffset });
 
-  const bytesPerSample = bitsPerSample === 16 ? 2 : 1;
+  const bytesPerSample =
+    bitsPerSample === 64 ? 8 : bitsPerSample === 32 ? 4 : bitsPerSample === 16 ? 2 : 1;
   const stripLength = width * height * bytesPerSample;
   const totalSize = stripOffset + stripLength;
 
@@ -353,7 +395,13 @@ function createSyntheticGeoTIFF({
     view.setUint16(entryOffset, e.tag, littleEndian);
     view.setUint16(entryOffset + 2, e.type, littleEndian);
     view.setUint32(entryOffset + 4, e.count, littleEndian);
-    view.setUint32(entryOffset + 8, e.val, littleEndian);
+    if (e.inlineBytes) {
+      for (let j = 0; j < Math.min(4, e.inlineBytes.length); j++) {
+        view.setUint8(entryOffset + 8 + j, e.inlineBytes[j]);
+      }
+    } else {
+      view.setUint32(entryOffset + 8, e.val, littleEndian);
+    }
   });
   view.setUint32(8 + 2 + entries.length * 12, 0, littleEndian);
 
@@ -372,11 +420,32 @@ function createSyntheticGeoTIFF({
       view.setFloat64(transformationOffset + idx * 8, v, littleEndian);
     });
   }
+  if (noDataBytes && noDataOffset > 0) {
+    for (let i = 0; i < noDataBytes.length; i++) {
+      view.setUint8(noDataOffset + i, noDataBytes[i]);
+    }
+  }
 
   const pixels = pixelData || new Uint8Array(width * height);
   for (let i = 0; i < pixels.length; i++) {
-    if (bytesPerSample === 2) {
-      view.setUint16(stripOffset + i * 2, pixels[i], littleEndian);
+    if (bytesPerSample === 8) {
+      view.setFloat64(stripOffset + i * 8, pixels[i], littleEndian);
+    } else if (bytesPerSample === 4) {
+      if (sampleFormat === 3 || pixels instanceof Float32Array || pixels instanceof Float64Array) {
+        view.setFloat32(stripOffset + i * 4, pixels[i], littleEndian);
+      } else if (sampleFormat === 2 || pixels instanceof Int32Array) {
+        view.setInt32(stripOffset + i * 4, pixels[i], littleEndian);
+      } else {
+        view.setUint32(stripOffset + i * 4, pixels[i], littleEndian);
+      }
+    } else if (bytesPerSample === 2) {
+      if (sampleFormat === 2 || pixels instanceof Int16Array) {
+        view.setInt16(stripOffset + i * 2, pixels[i], littleEndian);
+      } else {
+        view.setUint16(stripOffset + i * 2, pixels[i], littleEndian);
+      }
+    } else if (sampleFormat === 2 || pixels instanceof Int8Array) {
+      view.setInt8(stripOffset + i, pixels[i]);
     } else {
       view.setUint8(stripOffset + i, pixels[i]);
     }
@@ -491,6 +560,203 @@ test('parseElevationRaster performs GeoTIFF IFD parsing in under 5 milliseconds'
   const duration = performance.now() - start;
 
   assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
+});
+
+test('parseGeoTIFFWithFallback parses GDAL_NODATA tag 42113 for uint16 65535 sentinels and prevents runaway isoline loops', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 3,
+    height: 3,
+    bitsPerSample: 16,
+    noData: '65535',
+    pixelData: new Uint16Array([100, 105, 110, 102, 65535, 108, 65535, 106, 112]),
+  });
+
+  const grid = await parseGeoTIFFWithFallback(buffer, {
+    minElevation: 0,
+    maxElevation: 65535,
+    contourInterval: 2.0,
+  });
+
+  assert.equal(grid.minElevation, 100);
+  assert.equal(grid.maxElevation, 112);
+  // Void pixels (indices 4 and 6) are substituted with baseline minElevation (100)
+  assert.equal(grid.data[4], 100);
+  assert.equal(grid.data[6], 100);
+
+  const contours = computeMarchingSquares(grid);
+  assert.ok(contours.length > 0 && contours.length <= 7);
+  assert.ok(contours.every((c) => c.elevation >= 100 && c.elevation <= 112));
+});
+
+test('parseGeoTIFFWithFallback filters -9999 GDAL_NODATA sentinels in signed Int16 and Float32 rasters', async () => {
+  const int16Buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 3,
+    height: 2,
+    bitsPerSample: 16,
+    sampleFormat: 2,
+    noData: '-9999',
+    pixelData: new Int16Array([240, 245, -9999, 242, 250, -9999]),
+  });
+
+  const int16Grid = await parseGeoTIFFWithFallback(int16Buffer, { contourInterval: 2.0 });
+  assert.equal(int16Grid.minElevation, 240);
+  assert.equal(int16Grid.maxElevation, 250);
+  assert.equal(int16Grid.data[2], 240);
+  assert.equal(int16Grid.data[5], 240);
+
+  const int16Contours = computeMarchingSquares(int16Grid);
+  assert.ok(int16Contours.length > 0 && int16Contours.length <= 6);
+  assert.ok(int16Contours.every((c) => c.elevation >= 240 && c.elevation <= 250));
+
+  const float32Buffer = createSyntheticGeoTIFF({
+    littleEndian: false,
+    width: 2,
+    height: 2,
+    bitsPerSample: 32,
+    sampleFormat: 3,
+    noData: '-9999.0',
+    pixelData: new Float32Array([15.5, -9999.0, 18.5, 21.5]),
+  });
+
+  const float32Grid = await parseGeoTIFFWithFallback(float32Buffer, { contourInterval: 1.0 });
+  assert.equal(float32Grid.minElevation, 15.5);
+  assert.equal(float32Grid.maxElevation, 21.5);
+  assert.equal(float32Grid.data[1], 15.5);
+
+  const floatContours = computeMarchingSquares(float32Grid);
+  assert.ok(floatContours.length <= 6);
+});
+
+test('parseGeoTIFFWithFallback decodes inline (<= 4 byte) ASCII tag 42113 entries', async () => {
+  // 4-byte inline ASCII ("255\0", count = 4)
+  const inline4Buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+    bitsPerSample: 8,
+    noData: '255',
+    noDataIncludeNull: true,
+    pixelData: new Uint8Array([51, 102, 153, 255]),
+  });
+
+  const grid4 = await parseGeoTIFFWithFallback(inline4Buffer, {
+    minElevation: 0,
+    maxElevation: 100,
+  });
+  assert.equal(Math.round(grid4.minElevation), 20);
+  assert.equal(Math.round(grid4.maxElevation), 60);
+  assert.equal(Math.round(grid4.data[3]), 20);
+
+  // 3-byte inline ASCII ("-9\0", count = 3) in Big-Endian signed raster
+  const inline3Buffer = createSyntheticGeoTIFF({
+    littleEndian: false,
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    sampleFormat: 2,
+    noData: '-9',
+    noDataIncludeNull: true,
+    pixelData: new Int16Array([-9, 12, 16, 20]),
+  });
+
+  const grid3 = await parseGeoTIFFWithFallback(inline3Buffer);
+  assert.equal(grid3.minElevation, 12);
+  assert.equal(grid3.maxElevation, 20);
+  assert.equal(grid3.data[0], 12);
+});
+
+test('parseGeoTIFFWithFallback supports options.noDataValue, options.noDataReplacement, and options.filterStandardSentinels', async () => {
+  const buffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    noData: '65535',
+    pixelData: new Uint16Array([1000, 2000, 9999, 65535]),
+  });
+
+  // Override tag 42113 via options.noDataValue and customize replacement via options.noDataReplacement
+  const overriddenGrid = await parseGeoTIFFWithFallback(buffer, {
+    minElevation: 0,
+    maxElevation: 65535,
+    noDataValue: 9999,
+    noDataReplacement: 500,
+  });
+  assert.equal(overriddenGrid.minElevation, 1000);
+  assert.equal(overriddenGrid.maxElevation, 65535);
+  assert.equal(overriddenGrid.data[2], 500);
+
+  // Standard uint16 sentinel filtering when tag 42113 is absent
+  const untaggedBuffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    pixelData: new Uint16Array([500, 1000, 1500, 65535]),
+  });
+  const sentinelGrid = await parseGeoTIFFWithFallback(untaggedBuffer, {
+    minElevation: 0,
+    maxElevation: 65535,
+    filterStandardSentinels: true,
+  });
+  assert.equal(sentinelGrid.minElevation, 500);
+  assert.equal(sentinelGrid.maxElevation, 1500);
+  assert.equal(sentinelGrid.data[3], 500);
+});
+
+test('parseGeoTIFFWithFallback handles all-NoData rasters and corrupt tag 42113 strings gracefully', async () => {
+  // All pixels match GDAL_NODATA -> falls back to default elevation range [0, 10]
+  const allVoidBuffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    sampleFormat: 2,
+    noData: '-9999',
+    pixelData: new Int16Array([-9999, -9999, -9999, -9999]),
+  });
+
+  const allVoidGrid = await parseGeoTIFFWithFallback(allVoidBuffer);
+  assert.equal(allVoidGrid.minElevation, 0);
+  assert.equal(allVoidGrid.maxElevation, 10);
+  assert.deepEqual(Array.from(allVoidGrid.data), [0, 0, 0, 0]);
+  assert.deepEqual(computeMarchingSquares(allVoidGrid), []);
+
+  // Corrupt non-numeric ASCII string in tag 42113 -> ignored without failing decode
+  const corruptTagBuffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+    bitsPerSample: 8,
+    noData: 'NOT_A_NUMBER',
+    pixelData: new Uint8Array([0, 51, 102, 255]),
+  });
+
+  const corruptTagGrid = await parseGeoTIFFWithFallback(corruptTagBuffer, {
+    minElevation: 0,
+    maxElevation: 100,
+  });
+  assert.equal(Math.round(corruptTagGrid.minElevation), 0);
+  assert.equal(Math.round(corruptTagGrid.maxElevation), 100);
+
+  // Corrupt out-of-bounds ASCII offset in tag 42113 -> ignored safely
+  const badOffsetBuffer = createSyntheticGeoTIFF({
+    littleEndian: true,
+    width: 2,
+    height: 2,
+    bitsPerSample: 8,
+    noData: '-99999',
+    noDataOffsetOverride: 999999,
+    pixelData: new Uint8Array([0, 128, 255, 255]),
+  });
+  const badOffsetGrid = await parseGeoTIFFWithFallback(badOffsetBuffer, {
+    minElevation: 0,
+    maxElevation: 100,
+  });
+  assert.equal(Math.round(badOffsetGrid.minElevation), 0);
+  assert.equal(Math.round(badOffsetGrid.maxElevation), 100);
 });
 
 function referenceMultiPassMarchingSquares(grid, intervalOverride = null) {
