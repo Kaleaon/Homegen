@@ -153,6 +153,8 @@ test('renderInspector in app.js uses formRow for room inputs (i-name, i-type, i-
   assert.match(appJsContent, /formRow\(\s*'i-h',\s*'Depth \(ft\)'/);
   assert.match(appJsContent, /formRow\(\s*'i-ceil',\s*'Ceiling \(in\)'/);
   assert.match(appJsContent, /formRow\(\s*'i-otype',\s*'Style'/);
+  assert.match(appJsContent, /formRow\(\s*'dist-spacing-input',\s*'Spacing'/);
+  assert.match(appJsContent, /formRow\(\s*'dist-spacing-type',\s*'Mode'/);
 });
 
 test('inspector UV transform sliders and scope select in app.js use explicit ARIA labels', () => {

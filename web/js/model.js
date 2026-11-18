@@ -947,31 +947,57 @@ export function deserialize(text) {
   return s;
 }
 
-export function parseDistanceInInches(str) {
-  if (!str) return null;
-  str = String(str).trim().toLowerCase();
-  if (!str) return null;
-  if (str.includes('m') && !str.includes('ft')) {
-    if (str.includes('cm')) return parseFloat(str) * 0.393701;
-    return parseFloat(str) * 39.3701;
+function parseNumericToken(token) {
+  if (!token) return null;
+  const t = token.trim().replace(/^\+/, '');
+  const mixed = t.match(/^(\d+)\s*(?:\s+|-)\s*(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const den = parseFloat(mixed[3]);
+    return den !== 0 ? parseFloat(mixed[1]) + parseFloat(mixed[2]) / den : null;
   }
-  const hasFt = /'|ft|feet/.test(str);
-  const hasIn = /"|in|inches/.test(str);
+  const frac = t.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (frac) {
+    const den = parseFloat(frac[2]);
+    return den !== 0 ? parseFloat(frac[1]) / den : null;
+  }
+  const dec = t.match(/^(\d+(?:\.\d+)?)$/);
+  if (dec) return parseFloat(dec[1]);
+  return null;
+}
+
+const DIST_NUM_SRC =
+  '(?:\\+?\\d+\\s*(?:\\s+|-)\\s*\\d+\\s*\\/\\s*\\d+|\\+?\\d+\\s*\\/\\s*\\d+|\\+?\\d+(?:\\.\\d+)?)';
+
+export function parseDistanceInInches(str) {
+  if (str === null || str === undefined || str === '') return null;
+  str = String(str).trim().toLowerCase();
+  if (!str || str.startsWith('-')) return null;
+  const metricMatch = str.match(/^(\+?\d+(?:\.\d+)?)\s*(cm|mm|m)\b/);
+  if (metricMatch && !str.includes('ft')) {
+    const val = parseFloat(metricMatch[1]);
+    if (isNaN(val) || val <= 0) return null;
+    if (metricMatch[2] === 'cm') return val * 0.393701;
+    if (metricMatch[2] === 'mm') return val * 0.0393701;
+    return val * 39.3701;
+  }
+  const hasFt = /'|ft\b|feet\b/.test(str);
+  const hasIn = /"|in\b|inches\b/.test(str);
   if (hasFt) {
-    const ftMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:'|ft|feet)/);
+    const ftMatch = str.match(new RegExp(`(${DIST_NUM_SRC})\\s*(?:'|ft\\b|feet\\b)`));
     const inMatch =
-      str.match(/(\d+(?:\.\d+)?)\s*(?:"|in|inches)/) ||
-      str.match(/(?:'|ft|feet)\s*(\d+(?:\.\d+)?)/);
-    const feet = ftMatch ? parseFloat(ftMatch[1]) : 0;
-    const inches = inMatch ? parseFloat(inMatch[1]) : 0;
+      str.match(new RegExp(`(${DIST_NUM_SRC})\\s*(?:"|in\\b|inches\\b)`)) ||
+      str.match(new RegExp(`(?:'|ft\\b|feet\\b)\\s*(${DIST_NUM_SRC})`));
+    if (!ftMatch && !inMatch) return null;
+    const feet = ftMatch ? (parseNumericToken(ftMatch[1]) ?? 0) : 0;
+    const inches = inMatch ? (parseNumericToken(inMatch[1]) ?? 0) : 0;
     return feet * 12 + inches;
   }
   if (hasIn) {
-    const inMatch = str.match(/(\d+(?:\.\d+)?)/);
-    return inMatch ? parseFloat(inMatch[1]) : null;
+    const inMatch = str.match(new RegExp(`(${DIST_NUM_SRC})\\s*(?:"|in\\b|inches\\b)`));
+    return inMatch ? parseNumericToken(inMatch[1]) : null;
   }
-  const num = parseFloat(str);
-  if (isNaN(num) || num <= 0) return null;
+  const num = parseNumericToken(str);
+  if (num === null || isNaN(num) || num <= 0) return null;
   return num <= 50 ? num * 12 : num;
 }
 
@@ -1254,40 +1280,96 @@ export function alignItems(state, ids, alignment) {
   return true;
 }
 
-export function distributeItems(state, ids, direction) {
+export function distributeItems(state, ids, direction, spacing = null, spacingType = 'center') {
+  if (spacing !== null && typeof spacing === 'object') {
+    const opts = spacing;
+    spacingType = opts.spacingType ?? opts.type ?? opts.mode ?? 'center';
+    spacing = opts.spacing ?? opts.distance ?? null;
+  }
+
+  let resolvedSpacing = null;
+  if (typeof spacing === 'number') {
+    resolvedSpacing = Number.isFinite(spacing) && spacing > 0 ? spacing : null;
+  } else if (typeof spacing === 'string') {
+    const parsed = parseDistanceInInches(spacing);
+    resolvedSpacing =
+      typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
   const idArray = Array.from(ids || []);
   const boundsList = idArray.map((id) => getBounds(state, id)).filter((b) => b !== null);
 
-  if (boundsList.length < 3) return false;
+  const minCount = resolvedSpacing !== null ? 2 : 3;
+  if (boundsList.length < minCount) return false;
+
+  const isGap = spacingType === 'gap' || spacingType === 'edge' || spacingType === 'edge-to-edge';
 
   if (direction === 'horizontal') {
-    boundsList.sort((a, b) => a.cx - b.cx);
+    boundsList.sort((a, b) =>
+      isGap && resolvedSpacing !== null ? a.x - b.x || a.cx - b.cx : a.cx - b.cx
+    );
     const first = boundsList[0];
-    const last = boundsList[boundsList.length - 1];
-    const span = last.cx - first.cx;
-    const step = span / (boundsList.length - 1);
 
-    for (let i = 1; i < boundsList.length - 1; i++) {
-      const b = boundsList[i];
-      const hit = findOwner(state, b.id);
-      if (hit) {
-        setItemPosition(state, hit, first.cx + i * step, b.cy);
+    if (resolvedSpacing !== null) {
+      let prevRight = first.x + first.w;
+      for (let i = 1; i < boundsList.length; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        const targetCX = isGap
+          ? prevRight + resolvedSpacing + b.w / 2
+          : first.cx + i * resolvedSpacing;
+        if (hit) {
+          setItemPosition(state, hit, targetCX, b.cy);
+        }
+        prevRight = isGap ? prevRight + resolvedSpacing + b.w : targetCX + b.w / 2;
+      }
+    } else {
+      const last = boundsList[boundsList.length - 1];
+      const span = last.cx - first.cx;
+      const step = span / (boundsList.length - 1);
+
+      for (let i = 1; i < boundsList.length - 1; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        if (hit) {
+          setItemPosition(state, hit, first.cx + i * step, b.cy);
+        }
       }
     }
   } else if (direction === 'vertical') {
-    boundsList.sort((a, b) => a.cy - b.cy);
+    boundsList.sort((a, b) =>
+      isGap && resolvedSpacing !== null ? a.y - b.y || a.cy - b.cy : a.cy - b.cy
+    );
     const first = boundsList[0];
-    const last = boundsList[boundsList.length - 1];
-    const span = last.cy - first.cy;
-    const step = span / (boundsList.length - 1);
 
-    for (let i = 1; i < boundsList.length - 1; i++) {
-      const b = boundsList[i];
-      const hit = findOwner(state, b.id);
-      if (hit) {
-        setItemPosition(state, hit, b.cx, first.cy + i * step);
+    if (resolvedSpacing !== null) {
+      let prevBottom = first.y + first.h;
+      for (let i = 1; i < boundsList.length; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        const targetCY = isGap
+          ? prevBottom + resolvedSpacing + b.h / 2
+          : first.cy + i * resolvedSpacing;
+        if (hit) {
+          setItemPosition(state, hit, b.cx, targetCY);
+        }
+        prevBottom = isGap ? prevBottom + resolvedSpacing + b.h : targetCY + b.h / 2;
+      }
+    } else {
+      const last = boundsList[boundsList.length - 1];
+      const span = last.cy - first.cy;
+      const step = span / (boundsList.length - 1);
+
+      for (let i = 1; i < boundsList.length - 1; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        if (hit) {
+          setItemPosition(state, hit, b.cx, first.cy + i * step);
+        }
       }
     }
+  } else {
+    return false;
   }
 
   return true;
