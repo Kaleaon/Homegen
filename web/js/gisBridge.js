@@ -221,8 +221,7 @@ export class SpatialRTree {
 
     const roomBounds = getBounds(pts);
     const searchCandidates = this.search(roomBounds);
-    const candidates =
-      searchCandidates.length > 0 ? searchCandidates : this.items.map((i) => i.item);
+    const candidates = searchCandidates;
     const violations = [];
 
     for (const cand of candidates) {

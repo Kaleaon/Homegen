@@ -124,6 +124,71 @@ test('Requirement 2: SpatialRTree spatial query execution speed is < 5 milliseco
   );
 });
 
+test('Requirement 2: SpatialRTree spatial miss returns empty array quickly without full dataset scan', () => {
+  const tree = new SpatialRTree();
+  let polygonAccessCount = 0;
+
+  // Populate R-tree with 1,000 multi-vertex polygon features across a grid
+  for (let i = 0; i < 1000; i++) {
+    const x = (i % 25) * 200;
+    const y = Math.floor(i / 25) * 200;
+    const poly = [
+      { x, y },
+      { x: x + 120, y },
+      { x: x + 120, y: y + 120 },
+      { x, y: y + 120 },
+    ];
+    const feature = {
+      id: `feature-${i}`,
+      type: 'gisSetbackBuffer',
+      get polygon() {
+        polygonAccessCount++;
+        return poly;
+      },
+    };
+    tree.insert(feature, { minX: x, minY: y, maxX: x + 120, maxY: y + 120 });
+  }
+
+  let itemsMapCalls = 0;
+  const origMap = tree.items.map.bind(tree.items);
+  tree.items.map = (...args) => {
+    itemsMapCalls++;
+    return origMap(...args);
+  };
+
+  // Query 1: Room placed completely outside all site boundaries (array form)
+  const outsideRoomPoly = [
+    { x: 9000, y: 9000 },
+    { x: 9120, y: 9000 },
+    { x: 9120, y: 9120 },
+    { x: 9000, y: 9120 },
+  ];
+
+  // Query 2: Room placed within a clear zone between disjoint features (rect object form)
+  const clearZoneRoomRect = { x: 130, y: 130, w: 60, h: 60 };
+
+  const t0 = performance.now();
+  for (let run = 0; run < 100; run++) {
+    const outsideViolations = tree.querySetbackViolations(outsideRoomPoly);
+    assert.deepEqual(outsideViolations, []);
+
+    const clearZoneViolations = tree.querySetbackViolations(clearZoneRoomRect);
+    assert.deepEqual(clearZoneViolations, []);
+  }
+  const avgQueryTime = (performance.now() - t0) / 200;
+
+  assert.equal(itemsMapCalls, 0, 'Spatial search miss must not fall back to this.items.map');
+  assert.equal(
+    polygonAccessCount,
+    0,
+    'Spatial search miss must not run point-in-polygon checks on unrelated site features'
+  );
+  assert.ok(
+    avgQueryTime < 5,
+    `Average spatial miss query time (${avgQueryTime.toFixed(3)}ms) must be under 5ms`
+  );
+});
+
 test('Requirement 3: evaluate() flags GIS site boundary setback violations', () => {
   const state = newState();
   state.rooms = [
@@ -132,8 +197,8 @@ test('Requirement 3: evaluate() flags GIS site boundary setback violations', () 
       name: 'Living Room',
       level: 0,
       type: 'living',
-      x: 10, // Outside inner buildable area
-      y: 10,
+      x: 290, // Outside inner buildable area [319.83..880.17, 236..764], overlapping setback buffer
+      y: 210,
       w: 120,
       h: 120,
       openings: [],
@@ -155,6 +220,50 @@ test('Requirement 3: evaluate() flags GIS site boundary setback violations', () 
   );
   assert.equal(setbackViolations[0].ref, 'Zoning / Site Code');
   assert.equal(setbackViolations[0].roomId, 'r1');
+});
+
+test('Requirement 3: evaluate() returns empty setback violations for rooms outside site boundaries or inside clear zone', () => {
+  const state = newState();
+  state.rooms = [
+    {
+      id: 'r-outside',
+      name: 'Detached Studio',
+      level: 0,
+      type: 'living',
+      x: 10, // Outside all site boundaries (spatial search miss)
+      y: 10,
+      w: 120,
+      h: 120,
+      openings: [],
+      items: [],
+    },
+    {
+      id: 'r-clear',
+      name: 'Bedroom',
+      level: 0,
+      type: 'bedroom',
+      x: 400, // Inside clear buildable zone [319.83..880.17, 236..764]
+      y: 300,
+      w: 120,
+      h: 120,
+      openings: [],
+      items: [],
+    },
+  ];
+
+  const bridge = new GISBridge();
+  state.site = bridge.importGeoJSON(SAMPLE_GEOJSON, {
+    targetBounds: { x: 200, y: 200, w: 800, h: 600 },
+  });
+
+  const report = evaluate(state);
+  const setbackViolations = report.violations.filter((v) => v.rule === 'setback-clearance');
+
+  assert.deepEqual(
+    setbackViolations,
+    [],
+    'evaluate() must not report setback-clearance violations for non-overlapping or clear-zone rooms'
+  );
 });
 
 test('Requirement 4: ComplianceOverlayScene registers site layer nodes (gisLotLine, gisEasement, gisSetbackBuffer)', () => {
