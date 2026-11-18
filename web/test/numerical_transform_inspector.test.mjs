@@ -137,7 +137,7 @@ function createInspectorDomHarness() {
   };
 }
 
-const waitForLiveAnnouncement = () => new Promise((resolve) => setTimeout(resolve, 140));
+const waitForLiveAnnouncement = () => new Promise((resolve) => setTimeout(resolve, 260));
 
 test('formatNumericInput formats inch, angle, and scale floats without rounding drift', () => {
   assert.equal(formatNumericInput(60), '60');

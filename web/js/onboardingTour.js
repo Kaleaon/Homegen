@@ -186,6 +186,33 @@ export class OnboardingTour {
     this.ringEl = overlay.querySelector('.onboarding-focus-ring');
     this.announcerEl = overlay.querySelector('#spotlight-live-announcer');
 
+    const absorbBackdropEvent = (e) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+    };
+
+    const handleOverlayEvent = (e) => {
+      const path = typeof e?.composedPath === 'function' ? e.composedPath() : null;
+      const isInsidePopover =
+        Boolean(this.popoverEl) &&
+        ((Array.isArray(path) && path.includes(this.popoverEl)) ||
+          e?.target === this.popoverEl ||
+          (typeof this.popoverEl.contains === 'function' &&
+            Boolean(e?.target) &&
+            this.popoverEl.contains(e.target)));
+
+      if (!isInsidePopover) {
+        e?.preventDefault?.();
+      }
+      e?.stopPropagation?.();
+    };
+
+    for (const evtType of ['click', 'pointerdown', 'mousedown', 'touchstart']) {
+      this.svgEl?.addEventListener(evtType, absorbBackdropEvent);
+      this.popoverEl?.addEventListener(evtType, (e) => e?.stopPropagation?.());
+      overlay.addEventListener(evtType, handleOverlayEvent);
+    }
+
     const closeBtn = overlay.querySelector('.spotlight-close');
     const skipBtn = overlay.querySelector('.spotlight-btn-skip');
     const backBtn = overlay.querySelector('.spotlight-btn-back');
@@ -443,6 +470,10 @@ export class OnboardingTour {
       this.overlayEl.remove();
       this.overlayEl = null;
     }
+    this.popoverEl = null;
+    this.svgEl = null;
+    this.pathEl = null;
+    this.ringEl = null;
     this.announcerEl = null;
 
     this.restoreBackgroundInert();

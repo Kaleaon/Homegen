@@ -4,84 +4,16 @@
  * variable segment setbacks, and site layer scene graph geometries.
  */
 
-import { reproject } from './geometry.js';
+import {
+  reproject,
+  getBounds,
+  boundsOverlap,
+  pointInPolygon,
+  lineIntersection,
+  polygonArea,
+} from './geometry.js';
 
-/**
- * 2D Minimum Bounding Rectangle helper.
- */
-export function getBounds(pts) {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  if (Array.isArray(pts)) {
-    for (const p of pts) {
-      const x = p.x !== undefined ? p.x : p[0];
-      const y = p.y !== undefined ? p.y : p[1];
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  } else if (pts && typeof pts === 'object') {
-    minX = pts.x ?? pts.minX ?? 0;
-    minY = pts.y ?? pts.minY ?? 0;
-    maxX = pts.w !== undefined ? minX + pts.w : (pts.maxX ?? minX);
-    maxY = pts.h !== undefined ? minY + pts.h : (pts.maxY ?? minY);
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-export function boundsOverlap(a, b, eps = 0.001) {
-  return (
-    a.minX < b.maxX + eps && a.maxX > b.minX - eps && a.minY < b.maxY + eps && a.maxY > b.minY - eps
-  );
-}
-
-export function pointInPolygon(p, poly) {
-  let inside = false;
-  const px = p.x ?? p[0];
-  const py = p.y ?? p[1];
-  const n = poly.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = poly[i].x ?? poly[i][0];
-    const yi = poly[i].y ?? poly[i][1];
-    const xj = poly[j].x ?? poly[j][0];
-    const yj = poly[j].y ?? poly[j][1];
-
-    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-export function lineIntersection(a1, a2, b1, b2) {
-  const dx1 = a2.x - a1.x;
-  const dy1 = a2.y - a1.y;
-  const dx2 = b2.x - b1.x;
-  const dy2 = b2.y - b1.y;
-
-  const denom = dx1 * dy2 - dy1 * dx2;
-  if (Math.abs(denom) < 1e-9) return null;
-
-  const t1 = ((b1.x - a1.x) * dy2 - (b1.y - a1.y) * dx2) / denom;
-  return {
-    x: a1.x + t1 * dx1,
-    y: a1.y + t1 * dy1,
-  };
-}
-
-export function polygonArea(poly) {
-  let area = 0;
-  const n = poly.length;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const pi = poly[i];
-    const pj = poly[j];
-    area += pi.x * pj.y - pj.x * pi.y;
-  }
-  return area / 2;
-}
+export { getBounds, boundsOverlap, pointInPolygon, lineIntersection, polygonArea };
 
 /**
  * 2D R-tree spatial index implementation.
@@ -95,28 +27,11 @@ export class SpatialRTree {
       leaf: true,
     };
     this.items = [];
-    this._setbackItems = [];
-    this._lotItems = [];
   }
 
   insert(item, bounds) {
     const nodeItem = { item, bounds };
     this.items.push(nodeItem);
-    if (item && typeof item === 'object') {
-      if (
-        item.type === 'setbackBuffer' ||
-        item.type === 'gisSetbackBuffer' ||
-        item.layerType === 'gisSetbackBuffer'
-      ) {
-        this._setbackItems.push(item);
-      } else if (
-        item.type === 'lotLine' ||
-        item.type === 'gisLotLine' ||
-        item.layerType === 'gisLotLine'
-      ) {
-        this._lotItems.push(item);
-      }
-    }
     this._insertNode(this.root, nodeItem);
   }
 
@@ -238,6 +153,16 @@ export class SpatialRTree {
 
     const roomBounds = getBounds(pts);
     const searchCandidates = this.search(roomBounds);
+    if (searchCandidates.length === 0) {
+      const duration =
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime;
+      if (duration > 5) {
+        console.warn(
+          `[GISBridge] Spatial query execution exceeded target time: ${duration.toFixed(2)}ms`
+        );
+      }
+      return [];
+    }
     const violations = [];
 
     const isSetbackItem = (cand) =>
@@ -249,29 +174,27 @@ export class SpatialRTree {
       cand &&
       (cand.type === 'lotLine' || cand.type === 'gisLotLine' || cand.layerType === 'gisLotLine');
 
-    let setbackCandidates = searchCandidates.filter(isSetbackItem);
-    if (setbackCandidates.length === 0 && this._setbackItems.length > 0) {
-      setbackCandidates = [this._setbackItems[0]];
-    }
-
-    let lotCandidates = searchCandidates.filter(isLotItem);
-    if (lotCandidates.length === 0 && this._lotItems.length > 0) {
-      lotCandidates = [this._lotItems[0]];
-    }
+    const setbackCandidates = searchCandidates.filter(isSetbackItem);
+    const lotCandidates = searchCandidates.filter(isLotItem);
 
     const buildableRings = [];
+    const seenBuildable = new Set();
     for (const cand of setbackCandidates) {
       if (Array.isArray(cand.rings) && cand.rings.length > 0) {
         for (const ring of cand.rings) {
           const ringInner = ring.innerPoints || ring.innerPolygon;
-          if (ringInner && ringInner.length >= 3) {
+          if (ringInner && ringInner.length >= 3 && !seenBuildable.has(ringInner)) {
+            seenBuildable.add(ringInner);
             buildableRings.push({ id: ring.id || cand.id, innerPoly: ringInner });
           }
         }
       } else {
         const innerPoly = cand.innerPoints || cand.innerPolygon;
         if (innerPoly && innerPoly.length >= 3) {
-          buildableRings.push({ id: cand.id, innerPoly });
+          if (!seenBuildable.has(innerPoly)) {
+            seenBuildable.add(innerPoly);
+            buildableRings.push({ id: cand.id, innerPoly });
+          }
         } else if (cand.polygon && cand.polygon.length >= 3) {
           for (const pt of pts) {
             if (pointInPolygon(pt, cand.polygon)) {
@@ -301,10 +224,22 @@ export class SpatialRTree {
     }
 
     const validLotRings = [];
+    const seenLot = new Set();
     for (const cand of lotCandidates) {
-      const lotPoly = cand.points || cand.polygon;
-      if (lotPoly && lotPoly.length >= 3) {
-        validLotRings.push({ id: cand.id, lotPoly });
+      if (Array.isArray(cand.rings) && cand.rings.length > 0) {
+        for (const ring of cand.rings) {
+          const ringPoly = ring.points || ring.polygon;
+          if (ringPoly && ringPoly.length >= 3 && !seenLot.has(ringPoly)) {
+            seenLot.add(ringPoly);
+            validLotRings.push({ id: ring.id || cand.id, lotPoly: ringPoly });
+          }
+        }
+      } else {
+        const lotPoly = cand.points || cand.polygon;
+        if (lotPoly && lotPoly.length >= 3 && !seenLot.has(lotPoly)) {
+          seenLot.add(lotPoly);
+          validLotRings.push({ id: cand.id, lotPoly });
+        }
       }
     }
 
@@ -686,7 +621,7 @@ function groupSegmentsByRingLoop(segments) {
  */
 function computeSingleRingBuffer(ringSegments, layerId, ringId = null) {
   const outerPoints = ringSegments.map((s) => s.p1);
-  const isCCW = polygonArea(outerPoints) > 0;
+  const isCCW = polygonArea(outerPoints, true) > 0;
 
   const offsetLines = ringSegments.map((s) => {
     const p1 = s.p1;
@@ -806,9 +741,56 @@ export function buildSpatialIndex(siteOrFeatures) {
     layers = siteOrFeatures;
   }
 
+  const lotGroups = new Map();
+  const setbackByRingId = new Map();
+
   for (const layer of layers) {
     const bounds = layer.bounds || getBounds(layer.points || layer.innerPoints || []);
     tree.insert(layer, bounds);
+
+    if (layer && layer.type === 'gisLotLine' && layer.parentId) {
+      if (!lotGroups.has(layer.parentId)) lotGroups.set(layer.parentId, []);
+      lotGroups.get(layer.parentId).push({ layer, bounds });
+    } else if (layer && layer.type === 'gisSetbackBuffer' && layer.ringId) {
+      setbackByRingId.set(layer.ringId, { layer, bounds });
+    }
+  }
+
+  for (const [parentId, entries] of lotGroups.entries()) {
+    if (entries.length > 1) {
+      const unionLotBounds = {
+        minX: Math.min(...entries.map((e) => e.bounds.minX)),
+        minY: Math.min(...entries.map((e) => e.bounds.minY)),
+        maxX: Math.max(...entries.map((e) => e.bounds.maxX)),
+        maxY: Math.max(...entries.map((e) => e.bounds.maxY)),
+      };
+      tree.insert(
+        {
+          id: parentId,
+          type: 'gisLotLine',
+          rings: entries.map((e) => e.layer),
+        },
+        unionLotBounds
+      );
+
+      const setbackEntries = entries.map((e) => setbackByRingId.get(e.layer.id)).filter(Boolean);
+      if (setbackEntries.length > 0) {
+        const unionSetbackBounds = {
+          minX: Math.min(...setbackEntries.map((e) => e.bounds.minX)),
+          minY: Math.min(...setbackEntries.map((e) => e.bounds.minY)),
+          maxX: Math.max(...setbackEntries.map((e) => e.bounds.maxX)),
+          maxY: Math.max(...setbackEntries.map((e) => e.bounds.maxY)),
+        };
+        tree.insert(
+          {
+            id: `${parentId}-setback-buffer`,
+            type: 'gisSetbackBuffer',
+            rings: setbackEntries.map((e) => e.layer),
+          },
+          unionSetbackBounds
+        );
+      }
+    }
   }
 
   return tree;

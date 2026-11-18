@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleCadWorkerMessage } from '../js/cadWorker.js';
+import { handleCadWorkerMessage, computeMarchingSquaresWorker } from '../js/cadWorker.js';
 import { CadWorkerClient } from '../js/cadWorkerClient.js';
 import { SnappingBridge } from '../js/snapping-bridge.js';
-import { ElevationGrid, computeContoursAsync } from '../js/elevationEngine.js';
+import {
+  ElevationGrid,
+  computeContoursAsync,
+  computeMarchingSquares,
+} from '../js/elevationEngine.js';
 import { InteractionLayer } from '../../designer3d/tools/index.mjs';
 
 test('cadWorker direct message handler processes COMPUTE_SNAP with Float32Array transferable payload', () => {
@@ -137,4 +141,97 @@ test('computeContoursAsync delegates isoline Marching Squares calculation to Cad
   assert.ok(Array.isArray(contours));
   assert.ok(contours.length > 0);
   assert.equal(contours[0].elevation, 2);
+});
+
+test('computeMarchingSquaresWorker matches computeMarchingSquares across flat, uniform, multi-interval, and complex grids', () => {
+  const bounds = { minX: -300, maxX: 300, minY: -300, maxY: 300 };
+
+  // 1. Flat grid at contour level
+  const flatData = new Float32Array(25).fill(6.0);
+  assert.deepEqual(computeMarchingSquaresWorker(flatData, 5, 5, 0, 12, bounds, 3.0), []);
+
+  // 2. Uniform slope grid
+  const uw = 12;
+  const uh = 10;
+  const uniformData = new Float32Array(uw * uh);
+  for (let y = 0; y < uh; y++) {
+    for (let x = 0; x < uw; x++) {
+      uniformData[y * uw + x] = x * 1.5 + y * 0.5;
+    }
+  }
+  const uniformGrid = new ElevationGrid({
+    width: uw,
+    height: uh,
+    data: uniformData,
+    minElevation: 0,
+    maxElevation: 22,
+    contourInterval: 2.0,
+    bounds,
+  });
+  const workerUniform = handleCadWorkerMessage({
+    data: {
+      type: 'COMPUTE_ISOLINES',
+      reqId: 101,
+      payload: {
+        gridData: uniformGrid.data,
+        width: uw,
+        height: uh,
+        minElevation: 0,
+        maxElevation: 22,
+        bounds,
+        interval: 2.0,
+      },
+    },
+  });
+  assert.equal(workerUniform.type, 'ISOLINES_RESULT');
+  assert.deepEqual(workerUniform.contours, computeMarchingSquares(uniformGrid, 2.0));
+
+  // 3. Complex heightmap with steep cliffs, saddle points, floating-point interval, and out-of-range cells
+  const cw = 32;
+  const ch = 32;
+  const complexData = new Float32Array(cw * ch);
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      complexData[y * cw + x] =
+        8 * Math.sin(x * 0.45) * Math.cos(y * 0.45) + (x > 20 ? 15 : 0) + y * 0.1;
+    }
+  }
+  complexData[0] = -80;
+  complexData[cw * ch - 1] = 120;
+
+  const complexGrid = new ElevationGrid({
+    width: cw,
+    height: ch,
+    data: complexData,
+    minElevation: -6,
+    maxElevation: 24,
+    contourInterval: 0.3,
+    bounds,
+  });
+
+  const workerComplex = computeMarchingSquaresWorker(complexGrid.data, cw, ch, -6, 24, bounds, 0.3);
+  assert.deepEqual(workerComplex, computeMarchingSquares(complexGrid, 0.3));
+
+  // Verify single-pass O(W * H) cell scan independent of contour level count
+  let workerReads = 0;
+  const trackedWorkerData = new Proxy(complexGrid.data, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && prop !== 'length' && !Number.isNaN(Number(prop))) {
+        workerReads++;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
+  const trackedResult = computeMarchingSquaresWorker(
+    trackedWorkerData,
+    cw,
+    ch,
+    -6,
+    24,
+    bounds,
+    0.3
+  );
+  assert.equal(trackedResult.length, workerComplex.length);
+  assert.equal(workerReads, (cw - 1) * (ch - 1) * 4);
 });
