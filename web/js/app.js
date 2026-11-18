@@ -65,6 +65,7 @@ import {
   resolveDoorStyle,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
+import { defaultRateLimiter } from './rateLimiter.js';
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
@@ -231,6 +232,133 @@ function announceToLiveRegion(msg) {
   liveRegionTimeout = setTimeout(() => {
     liveEl.textContent = msg;
   }, 100);
+}
+
+export function bindHeaderQuotaBadge(
+  limiter = defaultRateLimiter,
+  root = typeof document !== 'undefined' ? document : null,
+  options = {}
+) {
+  if (!root || typeof root.querySelector !== 'function') {
+    return { update: () => {}, destroy: () => {} };
+  }
+  const q = (sel) => root.querySelector(sel);
+  const badgeEl = q('#header-quota-badge');
+  const countEl = q('#header-quota-count');
+  const queueEl = q('#header-quota-queue');
+  const upgradeBtnEl = q('#header-quota-upgrade');
+
+  const getStoredKey =
+    options.getStoredKey ||
+    (() => {
+      const pKey = q('#p-key');
+      if (pKey && typeof pKey.value === 'string' && pKey.value.trim()) {
+        return pKey.value.trim();
+      }
+      try {
+        if (typeof localStorage !== 'undefined') {
+          return (localStorage.getItem('homegen.horde.key') || '').trim();
+        }
+      } catch {
+        /* ignore storage restrictions */
+      }
+      return '';
+    });
+
+  function update(state = limiter.getQuotaState('sync')) {
+    const tokens = state?.tokens ?? state?.remaining ?? limiter.tokens ?? 0;
+    const capacity = state?.capacity ?? limiter.capacity ?? 0;
+    const queuedCount = state?.queuedCount ?? state?.queueLength ?? limiter.queue?.length ?? 0;
+    const status =
+      state?.status ??
+      (tokens <= 0
+        ? 'exhausted'
+        : capacity > 1 && tokens < capacity && tokens <= Math.max(1, Math.ceil(capacity * 0.2))
+          ? 'low'
+          : tokens >= capacity
+            ? 'full'
+            : 'available');
+    const isLow = status === 'low';
+    const isExhausted = status === 'exhausted';
+    const storedKey = getStoredKey();
+    const upgraded = Boolean(storedKey && storedKey !== '0000000000');
+
+    if (badgeEl) {
+      if (badgeEl.dataset) badgeEl.dataset.quotaState = status;
+      else if (typeof badgeEl.setAttribute === 'function')
+        badgeEl.setAttribute('data-quota-state', status);
+      badgeEl.classList?.toggle('quota-full', status === 'full');
+      badgeEl.classList?.toggle('quota-low', isLow);
+      badgeEl.classList?.toggle('quota-exhausted', isExhausted);
+    }
+
+    if (countEl) {
+      countEl.textContent = `${tokens} / ${capacity} credits`;
+    }
+
+    if (queueEl) {
+      if (queuedCount > 0) {
+        queueEl.hidden = false;
+        queueEl.textContent = `${queuedCount} queued`;
+      } else {
+        queueEl.hidden = true;
+        queueEl.textContent = '';
+      }
+    }
+
+    if (upgradeBtnEl) {
+      upgradeBtnEl.classList?.toggle('upgraded', upgraded && !isLow && !isExhausted);
+      upgradeBtnEl.classList?.toggle('quota-upgrade-urgent', isLow || isExhausted);
+      if (isExhausted) {
+        upgradeBtnEl.textContent = 'Refilling…';
+      } else if (isLow) {
+        upgradeBtnEl.textContent = upgraded ? 'Low Credits' : 'Upgrade';
+      } else {
+        upgradeBtnEl.textContent = upgraded ? 'HD Key' : 'Upgrade';
+      }
+    }
+  }
+
+  const onUpgradeClick = () => {
+    if (typeof options.onUpgrade === 'function') {
+      options.onUpgrade(upgradeBtnEl);
+    }
+  };
+
+  if (upgradeBtnEl && typeof upgradeBtnEl.addEventListener === 'function') {
+    upgradeBtnEl.addEventListener('click', onUpgradeClick);
+  }
+
+  const unsubscribe =
+    typeof limiter.onQuotaChange === 'function'
+      ? limiter.onQuotaChange((detail) => update(detail))
+      : (() => {
+          const handler = (evt) => update(evt.detail);
+          limiter.addEventListener?.('quota-change', handler);
+          return () => limiter.removeEventListener?.('quota-change', handler);
+        })();
+
+  const onKeySync = () => update();
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('horde-key-change', onKeySync);
+    window.addEventListener('storage', onKeySync);
+  }
+
+  update(limiter.getQuotaState('init'));
+
+  return {
+    update,
+    destroy() {
+      unsubscribe();
+      if (upgradeBtnEl && typeof upgradeBtnEl.removeEventListener === 'function') {
+        upgradeBtnEl.removeEventListener('click', onUpgradeClick);
+      }
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('horde-key-change', onKeySync);
+        window.removeEventListener('storage', onKeySync);
+      }
+    },
+  };
 }
 
 function persist() {
@@ -4670,6 +4798,9 @@ if (typeof window !== 'undefined') {
     interaction,
     snappingBridge,
   });
+  bindHeaderQuotaBadge(defaultRateLimiter, document, {
+    onUpgrade: (btn) => view3d?.openQuotaUpgrade?.(btn),
+  });
 
   function toggleHistoryPopover() {
     const popover = $('#history-popover');
@@ -5678,4 +5809,6 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     SAMPLE_MUNICIPAL_GIS,
+    bindHeaderQuotaBadge,
+    defaultRateLimiter,
   };

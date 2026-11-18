@@ -9,10 +9,129 @@ import {
   hordeWidth,
   toWebpDataUrl,
 } from './photoreal.js';
+import { defaultRateLimiter } from './rateLimiter.js';
 import { getSnappedPoint3D } from '../../designer3d/tools/index.mjs';
 
-const $ = (s) => document.querySelector(s);
+const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const KEY = 'homegen.horde.key';
+
+export function bindPhotorealQuotaBadge(
+  limiter = defaultRateLimiter,
+  root = typeof document !== 'undefined' ? document : null
+) {
+  if (!root || typeof root.querySelector !== 'function') {
+    return { update: () => {}, destroy: () => {} };
+  }
+  const q = (sel) => root.querySelector(sel);
+  const badgeEl = q('#photo-quota-badge');
+  const countEl = q('#photo-quota-count');
+  const queueEl = q('#photo-quota-queue');
+  const tierEl = q('#photo-quota-tier');
+  const upgradeWrapEl = q('#photo-quota-upgrade-wrap');
+  const upgradeBtnEl = q('#photo-quota-upgrade');
+  const keyInputEl = q('#p-key');
+
+  function hasUpgradedKey() {
+    const rawKey =
+      keyInputEl && typeof keyInputEl.value === 'string' ? keyInputEl.value.trim() : '';
+    return Boolean(rawKey && rawKey !== '0000000000');
+  }
+
+  function update(state = limiter.getQuotaState('sync')) {
+    const tokens = state?.tokens ?? state?.remaining ?? limiter.tokens ?? 0;
+    const capacity = state?.capacity ?? limiter.capacity ?? 0;
+    const queuedCount = state?.queuedCount ?? state?.queueLength ?? limiter.queue?.length ?? 0;
+    const status =
+      state?.status ??
+      (tokens <= 0
+        ? 'exhausted'
+        : capacity > 1 && tokens < capacity && tokens <= Math.max(1, Math.ceil(capacity * 0.2))
+          ? 'low'
+          : tokens >= capacity
+            ? 'full'
+            : 'available');
+    const isLow = status === 'low';
+    const isExhausted = status === 'exhausted';
+    const upgraded = hasUpgradedKey();
+
+    if (badgeEl) {
+      if (badgeEl.dataset) badgeEl.dataset.quotaState = status;
+      else if (typeof badgeEl.setAttribute === 'function')
+        badgeEl.setAttribute('data-quota-state', status);
+      badgeEl.classList?.toggle('quota-full', status === 'full');
+      badgeEl.classList?.toggle('quota-low', isLow);
+      badgeEl.classList?.toggle('quota-exhausted', isExhausted);
+    }
+
+    if (countEl) {
+      countEl.textContent = `${tokens} / ${capacity} credits`;
+    }
+
+    if (queueEl) {
+      if (queuedCount > 0) {
+        queueEl.hidden = false;
+        queueEl.textContent = `${queuedCount} queued`;
+      } else {
+        queueEl.hidden = true;
+        queueEl.textContent = '';
+      }
+    }
+
+    if (tierEl) {
+      tierEl.textContent = upgraded ? 'Priority HD · 768px' : 'Anonymous · 576px';
+      tierEl.classList?.toggle('upgraded', upgraded);
+    }
+
+    if (upgradeWrapEl) {
+      upgradeWrapEl.hidden = upgraded && !isLow && !isExhausted;
+    }
+
+    if (upgradeBtnEl) {
+      upgradeBtnEl.classList?.toggle('quota-upgrade-urgent', isLow || isExhausted);
+      if (isExhausted) {
+        upgradeBtnEl.textContent = upgraded
+          ? 'Quota Exhausted · Refilling'
+          : 'Quota Exhausted · Add Key';
+      } else if (isLow) {
+        upgradeBtnEl.textContent = upgraded ? 'Low Credits · Manage Key' : 'Low Credits · Upgrade';
+      } else {
+        upgradeBtnEl.textContent = upgraded ? 'Manage HD Key' : 'Add HD Key';
+      }
+    }
+  }
+
+  const onUpgradeClick = () => {
+    if (keyInputEl) {
+      if (typeof keyInputEl.focus === 'function') keyInputEl.focus();
+      if (typeof keyInputEl.select === 'function') keyInputEl.select();
+    }
+  };
+
+  if (upgradeBtnEl && typeof upgradeBtnEl.addEventListener === 'function') {
+    upgradeBtnEl.addEventListener('click', onUpgradeClick);
+  }
+
+  const unsubscribe =
+    typeof limiter.onQuotaChange === 'function'
+      ? limiter.onQuotaChange((detail) => update(detail))
+      : (() => {
+          const handler = (evt) => update(evt.detail);
+          limiter.addEventListener?.('quota-change', handler);
+          return () => limiter.removeEventListener?.('quota-change', handler);
+        })();
+
+  update(limiter.getQuotaState('init'));
+
+  return {
+    update,
+    destroy() {
+      unsubscribe();
+      if (upgradeBtnEl && typeof upgradeBtnEl.removeEventListener === 'function') {
+        upgradeBtnEl.removeEventListener('click', onUpgradeClick);
+      }
+    },
+  };
+}
 
 export function initView3D({
   getDoc,
@@ -22,6 +141,7 @@ export function initView3D({
   setLevel,
   interaction,
   _snappingBridge,
+  rateLimiter = defaultRateLimiter,
 }) {
   let api = null;
   let mode = '2d';
@@ -374,6 +494,14 @@ export function initView3D({
     (r) =>
       `<li><a href="${r.url}" target="_blank" rel="noopener">${r.name}</a>${r.license ? ` · <b>${r.license}</b>` : ''}<small>${r.group} — ${r.note}</small></li>`
   ).join('');
+  const photoQuota = bindPhotorealQuotaBadge(rateLimiter, document);
+  const notifyKeyChange = () => {
+    photoQuota.update();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      const val = $('#p-key')?.value?.trim() || '';
+      window.dispatchEvent(new CustomEvent('horde-key-change', { detail: { key: val } }));
+    }
+  };
 
   const rooms = () => getDoc().rooms;
   const selectedRoom = () => rooms().find((r) => r.id === $('#p-room').value) || rooms()[0];
@@ -442,6 +570,7 @@ export function initView3D({
     }
     capture();
     clearPhotorealError();
+    photoQuota.update();
     overrideResolution = null;
     $('#p-status').textContent =
       'Tip: press “Eye level” in the room you want, then re-capture, for a photo-like angle.';
@@ -450,6 +579,42 @@ export function initView3D({
     const pRoom = $('#p-room');
     if (pRoom && typeof pRoom.focus === 'function') {
       pRoom.focus();
+    }
+  }
+
+  async function openQuotaUpgrade(triggerButton) {
+    if (rooms().length > 0) {
+      if (mode !== '3d') {
+        await setView('3d');
+      }
+      if (api) {
+        openPhoto({ currentTarget: triggerButton || $('#header-quota-upgrade') || $('#o-photo') });
+        const keyInput = $('#p-key');
+        if (keyInput && typeof keyInput.focus === 'function') {
+          keyInput.focus();
+        }
+        return;
+      }
+    }
+    triggerEl = triggerButton || $('#header-quota-upgrade') || $('#o-photo');
+    clearPhotorealError();
+    photoQuota.update();
+    $('#p-status').textContent = rooms().length
+      ? 'Enter a free AI Horde API key below for priority 768px HD renders.'
+      : 'Add a free AI Horde API key below for priority 768px HD renders once you draw a room.';
+    $('#p-result').hidden = true;
+    if (typeof dlg.showModal === 'function') {
+      try {
+        dlg.showModal();
+      } catch {
+        dlg.setAttribute('open', '');
+      }
+    } else {
+      dlg.setAttribute('open', '');
+    }
+    const keyInput = $('#p-key');
+    if (keyInput && typeof keyInput.focus === 'function') {
+      keyInput.focus();
     }
   }
 
@@ -466,7 +631,23 @@ export function initView3D({
     }
   });
 
-  $('#p-key').addEventListener('input', () => $('#p-key').classList.remove('invalid', 'error'));
+  $('#p-key').addEventListener('input', () => {
+    $('#p-key').classList.remove('invalid', 'error');
+    try {
+      localStorage.setItem(KEY, $('#p-key').value.trim());
+    } catch {
+      /* ignore */
+    }
+    notifyKeyChange();
+  });
+  $('#p-key').addEventListener('change', () => {
+    try {
+      localStorage.setItem(KEY, $('#p-key').value.trim());
+    } catch {
+      /* ignore */
+    }
+    notifyKeyChange();
+  });
   $('#p-room').addEventListener('change', () => {
     const r = selectedRoom();
     setLevel(r.level || 0);
@@ -535,6 +716,7 @@ export function initView3D({
     } catch {
       /* ignore */
     }
+    notifyKeyChange();
     const width = overrideResolution ?? hordeWidth(key);
     abort = new AbortController();
     btn.textContent = 'Cancel AI Horde job';
@@ -587,6 +769,7 @@ export function initView3D({
     } catch {
       /* ignore */
     }
+    notifyKeyChange();
     clearPhotorealError();
     runHordeRender();
   });
@@ -596,5 +779,10 @@ export function initView3D({
     runHordeRender();
   });
 
-  return { setView, isThree: () => mode === '3d' };
+  return {
+    setView,
+    isThree: () => mode === '3d',
+    openQuotaUpgrade,
+    updateQuotaBadge: () => photoQuota.update(),
+  };
 }

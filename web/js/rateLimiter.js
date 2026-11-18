@@ -1,7 +1,30 @@
+const BaseEventTarget =
+  typeof EventTarget !== 'undefined'
+    ? EventTarget
+    : class {
+        constructor() {
+          this._listeners = new Map();
+        }
+        addEventListener(type, fn) {
+          if (!this._listeners.has(type)) this._listeners.set(type, new Set());
+          this._listeners.get(type).add(fn);
+        }
+        removeEventListener(type, fn) {
+          this._listeners.get(type)?.delete(fn);
+        }
+        dispatchEvent(evt) {
+          const set = this._listeners.get(evt.type);
+          if (set) {
+            for (const fn of [...set]) fn(evt);
+          }
+          return true;
+        }
+      };
+
 /**
- * Token Bucket Rate Limiter with request queueing and concurrency controls.
+ * Token Bucket Rate Limiter with request queueing, concurrency controls, and quota events.
  */
-export class RateLimiter {
+export class RateLimiter extends BaseEventTarget {
   /**
    * @param {Object} [options]
    * @param {number} [options.capacity=10] Maximum tokens the bucket can hold.
@@ -10,6 +33,7 @@ export class RateLimiter {
    * @param {Function} [options.fetchImpl] Fetch function implementation.
    */
   constructor(options = {}) {
+    super();
     this.capacity = options.capacity ?? 10;
     this.refillRate = options.refillRate ?? 5; // tokens / second
     this.maxConcurrency = options.maxConcurrency ?? 4;
@@ -22,13 +46,74 @@ export class RateLimiter {
     this.timer = null;
   }
 
+  /**
+   * Returns a snapshot of the current token bucket and request queue quota state.
+   * @param {string} [reason='snapshot']
+   */
+  getQuotaState(reason = 'snapshot') {
+    const capacity = Math.max(0, this.capacity);
+    const remaining = Math.max(0, Math.min(capacity, Math.floor(this.tokens)));
+    const queuedCount = this.queue.length;
+    const activeCount = this.activeCount;
+    const lowThreshold = capacity > 1 ? Math.max(1, Math.ceil(capacity * 0.2)) : 0;
+    const exhausted = remaining <= 0;
+    const low = !exhausted && remaining < capacity && remaining <= lowThreshold;
+    const status = exhausted
+      ? 'exhausted'
+      : low
+        ? 'low'
+        : remaining >= capacity
+          ? 'full'
+          : 'available';
+
+    return {
+      tokens: remaining,
+      remaining,
+      capacity,
+      activeCount,
+      queuedCount,
+      queueLength: queuedCount,
+      refillRate: this.refillRate,
+      exhausted,
+      low,
+      status,
+      reason,
+    };
+  }
+
+  /**
+   * Subscribes a listener to `quota-change` events and returns an unsubscribe function.
+   * @param {(detail: Object, event: Event) => void} listener
+   * @returns {() => void}
+   */
+  onQuotaChange(listener) {
+    if (typeof listener !== 'function') return () => {};
+    const handler = (event) => listener(event.detail, event);
+    this.addEventListener('quota-change', handler);
+    return () => this.removeEventListener('quota-change', handler);
+  }
+
+  _emitQuotaChange(reason = 'update') {
+    const detail = this.getQuotaState(reason);
+    let evt;
+    if (typeof CustomEvent === 'function') {
+      evt = new CustomEvent('quota-change', { detail });
+    } else if (typeof Event === 'function') {
+      evt = Object.assign(new Event('quota-change'), { detail });
+    } else {
+      evt = { type: 'quota-change', detail };
+    }
+    this.dispatchEvent(evt);
+  }
+
   _refillTokens() {
     const now = Date.now();
     if (this.tokens >= this.capacity) {
       this.tokens = this.capacity;
       this.lastRefill = now;
-      return;
+      return false;
     }
+    const prevTokens = this.tokens;
     const elapsedSeconds = (now - this.lastRefill) / 1000;
     const tokensToAdd = Math.floor(elapsedSeconds * this.refillRate);
     if (tokensToAdd > 0) {
@@ -40,11 +125,29 @@ export class RateLimiter {
         this.lastRefill += (tokensToAdd * 1000) / this.refillRate;
       }
     }
+    if (this.tokens !== prevTokens) {
+      this._emitQuotaChange('refill');
+      return true;
+    }
+    return false;
   }
 
   _scheduleRefill() {
-    if (this.timer || this.queue.length === 0) return;
-    if (this.tokens >= 1) {
+    const needsQueueRefill =
+      this.queue.length > 0 && this.activeCount < this.maxConcurrency && this.tokens < 1;
+    const needsBucketRecovery = this.tokens < this.capacity;
+    if (!needsQueueRefill && !needsBucketRecovery) return;
+
+    if (this.timer) {
+      if (needsQueueRefill && typeof this.timer.ref === 'function') {
+        this.timer.ref();
+      } else if (!needsQueueRefill && typeof this.timer.unref === 'function') {
+        this.timer.unref();
+      }
+      return;
+    }
+
+    if (this.queue.length > 0 && this.activeCount < this.maxConcurrency && this.tokens >= 1) {
       this._processQueue();
       return;
     }
@@ -56,8 +159,11 @@ export class RateLimiter {
         this.timer = null;
         this._processQueue();
       },
-      Math.max(0, waitMs)
+      Math.max(1, waitMs)
     );
+    if (!needsQueueRefill && typeof this.timer?.unref === 'function') {
+      this.timer.unref();
+    }
   }
 
   _processQueue() {
@@ -72,6 +178,7 @@ export class RateLimiter {
           item.abortHandler = null;
         }
         item.reject(item.signal.reason || new DOMException('Aborted', 'AbortError'));
+        this._emitQuotaChange('abort');
         continue;
       }
 
@@ -81,8 +188,10 @@ export class RateLimiter {
         item.abortHandler = null;
       }
 
+      item.started = true;
       this.tokens -= 1;
       this.activeCount += 1;
+      this._emitQuotaChange('consume');
 
       const fetchFn = item.fetchImpl || this.fetchImpl || globalThis.fetch;
       const { fetchImpl: _ignored, ...requestOptions } = item.options || {};
@@ -95,12 +204,16 @@ export class RateLimiter {
           item.reject(err);
         } finally {
           this.activeCount -= 1;
+          this._emitQuotaChange('complete');
           this._processQueue();
         }
       })();
     }
 
-    if (this.queue.length > 0 && this.activeCount < this.maxConcurrency && this.tokens < 1) {
+    if (
+      (this.queue.length > 0 && this.activeCount < this.maxConcurrency && this.tokens < 1) ||
+      this.tokens < this.capacity
+    ) {
       this._scheduleRefill();
     }
   }
@@ -128,6 +241,7 @@ export class RateLimiter {
         resolve,
         reject,
         abortHandler: null,
+        started: false,
       };
 
       if (signal) {
@@ -136,6 +250,7 @@ export class RateLimiter {
           if (idx !== -1) {
             this.queue.splice(idx, 1);
             reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+            this._emitQuotaChange('dequeue');
           }
         };
         signal.addEventListener('abort', item.abortHandler, { once: true });
@@ -143,6 +258,9 @@ export class RateLimiter {
 
       this.queue.push(item);
       this._processQueue();
+      if (!item.started && this.queue.includes(item)) {
+        this._emitQuotaChange('enqueue');
+      }
     });
   }
 
@@ -154,6 +272,8 @@ export class RateLimiter {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    const hadPendingOrConsumed =
+      this.queue.length > 0 || this.activeCount > 0 || this.tokens !== this.capacity;
     for (const item of this.queue) {
       if (item.signal && item.abortHandler) {
         item.signal.removeEventListener('abort', item.abortHandler);
@@ -164,6 +284,9 @@ export class RateLimiter {
     this.activeCount = 0;
     this.tokens = this.capacity;
     this.lastRefill = Date.now();
+    if (hadPendingOrConsumed) {
+      this._emitQuotaChange('clear');
+    }
   }
 }
 

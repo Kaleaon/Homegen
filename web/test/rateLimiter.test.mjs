@@ -173,3 +173,95 @@ test('rateLimitedFetch wraps defaultRateLimiter fetch call', async () => {
     defaultRateLimiter.clear();
   }
 });
+
+test('RateLimiter dispatches quota-change events on consume, enqueue, dequeue, complete, refill, and clear', async () => {
+  const events = [];
+  let releaseActive;
+  const activeGate = new Promise((r) => {
+    releaseActive = r;
+  });
+
+  const mockFetch = async (url) => {
+    if (url === '/hold') {
+      await activeGate;
+    }
+    return { ok: true, url };
+  };
+
+  const limiter = new RateLimiter({
+    capacity: 2,
+    refillRate: 25, // 1 token per 40ms
+    maxConcurrency: 1,
+    fetchImpl: mockFetch,
+  });
+
+  const unsubscribe = limiter.onQuotaChange((detail, evt) => {
+    assert.equal(evt.type, 'quota-change');
+    events.push(detail);
+  });
+
+  assert.deepEqual(limiter.getQuotaState('init'), {
+    tokens: 2,
+    remaining: 2,
+    capacity: 2,
+    activeCount: 0,
+    queuedCount: 0,
+    queueLength: 0,
+    refillRate: 25,
+    exhausted: false,
+    low: false,
+    status: 'full',
+    reason: 'init',
+  });
+
+  // 1. Consume first token
+  const pHold = limiter.fetch('/hold');
+  assert.equal(events.at(-1).reason, 'consume');
+  assert.equal(events.at(-1).tokens, 1);
+  assert.equal(events.at(-1).activeCount, 1);
+  assert.equal(events.at(-1).queuedCount, 0);
+
+  // 2. Enqueue while maxConcurrency=1 is occupied
+  const ac = new AbortController();
+  const pQueuedAbort = limiter.fetch('/queued-abort', { signal: ac.signal });
+  assert.equal(events.at(-1).reason, 'enqueue');
+  assert.equal(events.at(-1).queuedCount, 1);
+
+  // 3. Dequeue on abort
+  ac.abort();
+  await assert.rejects(pQueuedAbort, { name: 'AbortError' });
+  assert.equal(events.at(-1).reason, 'dequeue');
+  assert.equal(events.at(-1).queuedCount, 0);
+
+  // 4. Enqueue another request and release active request
+  const pNext = limiter.fetch('/next');
+  assert.equal(events.at(-1).reason, 'enqueue');
+  releaseActive();
+  await Promise.all([pHold, pNext]);
+
+  assert.ok(
+    events.some((e) => e.reason === 'complete'),
+    'emitted complete event'
+  );
+  assert.ok(
+    events.some((e) => e.tokens === 0 && e.exhausted === true && e.status === 'exhausted'),
+    'emitted exhausted state when bucket hit 0'
+  );
+
+  // 5. Wait for passive refill back to full capacity
+  await new Promise((r) => setTimeout(r, 110));
+  assert.ok(
+    events.some((e) => e.reason === 'refill'),
+    'emitted refill event during token recovery'
+  );
+  assert.equal(limiter.tokens, 2);
+
+  // 6. Consume and verify clear() emits reset event
+  limiter.tokens = 0;
+  limiter.clear();
+  assert.equal(events.at(-1).reason, 'clear');
+  assert.equal(events.at(-1).tokens, 2);
+  assert.equal(events.at(-1).status, 'full');
+
+  unsubscribe();
+});

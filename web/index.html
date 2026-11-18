@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="dist/css/style.css">
 <link rel="stylesheet" href="css/overlays.css">
+<script type="importmap">{"imports":{"proj4":"./vendor/proj4/proj4.js","#proj4":"./vendor/proj4/proj4.js","three":"./vendor/three/three.module.js","#three":"./vendor/three/three.module.js","#three/":"./vendor/three/","jspdf":"./vendor/jspdf/jspdf.es.min.js","#jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","#jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/k-components.js"></script>
 </head>
 <body>
@@ -15,6 +16,12 @@
   <header id="top">
   <div class="brand">🏠 Homegen <span>Designer</span></div>
   <k-input id="plan-name" aria-label="Plan name" value="My home"></k-input>
+  <div id="header-quota-badge" class="quota-badge" data-quota-state="full" role="status" aria-live="polite" aria-label="Render credit quota">
+    <span class="quota-badge-icon" aria-hidden="true">⚡</span>
+    <span id="header-quota-count" class="quota-badge-count">30 / 30 credits</span>
+    <span id="header-quota-queue" class="quota-badge-queue" hidden></span>
+    <button type="button" id="header-quota-upgrade" class="quota-upgrade-btn" title="Configure priority AI Horde API key for faster HD renders">Upgrade</button>
+  </div>
   <div class="spacer"></div>
   <k-button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></k-button>
   <k-button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></k-button>
@@ -260,6 +267,18 @@
 <dialog id="photo" aria-labelledby="photo-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head"><h2 id="photo-title">Photoreal render</h2><button value="close" aria-label="Close photoreal render"><span aria-hidden="true">✕</span></button></form>
   <div class="dlg-body">
+    <div id="photo-quota-badge" class="quota-badge photo-quota-badge" data-quota-state="full" role="status" aria-live="polite" aria-label="Photoreal render credit quota">
+      <div class="photo-quota-main">
+        <span class="quota-badge-icon" aria-hidden="true">⚡</span>
+        <span id="photo-quota-count" class="quota-badge-count">30 / 30 credits</span>
+        <span id="photo-quota-queue" class="quota-badge-queue" hidden></span>
+        <span id="photo-quota-tier" class="quota-tier-badge">Anonymous · 576px</span>
+      </div>
+      <div id="photo-quota-upgrade-wrap" class="photo-quota-upgrade">
+        <button type="button" id="photo-quota-upgrade" class="quota-upgrade-btn">Add HD Key</button>
+        <a id="photo-quota-upgrade-link" class="quota-upgrade-link" href="https://aihorde.net/register" target="_blank" rel="noopener">Get free HD key ↗</a>
+      </div>
+    </div>
     <div class="row"><label for="p-room">Room</label><k-select id="p-room"></k-select></div>
     <div class="row"><label for="p-style">Style</label><k-select id="p-style"></k-select></div>
     <div class="row"><label for="p-prompt">Prompt</label><textarea id="p-prompt" rows="5"></textarea></div>
@@ -702,7 +721,6 @@
     </div>
   </div>
 </dialog>
-<script type="importmap">{"imports":{"proj4":"./vendor/proj4/proj4.js","#proj4":"./vendor/proj4/proj4.js","three":"./vendor/three/three.module.js","#three":"./vendor/three/three.module.js","#three/":"./vendor/three/","jspdf":"./vendor/jspdf/jspdf.es.min.js","#jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","#jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
