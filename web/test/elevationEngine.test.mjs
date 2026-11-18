@@ -496,3 +496,301 @@ test('parseGeoTIFFWithFallback performs IFD parsing in under 5 milliseconds', as
 
   assert.ok(duration < 5.0, `Parsing took ${duration.toFixed(3)}ms, expected < 5ms`);
 });
+
+function referenceMultiPassMarchingSquares(grid, intervalOverride = null) {
+  if (!grid || !grid.data || grid.width < 2 || grid.height < 2) return [];
+  const lookup = [
+    [],
+    [[3, 2]],
+    [[2, 1]],
+    [[3, 1]],
+    [[1, 0]],
+    [
+      [3, 0],
+      [2, 1],
+    ],
+    [[2, 0]],
+    [[3, 0]],
+    [[0, 3]],
+    [[0, 2]],
+    [
+      [0, 1],
+      [3, 2],
+    ],
+    [[0, 1]],
+    [[1, 3]],
+    [[1, 2]],
+    [[2, 3]],
+    [],
+  ];
+  const edgePt = (x, y, edge, v0, v1, v2, v3, z, width, height, bounds) => {
+    let cx1 = x,
+      cy1 = y,
+      cx2 = x,
+      cy2 = y,
+      val1 = v0,
+      val2 = v1;
+    if (edge === 0) {
+      cx2 = x + 1;
+      val2 = v1;
+    } else if (edge === 1) {
+      cx1 = x + 1;
+      cx2 = x + 1;
+      cy2 = y + 1;
+      val1 = v1;
+      val2 = v2;
+    } else if (edge === 2) {
+      cy1 = y + 1;
+      cx2 = x + 1;
+      cy2 = y + 1;
+      val1 = v3;
+      val2 = v2;
+    } else if (edge === 3) {
+      cy2 = y + 1;
+      val1 = v0;
+      val2 = v3;
+    }
+    let t = 0.5;
+    if (Math.abs(val2 - val1) > 1e-6) {
+      t = Math.max(0, Math.min(1, (z - val1) / (val2 - val1)));
+    }
+    const gx = cx1 + t * (cx2 - cx1);
+    const gy = cy1 + t * (cy2 - cy1);
+    return {
+      x: bounds.minX + (gx / (width - 1)) * (bounds.maxX - bounds.minX),
+      y: bounds.minY + (gy / (height - 1)) * (bounds.maxY - bounds.minY),
+    };
+  };
+
+  const interval = intervalOverride || grid.contourInterval || 1.0;
+  const startLevel = Math.ceil(grid.minElevation / interval) * interval;
+  const levels = [];
+  for (let z = startLevel; z <= grid.maxElevation; z += interval) {
+    levels.push(Number(z.toFixed(2)));
+  }
+  const { width, height, data, bounds } = grid;
+  const contours = [];
+  for (const z of levels) {
+    const lines = [];
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const v0 = data[y * width + x];
+        const v1 = data[y * width + x + 1];
+        const v2 = data[(y + 1) * width + x + 1];
+        const v3 = data[(y + 1) * width + x];
+        let idx = 0;
+        if (v0 >= z) idx |= 8;
+        if (v1 >= z) idx |= 4;
+        if (v2 >= z) idx |= 2;
+        if (v3 >= z) idx |= 1;
+        if (idx === 0 || idx === 15) continue;
+        for (const [eA, eB] of lookup[idx]) {
+          const pA = edgePt(x, y, eA, v0, v1, v2, v3, z, width, height, bounds);
+          const pB = edgePt(x, y, eB, v0, v1, v2, v3, z, width, height, bounds);
+          lines.push({ x1: pA.x, y1: pA.y, x2: pB.x, y2: pB.y });
+        }
+      }
+    }
+    if (lines.length > 0) contours.push({ elevation: z, lines });
+  }
+  return contours;
+}
+
+test('computeMarchingSquares returns empty array for flat grids even when elevation equals a contour level', () => {
+  const flatGrid = new ElevationGrid({
+    width: 6,
+    height: 6,
+    data: new Float32Array(36).fill(5.0),
+    minElevation: 0,
+    maxElevation: 10,
+    contourInterval: 5.0,
+  });
+
+  assert.deepEqual(computeMarchingSquares(flatGrid), []);
+
+  const exactFlatGrid = new ElevationGrid({
+    width: 4,
+    height: 4,
+    data: new Float32Array(16).fill(4.0),
+    minElevation: 4.0,
+    maxElevation: 4.0,
+    contourInterval: 1.0,
+  });
+
+  assert.deepEqual(computeMarchingSquares(exactFlatGrid), []);
+});
+
+test('computeMarchingSquares buckets cells spanning multiple contour intervals accurately', () => {
+  const cliffGrid = new ElevationGrid({
+    width: 2,
+    height: 2,
+    data: [0, 25, 0, 25],
+    minElevation: 0,
+    maxElevation: 25,
+    contourInterval: 2.0,
+    bounds: { minX: 0, maxX: 100, minY: 0, maxY: 50 },
+  });
+
+  const actual = computeMarchingSquares(cliffGrid);
+  const expected = referenceMultiPassMarchingSquares(cliffGrid);
+
+  assert.equal(actual.length, 12); // Levels 2, 4, ..., 24 (0 has index 15, 26 > 25)
+  assert.deepEqual(actual, expected);
+});
+
+test('computeMarchingSquares produces identical output to multi-pass reference on uniform and complex heightmaps', () => {
+  // Uniform diagonal gradient grid
+  const uw = 20;
+  const uh = 16;
+  const uniformData = new Float32Array(uw * uh);
+  for (let y = 0; y < uh; y++) {
+    for (let x = 0; x < uw; x++) {
+      uniformData[y * uw + x] = x * 1.25 + y * 0.75;
+    }
+  }
+  const uniformGrid = new ElevationGrid({
+    width: uw,
+    height: uh,
+    data: uniformData,
+    minElevation: 0,
+    maxElevation: 36,
+    contourInterval: 2.5,
+    bounds: { minX: -200, maxX: 200, minY: -150, maxY: 150 },
+  });
+
+  assert.deepEqual(
+    computeMarchingSquares(uniformGrid),
+    referenceMultiPassMarchingSquares(uniformGrid)
+  );
+
+  // Complex procedural terrain with peaks, valleys, flat terraces, and saddle points
+  const cw = 40;
+  const ch = 40;
+  const complexData = new Float32Array(cw * ch);
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      if (x >= 5 && x <= 10 && y >= 5 && y <= 10) {
+        complexData[y * cw + x] = 12.0; // Flat terrace at an exact contour level
+      } else {
+        const dx1 = (x - 15) / 6;
+        const dy1 = (y - 18) / 6;
+        const dx2 = (x - 28) / 5;
+        const dy2 = (y - 24) / 5;
+        complexData[y * cw + x] =
+          20 * Math.exp(-(dx1 * dx1 + dy1 * dy1)) -
+          12 * Math.exp(-(dx2 * dx2 + dy2 * dy2)) +
+          4 * Math.sin(x * 0.7) * Math.cos(y * 0.7);
+      }
+    }
+  }
+  const complexGrid = new ElevationGrid({
+    width: cw,
+    height: ch,
+    data: complexData,
+    minElevation: -15,
+    maxElevation: 25,
+    contourInterval: 1.5,
+    bounds: { minX: -500, maxX: 500, minY: -500, maxY: 500 },
+  });
+
+  const complexActual = computeMarchingSquares(complexGrid);
+  const complexExpected = referenceMultiPassMarchingSquares(complexGrid);
+  assert.ok(complexActual.length > 15);
+  assert.deepEqual(complexActual, complexExpected);
+});
+
+test('computeMarchingSquares handles floating-point interval boundaries and out-of-bounds cell elevations', () => {
+  const w = 15;
+  const h = 15;
+  const data = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Includes exact tenths like 0.3 where 0.3 / 0.1 === 2.9999999999999996 in IEEE-754
+      data[y * w + x] = (x - 3) * 0.1 + Math.sin(y) * 0.33;
+    }
+  }
+  // Explicitly inject extreme outlier elevations outside [minElevation, maxElevation]
+  data[0] = -100.0;
+  data[w * h - 1] = 250.0;
+
+  for (const interval of [0.1, 0.15, 0.3, 0.33]) {
+    const grid = new ElevationGrid({
+      width: w,
+      height: h,
+      data,
+      minElevation: -0.25,
+      maxElevation: 1.25,
+      contourInterval: interval,
+    });
+
+    assert.deepEqual(
+      computeMarchingSquares(grid, interval),
+      referenceMultiPassMarchingSquares(grid, interval),
+      `Mismatch for floating-point interval ${interval}`
+    );
+  }
+
+  // Degenerate inputs return empty array safely
+  assert.deepEqual(computeMarchingSquares(null), []);
+  assert.deepEqual(computeMarchingSquares({ width: 1, height: 5, data: [1, 2, 3, 4, 5] }), []);
+  assert.deepEqual(
+    computeMarchingSquares({
+      width: 2,
+      height: 2,
+      data: [0, 1, 2, 3],
+      minElevation: 0,
+      maxElevation: 3,
+      contourInterval: -1,
+    }),
+    []
+  );
+  assert.deepEqual(
+    computeMarchingSquares({
+      width: 2,
+      height: 2,
+      data: [0, 1, 2, 3],
+      minElevation: 10,
+      maxElevation: 5,
+      contourInterval: 1,
+    }),
+    []
+  );
+});
+
+test('computeMarchingSquares scans grid cells in a single O(W * H) pass independent of level count', () => {
+  const width = 20;
+  const height = 20;
+  const raw = new Float32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      raw[y * width + x] = x + y;
+    }
+  }
+
+  let elementReads = 0;
+  const trackedData = new Proxy(raw, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && prop !== 'length' && !Number.isNaN(Number(prop))) {
+        elementReads++;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
+  const grid = {
+    width,
+    height,
+    data: trackedData,
+    minElevation: 0,
+    maxElevation: 50,
+    contourInterval: 0.5, // 101 contour levels
+    bounds: { minX: 0, maxX: 100, minY: 0, maxY: 100 },
+  };
+
+  const contours = computeMarchingSquares(grid);
+  assert.ok(contours.length > 30);
+
+  const cellCount = (width - 1) * (height - 1);
+  // Single pass reads 4 corners per cell once (1,444 reads), whereas O(L*W*H) would perform 145,844 reads
+  assert.equal(elementReads, cellCount * 4);
+});
