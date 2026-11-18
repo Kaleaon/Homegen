@@ -5435,6 +5435,8 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
+export { renderGISSegments };
+
 function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
@@ -5465,8 +5467,6 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
-
-export { renderGISSegments };
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
