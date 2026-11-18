@@ -2246,7 +2246,50 @@ function card(label, sub, on, attrs, swatch) {
   return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
-function renderPalette() {
+const CATALOG_ANNOUNCE_DEBOUNCE_MS = 300;
+let catalogAnnounceTimer = null;
+
+function getCatalogStatusAnnouncer() {
+  if (typeof document === 'undefined') return null;
+  if (typeof document.getElementById === 'function') {
+    const byId = document.getElementById('catalog-status-announcer');
+    if (byId) return byId;
+  }
+  return $('#catalog-status-announcer');
+}
+
+export function clearCatalogAnnouncement() {
+  if (catalogAnnounceTimer) {
+    clearTimeout(catalogAnnounceTimer);
+    catalogAnnounceTimer = null;
+  }
+  const announcer = getCatalogStatusAnnouncer();
+  if (announcer) {
+    announcer.textContent = '';
+  }
+}
+
+export function announceCatalogResults(count, delayMs = CATALOG_ANNOUNCE_DEBOUNCE_MS) {
+  if (catalogAnnounceTimer) {
+    clearTimeout(catalogAnnounceTimer);
+    catalogAnnounceTimer = null;
+  }
+  catalogAnnounceTimer = setTimeout(() => {
+    catalogAnnounceTimer = null;
+    const announcer = getCatalogStatusAnnouncer();
+    if (!announcer) return;
+    const n = Number.isFinite(Number(count)) ? Math.max(0, Math.trunc(Number(count))) : 0;
+    const msg = `${n} furniture ${n === 1 ? 'item' : 'items'} found`;
+    if (announcer.textContent !== msg) {
+      announcer.textContent = msg;
+    }
+  }, delayMs);
+}
+
+export function renderPalette() {
+  if (tab !== 'buy') {
+    clearCatalogAnnouncement();
+  }
   const p = $('#palette');
   if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   if (!p) return;
@@ -2326,6 +2369,7 @@ function renderPalette() {
       maxW: catalogMaxWidth,
       maxD: catalogMaxDepth,
     });
+    announceCatalogResults(filtered.length);
 
     if (filtered.length === 0) {
       h += `<div class="catalog-empty">No matching items found</div>`;
@@ -4495,7 +4539,7 @@ if (typeof document !== 'undefined')
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
-function switchTab(targetBtn, shouldFocus = false) {
+export function switchTab(targetBtn, shouldFocus = false) {
   if (!targetBtn) return;
   tab = targetBtn.dataset.tab;
   const buttons = document.querySelectorAll('#tabs button, #tabs k-tab');
@@ -4515,6 +4559,7 @@ function switchTab(targetBtn, shouldFocus = false) {
   if (palette && targetBtn.id) {
     palette.setAttribute('aria-labelledby', targetBtn.id);
   }
+  clearCatalogAnnouncement();
   renderPalette();
   if (shouldFocus) {
     targetBtn.focus();
@@ -5678,4 +5723,8 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     SAMPLE_MUNICIPAL_GIS,
+    announceCatalogResults,
+    clearCatalogAnnouncement,
+    renderPalette,
+    switchTab,
   };
