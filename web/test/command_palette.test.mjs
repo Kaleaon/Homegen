@@ -142,18 +142,23 @@ test('index.html contains required markup for command palette and shortcut overl
     html.includes('id="shortcut-overlay"'),
     'index.html must contain dialog id="shortcut-overlay"'
   );
-  assert.ok(html.includes('<kbd>'), 'index.html must contain shortcut kbd badges');
+  assert.ok(html.includes('<k-kbd>'), 'index.html must contain shortcut <k-kbd> badges');
+  assert.ok(!html.includes('<kbd>'), 'index.html must not contain raw un-themed <kbd> tags');
 });
 
-test('style.css defines rules for command palette, kbd badges, and shortcut overlay', () => {
+test('style.css defines rules for command palette, k-kbd badges, and shortcut overlay with Ktheme tokens', () => {
   const cssPath = path.join(__dirname, '../css/style.css');
   const css = fs.readFileSync(cssPath, 'utf8');
 
   assert.ok(css.includes('#command-palette'), 'style.css must style #command-palette');
   assert.ok(css.includes('#cmd-search'), 'style.css must style #cmd-search');
   assert.ok(css.includes('#cmd-list'), 'style.css must style #cmd-list');
-  assert.ok(css.includes('kbd'), 'style.css must style kbd tags');
+  assert.ok(css.includes('k-kbd'), 'style.css must style k-kbd tags');
   assert.ok(css.includes('#shortcut-overlay'), 'style.css must style #shortcut-overlay');
+  assert.ok(css.includes('var(--ktheme-bg-surface)'), 'style.css must use --ktheme-bg-surface');
+  assert.ok(css.includes('var(--ktheme-bg-hover)'), 'style.css must use --ktheme-bg-hover');
+  assert.ok(css.includes('var(--ktheme-text-muted)'), 'style.css must use --ktheme-text-muted');
+  assert.ok(css.includes('var(--ktheme-border)'), 'style.css must use --ktheme-border');
 });
 
 test('command palette query filtering and execution unit test', async () => {
@@ -225,6 +230,11 @@ test('command palette query filtering and execution unit test', async () => {
   // Open command palette
   homegen.openCommandPalette();
   assert.equal(cmdPalette.open, true, 'Command palette dialog should be open');
+  assert.ok(
+    cmdList.innerHTML.includes('<k-kbd>'),
+    'Command list should render shortcut badges using <k-kbd> custom elements'
+  );
+  assert.ok(!cmdList.innerHTML.includes('<kbd>'), 'Command list should not render raw <kbd> tags');
 
   // Filter commands with query "pdf"
   cmdSearch.value = 'pdf';

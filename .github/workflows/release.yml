@@ -65,8 +65,9 @@ jobs:
           find app/build/outputs/bundle/release -name "*.aab" -exec cp {} release-artifacts/ \;
           
           cd release-artifacts
+          rm -f checksums.txt
           for file in *; do
-            if [ -f "$file" ]; then
+            if [ -f "$file" ] && [ "$file" != "checksums.txt" ]; then
               sha256sum "$file" >> checksums.txt
             fi
           done
