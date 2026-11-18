@@ -145,6 +145,7 @@ let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | 
 let tab = 'build';
 let selectionSet = new Set();
 let selection = null;
+let view3d = null;
 
 function isSelected(id) {
   return selectionSet.has(id);
@@ -241,9 +242,27 @@ function persist() {
   }
 }
 
-function renderSnapToggles() {
+function is3DViewActive() {
+  if (view3d && typeof view3d.isThree === 'function' && view3d.isThree()) {
+    return true;
+  }
+  const view3dBtn = $('#toolbar [data-view="3d"]') || $('[data-view="3d"]');
+  if (
+    view3dBtn &&
+    view3dBtn.classList &&
+    typeof view3dBtn.classList.contains === 'function' &&
+    view3dBtn.classList.contains('on')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
+  const is3d = is3DViewActive();
+  const disabledAttr = is3d ? 'disabled' : '';
   const viewModels = buildToggleViewModel(interaction);
   const activeCount = viewModels.filter((vm) => vm.enabled).length;
 
@@ -251,7 +270,7 @@ function renderSnapToggles() {
   const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
 
   const existingPopover = container.querySelector('k-popover');
-  const wasOpen = existingPopover ? existingPopover.open : false;
+  const wasOpen = !is3d && existingPopover ? existingPopover.open : false;
 
   const renderGroup = (items) =>
     items
@@ -260,7 +279,7 @@ function renderSnapToggles() {
         const tokenHover = vm.tokenHover || '--ktheme-accent-hover';
         const styleAttr = `--snap-accent: var(${token}); --snap-accent-hover: var(${tokenHover});`;
         return `
-        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
+        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} ${disabledAttr} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
           <span>${esc(vm.label)}</span>
           <span class="snap-status">${vm.enabled ? 'ON' : 'OFF'}</span>
         </k-button>
@@ -270,7 +289,7 @@ function renderSnapToggles() {
 
   container.innerHTML = `
     <k-popover id="snap-popover">
-      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} title="Snapping modes (${activeCount} enabled)">
+      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} ${disabledAttr} title="Snapping modes (${activeCount} enabled)">
         <span aria-hidden="true">🧲</span> Snapping <span class="snap-badge badge">${activeCount}</span>
       </k-button>
       <div class="snap-popover-menu">
@@ -291,13 +310,43 @@ function renderSnapToggles() {
   `;
 
   const newPopover = container.querySelector('k-popover');
-  if (newPopover && wasOpen) {
-    newPopover.open = true;
+  if (newPopover) {
+    if (wasOpen && !is3d) {
+      newPopover.open = true;
+    } else if (is3d) {
+      newPopover.open = false;
+      if (typeof newPopover.removeAttribute === 'function') {
+        newPopover.removeAttribute('open');
+      }
+    }
+  }
+
+  const snapTrigger = container.querySelector('#snap-trigger');
+  if (snapTrigger) {
+    snapTrigger.disabled = is3d;
+    if (is3d) {
+      if (typeof snapTrigger.setAttribute === 'function') snapTrigger.setAttribute('disabled', '');
+    } else if (typeof snapTrigger.removeAttribute === 'function') {
+      snapTrigger.removeAttribute('disabled');
+    }
   }
 
   container.querySelectorAll('[data-snap-id]').forEach((btn) => {
+    btn.disabled = is3d;
+    if (is3d) {
+      if (typeof btn.setAttribute === 'function') btn.setAttribute('disabled', '');
+    } else if (typeof btn.removeAttribute === 'function') {
+      btn.removeAttribute('disabled');
+    }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (
+        is3DViewActive() ||
+        btn.disabled ||
+        (typeof btn.hasAttribute === 'function' && btn.hasAttribute('disabled'))
+      ) {
+        return;
+      }
       const id = btn.dataset.snapId;
       const vm = viewModels.find((x) => x.id === id);
       if (vm) {
@@ -4555,7 +4604,6 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   }
 }
 
-let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
   setupAddRoomDimsModal();
@@ -5614,6 +5662,7 @@ function initCommandPaletteUI() {
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
+    renderSnapToggles,
     setLevel,
     formRow,
     get doc() {
