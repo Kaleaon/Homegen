@@ -309,12 +309,11 @@ function renderSnapToggles() {
   });
 }
 
-function renderBgToolbar() {
+export function renderBgToolbar(bg = doc.background) {
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
-  if (doc.background && (doc.background.dataUrl || doc.background.presetKey)) {
+  if (bg && (bg.dataUrl || bg.presetKey)) {
     bgBar.hidden = false;
-    const bg = doc.background;
     const vis = $('#bg-visible');
     if (vis) vis.checked = bg.visible !== false;
     const op = $('#bg-opacity');
@@ -324,13 +323,21 @@ function renderBgToolbar() {
     const gisMapSelect = $('#gis-map-preset');
     if (gisMapSelect) gisMapSelect.value = bg.presetKey || '';
     const lockBtn = $('#bg-lock-btn');
-    if (lockBtn) lockBtn.textContent = bg.locked ? '🔒 Locked' : '🔓 Unlocked';
+    if (lockBtn) {
+      lockBtn.innerHTML = `<span aria-hidden="true">${bg.locked ? '🔒' : '🔓'}</span> ${bg.locked ? 'Locked' : 'Unlocked'}`;
+      lockBtn.setAttribute('aria-pressed', bg.locked ? 'true' : 'false');
+    }
   } else {
     bgBar.hidden = true;
     const mapSelect = $('#bg-map-preset');
     if (mapSelect) mapSelect.value = '';
     const gisMapSelect = $('#gis-map-preset');
     if (gisMapSelect) gisMapSelect.value = '';
+    const lockBtn = $('#bg-lock-btn');
+    if (lockBtn) {
+      lockBtn.innerHTML = '<span aria-hidden="true">🔓</span> Unlocked';
+      lockBtn.setAttribute('aria-pressed', 'false');
+    }
   }
 }
 
@@ -5644,6 +5651,7 @@ if (typeof window !== 'undefined')
     computeGeoBounds,
     worldfileToAffineMatrix,
     setBackgroundAttribution,
+    renderBgToolbar,
     renderCompliance,
     renderViolationItem,
     complianceScene,
