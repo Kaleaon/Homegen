@@ -173,7 +173,7 @@ export function daylight(state, room) {
 }
 
 /** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
-function outletSegments(state, room) {
+export function outletSegments(state, room) {
   const segs = [];
   const walls = getRoomWallKeys(room);
   for (const wall of walls) {

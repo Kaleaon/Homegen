@@ -5067,7 +5067,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-const SAMPLE_MUNICIPAL_GIS = {
+export const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -5108,7 +5108,7 @@ const SAMPLE_MUNICIPAL_GIS = {
   ],
 };
 
-function loadGISSubsystem(geojson, options = {}) {
+export function loadGISSubsystem(geojson, options = {}) {
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.importGeoJSON(geojson, {
     targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
@@ -5122,7 +5122,7 @@ function loadGISSubsystem(geojson, options = {}) {
   return doc.site;
 }
 
-function setGISSegmentSetback(segmentId, setbackDistance) {
+export function setGISSegmentSetback(segmentId, setbackDistance) {
   if (!doc.site) return null;
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
@@ -5133,7 +5133,7 @@ function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-function openGISDialog() {
+export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisMapSelect = $('#gis-map-preset');
@@ -5143,7 +5143,7 @@ function openGISDialog() {
   else dlg.setAttribute('open', '');
 }
 
-function closeGISDialog() {
+export function closeGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   if (typeof dlg.close === 'function') dlg.close();
@@ -5180,6 +5180,8 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+
+export { renderGISSegments };
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
