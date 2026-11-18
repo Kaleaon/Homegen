@@ -2489,8 +2489,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (!hudBadge && canvas?.parentElement) {
         hudBadge = document.createElement('div');
         hudBadge.className = 'scene3d-hud-attribution';
-        hudBadge.style.cssText =
-          'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
         try {
           if (getComputedStyle(canvas.parentElement).position === 'static') {
             canvas.parentElement.style.position = 'relative';
