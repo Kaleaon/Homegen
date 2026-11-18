@@ -98,8 +98,24 @@
     <div id="view3d-a11y-live" class="sr-only" aria-live="polite"></div>
     <div id="walkthrough-hud" class="walkthrough-hud k-overlay-hud" hidden>
       <span class="hud-title"><span aria-hidden="true">🚶</span> Walkthrough Mode</span>
+      <div class="hud-group hud-level-group">
+        <label for="walk-level-select" class="hud-label">Floor</label>
+        <select id="walk-level-select" aria-label="Active walkthrough floor level">
+          <option value="0">Floor 1</option>
+        </select>
+      </div>
+      <div class="hud-group hud-presets" role="group" aria-label="Camera elevation presets">
+        <button type="button" id="walk-preset-seated" class="hud-preset-btn k-target-min-size" data-walk-height="36" aria-pressed="false" title="Seated perspective (36 inches)">Seated (36&quot;)</button>
+        <button type="button" id="walk-preset-eye" class="hud-preset-btn k-target-min-size on" data-walk-height="64" aria-pressed="true" title="Eye-level perspective (64 inches)">Eye level (64&quot;)</button>
+        <button type="button" id="walk-preset-overhead" class="hud-preset-btn k-target-min-size" data-walk-height="96" aria-pressed="false" title="Overhead perspective (96 inches)">Overhead (96&quot;)</button>
+      </div>
+      <div class="hud-group hud-step-group" role="group" aria-label="Camera height step controls">
+        <button type="button" id="walk-elev-down" class="hud-step-btn k-target-min-size" data-walk-step="-6" aria-label="Decrease camera height" title="Lower camera height (-6 inches)"><span aria-hidden="true">−</span></button>
+        <span id="walk-elev-label" class="hud-elev-label" aria-live="polite" title="Current camera height above floor">5&apos; 4&quot; (64&quot;)</span>
+        <button type="button" id="walk-elev-up" class="hud-step-btn k-target-min-size" data-walk-step="6" aria-label="Increase camera height" title="Raise camera height (+6 inches)"><span aria-hidden="true">+</span></button>
+      </div>
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
-      <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
+      <button type="button" id="walk-exit-btn" class="hud-exit-btn k-target-min-size" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
     <div id="toast" role="status" aria-live="polite">
       <span class="toast-msg"></span>
