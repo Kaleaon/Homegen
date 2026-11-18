@@ -74,9 +74,9 @@ function isA11yElementAttached(el, doc) {
   if (el.ownerDocument && el.ownerDocument !== doc) return false;
   if (typeof el.isConnected === 'boolean') return el.isConnected;
   if (typeof doc.contains === 'function') return doc.contains(el);
-  if (el.parentNode !== undefined && el.parentNode === null) return false;
-  if (el.parentElement !== undefined && el.parentElement === null) return false;
-  return true;
+  if (el.parentNode !== undefined) return el.parentNode !== null;
+  if (el.parentElement !== undefined) return el.parentElement !== null;
+  return false;
 }
 
 export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {

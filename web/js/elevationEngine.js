@@ -449,7 +449,7 @@ function parseNoDataValue(raw) {
 /**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
-async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
+export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
   try {
     const view = new DataView(arrayBuffer);
     if (arrayBuffer.byteLength >= 4) {

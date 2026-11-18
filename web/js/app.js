@@ -719,7 +719,8 @@ export function renderSnapToggles() {
   bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
-export function renderBgToolbar(bg = doc.background) {
+export function renderBgToolbar() {
+  const bg = arguments.length > 0 ? arguments[0] : doc.background;
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
   if (bg && (bg.dataUrl || bg.presetKey)) {
@@ -5332,7 +5333,7 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
-export { renderGISSegments, openGISDialog };
+export { renderGISSegments };
 
 function renderGISSegments() {
   const container = $('#gis-segment-list');
@@ -5364,7 +5365,6 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
-export { renderGISSegments };
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -6820,5 +6820,3 @@ if (typeof window !== 'undefined')
     setCatalogFilters,
     resetCatalogFilters,
   };
-
-export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
