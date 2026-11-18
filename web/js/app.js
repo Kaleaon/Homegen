@@ -4878,7 +4878,7 @@ function renderGISSegments() {
   for (const seg of doc.site.segments) {
     html += `<tr class="gis-table-row">
       <td class="gis-table-cell">${seg.label || seg.id}</td>
-      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input"></k-input> in</td>
+      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" aria-label="${seg.label || seg.id} setback (inches)" class="gis-setback-input"></k-input> in</td>
     </tr>`;
   }
   html += '</tbody></table>';

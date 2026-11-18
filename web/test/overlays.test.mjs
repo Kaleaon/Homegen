@@ -152,11 +152,11 @@ test('renderGISSegments in app.js uses <k-input type="number"> and contains zero
   assert.ok(fnMatch, 'renderGISSegments function found in app.js');
   const fnCode = fnMatch[1];
 
-  // Verify k-input usage
+  // Verify k-input usage and direct ARIA label formatting
   assert.match(
     fnCode,
-    /<k-input type="number" min="0" max="360" value="\${seg\.setback \?\? 36}" data-seg-id="\${seg\.id}" class="gis-setback-input"><\/k-input>/,
-    'renderGISSegments renders setback inputs using <k-input>'
+    /<k-input type="number" min="0" max="360" value="\${seg\.setback \?\? 36}" data-seg-id="\${seg\.id}" aria-label="\${seg\.label \|\| seg\.id} setback \(inches\)" class="gis-setback-input"><\/k-input>/,
+    'renderGISSegments renders setback inputs using <k-input> with aria-label'
   );
 
   // Verify zero hardcoded inline style attributes
