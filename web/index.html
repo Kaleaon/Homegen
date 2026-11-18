@@ -762,6 +762,12 @@
     <button value="close" aria-label="Close keyboard shortcuts"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body shortcut-body">
+    <input id="shortcut-search"
+           type="search"
+           placeholder="Search shortcuts or keys..."
+           aria-label="Search keyboard shortcuts"
+           autocomplete="off">
+    <div id="shortcut-no-results" class="shortcut-no-results" role="status" aria-live="polite" hidden>No matching shortcuts found</div>
     <div class="shortcut-grid">
       <div class="shortcut-group">
         <h3>General &amp; Search</h3>

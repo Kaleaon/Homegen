@@ -5361,6 +5361,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  initShortcutOverlayUI();
   setupAddRoomDimsModal();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
@@ -6284,9 +6285,94 @@ function closeCommandPalette() {
   dlg.open = false;
 }
 
-function openShortcutOverlay() {
+function setShortcutElementHidden(el, isHidden) {
+  if (!el) return;
+  el.hidden = isHidden;
+  if (isHidden) {
+    if (typeof el.setAttribute === 'function') el.setAttribute('hidden', '');
+  } else if (typeof el.removeAttribute === 'function') {
+    el.removeAttribute('hidden');
+  }
+}
+
+function getShortcutRowSearchText(row) {
+  if (!row) return '';
+  if (row.children && row.children.length > 0) {
+    const parts = Array.from(row.children).map((child) => child.textContent || '');
+    return `${parts.join(' ')} ${row.textContent || ''}`.toLowerCase();
+  }
+  return (row.textContent || '').toLowerCase();
+}
+
+export function filterShortcuts(query = '') {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return 0;
+  const q = String(query ?? '')
+    .trim()
+    .toLowerCase();
+  const compactQuery = q.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+  const groups =
+    typeof dlg.querySelectorAll === 'function'
+      ? Array.from(dlg.querySelectorAll('.shortcut-group'))
+      : [];
+  let totalVisible = 0;
+
+  groups.forEach((group) => {
+    const rows =
+      typeof group.querySelectorAll === 'function'
+        ? Array.from(group.querySelectorAll('.shortcut-row'))
+        : [];
+    let groupVisibleCount = 0;
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) {
+        groupVisibleCount += 1;
+        totalVisible += 1;
+      }
+    });
+    setShortcutElementHidden(group, Boolean(q) && groupVisibleCount === 0);
+  });
+
+  if (groups.length === 0 && typeof dlg.querySelectorAll === 'function') {
+    const rows = Array.from(dlg.querySelectorAll('.shortcut-row'));
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) totalVisible += 1;
+    });
+  }
+
+  const gridEl =
+    typeof dlg.querySelector === 'function' ? dlg.querySelector('.shortcut-grid') : null;
+  if (gridEl) {
+    setShortcutElementHidden(gridEl, Boolean(q) && totalVisible === 0);
+  }
+
+  const noResultsEl =
+    $('#shortcut-no-results') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-no-results') : null);
+  if (noResultsEl) {
+    setShortcutElementHidden(noResultsEl, !(Boolean(q) && totalVisible === 0));
+  }
+
+  return totalVisible;
+}
+
+export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  const searchInput =
+    $('#shortcut-search') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.value = '';
+  }
+  filterShortcuts('');
   if (typeof dlg.showModal === 'function') {
     try {
       dlg.showModal();
@@ -6297,9 +6383,12 @@ function openShortcutOverlay() {
     dlg.setAttribute('open', '');
   }
   dlg.open = true;
+  if (searchInput && typeof searchInput.focus === 'function') {
+    searchInput.focus();
+  }
 }
 
-function closeShortcutOverlay() {
+export function closeShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
@@ -6441,6 +6530,20 @@ function initCommandPaletteUI() {
   }
 }
 
+function initShortcutOverlayUI() {
+  const dlg = $('#shortcut-overlay');
+  const searchInput =
+    $('#shortcut-search') ||
+    (dlg && typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      const val =
+        e && e.target && typeof e.target.value === 'string' ? e.target.value : searchInput.value;
+      filterShortcuts(val);
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
@@ -6491,6 +6594,7 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    filterShortcuts,
     renderCommandList,
     trapFocus,
     toggleHistoryPopover,
