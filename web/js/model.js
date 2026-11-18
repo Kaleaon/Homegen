@@ -15,7 +15,7 @@ import {
   getRoomBoundingBox,
   computeGeoBounds,
 } from './geometry.js';
-import { isRegisteredEPSG } from './epsgRegistry.js';
+import { isRegisteredEPSG, normalizeCode, getEPSGDefinition } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
@@ -62,8 +62,7 @@ export function defaultCRS() {
 
 export function isValidEPSGCode(code) {
   if (!code || typeof code !== 'string') return false;
-  const trimmed = code.trim().toUpperCase();
-  const normalized = trimmed.startsWith('EPSG:') ? trimmed : `EPSG:${trimmed}`;
+  const normalized = normalizeCode(code);
   if (!/^EPSG:\d+$/.test(normalized)) return false;
   return isRegisteredEPSG(normalized);
 }
@@ -71,9 +70,8 @@ export function isValidEPSGCode(code) {
 export function normalizeEPSGCode(code) {
   if (code == null) return 'EPSG:4326';
   if (typeof code === 'number') return `EPSG:${code}`;
-  const str = String(code).trim().toUpperCase();
-  if (/^\d+$/.test(str)) return `EPSG:${str}`;
-  if (/^EPSG:\d+$/.test(str)) return str;
+  const normalized = normalizeCode(String(code));
+  if (/^EPSG:\d+$/.test(normalized)) return normalized;
   return 'EPSG:4326';
 }
 
@@ -867,7 +865,7 @@ export function deserialize(text) {
   } else {
     const fallback = defaultCRS();
     s.crs.epsg = normalizeEPSGCode(s.crs.epsg);
-    s.crs.proj4 = s.crs.proj4 || fallback.proj4;
+    s.crs.proj4 = s.crs.proj4 || getEPSGDefinition(s.crs.epsg) || fallback.proj4;
     s.crs.wkt = s.crs.wkt || fallback.wkt;
     s.crs.origin = s.crs.origin || fallback.origin;
     s.crs.units = s.crs.units || fallback.units;
@@ -1261,32 +1259,38 @@ export function distributeItems(state, ids, direction) {
   if (boundsList.length < 3) return false;
 
   if (direction === 'horizontal') {
-    boundsList.sort((a, b) => a.cx - b.cx);
+    boundsList.sort((a, b) => a.x - b.x || a.w - b.w);
     const first = boundsList[0];
     const last = boundsList[boundsList.length - 1];
-    const span = last.cx - first.cx;
-    const step = span / (boundsList.length - 1);
+    const outerSpan = last.x + last.w - first.x;
+    const totalWidth = boundsList.reduce((sum, b) => sum + b.w, 0);
+    const gap = (outerSpan - totalWidth) / (boundsList.length - 1);
 
+    let currentX = first.x + first.w + gap;
     for (let i = 1; i < boundsList.length - 1; i++) {
       const b = boundsList[i];
       const hit = findOwner(state, b.id);
       if (hit) {
-        setItemPosition(state, hit, first.cx + i * step, b.cy);
+        setItemPosition(state, hit, currentX + b.w / 2, b.cy);
       }
+      currentX += b.w + gap;
     }
   } else if (direction === 'vertical') {
-    boundsList.sort((a, b) => a.cy - b.cy);
+    boundsList.sort((a, b) => a.y - b.y || a.h - b.h);
     const first = boundsList[0];
     const last = boundsList[boundsList.length - 1];
-    const span = last.cy - first.cy;
-    const step = span / (boundsList.length - 1);
+    const outerSpan = last.y + last.h - first.y;
+    const totalHeight = boundsList.reduce((sum, b) => sum + b.h, 0);
+    const gap = (outerSpan - totalHeight) / (boundsList.length - 1);
 
+    let currentY = first.y + first.h + gap;
     for (let i = 1; i < boundsList.length - 1; i++) {
       const b = boundsList[i];
       const hit = findOwner(state, b.id);
       if (hit) {
-        setItemPosition(state, hit, b.cx, first.cy + i * step);
+        setItemPosition(state, hit, b.cx, currentY + b.h / 2);
       }
+      currentY += b.h + gap;
     }
   }
 
