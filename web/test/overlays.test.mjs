@@ -148,7 +148,7 @@ test('renderGISSegments in app.js uses <k-input type="number"> and contains zero
   const appJs = fs.readFileSync(appJsPath, 'utf8');
 
   // Extract renderGISSegments function block
-  const fnMatch = appJs.match(/export function renderGISSegments\(\)\s*\{([\s\S]*?)\n\}/);
+  const fnMatch = appJs.match(/^function renderGISSegments\(\)\s*\{([\s\S]*?)\n\}/m);
   assert.ok(fnMatch, 'renderGISSegments function found in app.js');
   const fnCode = fnMatch[1];
 

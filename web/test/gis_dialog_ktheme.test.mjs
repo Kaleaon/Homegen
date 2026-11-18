@@ -16,7 +16,9 @@ if (typeof customElements === 'undefined') {
   };
 }
 
-const { KButton, KSelect } = await import('../js/k-components.js');
+const kComponents = await import('../js/k-components.js');
+const KButton = kComponents.KButton ?? customElements.get('k-button');
+const KSelect = kComponents.KSelect ?? customElements.get('k-select');
 
 function extractDialogMarkup(html, id) {
   const re = new RegExp(`<dialog\\s+id="${id}"[^>]*>[\\s\\S]*?<\\/dialog>`);
@@ -274,7 +276,7 @@ test('app.js synchronizes #gis-map-preset and #gis-crs <k-select> values and han
   const appJs = fs.readFileSync(appJsPath, 'utf8');
 
   // Verify openGISDialog syncs #gis-map-preset with doc.background?.presetKey || ''
-  const openFnMatch = appJs.match(/export function openGISDialog\(\)\s*\{([\s\S]*?)\n\}/);
+  const openFnMatch = appJs.match(/^(?:export\s+)?function openGISDialog\(\)\s*\{([\s\S]*?)\n\}/m);
   assert.ok(openFnMatch, 'openGISDialog found in app.js');
   assert.match(
     openFnMatch[1],
