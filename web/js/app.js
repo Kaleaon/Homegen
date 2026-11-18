@@ -102,6 +102,9 @@ export { RANGE_VALUE_FORMATTERS, formatRangeValueText, updateRangeAriaValueText 
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
+  parseExplicitLengthInches,
+  computeVectorAngle,
+  computeVertexFromAngle,
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
@@ -1888,6 +1891,7 @@ function redraw() {
       bad,
       selection,
       hover,
+      activeHudNodeId: wallHudState.open && wallHudState.focused ? wallHudState.nodeId : null,
       openingUnits: getOpeningUnitMode(),
       hoveredOpeningHudSide,
       activeOpeningHudSide: activeHudEdit?.side || null,
@@ -1897,6 +1901,8 @@ function redraw() {
       overlay: (c) => drawOverlay(c, state),
     });
   }
+  syncPassiveWallHud();
+  updateWallHudPosition();
   if (activeHudEdit) syncOpeningHudPosition();
   updatePlanA11yTree(state, curLevel);
 }
@@ -1979,8 +1985,10 @@ export function drawOverlay(c, _state) {
   const sequentialPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
   if (sequentialPts && sequentialPts.length > 0) {
     c.save();
-    c.strokeStyle = '#2a7fff';
-    c.fillStyle = 'rgba(42, 127, 255, 0.2)';
+    const hudPreviewInvalid =
+      wallHudState.open && wallHudState.mode === 'draw-corner' && Boolean(wallHudState.error);
+    c.strokeStyle = hudPreviewInvalid ? '#ef4444' : '#2a7fff';
+    c.fillStyle = hudPreviewInvalid ? 'rgba(239, 68, 68, 0.2)' : 'rgba(42, 127, 255, 0.2)';
     c.lineWidth = 2 / view.scale;
     c.beginPath();
     c.moveTo(sequentialPts[0].x, sequentialPts[0].y);
@@ -1995,9 +2003,14 @@ export function drawOverlay(c, _state) {
         c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
       }
     }
-    if (hover) {
-      const activeSnap = snappingBridge.getActiveSnap();
-      const previewTip = preview?.feedback?.point || activeSnap?.point || hover;
+    const activeSnap = hover ? snappingBridge.getActiveSnap() : null;
+    const previewTip =
+      wallHudState.open && wallHudState.mode === 'draw-corner' && wallHudState.previewPoint
+        ? wallHudState.previewPoint
+        : hover
+          ? preview?.feedback?.point || activeSnap?.point || hover
+          : null;
+    if (previewTip) {
       const lastIdx = sequentialPts.length - 1;
       const previewBulge =
         sequentialPts.length < 3 && interaction.getEdgeBulge
@@ -2523,6 +2536,36 @@ export function renderInspector() {
         : wallFinishId;
 
     const roomPts = getRoomPoints(room);
+    const wallNameMap = {
+      N: 'North (N)',
+      E: 'East (E)',
+      S: 'South (S)',
+      W: 'West (W)',
+    };
+    const wallRowsHtml = roomPts
+      .map((_, wIdx) => {
+        const wKey = roomPts.length === 4 ? WALLS[wIdx] : String(wIdx);
+        const wLabel = roomPts.length === 4 ? wallNameMap[wKey] : `Wall ${wIdx + 1}`;
+        const segLen = wallLength(room, wIdx);
+        const inputId = `i-wall-len-${wKey}`;
+        const roundedIn = Number(segLen.toFixed(2));
+        return `<tr data-wall-row="${esc(wKey)}">
+          <td><label for="${esc(inputId)}">${esc(wLabel)}</label></td>
+          <td class="wall-segment-table__fmt">${esc(fmtLen(segLen))}</td>
+          <td>
+            <input
+              id="${esc(inputId)}"
+              class="i-wall-len-input"
+              type="text"
+              data-wall-key="${esc(wKey)}"
+              data-wall-index="${wIdx}"
+              value="${roundedIn}"
+              aria-label="${esc(wLabel)} wall length"
+            />
+          </td>
+        </tr>`;
+      })
+      .join('');
     const curveWallKeys =
       roomPts.length === 4 ? ['N', 'E', 'S', 'W'] : roomPts.map((_, idx) => String(idx));
     if (!win.__activeCurveWall || !curveWallKeys.includes(String(win.__activeCurveWall))) {
@@ -2557,6 +2600,20 @@ export function renderInspector() {
         ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="any" value="${formatNumericInput(room.y)}">`)}
         ${formRow('i-pos-z', 'Elevation Z (in)', `<input id="i-pos-z" type="number" step="any" value="${formatNumericInput(Number.isFinite(room.z) ? room.z : 0)}">`)}
         ${formRow('i-rot-deg', 'Rotation (°)', `<input id="i-rot-deg" type="number" step="15" min="0" max="360" value="${formatNumericInput(normalizeRotationDegrees(room.rot ?? 0, 0))}">`)}
+      </div>
+      <div class="wall-segment-editor">
+        <h4 class="wall-segment-editor__title">Wall Segment Lengths</h4>
+        <table class="wall-segment-table" aria-label="Wall segment lengths">
+          <thead>
+            <tr>
+              <th scope="col">Wall</th>
+              <th scope="col">Span</th>
+              <th scope="col">Length</th>
+            </tr>
+          </thead>
+          <tbody>${wallRowsHtml}</tbody>
+        </table>
+        <div id="i-wall-len-error" class="wall-segment-editor__error" role="alert" aria-live="assertive" hidden></div>
       </div>
       <div class="curve-inspector-group">
         <div class="curve-inspector-head">
@@ -2913,6 +2970,103 @@ export function renderInspector() {
         select(null);
         toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
       }
+    });
+
+    const commitInspectorWallLength = (inputEl) => {
+      const wIdx = Number(inputEl.dataset.wallIndex);
+      const wKey = inputEl.dataset.wallKey;
+      const liveRoom = roomOf(doc, room.id);
+      if (!liveRoom) return;
+      const currentLen = wallLength(liveRoom, wIdx);
+      const errEl = $('#i-wall-len-error');
+      const parsedInches = parseExplicitLengthInches(inputEl.value);
+
+      if (parsedInches === null) {
+        inputEl.value = String(Number(currentLen.toFixed(2)));
+        inputEl.classList.remove('is-invalid');
+        if (errEl) {
+          errEl.textContent = '';
+          errEl.hidden = true;
+        }
+        return;
+      }
+
+      if (Math.abs(parsedInches - currentLen) < 1e-4) {
+        inputEl.value = String(Number(currentLen.toFixed(2)));
+        inputEl.classList.remove('is-invalid');
+        if (errEl) {
+          errEl.textContent = '';
+          errEl.hidden = true;
+        }
+        return;
+      }
+
+      const adjusted = M.computeAdjustedWallPoints(liveRoom, wIdx, parsedInches);
+      if (!adjusted.ok) {
+        inputEl.classList.add('is-invalid');
+        if (errEl) {
+          errEl.textContent = adjusted.error;
+          errEl.hidden = false;
+        }
+        return;
+      }
+
+      const siblingPolys = levelRooms()
+        .filter((rm) => rm.id !== liveRoom.id)
+        .map((rm) => getRoomPoints(rm));
+      const placementCheck = validatePlacement(adjusted.points, siblingPolys);
+      if (!placementCheck.valid) {
+        const msg = placementCheck.reasons.selfIntersecting
+          ? 'Wall length causes polygon self-intersection.'
+          : 'Wall length overlaps an adjacent room.';
+        inputEl.classList.add('is-invalid');
+        if (errEl) {
+          errEl.textContent = msg;
+          errEl.hidden = false;
+        }
+        return;
+      }
+
+      const res = apply(
+        (n) => M.updateRoomPoints(roomOf(n, liveRoom.id), adjusted.points, n),
+        'Edit Wall Length'
+      );
+      if (!res.ok) {
+        const freshInput = $(`#i-wall-len-${wKey}`) || inputEl;
+        const freshErr = $('#i-wall-len-error') || errEl;
+        freshInput.classList.add('is-invalid');
+        if (freshErr) {
+          freshErr.textContent =
+            res.reasons?.[0]?.msg || 'Wall length violates building code clear span.';
+          freshErr.hidden = false;
+        }
+        return;
+      }
+
+      announceToLiveRegion(`${liveRoom.name} wall ${wKey} updated to ${fmtLen(parsedInches)}.`);
+    };
+
+    el.querySelectorAll('.i-wall-len-input').forEach((inputEl) => {
+      inputEl.addEventListener('change', () => commitInspectorWallLength(inputEl));
+      inputEl.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          commitInspectorWallLength(inputEl);
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault();
+          const liveRoom = roomOf(doc, room.id);
+          if (liveRoom) {
+            const curLen = wallLength(liveRoom, Number(inputEl.dataset.wallIndex));
+            inputEl.value = String(Number(curLen.toFixed(2)));
+          }
+          inputEl.classList.remove('is-invalid');
+          const errEl = $('#i-wall-len-error');
+          if (errEl) {
+            errEl.textContent = '';
+            errEl.hidden = true;
+          }
+        }
+      });
     });
 
     el.querySelectorAll('.i-nudge-btn').forEach((btn) => {
@@ -4705,6 +4859,7 @@ function setTool(t) {
   tool = t;
   preview = null;
   drag = null;
+  closeWallHud();
   if (t.kind !== 'calibrate') calibPoints = [];
   if (t.kind !== 'room' && prevKind === 'room') {
     if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
@@ -5287,8 +5442,10 @@ function handleCloseRoom() {
       createdId = created.id;
     }, 'Close Room');
     if (r.ok) {
+      closeWallHud();
+      const labelName = ROOM_TYPES[roomType]?.name || 'Living';
       announceToLiveRegion(
-        `${ROOM_TYPES[roomType]?.name || 'Living'} room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+        `${labelName} room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
       );
       interaction.resetRoomDrawing();
       activeDraftCurveEdge = null;
@@ -5753,6 +5910,739 @@ canvas?.addEventListener('pointerup', () => {
   }
 });
 
+const wallHudState = {
+  open: false,
+  focused: false,
+  mode: null,
+  worldPos: null,
+  nodeId: null,
+  roomId: null,
+  wallKey: null,
+  wallIndex: 0,
+  cornerIndex: null,
+  anchor: null,
+  pointerPoint: null,
+  snappedPoint: null,
+  snappedLength: null,
+  rectStart: null,
+  previewPoint: null,
+  error: '',
+};
+
+function worldToStagePixels(worldPt) {
+  if (!worldPt) return { left: 0, top: 0 };
+  const stageEl = $('#stage');
+  let offsetX = 0;
+  let offsetY = 0;
+  if (
+    stageEl &&
+    canvas &&
+    typeof stageEl.getBoundingClientRect === 'function' &&
+    typeof canvas.getBoundingClientRect === 'function'
+  ) {
+    const sr = stageEl.getBoundingClientRect();
+    const cr = canvas.getBoundingClientRect();
+    offsetX = cr.left - sr.left;
+    offsetY = cr.top - sr.top;
+  }
+  return {
+    left: offsetX + worldPt.x * view.scale + view.ox,
+    top: offsetY + worldPt.y * view.scale + view.oy,
+  };
+}
+
+function updateWallHudPosition() {
+  const hudEl = $('#wall-length-hud');
+  if (!hudEl) return;
+  if (!wallHudState.open || !wallHudState.worldPos) {
+    hudEl.hidden = true;
+    return;
+  }
+  const { left, top } = worldToStagePixels(wallHudState.worldPos);
+  hudEl.style.left = `${Math.round(left)}px`;
+  hudEl.style.top = `${Math.round(top)}px`;
+  hudEl.hidden = false;
+}
+
+function setWallHudError(msg = '') {
+  wallHudState.error = msg || '';
+  const hudEl = $('#wall-length-hud');
+  const errEl = $('#wall-length-hud-error');
+  const inputEl = $('#wall-length-hud-input');
+  if (hudEl) {
+    hudEl.classList.toggle('is-invalid', Boolean(msg));
+  }
+  if (inputEl) {
+    inputEl.setAttribute('aria-invalid', msg ? 'true' : 'false');
+  }
+  if (errEl) {
+    errEl.textContent = msg || '';
+    errEl.hidden = !msg;
+  }
+}
+
+function openWallHud(config = {}) {
+  const hudEl = $('#wall-length-hud');
+  const inputEl = $('#wall-length-hud-input');
+  const hintEl = $('#wall-length-hud-hint');
+
+  Object.assign(wallHudState, {
+    open: true,
+    focused: Boolean(config.focused),
+    mode: config.mode || 'edit-wall',
+    worldPos: config.worldPos || { x: 0, y: 0 },
+    nodeId: config.nodeId || null,
+    roomId: config.roomId || null,
+    wallKey: config.wallKey ?? null,
+    wallIndex: config.wallIndex ?? 0,
+    cornerIndex: config.cornerIndex ?? null,
+    anchor: config.anchor || null,
+    pointerPoint: config.pointerPoint || null,
+    snappedPoint: config.snappedPoint || null,
+    snappedLength: config.snappedLength ?? null,
+    rectStart: config.rectStart || null,
+    previewPoint: config.previewPoint || null,
+    error: '',
+  });
+
+  if (hudEl) {
+    hudEl.hidden = false;
+    hudEl.classList.toggle('is-passive', !wallHudState.focused);
+    hudEl.classList.remove('is-invalid');
+  }
+  setWallHudError('');
+
+  if (hintEl) {
+    hintEl.textContent = wallHudState.focused ? 'Enter' : 'Tab';
+  }
+
+  if (inputEl) {
+    if (config.value !== undefined) {
+      inputEl.value = String(config.value);
+    }
+    if (config.ariaLabel) {
+      inputEl.setAttribute('aria-label', config.ariaLabel);
+    }
+    if (wallHudState.focused) {
+      inputEl.focus();
+      if (typeof inputEl.select === 'function') {
+        inputEl.select();
+      }
+    }
+  }
+
+  updateWallHudPosition();
+  return wallHudState;
+}
+
+function closeWallHud(opts = {}) {
+  const wasOpen = wallHudState.open;
+  wallHudState.open = false;
+  wallHudState.focused = false;
+  wallHudState.mode = null;
+  wallHudState.worldPos = null;
+  wallHudState.nodeId = null;
+  wallHudState.roomId = null;
+  wallHudState.wallKey = null;
+  wallHudState.cornerIndex = null;
+  wallHudState.anchor = null;
+  wallHudState.pointerPoint = null;
+  wallHudState.snappedPoint = null;
+  wallHudState.snappedLength = null;
+  wallHudState.rectStart = null;
+  wallHudState.previewPoint = null;
+  setWallHudError('');
+
+  const hudEl = $('#wall-length-hud');
+  if (hudEl) {
+    hudEl.hidden = true;
+    hudEl.classList.remove('is-passive', 'is-invalid');
+  }
+  if (opts.restoreFocus && canvas && typeof canvas.focus === 'function') {
+    canvas.focus();
+  }
+  if (wasOpen && opts.redraw !== false) {
+    preview = null;
+    redraw();
+  }
+}
+
+function syncPassiveWallHud() {
+  if (wallHudState.focused) return;
+
+  // 1. Sequential room corner drawing
+  const seqPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (tool.kind === 'room' && seqPts.length > 0 && hover) {
+    const anchor = seqPts[seqPts.length - 1];
+    const pv = interaction.previewRoom(hover, {
+      edges: extractRoomEdges(levelRooms()),
+      existingRooms: levelRooms(),
+      scale: view.scale,
+      explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+    });
+    const targetPt = pv?.targetPoint || hover;
+    const len = pv?.lengthInches ?? Math.hypot(targetPt.x - anchor.x, targetPt.y - anchor.y);
+    openWallHud({
+      focused: false,
+      mode: 'draw-corner',
+      worldPos: {
+        x: (anchor.x + targetPt.x) / 2,
+        y: (anchor.y + targetPt.y) / 2 - 14 / Math.max(0.4, view.scale),
+      },
+      anchor,
+      pointerPoint: { ...hover },
+      snappedPoint: { ...targetPt },
+      snappedLength: len,
+      value: fmtLen(len),
+      ariaLabel: 'Active wall segment length',
+    });
+    return;
+  }
+
+  // 2. Active corner resize drag
+  if (drag && drag.kind === 'resize' && drag.target?.points) {
+    const r = roomOf(doc, drag.id);
+    if (r) {
+      const pts = drag.target.points;
+      const cornerIdx = drag.corner % pts.length;
+      const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
+      const anchor = pts[prevIdx];
+      const movedPt = pts[cornerIdx];
+      const len = Math.hypot(movedPt.x - anchor.x, movedPt.y - anchor.y);
+      openWallHud({
+        focused: false,
+        mode: 'resize-corner',
+        roomId: r.id,
+        cornerIndex: cornerIdx,
+        anchor: { ...anchor },
+        pointerPoint: hover ? { ...hover } : { ...movedPt },
+        snappedPoint: { ...movedPt },
+        snappedLength: len,
+        worldPos: {
+          x: (anchor.x + movedPt.x) / 2,
+          y: (anchor.y + movedPt.y) / 2 - 14 / Math.max(0.4, view.scale),
+        },
+        value: fmtLen(len),
+        ariaLabel: 'Resized wall segment length',
+      });
+      return;
+    }
+  }
+
+  // 3. Active rectangular room-new drag
+  if (drag && drag.kind === 'room-new' && drag.rect && (drag.rect.w > 0 || drag.rect.h > 0)) {
+    openWallHud({
+      focused: false,
+      mode: 'room-new',
+      rectStart: {
+        x0: drag.x0,
+        y0: drag.y0,
+        pointer: hover
+          ? { ...hover }
+          : { x: drag.rect.x + drag.rect.w, y: drag.rect.y + drag.rect.h },
+        snappedRect: { ...drag.rect },
+      },
+      worldPos: {
+        x: drag.rect.x + drag.rect.w / 2,
+        y: drag.rect.y - 14 / Math.max(0.4, view.scale),
+      },
+      value: `${fmtLen(drag.rect.w)} × ${fmtLen(drag.rect.h)}`,
+      ariaLabel: 'New room width by depth',
+    });
+    return;
+  }
+
+  if (wallHudState.open && !wallHudState.focused) {
+    wallHudState.open = false;
+    wallHudState.worldPos = null;
+    const hudEl = $('#wall-length-hud');
+    if (hudEl) hudEl.hidden = true;
+  }
+}
+
+function openRoomWallHud(room, wallIndex = 0) {
+  if (!room) return null;
+  const pts = getRoomPoints(room);
+  const wIdx = ((wallIndex % pts.length) + pts.length) % pts.length;
+  const wKey = pts.length === 4 ? WALLS[wIdx] : String(wIdx);
+  const seg = wallSeg(room, wIdx);
+  const midX = seg.ax + (seg.dx * seg.len) / 2 - seg.nx * 10;
+  const midY = seg.ay + (seg.dy * seg.len) / 2 - seg.ny * 10;
+  openWallHud({
+    focused: true,
+    mode: 'edit-wall',
+    roomId: room.id,
+    wallKey: wKey,
+    wallIndex: wIdx,
+    snappedLength: seg.len,
+    nodeId: `node:wall-dim:${room.id}:${wKey}`,
+    worldPos: { x: midX, y: midY },
+    value: fmtLen(seg.len),
+    ariaLabel: `${room.name} wall ${wKey} length`,
+  });
+  redraw();
+  return wallHudState;
+}
+
+function nearestWallAny(p, maxDist = 16) {
+  let best = null;
+  for (const room of levelRooms()) {
+    const pts = getRoomPoints(room);
+    for (let i = 0; i < pts.length; i++) {
+      const s = wallSeg(room, i);
+      if (s.len <= 0) continue;
+      const t = Math.max(0, Math.min(s.len, (p.x - s.ax) * s.dx + (p.y - s.ay) * s.dy));
+      const cx = s.ax + s.dx * t;
+      const cy = s.ay + s.dy * t;
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      if (d <= maxDist && (!best || d < best.d)) {
+        const wKey = pts.length === 4 ? WALLS[i] : String(i);
+        best = { room, wallIndex: i, wallKey: wKey, d };
+      }
+    }
+  }
+  return best;
+}
+
+function canActivateWallHudOnTab() {
+  if (tool.kind === 'room' && interaction.getCornerCount() > 0) return true;
+  if (drag && (drag.kind === 'resize' || drag.kind === 'room-new')) return true;
+  const selList = getSelectionList();
+  if (selList.length === 1) {
+    const hit = M.findOwner(doc, selList[0]);
+    if (hit && hit.kind === 'room') return true;
+  }
+  return false;
+}
+
+function activateWallHudByTab(reverse = false) {
+  // 1. Sequential room drawing active segment
+  const seqPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (tool.kind === 'room' && seqPts.length > 0) {
+    const anchor = seqPts[seqPts.length - 1];
+    const ptr = hover || { x: anchor.x + 144, y: anchor.y };
+    const pv = interaction.previewRoom(ptr, {
+      edges: extractRoomEdges(levelRooms()),
+      existingRooms: levelRooms(),
+      scale: view.scale,
+      explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+    });
+    const targetPt = pv?.targetPoint || ptr;
+    const len = pv?.lengthInches ?? Math.hypot(targetPt.x - anchor.x, targetPt.y - anchor.y);
+    openWallHud({
+      focused: true,
+      mode: 'draw-corner',
+      anchor: { ...anchor },
+      pointerPoint: { ...ptr },
+      snappedPoint: { ...targetPt },
+      snappedLength: len,
+      previewPoint: { ...targetPt },
+      worldPos: {
+        x: (anchor.x + targetPt.x) / 2,
+        y: (anchor.y + targetPt.y) / 2 - 14 / Math.max(0.4, view.scale),
+      },
+      value: fmtLen(len),
+      ariaLabel: 'Active wall segment length',
+    });
+    redraw();
+    return true;
+  }
+
+  // 2. Active corner resize drag -> freeze drag into interactive HUD
+  if (drag && drag.kind === 'resize') {
+    const r = roomOf(doc, drag.id);
+    if (r) {
+      const pts = drag.target?.points || getRoomPoints(r);
+      const cornerIdx = drag.corner % pts.length;
+      const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
+      const anchor = pts[prevIdx];
+      const movedPt = pts[cornerIdx];
+      const len = Math.hypot(movedPt.x - anchor.x, movedPt.y - anchor.y);
+      drag = null;
+      preview = null;
+      openWallHud({
+        focused: true,
+        mode: 'resize-corner',
+        roomId: r.id,
+        cornerIndex: cornerIdx,
+        anchor: { ...anchor },
+        pointerPoint: hover ? { ...hover } : { ...movedPt },
+        snappedPoint: { ...movedPt },
+        snappedLength: len,
+        worldPos: {
+          x: (anchor.x + movedPt.x) / 2,
+          y: (anchor.y + movedPt.y) / 2 - 14 / Math.max(0.4, view.scale),
+        },
+        value: fmtLen(len),
+        ariaLabel: 'Resized wall segment length',
+      });
+      redraw();
+      return true;
+    }
+  }
+
+  // 3. Active rectangular room-new drag -> freeze into interactive HUD
+  if (drag && drag.kind === 'room-new' && drag.rect) {
+    const captured = {
+      x0: drag.x0,
+      y0: drag.y0,
+      pointer: hover
+        ? { ...hover }
+        : { x: drag.rect.x + drag.rect.w, y: drag.rect.y + drag.rect.h },
+      snappedRect: { ...drag.rect },
+    };
+    const wVal = Math.max(36, drag.rect.w || 144);
+    const hVal = Math.max(36, drag.rect.h || 120);
+    drag = null;
+    preview = null;
+    openWallHud({
+      focused: true,
+      mode: 'room-new',
+      rectStart: captured,
+      worldPos: {
+        x: captured.snappedRect.x + wVal / 2,
+        y: captured.snappedRect.y - 14 / Math.max(0.4, view.scale),
+      },
+      value: `${fmtLen(wVal)} × ${fmtLen(hVal)}`,
+      ariaLabel: 'New room width by depth',
+    });
+    redraw();
+    return true;
+  }
+
+  // 4. Single selected room -> open or cycle wall segments
+  const selList = getSelectionList();
+  if (selList.length === 1) {
+    const hit = M.findOwner(doc, selList[0]);
+    if (hit && hit.kind === 'room') {
+      const pts = getRoomPoints(hit.room);
+      let nextIdx = 0;
+      if (
+        wallHudState.open &&
+        wallHudState.mode === 'edit-wall' &&
+        wallHudState.roomId === hit.room.id
+      ) {
+        nextIdx = (wallHudState.wallIndex + (reverse ? -1 : 1) + pts.length) % pts.length;
+      } else if (reverse) {
+        nextIdx = pts.length - 1;
+      }
+      openRoomWallHud(hit.room, nextIdx);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function parseDimensionPairInches(rawText, fallbackW, fallbackH) {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return { w: fallbackW, h: fallbackH, usedFallback: true };
+  }
+  const parts = rawText.split(/[×x,]/i).map((s) => s.trim());
+  if (parts.length >= 2) {
+    const wIn = parseExplicitLengthInches(parts[0]);
+    const hIn = parseExplicitLengthInches(parts[1]);
+    if (wIn !== null && hIn !== null) {
+      return { w: wIn, h: hIn, usedFallback: false };
+    }
+    return { w: fallbackW, h: fallbackH, usedFallback: true };
+  }
+  const single = parseExplicitLengthInches(parts[0]);
+  if (single !== null) {
+    return { w: single, h: fallbackH, usedFallback: false };
+  }
+  return { w: fallbackW, h: fallbackH, usedFallback: true };
+}
+
+function previewWallHudInput(rawVal) {
+  if (!wallHudState.open || !wallHudState.focused) return;
+  const text = rawVal !== undefined ? rawVal : $('#wall-length-hud-input')?.value || '';
+
+  if (wallHudState.mode === 'draw-corner') {
+    const ptr = wallHudState.pointerPoint || hover || wallHudState.anchor;
+    if (!ptr) return;
+    const pv = interaction.previewRoom(ptr, text, {
+      edges: extractRoomEdges(levelRooms()),
+      existingRooms: levelRooms(),
+      scale: view.scale,
+      explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+    });
+    if (pv) {
+      wallHudState.previewPoint = pv.targetPoint;
+      setWallHudError(pv.valid === false && pv.violations?.length ? pv.violations[0] : '');
+      redraw();
+    }
+  } else {
+    setWallHudError('');
+  }
+}
+
+function commitWallHudInput(rawValueOverride) {
+  if (!wallHudState.open) return { ok: false };
+  const inputEl = $('#wall-length-hud-input');
+  const rawText =
+    rawValueOverride !== undefined ? String(rawValueOverride) : (inputEl?.value ?? '');
+
+  if (wallHudState.mode === 'draw-corner') {
+    const ptr = wallHudState.pointerPoint ||
+      hover ||
+      wallHudState.snappedPoint || { x: (wallHudState.anchor?.x || 0) + 144, y: 0 };
+    const res = interaction.addRoomCornerWithLength(ptr, rawText, {
+      edges: extractRoomEdges(levelRooms()),
+      existingRooms: levelRooms(),
+      scale: view.scale,
+      explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+    });
+    if (!res.ok) {
+      setWallHudError(res.violations?.[0] || 'Invalid wall segment placement.');
+      redraw();
+      return res;
+    }
+
+    const count = interaction.getCornerCount();
+    hover = { ...res.corner };
+    const hint = $('#tool-hint');
+    if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
+    const btnClose = $('#btn-close-room');
+    if (btnClose) btnClose.hidden = !interaction.canCloseRoom();
+    announceToLiveRegion(
+      `Placed corner ${count} at (${Math.round(res.corner.x)}", ${Math.round(res.corner.y)}").`
+    );
+    closeWallHud({ restoreFocus: true, redraw: false });
+    refresh();
+    return res;
+  }
+
+  if (wallHudState.mode === 'resize-corner') {
+    const r = roomOf(doc, wallHudState.roomId);
+    if (!r) {
+      closeWallHud({ restoreFocus: true });
+      return { ok: false };
+    }
+    const pts = getRoomPoints(r);
+    const cornerIdx = (wallHudState.cornerIndex ?? 0) % pts.length;
+    const anchor = wallHudState.anchor || pts[(cornerIdx - 1 + pts.length) % pts.length];
+    const fallbackPt = wallHudState.snappedPoint || pts[cornerIdx];
+    const parsedLen = parseExplicitLengthInches(rawText);
+
+    let targetPt;
+    let usedFallback = false;
+    if (parsedLen === null) {
+      targetPt = { ...fallbackPt };
+      usedFallback = true;
+    } else {
+      if (parsedLen < 36) {
+        const msg = 'Wall length must be at least 36 in (3 ft) clear span.';
+        setWallHudError(msg);
+        return { ok: false, error: msg };
+      }
+      const dirPt =
+        Math.hypot(fallbackPt.x - anchor.x, fallbackPt.y - anchor.y) > 1e-6
+          ? fallbackPt
+          : wallHudState.pointerPoint || { x: anchor.x + 1, y: anchor.y };
+      const angle = computeVectorAngle(anchor, dirPt);
+      targetPt = computeVertexFromAngle(anchor, angle, parsedLen);
+    }
+
+    const nextPts = pts.map((pt, idx) => (idx === cornerIdx ? targetPt : { ...pt }));
+    const bbox = getRoomBoundingBox(nextPts);
+    if (bbox.w < 36 || bbox.h < 36 || polygonArea(nextPts) < 36 * 9) {
+      const msg = 'Room clear span must be at least 36 in (3 ft).';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    const siblingPolys = levelRooms()
+      .filter((rm) => rm.id !== r.id)
+      .map((rm) => getRoomPoints(rm));
+    const colCheck = validatePlacement(nextPts, siblingPolys);
+    if (!colCheck.valid) {
+      const msg = colCheck.reasons.selfIntersecting
+        ? 'Wall length causes polygon self-intersection.'
+        : 'Resized room overlaps an adjacent room.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+
+    const commitRes = apply(
+      (n) => M.updateRoomPoints(roomOf(n, r.id), nextPts, n),
+      'Resize Room Corner'
+    );
+    if (!commitRes.ok) {
+      const msg = commitRes.reasons?.[0]?.msg || 'Resize violates building code.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    closeWallHud({ restoreFocus: true });
+    return { ok: true, corner: targetPt, usedFallback };
+  }
+
+  if (wallHudState.mode === 'room-new') {
+    const start = wallHudState.rectStart || {
+      x0: 0,
+      y0: 0,
+      pointer: { x: 144, y: 120 },
+      snappedRect: { x: 0, y: 0, w: 144, h: 120 },
+    };
+    const fbW = start.snappedRect?.w > 0 ? start.snappedRect.w : 144;
+    const fbH = start.snappedRect?.h > 0 ? start.snappedRect.h : 120;
+    const { w, h, usedFallback } = parseDimensionPairInches(rawText, fbW, fbH);
+    if (w < 36 || h < 36) {
+      const msg = 'Room dimensions must be at least 36 in (3 ft) clear span.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    const dirX = (start.pointer?.x ?? start.x0 + w) >= start.x0 ? 1 : -1;
+    const dirY = (start.pointer?.y ?? start.y0 + h) >= start.y0 ? 1 : -1;
+    const x = dirX >= 0 ? start.x0 : start.x0 - w;
+    const y = dirY >= 0 ? start.y0 : start.y0 - h;
+    const candPoly = roomToPolygon({ x, y, w, h });
+    const siblingPolys = levelRooms().map((rm) => getRoomPoints(rm));
+    const colCheck = validatePlacement(candPoly, siblingPolys);
+    if (!colCheck.valid) {
+      const msg = 'Room placement overlaps an existing room.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    let createdId = null;
+    const commitRes = apply((n) => {
+      const created = M.createRoom(n, tool.type || 'living', x, y, w, h, { level: curLevel });
+      createdId = created.id;
+    }, 'Add Room');
+    if (!commitRes.ok) {
+      const msg = commitRes.reasons?.[0]?.msg || 'Room violates building code.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    if (createdId) select(createdId);
+    closeWallHud({ restoreFocus: true });
+    return { ok: true, usedFallback };
+  }
+
+  if (wallHudState.mode === 'edit-wall') {
+    const r = roomOf(doc, wallHudState.roomId);
+    if (!r) {
+      closeWallHud({ restoreFocus: true });
+      return { ok: false };
+    }
+    const curLen = wallHudState.snappedLength ?? wallLength(r, wallHudState.wallIndex);
+    const parsedLen = parseExplicitLengthInches(rawText);
+    const targetLen = parsedLen === null ? curLen : parsedLen;
+    const usedFallback = parsedLen === null;
+
+    const adjusted = M.computeAdjustedWallPoints(r, wallHudState.wallIndex, targetLen);
+    if (!adjusted.ok) {
+      setWallHudError(adjusted.error);
+      return { ok: false, error: adjusted.error };
+    }
+
+    const siblingPolys = levelRooms()
+      .filter((rm) => rm.id !== r.id)
+      .map((rm) => getRoomPoints(rm));
+    const colCheck = validatePlacement(adjusted.points, siblingPolys);
+    if (!colCheck.valid) {
+      const msg = colCheck.reasons.selfIntersecting
+        ? 'Wall length causes polygon self-intersection.'
+        : 'Wall length overlaps an adjacent room.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+
+    if (Math.abs(targetLen - wallLength(r, wallHudState.wallIndex)) < 1e-4) {
+      closeWallHud({ restoreFocus: true });
+      return { ok: true, usedFallback, unchanged: true };
+    }
+
+    const commitRes = apply(
+      (n) => M.updateRoomPoints(roomOf(n, r.id), adjusted.points, n),
+      'Edit Wall Length'
+    );
+    if (!commitRes.ok) {
+      const msg = commitRes.reasons?.[0]?.msg || 'Wall length violates building code.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+
+    announceToLiveRegion(
+      `${r.name} wall ${wallHudState.wallKey ?? wallHudState.wallIndex} set to ${fmtLen(targetLen)}.`
+    );
+    closeWallHud({ restoreFocus: true });
+    return { ok: true, lengthInches: targetLen, usedFallback };
+  }
+
+  if (wallHudState.mode === 'edit-room-dims') {
+    const r = roomOf(doc, wallHudState.roomId);
+    if (!r) {
+      closeWallHud({ restoreFocus: true });
+      return { ok: false };
+    }
+    const { w, h, usedFallback } = parseDimensionPairInches(rawText, r.w, r.h);
+    if (w < 36 || h < 36) {
+      const msg = 'Room dimensions must be at least 36 in (3 ft) clear span.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    const candPoly = roomToPolygon({ x: r.x, y: r.y, w, h });
+    const siblingPolys = levelRooms()
+      .filter((rm) => rm.id !== r.id)
+      .map((rm) => getRoomPoints(rm));
+    const colCheck = validatePlacement(candPoly, siblingPolys);
+    if (!colCheck.valid) {
+      const msg = 'Resized room overlaps an adjacent room.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    const commitRes = apply((n) => M.resizeRoom(roomOf(n, r.id), r.x, r.y, w, h), 'Resize Room');
+    if (!commitRes.ok) {
+      const msg = commitRes.reasons?.[0]?.msg || 'Room dimensions violate building code.';
+      setWallHudError(msg);
+      return { ok: false, error: msg };
+    }
+    closeWallHud({ restoreFocus: true });
+    return { ok: true, w, h, usedFallback };
+  }
+
+  return { ok: false };
+}
+
+function initWallHudUI() {
+  const hudEl = $('#wall-length-hud');
+  const inputEl = $('#wall-length-hud-input');
+  if (!hudEl || !inputEl) return;
+
+  hudEl.addEventListener('pointerdown', (ev) => {
+    ev.stopPropagation();
+  });
+
+  inputEl.addEventListener('focus', () => {
+    if (wallHudState.open && !wallHudState.focused) {
+      wallHudState.focused = true;
+      hudEl.classList.remove('is-passive');
+      const hintEl = $('#wall-length-hud-hint');
+      if (hintEl) hintEl.textContent = 'Enter';
+    }
+  });
+
+  inputEl.addEventListener('input', () => {
+    previewWallHudInput(inputEl.value);
+  });
+
+  inputEl.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      commitWallHudInput();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeWallHud({ restoreFocus: true });
+    } else if (ev.key === 'Tab' && wallHudState.mode === 'edit-wall') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      activateWallHudByTab(ev.shiftKey);
+    }
+  });
+}
+
 canvas?.addEventListener('pointerleave', () => {
   hover = null;
   preview = null;
@@ -5774,31 +6664,53 @@ canvas?.addEventListener('dblclick', (e) => {
   }
   const p = toWorld(e);
   const hitNode = complianceScene.hitTest(p, view);
-  if (hitNode && (hitNode.type === 'dimensionLabel' || hitNode.type === 'constraintHandle')) {
+  if (hitNode && hitNode.type === 'wallDimensionLabel') {
     const r = roomOf(doc, hitNode.data.roomId);
     if (r) {
-      const currentFtW = (r.w / 12).toFixed(1);
-      const currentFtH = (r.h / 12).toFixed(1);
-      const input = prompt(
-        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or with units "144 in"):`,
-        `${currentFtW} × ${currentFtH}`
-      );
-      if (input) {
-        const parts = parseRoomDimensionsInput(input);
-        if (parts.length >= 1) {
-          const rawWInches = parts[0];
-          let clamped;
-          if (parts.length >= 2) {
-            const rawHInches = parts[1];
-            clamped = clampRoomDimensions(r, rawWInches, rawHInches);
-          } else {
-            const clampedW = clampRoomWidth(r, rawWInches, r.h);
-            clamped = { w: clampedW, h: r.h };
-          }
-          apply((n) => M.resizeRoom(roomOf(n, r.id), r.x, r.y, clamped.w, clamped.h));
-        }
-      }
+      if (!isSelected(r.id)) select(r.id);
+      openRoomWallHud(r, hitNode.data.wallIndex);
+      return;
     }
+  }
+  if (hitNode && hitNode.type === 'constraintHandle') {
+    const r = roomOf(doc, hitNode.data.roomId);
+    if (r) {
+      if (!isSelected(r.id)) select(r.id);
+      const pts = getRoomPoints(r);
+      const hIdx = hitNode.data.handleIndex ?? 0;
+      const wIdx =
+        pts.length === 4
+          ? hIdx === 0 || hIdx === 1
+            ? 0
+            : hIdx === 2
+              ? 1
+              : 3
+          : (hIdx - 1 + pts.length) % pts.length;
+      openRoomWallHud(r, wIdx);
+      return;
+    }
+  }
+  if (hitNode && hitNode.type === 'dimensionLabel') {
+    const r = roomOf(doc, hitNode.data.roomId);
+    if (r) {
+      if (!isSelected(r.id)) select(r.id);
+      openWallHud({
+        focused: true,
+        mode: 'edit-room-dims',
+        roomId: r.id,
+        nodeId: hitNode.id,
+        worldPos: { x: hitNode.bounds.x, y: hitNode.bounds.y },
+        value: `${fmtLen(r.w)} × ${fmtLen(r.h)}`,
+        ariaLabel: `${r.name} dimensions (width × depth)`,
+      });
+      redraw();
+      return;
+    }
+  }
+  const wallHit = nearestWallAny(p, 16 / Math.max(0.4, view.scale));
+  if (wallHit) {
+    if (!isSelected(wallHit.room.id)) select(wallHit.room.id);
+    openRoomWallHud(wallHit.room, wallHit.wallIndex);
   }
 });
 canvas?.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -7778,6 +8690,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   initOpeningHudUI();
   initShortcutOverlayUI();
   setupAddRoomDimsModal();
+  initWallHudUI();
   setupWallAngleHud();
   setupDraftingCurveHud();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
@@ -7787,6 +8700,12 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 
     const k = e.key;
     const lk = k ? k.toLowerCase() : '';
+
+    if (wallHudState.open && wallHudState.focused && lk === 'escape') {
+      e.preventDefault();
+      closeWallHud({ restoreFocus: true });
+      return;
+    }
 
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && lk === 'r') {
       e.preventDefault();
@@ -7818,6 +8737,18 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
         e.preventDefault?.();
         confirmDlg.close?.();
       }
+      return;
+    }
+
+    if (
+      k === 'Tab' &&
+      (document.activeElement === canvas ||
+        tool.kind === 'room' ||
+        (drag && (drag.kind === 'resize' || drag.kind === 'room-new'))) &&
+      canActivateWallHudOnTab()
+    ) {
+      e.preventDefault();
+      activateWallHudByTab(e.shiftKey);
       return;
     }
 
@@ -7862,9 +8793,17 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
       e.preventDefault();
       $('#redo').click();
     } else if (lk === 'escape') {
+      const hadOpenWallHud = Boolean(wallHudState.open);
+      closeWallHud({ redraw: false });
       const historyPopover = $('#history-popover');
       const hasOpenHistory = Boolean(historyPopover && !historyPopover.hidden);
-      if (toast._state?.active && !selection && tool.kind === 'select' && !hasOpenHistory) {
+      if (
+        toast._state?.active &&
+        !hadOpenWallHud &&
+        !selection &&
+        tool.kind === 'select' &&
+        !hasOpenHistory
+      ) {
         e.preventDefault();
         dismissToast({ restoreFocus: true });
         return;
@@ -9137,6 +10076,20 @@ if (typeof window !== 'undefined')
     initExportModalTierState,
     openPlanUpgradePrompt,
     bindUpgradeTriggerLinks,
+    openWallHud,
+    openRoomWallHud,
+    closeWallHud,
+    commitWallHudInput,
+    previewWallHudInput,
+    updateWallHudPosition,
+    activateWallHudByTab,
+    getWallHudState: () => ({ ...wallHudState }),
+    getView: () => ({ ...view }),
+    setView: (nextView) => {
+      Object.assign(view, nextView);
+      redraw();
+    },
+    hist,
     bindHeaderQuotaBadge,
     defaultRateLimiter,
     getOpeningUnitMode,

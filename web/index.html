@@ -139,6 +139,13 @@
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
       <button type="button" id="walk-exit-btn" class="hud-exit-btn k-target-min-size" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
+    <div id="wall-length-hud" class="wall-length-hud" hidden>
+      <div class="wall-length-hud__row">
+        <input id="wall-length-hud-input" class="wall-length-hud__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" aria-label="Wall segment length" aria-describedby="wall-length-hud-error">
+        <k-kbd id="wall-length-hud-hint" class="wall-length-hud__hint" aria-hidden="true">Tab</k-kbd>
+      </div>
+      <div id="wall-length-hud-error" class="wall-length-hud__error" role="alert" aria-live="assertive" hidden></div>
+    </div>
     <div id="wall-angle-hud" class="wall-angle-hud k-overlay-hud" role="region" aria-label="Wall angle controls" hidden>
       <div class="wall-angle-hud-group" id="hud-draw-angle-group">
         <label for="hud-wall-angle" class="wall-angle-hud-label">Wall Angle (°)</label>

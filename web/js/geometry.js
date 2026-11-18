@@ -1060,7 +1060,7 @@ export function getRoomClearSpan(room) {
 
       // Ray: P + lambda * (nx, ny)
       for (let j = 0; j < m; j++) {
-        if (j === i) continue;
+        if (j === i || (m > 3 && (j === (i + 1) % m || j === (i - 1 + m) % m))) continue;
         const A = innerPts[j];
         const B = innerPts[(j + 1) % m];
         const wx = B.x - A.x;
