@@ -172,10 +172,10 @@ export function daylight(state, room) {
   return { glaze, operable, egress, needGlaze: area * 0.08, needVent: area * 0.04, maxSillOk };
 }
 
-/** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
-export function outletSegments(state, room) {
-  const segs = [];
+/** Precompute unbroken wall intervals (excluding doors) per wall of `room`. */
+export function computeWallIntervals(state, room) {
   const walls = getRoomWallKeys(room);
+  const wallIntervals = [];
   for (const wall of walls) {
     const chordLen = wallLength(room, wall);
     const arcLen = wallArcLength(room, wall);
@@ -183,13 +183,33 @@ export function outletSegments(state, room) {
     let iv = [[WT / 2, arcLen - WT / 2]];
     for (const { o, from, to } of wallOpenings(state, room, wall))
       if (o.kind === 'door') iv = subtractInterval(iv, [from * scale, to * scale]);
+    wallIntervals.push({ wall, intervals: iv, scale });
+  }
+  return wallIntervals;
+}
+
+/** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
+export function outletSegments(state, room, wallIntervals = null) {
+  const segs = [];
+  const resolvedIntervals = wallIntervals ?? computeWallIntervals(state, room);
+  for (const entry of resolvedIntervals) {
+    const { wall, intervals } = entry;
+    if (!intervals.some(([a, b]) => b - a >= 24)) continue;
+    const scale =
+      entry.scale ??
+      (() => {
+        const chordLen = wallLength(room, wall);
+        const arcLen = wallArcLength(room, wall);
+        return chordLen > 0 ? arcLen / chordLen : 1;
+      })();
+    const wallIdx = resolveWallIndex(wall);
     const outs = room.items.filter(
       (i) =>
-        resolveWallIndex(i.wall) === resolveWallIndex(wall) &&
+        resolveWallIndex(i.wall) === wallIdx &&
         ITEM_BY_ID[i.type]?.cat === 'electrical' &&
         ITEM_BY_ID[i.type]?.shape === 'outlet'
     );
-    for (const [a, b] of iv) {
+    for (const [a, b] of intervals) {
       if (b - a < 24) continue;
       const mine = outs
         .map((i) => i.offset * scale)
@@ -1669,13 +1689,13 @@ export function autoComply(state, options = {}) {
           }
       const outType = t.wet ? 'outlet_gfci' : 'outlet';
       if (t.habitable || r.type === 'laundry') {
+        const wallIntervals = computeWallIntervals(state, get());
+        const scaleByWall = new Map(wallIntervals.map((entry) => [entry.wall, entry.scale]));
         for (let k = 0; k < 20; k++) {
           const curRoom = get();
-          const seg = outletSegments(state, curRoom).find((s) => !s.covered);
+          const seg = outletSegments(state, curRoom, wallIntervals).find((s) => !s.covered);
           if (!seg) break;
-          const chordLen = wallLength(curRoom, seg.wall);
-          const arcLen = wallArcLength(curRoom, seg.wall);
-          const scale = chordLen > 0 ? arcLen / chordLen : 1;
+          const scale = scaleByWall.get(seg.wall) ?? 1;
           const parts = seg.need;
           let placed = false;
           for (let p = 0; p < parts && !placed; p++) {
