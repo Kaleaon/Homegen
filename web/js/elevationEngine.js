@@ -449,7 +449,7 @@ function parseNoDataValue(raw) {
 /**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
-async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
+export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
   try {
     const view = new DataView(arrayBuffer);
     if (arrayBuffer.byteLength >= 4) {
@@ -565,10 +565,19 @@ async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                         : -1
                     : -1;
 
+                const byteStrip =
+                  bytesPerSample === 1
+                    ? isSignedSample
+                      ? new Int8Array(arrayBuffer, stripOffset, total)
+                      : new Uint8Array(arrayBuffer, stripOffset, total)
+                    : null;
+
                 let voidMask = null;
                 for (let k = 0; k < total; k++) {
                   let rawVal = 0;
-                  if (bytesPerSample === 8) {
+                  if (byteStrip !== null) {
+                    rawVal = byteStrip[k];
+                  } else if (bytesPerSample === 8) {
                     rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
                   } else if (bytesPerSample === 4) {
                     if (isFloatSample) {
@@ -578,14 +587,10 @@ async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                     } else {
                       rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
                     }
-                  } else if (bytesPerSample === 2) {
+                  } else {
                     rawVal = isSignedSample
                       ? view.getInt16(stripOffset + k * 2, littleEndian)
                       : view.getUint16(stripOffset + k * 2, littleEndian);
-                  } else {
-                    rawVal = isSignedSample
-                      ? view.getInt8(stripOffset + k)
-                      : view.getUint8(stripOffset + k);
                   }
 
                   let isVoid = !Number.isFinite(rawVal);

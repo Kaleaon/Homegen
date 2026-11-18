@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ElevationGrid,
   parseElevationRaster,
+  parseGeoTIFFWithFallback,
   computeMarchingSquares,
   computeContoursAsync,
   deserializeElevationGrid,
