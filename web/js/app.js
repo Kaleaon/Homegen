@@ -214,6 +214,7 @@ const roomAt = (p) =>
 
 function toast(msg, err = false, ms = 4500) {
   const t = $('#toast');
+  if (!t) return;
   t.textContent = msg;
   t.className = err ? 'err' : '';
   t.style.display = 'block';
@@ -224,13 +225,24 @@ function toast(msg, err = false, ms = 4500) {
 }
 
 let liveRegionTimeout = null;
-function announceToLiveRegion(msg) {
+export function announceToLiveRegion(msg) {
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
+  if (a11yDebounceTimer) {
+    clearTimeout(a11yDebounceTimer);
+    a11yDebounceTimer = null;
+  }
   if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
   liveRegionTimeout = setTimeout(() => {
     liveEl.textContent = msg;
   }, 100);
+}
+
+export function formatNumericInput(value, maxDecimals = 4) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '0';
+  const factor = 10 ** maxDecimals;
+  const rounded = Math.round((value + Number.EPSILON) * factor) / factor;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
 function persist() {
@@ -390,7 +402,7 @@ function refresh() {
   renderInspector();
   renderBgToolbar();
   renderDiffDrawer();
-  window.__scene3d?.update();
+  if (typeof window !== 'undefined') window.__scene3d?.update();
   const undoBtn = $('#undo');
   if (undoBtn) {
     undoBtn.disabled = !hist.canUndo();
@@ -404,15 +416,18 @@ function refresh() {
     redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   }
   renderHistoryTimeline();
-  $('#plan-name').value = doc.name;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const planNameEl = $('#plan-name');
+  if (planNameEl) planNameEl.value = doc.name;
+  const zoomLabelEl = $('#zoom-label');
+  if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
-function apply(mutate, opts = {}) {
+export function apply(mutate, opts = {}) {
   const options = typeof opts === 'string' ? { label: opts } : opts;
   const { quiet = false, label = 'Action' } = options;
-  const r = commit(doc, mutate, { autoFix: $('#auto').checked });
+  const autoEl = $('#auto');
+  const r = commit(doc, mutate, { autoFix: autoEl ? autoEl.checked : false });
   if (!r.ok) {
     toast(
       `Blocked by building code:\n• ${[...new Set(r.reasons.map((v) => v.msg))].slice(0, 4).join('\n• ')}`,
@@ -674,8 +689,12 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  const dpr = window.devicePixelRatio || 1;
   const state = preview ? preview.next : doc;
+  if (!ctx) {
+    updatePlanA11yTree(state, curLevel);
+    return;
+  }
+  const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
   const bad = new Set([
     ...badIds(rep),
@@ -966,6 +985,7 @@ export function renderViolationItem(v) {
 // ------------------------------------------------------------- compliance + inspector panels
 function renderCompliance() {
   const el = $('#compliance');
+  if (!el) return;
   const errs = report.violations.filter((v) => v.severity === 'error');
   const warns = report.violations.filter((v) => v.severity !== 'error');
   const sqft = doc.rooms.reduce((a, r) => a + floorAreaSqFt(r), 0);
@@ -1020,7 +1040,7 @@ function focus(id) {
   redraw();
 }
 
-function select(target, { toggle = false, append = false } = {}) {
+export function select(target, { toggle = false, append = false } = {}) {
   if (!target) {
     if (!toggle && !append) selectionSet.clear();
   } else if (typeof target === 'string') {
@@ -1057,7 +1077,11 @@ function select(target, { toggle = false, append = false } = {}) {
   redraw();
 }
 
-function renderInspector() {
+export function getDoc() {
+  return doc;
+}
+
+export function renderInspector() {
   const el = $('#inspector');
   if (!el) return;
   const selectedList = getSelectionList();
@@ -1173,8 +1197,8 @@ function renderInspector() {
   }
   const { room, kind, obj } = hit;
   if (kind === 'room') {
-    if (!window.__activeUVWall) window.__activeUVWall = 'N';
-    const activeWall = window.__activeUVWall;
+    if (!globalThis.__activeUVWall) globalThis.__activeUVWall = 'N';
+    const activeWall = globalThis.__activeUVWall;
     const uv = M.getWallUV(room, activeWall);
     const wallFinishId = room.walls?.[activeWall] || 'paint_white';
     const finishObj = WALL_BY_ID[wallFinishId];
@@ -1199,16 +1223,18 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      ${formRow('i-pos-x', 'Position X (in)', `<input id="i-pos-x" type="number" step="any" value="${formatNumericInput(room.x)}">`)}
+      ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="any" value="${formatNumericInput(room.y)}">`)}
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
-        <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position X (${formatNumericInput(room.x)}")</div>
         <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-6" style="flex:1;padding:3px">-6"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-1" style="flex:1;padding:3px">-1"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="1" style="flex:1;padding:3px">+1"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="6" style="flex:1;padding:3px">+6"</button>
         </div>
-        <div style="font-size:0.75rem;margin-bottom:2px">Position Y (${room.y}")</div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position Y (${formatNumericInput(room.y)}")</div>
         <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
           <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-6" style="flex:1;padding:3px">-6"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-1" style="flex:1;padding:3px">-1"</button>
@@ -1366,6 +1392,48 @@ function renderInspector() {
         roomOf(n, room.id).ceiling = Number(e.target.value);
       }, 'Change Ceiling Height')
     );
+    const applyExactRoomPosition = (axis, rawValue, inputEl) => {
+      const existingPolygons = levelRooms()
+        .filter((r) => r.id !== room.id)
+        .map((r) => roomToPolygon(r));
+      const entity = {
+        id: room.id,
+        position: { x: room.x, y: room.y },
+        polygon: roomToPolygon(room),
+      };
+      const rawX = axis === 'x' ? rawValue : room.x;
+      const rawY = axis === 'y' ? rawValue : room.y;
+      const posRes = interaction.setEntityPosition(
+        entity,
+        { x: rawX, y: rawY },
+        { existingPolygons }
+      );
+      const nextX = posRes.position.x;
+      const nextY = posRes.position.y;
+      if (nextX === room.x && nextY === room.y) {
+        if (inputEl) inputEl.value = formatNumericInput(axis === 'x' ? room.x : room.y);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, room.id);
+        if (targetHit) {
+          M.setItemPosition(n, targetHit, nextX + targetHit.obj.w / 2, nextY + targetHit.obj.h / 2);
+        }
+      }, 'Set Room Position');
+      if (r.ok) {
+        announceToLiveRegion(
+          `${room.name} position set to X ${formatNumericInput(nextX)}", Y ${formatNumericInput(nextY)}".`
+        );
+      } else {
+        renderInspector();
+      }
+    };
+    $('#i-pos-x')?.addEventListener('change', (e) =>
+      applyExactRoomPosition('x', e.target.value, e.target)
+    );
+    $('#i-pos-y')?.addEventListener('change', (e) =>
+      applyExactRoomPosition('y', e.target.value, e.target)
+    );
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, room.id), 'Delete Room');
       select(null);
@@ -1412,7 +1480,7 @@ function renderInspector() {
     });
 
     $('#i-uv-wall')?.addEventListener('change', (e) => {
-      window.__activeUVWall = e.target.value;
+      globalThis.__activeUVWall = e.target.value;
       renderInspector();
     });
 
@@ -1428,12 +1496,12 @@ function renderInspector() {
         await saveTextureBlob(texId, file, { name: file.name, mimeType: file.type });
         apply((n) => {
           const r = roomOf(n, room.id);
-          if (r) r.walls[window.__activeUVWall || 'N'] = texId;
+          if (r) r.walls[globalThis.__activeUVWall || 'N'] = texId;
         }, 'Upload Wall Texture');
         toast(`Uploaded custom texture: ${file.name}`);
         renderInspector();
         redraw();
-        window.__scene3d?.render?.();
+        globalThis.__scene3d?.render?.();
       } catch (err) {
         toast(`Failed to save texture: ${err.message}`, true);
       }
@@ -1461,13 +1529,13 @@ function renderInspector() {
           M.applyWallUV(
             n,
             { scaleU, scaleV, rotation, offsetU, offsetV },
-            { scope, room: r, wall: window.__activeUVWall || 'N', level: r?.level || 0 }
+            { scope, room: r, wall: globalThis.__activeUVWall || 'N', level: r?.level || 0 }
           );
         },
         { quiet: true, label: 'Update Wall UV' }
       );
       redraw();
-      window.__scene3d?.render?.();
+      globalThis.__scene3d?.render?.();
     };
 
     const bindPair = (rangeId, numId) => {
@@ -1535,11 +1603,59 @@ function renderInspector() {
     const doorStyle = kind === 'opening' && def.kind === 'door' ? resolveDoorStyle(obj) : null;
     const winPresets = getWindowPresets();
     const doorPresets = getDoorPresets();
+    const elemBounds = M.getBounds(doc, obj.id);
+    const posX =
+      kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+        ? obj.x
+        : (elemBounds?.cx ?? 0);
+    const posY =
+      kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+        ? obj.y
+        : (elemBounds?.cy ?? 0);
+    const itemRotDeg = kind === 'item' ? (obj.rot ?? 0) : 0;
+    const itemScaleVal =
+      kind === 'item'
+        ? typeof obj.scale === 'number' && Number.isFinite(obj.scale)
+          ? obj.scale
+          : Number.isFinite(obj.scale?.x)
+            ? obj.scale.x
+            : 1
+        : 1;
 
     el.innerHTML = `<h3>${esc(def.name)}</h3><p class="note" style="margin:0 0 6px">in ${esc(room.name)}</p><div class="btns">
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
       <button id="i-del">Delete</button></div>
+      <div class="exact-transform-group" style="margin-top:10px">
+        ${formRow(
+          'i-item-pos-x',
+          'Position X (in)',
+          `<input id="i-item-pos-x" type="number" step="any" value="${formatNumericInput(posX)}">`
+        )}
+        ${formRow(
+          'i-item-pos-y',
+          'Position Y (in)',
+          `<input id="i-item-pos-y" type="number" step="any" value="${formatNumericInput(posY)}">`
+        )}
+        ${
+          kind === 'item' && def.mount !== 'wall'
+            ? formRow(
+                'i-item-rot',
+                'Angle (°)',
+                `<input id="i-item-rot" type="number" step="1" min="-360" max="360" value="${formatNumericInput(itemRotDeg)}">`
+              )
+            : ''
+        }
+        ${
+          kind === 'item'
+            ? formRow(
+                'i-item-scale',
+                'Scale',
+                `<input id="i-item-scale" type="number" step="0.05" min="0.05" value="${formatNumericInput(itemScaleVal)}">`
+              )
+            : ''
+        }
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X</div>
@@ -1791,6 +1907,123 @@ function renderInspector() {
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, obj.id), 'Delete Element');
       select(null);
+    });
+
+    const getOtherFloorItemPolygons = () => {
+      const polygons = [];
+      for (const rm of levelRooms()) {
+        for (const other of rm.items) {
+          if (other.id === obj.id) continue;
+          const oDef = ITEM_BY_ID[other.type];
+          if (oDef && oDef.mount === 'floor' && !oDef.flat) {
+            polygons.push(itemToPolygon(other, oDef));
+          }
+        }
+      }
+      return polygons;
+    };
+
+    const applyExactElementPosition = (axis, rawValue, inputEl) => {
+      const existingPolygons = kind === 'item' ? getOtherFloorItemPolygons() : [];
+      const entity = {
+        id: obj.id,
+        position: { x: posX, y: posY },
+        polygon: kind === 'item' && def.mount === 'floor' ? itemToPolygon(obj, def) : undefined,
+      };
+      const rawX = axis === 'x' ? rawValue : posX;
+      const rawY = axis === 'y' ? rawValue : posY;
+      const posRes = interaction.setEntityPosition(
+        entity,
+        { x: rawX, y: rawY },
+        { existingPolygons }
+      );
+      const nextX = posRes.position.x;
+      const nextY = posRes.position.y;
+      if (nextX === posX && nextY === posY) {
+        if (inputEl) inputEl.value = formatNumericInput(axis === 'x' ? posX : posY);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, obj.id);
+        if (targetHit) {
+          M.setItemPosition(n, targetHit, nextX, nextY);
+        }
+      }, 'Set Element Position');
+      if (r.ok) {
+        const updatedHit = M.findOwner(doc, obj.id);
+        const updatedBounds = M.getBounds(doc, obj.id);
+        const finalX =
+          updatedHit?.kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+            ? updatedHit.obj.x
+            : (updatedBounds?.cx ?? nextX);
+        const finalY =
+          updatedHit?.kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+            ? updatedHit.obj.y
+            : (updatedBounds?.cy ?? nextY);
+        announceToLiveRegion(
+          `${def.name} position set to X ${formatNumericInput(finalX)}", Y ${formatNumericInput(finalY)}".`
+        );
+      } else {
+        renderInspector();
+      }
+    };
+
+    $('#i-item-pos-x')?.addEventListener('change', (e) =>
+      applyExactElementPosition('x', e.target.value, e.target)
+    );
+    $('#i-item-pos-y')?.addEventListener('change', (e) =>
+      applyExactElementPosition('y', e.target.value, e.target)
+    );
+
+    $('#i-item-rot')?.addEventListener('change', (e) => {
+      const existingPolygons = getOtherFloorItemPolygons();
+      const entity = {
+        id: obj.id,
+        position: { x: posX, y: posY },
+        rot: itemRotDeg,
+        rotation: (itemRotDeg * Math.PI) / 180,
+        polygon: def.mount === 'floor' ? itemToPolygon(obj, def) : undefined,
+      };
+      const rotRes = interaction.setEntityRotation(entity, e.target.value, { existingPolygons });
+      const nextRot = rotRes.rotationDegrees;
+      if (nextRot === itemRotDeg) {
+        e.target.value = formatNumericInput(itemRotDeg);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, obj.id);
+        if (targetHit) targetHit.obj.rot = nextRot;
+      }, 'Set Item Rotation');
+      if (r.ok) {
+        announceToLiveRegion(`${def.name} rotated to ${formatNumericInput(nextRot)} degrees.`);
+      } else {
+        renderInspector();
+      }
+    });
+
+    $('#i-item-scale')?.addEventListener('change', (e) => {
+      const existingPolygons = getOtherFloorItemPolygons();
+      const entity = {
+        id: obj.id,
+        position: { x: posX, y: posY },
+        scale: { x: itemScaleVal, y: itemScaleVal, z: itemScaleVal },
+        polygon: def.mount === 'floor' ? itemToPolygon(obj, def) : undefined,
+      };
+      const scaleRes = interaction.setEntityScale(entity, e.target.value, { existingPolygons });
+      const nextScale = scaleRes.scale.x;
+      if (nextScale === itemScaleVal) {
+        e.target.value = formatNumericInput(itemScaleVal);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, obj.id);
+        if (targetHit) targetHit.obj.scale = nextScale;
+      }, 'Set Item Scale');
+      if (r.ok) {
+        announceToLiveRegion(`${def.name} scaled to ${formatNumericInput(nextScale)}x.`);
+      } else {
+        renderInspector();
+      }
     });
 
     el.querySelectorAll('.i-item-nudge-btn').forEach((btn) => {
@@ -3282,11 +3515,12 @@ function fit() {
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
-function setDoc(next, label) {
+export function setDoc(next, label) {
   doc = next;
   hist.push(doc, label);
   persist();
   curLevel = 0;
+  selectionSet.clear();
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
@@ -5616,6 +5850,8 @@ if (typeof window !== 'undefined')
     view3d,
     setLevel,
     formRow,
+    formatNumericInput,
+    renderInspector,
     get doc() {
       return doc;
     },
