@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWebpDataUrl } from '../js/photoreal.js';
-import { hordeRender, HordeError } from '../js/photoreal.js';
+import { toWebpDataUrl, hordeRender, HordeError, DEFAULT_RETRY_DELAYS } from '../js/photoreal.js';
+import { defaultRateLimiter } from '../js/rateLimiter.js';
 
 function setupEnvironment({ useOffscreen = true, offscreenFails = false } = {}) {
   const origImage = globalThis.Image;
@@ -385,5 +385,229 @@ test('hordeRender abort signal cancels polling cleanly and sends delete request'
   assert.ok(
     deletedJobs.some((u) => u.includes('/generate/status/job-abort')),
     'sent DELETE request to cancel job on Horde'
+  );
+});
+
+test('hordeRender executes initial check immediately without sleeping pollIntervalMs', async () => {
+  const events = [];
+  const origSetTimeout = globalThis.setTimeout;
+  const scheduledPollDelays = [];
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms >= 1000) {
+      scheduledPollDelays.push(ms);
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+
+  try {
+    const fakeFetch = async (url) => {
+      const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+      if (url.endsWith('/generate/async')) {
+        events.push('async');
+        return ok({ id: 'job-fast-immediate' });
+      }
+      if (url.includes('/generate/check/')) {
+        events.push('check');
+        return ok({ done: true, queue_position: 0, wait_time: 0 });
+      }
+      if (url.includes('/generate/status/')) {
+        events.push('status');
+        return ok({
+          generations: [{ img: 'https://example.test/fast.webp', censored: false }],
+        });
+      }
+      return ok({});
+    };
+
+    const statuses = [];
+    const start = Date.now();
+    const out = await hordeRender({
+      prompt: 'modern kitchen',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 5000,
+      onStatus: (st) => statuses.push(st),
+    });
+    const elapsed = Date.now() - start;
+
+    assert.deepEqual(events, ['async', 'check', 'status']);
+    assert.deepEqual(scheduledPollDelays, [], 'no pollIntervalMs sleep before first check');
+    assert.ok(elapsed < 500, `expected immediate completion (<500ms), took ${elapsed}ms`);
+    assert.deepEqual(out, { url: 'https://example.test/fast.webp', censored: false });
+    assert.deepEqual(statuses, ['Queued (job job-fast)…', 'Finishing…']);
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('hordeRender sleeps pollIntervalMs only before subsequent polling iterations', async () => {
+  const timeline = [];
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms === 25) {
+      timeline.push(`sleep:${ms}`);
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+
+  try {
+    let checks = 0;
+    const fakeFetch = async (url) => {
+      const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+      if (url.endsWith('/generate/async')) {
+        timeline.push('async');
+        return ok({ id: 'job-multi-poll' });
+      }
+      if (url.includes('/generate/check/')) {
+        checks++;
+        timeline.push(`check:${checks}`);
+        if (checks < 3) {
+          return ok({ done: false, queue_position: 4 - checks, wait_time: 10 - checks * 3 });
+        }
+        return ok({ done: true, queue_position: 0, wait_time: 0 });
+      }
+      if (url.includes('/generate/status/')) {
+        timeline.push('status');
+        return ok({
+          generations: [{ img: 'https://example.test/multi.webp', censored: true }],
+        });
+      }
+      return ok({});
+    };
+
+    const statuses = [];
+    const out = await hordeRender({
+      prompt: 'scandi bedroom',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      apikey: 'registered-key',
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 25,
+      onStatus: (st) => statuses.push(st),
+    });
+
+    assert.deepEqual(timeline, [
+      'async',
+      'check:1',
+      'sleep:25',
+      'check:2',
+      'sleep:25',
+      'check:3',
+      'status',
+    ]);
+    assert.deepEqual(statuses, [
+      'Queued (job job-mult)…',
+      'Queue position 3 · ~7s',
+      'Queue position 2 · ~4s',
+      'Finishing…',
+    ]);
+    assert.deepEqual(out, { url: 'https://example.test/multi.webp', censored: true });
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('hordeRender uses exponential retry backoff delays and preserves onStatus across transient errors', async () => {
+  assert.deepEqual(DEFAULT_RETRY_DELAYS, [250, 500, 1000]);
+  defaultRateLimiter.clear();
+
+  const recordedSleeps = [];
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms >= 40) {
+      recordedSleeps.push(ms);
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+
+  try {
+    let checkCalls = 0;
+    const fakeFetch = async (url) => {
+      const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+      if (url.endsWith('/generate/async')) {
+        return ok({ id: 'job-exp-backoff' });
+      }
+      if (url.includes('/generate/check/')) {
+        checkCalls++;
+        // First check returns not done immediately
+        if (checkCalls === 1) {
+          return ok({ done: false, queue_position: 1, wait_time: 3 });
+        }
+        // Second poll experiences 3 transient network drops before succeeding on 4th attempt
+        if (checkCalls >= 2 && checkCalls <= 4) {
+          throw new TypeError('Transient network error');
+        }
+        return ok({ done: true, queue_position: 0, wait_time: 0 });
+      }
+      if (url.includes('/generate/status/')) {
+        return ok({
+          generations: [{ img: 'https://example.test/backoff.webp', censored: false }],
+        });
+      }
+      return ok({});
+    };
+
+    const statuses = [];
+    const out = await hordeRender({
+      prompt: 'industrial loft',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      apikey: 'registered-key',
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 45,
+      retryDelays: [40], // single base element scales exponentially: 40, 80, 160
+      onStatus: (st) => statuses.push(st),
+    });
+
+    assert.equal(out.url, 'https://example.test/backoff.webp');
+    assert.deepEqual(recordedSleeps, [45, 40, 80, 160]);
+    assert.deepEqual(statuses, ['Queued (job job-exp-)…', 'Queue position 1 · ~3s', 'Finishing…']);
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('hordeRender aborts cleanly during fetch retry backoff sleep and clears pending timers', async () => {
+  const deletedJobs = [];
+  let checkAttempts = 0;
+  const ac = new AbortController();
+
+  const fakeFetch = async (url, opts = {}) => {
+    if (opts.method === 'DELETE') {
+      deletedJobs.push(url);
+      return { ok: true, status: 200, json: async () => ({}) };
+    }
+    const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+    if (url.endsWith('/generate/async')) {
+      return ok({ id: 'job-retry-abort' });
+    }
+    if (url.includes('/generate/check/')) {
+      checkAttempts++;
+      setTimeout(() => ac.abort('user cancelled during retry sleep'), 10);
+      throw new TypeError('Network drop before abort');
+    }
+    return ok({});
+  };
+
+  const start = Date.now();
+  await assert.rejects(
+    hordeRender({
+      prompt: 'boho living room',
+      depthWebp: { url: 'data:image/webp;base64,QUJD', size: [576, 448] },
+      signal: ac.signal,
+      fetchImpl: fakeFetch,
+      pollIntervalMs: 5000,
+      retryDelays: [5000, 10000, 20000],
+    }),
+    (err) => {
+      assert.equal(err.name, 'AbortError');
+      return true;
+    }
+  );
+  const elapsed = Date.now() - start;
+
+  assert.equal(checkAttempts, 1, 'aborted during first retry sleep without further retry attempts');
+  assert.ok(elapsed < 500, `expected prompt abort cleanup (<500ms), took ${elapsed}ms`);
+  assert.ok(
+    deletedJobs.some((u) => u.includes('/generate/status/job-retry-abort')),
+    'sent DELETE request on abort during retry backoff'
   );
 });
