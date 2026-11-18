@@ -12,6 +12,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
 /**
  * Draws a closed vector polygon path from array of PDF points [{x, y}, ...].
@@ -66,12 +67,6 @@ export const SCALE_OPTIONS = {
     mPerSeg: 2,
   },
   fit: { label: 'Fit to Page', fit: true, ratioStr: 'Fit to Page' },
-};
-
-const fmtLen = (inches) => {
-  const ft = Math.floor(inches / 12);
-  const inch = Math.round(inches % 12);
-  return `${ft}'${inch ? ` ${inch}"` : ''}`;
 };
 
 export function resolvePDFAttributionAndLicensing(docState, options = {}) {
@@ -682,7 +677,7 @@ function drawRoomLabelVector(pdf, room, transform) {
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(6.5);
   pdf.setTextColor('#555555');
-  const sub = `${fmtLen(ir.w)} × ${fmtLen(ir.h)} · ${area.toFixed(0)} sq ft`;
+  const sub = `${formatFractionalInches(ir.w)} × ${formatFractionalInches(ir.h)} · ${area.toFixed(0)} sq ft`;
   pdf.text(sub, cx, cy + 6, { align: 'center' });
 }
 
@@ -937,7 +932,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
       room.name,
       typeDef.name,
       `Level ${(room.level || 0) + 1}`,
-      `${fmtLen(ir.w)} × ${fmtLen(ir.h)}`,
+      `${formatFractionalInches(ir.w)} × ${formatFractionalInches(ir.h)}`,
       `${area.toFixed(0)} sq ft`,
     ];
 
