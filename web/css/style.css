@@ -389,10 +389,30 @@ aside {
   outline-offset: var(--focus-ring-offset);
 }
 .catalog-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
   padding: 20px 8px;
   text-align: center;
   color: var(--ktheme-text-muted);
   font-size: 13px;
+}
+.catalog-empty p {
+  margin: 0;
+}
+.catalog-reset-btn {
+  margin-top: 2px;
+  padding: 5px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--ktheme-text);
+  background: var(--ktheme-bg);
+  border: 1px solid var(--ktheme-border);
+  border-radius: var(--radius-sm);
+}
+.catalog-reset-btn:hover {
+  border-color: var(--ktheme-accent);
+  color: var(--ktheme-accent);
 }
 #palette h4 {
   margin: 14px 0 6px;
