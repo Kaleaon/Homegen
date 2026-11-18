@@ -239,7 +239,7 @@ function toFiniteCoord(val) {
  * Parses Google Maps Elevation API JSON responses.
  * Accepts string or object matching Google Maps Elevation API JSON response format.
  */
-export function parseGoogleElevationJson(input, options = {}) {
+function parseGoogleElevationJson(input, options = {}) {
   const json = typeof input === 'string' ? JSON.parse(input) : input;
   if (!json) {
     throw new Error('Invalid JSON payload');
@@ -320,7 +320,7 @@ export function parseGoogleElevationJson(input, options = {}) {
 /**
  * Parses image heightmap (grayscale/RGB) from ImageData or HTMLImageElement/Canvas.
  */
-export function parseImageHeightmap(imageInput, options = {}) {
+function parseImageHeightmap(imageInput, options = {}) {
   let width;
   let height;
   let pixels;
@@ -391,9 +391,65 @@ function readDoubleArray(view, offset, count, littleEndian) {
 }
 
 /**
+ * Helper to extract ASCII string values (TIFF Type 2) from an IFD entry.
+ * Handles inline values (count <= 4 bytes stored at entryOffset + 8) and
+ * out-of-line offset strings (count > 4 bytes stored at the 32-bit offset).
+ */
+function readAsciiTag(view, entryOffset, count, littleEndian) {
+  if (!count || count <= 0) {
+    return null;
+  }
+  try {
+    let strOffset;
+    if (count <= 4) {
+      strOffset = entryOffset + 8;
+      if (strOffset < 0 || strOffset + count > view.byteLength) {
+        return null;
+      }
+    } else {
+      strOffset = view.getUint32(entryOffset + 8, littleEndian);
+      if (strOffset <= 0 || strOffset + count > view.byteLength) {
+        return null;
+      }
+    }
+    let result = '';
+    for (let i = 0; i < count; i++) {
+      const byte = view.getUint8(strOffset + i);
+      if (byte === 0) break;
+      result += String.fromCharCode(byte);
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Converts a raw GDAL_NODATA string or option value into a numeric sentinel,
+ * returning null for empty, corrupt, or non-numeric inputs.
+ */
+function parseNoDataValue(raw) {
+  if (raw === null || raw === undefined || raw === false || typeof raw === 'boolean') {
+    return null;
+  }
+  if (typeof raw === 'number') {
+    if (Number.isNaN(raw)) return NaN;
+    return Number.isFinite(raw) ? raw : null;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return null;
+    if (trimmed.toLowerCase() === 'nan') return NaN;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
-export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
+async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
   try {
     const view = new DataView(arrayBuffer);
     if (arrayBuffer.byteLength >= 4) {
@@ -410,10 +466,13 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
             let imgWidth = 0,
               imgHeight = 0,
               stripOffset = 0,
-              bitsPerSample = 8;
+              bitsPerSample = 8,
+              sampleFormat = 1,
+              hasExplicitSampleFormat = false;
             let modelPixelScale = null;
             let modelTiepoint = null;
             let modelTransformation = null;
+            let gdalNoData = null;
 
             for (let i = 0; i < numEntries; i++) {
               const entryOffset = firstIFD + 2 + i * 12;
@@ -424,18 +483,30 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
               const val = view.getUint32(entryOffset + 8, littleEndian);
 
               if (tag === 256)
-                imgWidth = val; // ImageWidth
+                imgWidth = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val; // ImageWidth
               else if (tag === 257)
-                imgHeight = val; // ImageLength
-              else if (tag === 258) bitsPerSample = val & 0xffff;
+                imgHeight = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val; // ImageLength
+              else if (tag === 258)
+                bitsPerSample =
+                  !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val & 0xffff;
               else if (tag === 273)
-                stripOffset = val; // StripOffsets
-              else if (tag === 33550 && type === 12) {
+                stripOffset = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val; // StripOffsets
+              else if (tag === 339) {
+                sampleFormat =
+                  !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val & 0xffff;
+                hasExplicitSampleFormat = true;
+              } else if (tag === 33550 && type === 12) {
                 modelPixelScale = readDoubleArray(view, val, count, littleEndian);
               } else if (tag === 33922 && type === 12) {
                 modelTiepoint = readDoubleArray(view, val, count, littleEndian);
               } else if (tag === 34264 && type === 12) {
                 modelTransformation = readDoubleArray(view, val, count, littleEndian);
+              } else if (tag === 42113 && type === 2) {
+                const asciiNoData = readAsciiTag(view, entryOffset, count, littleEndian);
+                const parsedNoData = parseNoDataValue(asciiNoData);
+                if (parsedNoData !== null) {
+                  gdalNoData = parsedNoData;
+                }
               }
             }
             if (imgWidth > 0 && imgHeight > 0 && stripOffset > 0) {
@@ -443,22 +514,125 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
               const data = new Float32Array(total);
               let minE = Infinity,
                 maxE = -Infinity;
-              const bytesPerSample = bitsPerSample === 16 ? 2 : 1;
+              const bytesPerSample =
+                bitsPerSample === 64 ? 8 : bitsPerSample === 32 ? 4 : bitsPerSample === 16 ? 2 : 1;
               if (stripOffset + total * bytesPerSample <= arrayBuffer.byteLength) {
+                const effectiveNoData =
+                  options.noDataValue !== undefined
+                    ? parseNoDataValue(options.noDataValue)
+                    : gdalNoData;
+                const hasNumericNoData = effectiveNoData !== null && !Number.isNaN(effectiveNoData);
+
+                const isFloatSample =
+                  sampleFormat === 3 ||
+                  bytesPerSample === 8 ||
+                  (!hasExplicitSampleFormat &&
+                    bytesPerSample === 4 &&
+                    hasNumericNoData &&
+                    (!Number.isInteger(effectiveNoData) || Math.abs(effectiveNoData) > 2147483647));
+                const isSignedSample =
+                  !isFloatSample &&
+                  (sampleFormat === 2 ||
+                    (!hasExplicitSampleFormat &&
+                      hasNumericNoData &&
+                      effectiveNoData < 0 &&
+                      ((bytesPerSample === 2 && effectiveNoData >= -32768) ||
+                        (bytesPerSample === 4 && effectiveNoData >= -2147483648) ||
+                        (bytesPerSample === 1 && effectiveNoData >= -128))));
+                const isUnsignedNormalized = !isFloatSample && !isSignedSample;
+
+                const baseMin = options.minElevation ?? 0;
+                const rangeElev = (options.maxElevation ?? 10) - baseMin;
+                const maxUnsignedSample =
+                  bytesPerSample === 4 ? 4294967295 : bytesPerSample === 2 ? 65535 : 255;
+
+                const noDataF32 = hasNumericNoData ? Math.fround(effectiveNoData) : 0;
+                const noDataTol = hasNumericNoData
+                  ? (bytesPerSample === 8 ? 1e-9 : 1e-6) * Math.max(1, Math.abs(effectiveNoData))
+                  : 0;
+
+                const enableStandardSentinels = Boolean(
+                  options.filterStandardSentinels ||
+                  options.standardSentinels ||
+                  options.detectStandardSentinels
+                );
+                const stdSentinelVal =
+                  enableStandardSentinels && isUnsignedNormalized
+                    ? bytesPerSample === 2
+                      ? 65535
+                      : bytesPerSample === 1
+                        ? 255
+                        : -1
+                    : -1;
+
+                let voidMask = null;
                 for (let k = 0; k < total; k++) {
                   let rawVal = 0;
-                  if (bytesPerSample === 2) {
-                    rawVal = view.getUint16(stripOffset + k * 2, littleEndian);
+                  if (bytesPerSample === 8) {
+                    rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
+                  } else if (bytesPerSample === 4) {
+                    if (isFloatSample) {
+                      rawVal = view.getFloat32(stripOffset + k * 4, littleEndian);
+                    } else if (isSignedSample) {
+                      rawVal = view.getInt32(stripOffset + k * 4, littleEndian);
+                    } else {
+                      rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
+                    }
+                  } else if (bytesPerSample === 2) {
+                    rawVal = isSignedSample
+                      ? view.getInt16(stripOffset + k * 2, littleEndian)
+                      : view.getUint16(stripOffset + k * 2, littleEndian);
                   } else {
-                    rawVal = view.getUint8(stripOffset + k);
+                    rawVal = isSignedSample
+                      ? view.getInt8(stripOffset + k)
+                      : view.getUint8(stripOffset + k);
                   }
-                  const norm = rawVal / (bytesPerSample === 2 ? 65535 : 255);
-                  const elev =
-                    (options.minElevation ?? 0) +
-                    norm * ((options.maxElevation ?? 10) - (options.minElevation ?? 0));
+
+                  let isVoid = !Number.isFinite(rawVal);
+                  if (!isVoid && hasNumericNoData) {
+                    if (isFloatSample) {
+                      isVoid =
+                        rawVal === effectiveNoData ||
+                        (bytesPerSample === 4 && rawVal === noDataF32) ||
+                        Math.abs(rawVal - effectiveNoData) <= noDataTol;
+                    } else {
+                      isVoid = rawVal === effectiveNoData;
+                    }
+                  }
+                  if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
+                    isVoid = true;
+                  }
+
+                  if (isVoid) {
+                    if (!voidMask) voidMask = new Uint8Array(total);
+                    voidMask[k] = 1;
+                    continue;
+                  }
+
+                  const elev = isUnsignedNormalized
+                    ? baseMin + (rawVal / maxUnsignedSample) * rangeElev
+                    : rawVal;
                   data[k] = elev;
                   if (elev < minE) minE = elev;
                   if (elev > maxE) maxE = elev;
+                }
+
+                if (minE === Infinity || maxE === -Infinity) {
+                  minE = baseMin;
+                  maxE = options.maxElevation ?? 10;
+                }
+
+                if (voidMask) {
+                  const baselineElevation =
+                    typeof options.noDataReplacement === 'number' &&
+                    Number.isFinite(options.noDataReplacement)
+                      ? options.noDataReplacement
+                      : minE;
+                  for (let k = 0; k < total; k++) {
+                    if (voidMask[k]) {
+                      data[k] = baselineElevation;
+                    }
+                  }
                 }
 
                 let computedBounds = null;
@@ -788,24 +962,6 @@ export async function computeContoursAsync(grid, intervalOverride = null) {
   }
 
   return computeMarchingSquares(grid, intervalOverride);
-}
-
-/**
- * Serializes ElevationGrid instance to plain object for plan JSON state.
- */
-export function serializeElevationGrid(grid) {
-  if (!grid) return null;
-  return {
-    width: grid.width,
-    height: grid.height,
-    data: Array.from(grid.data),
-    minElevation: grid.minElevation,
-    maxElevation: grid.maxElevation,
-    bounds: grid.bounds,
-    contourInterval: grid.contourInterval,
-    verticalScale: grid.verticalScale,
-    visible: grid.visible !== false,
-  };
 }
 
 /**

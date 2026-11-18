@@ -286,7 +286,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   global.document = win.document;
   global.localStorage = win.localStorage;
 
-  const { OnboardingTour, TOUR_STEPS, resetOnboardingStatus, getOnboardingStatus } =
+  const { OnboardingTour, resetOnboardingStatus, getOnboardingStatus } =
     await import('../js/onboardingTour.js');
 
   resetOnboardingStatus();
@@ -298,6 +298,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   assert.equal(win.document.activeElement, headerEl);
 
   const tour = new OnboardingTour();
+  const steps = tour.steps;
   assert.equal(tour.active, false);
   assert.equal(headerEl.getAttribute('inert'), null);
   assert.equal(mainEl.getAttribute('inert'), null);
@@ -319,7 +320,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   assert.ok(announcer, '#spotlight-live-announcer should exist inside tour overlay');
   assert.equal(
     announcer.textContent,
-    `Step 1 of ${TOUR_STEPS.length}: ${TOUR_STEPS[0].title}. ${TOUR_STEPS[0].description}`
+    `Step 1 of ${steps.length}: ${steps[0].title}. ${steps[0].description}`
   );
   assert.equal(
     win.document.activeElement,
@@ -332,7 +333,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   assert.equal(tour.currentIndex, 1);
   assert.equal(
     announcer.textContent,
-    `Step 2 of ${TOUR_STEPS.length}: ${TOUR_STEPS[1].title}. ${TOUR_STEPS[1].description}`
+    `Step 2 of ${steps.length}: ${steps[1].title}. ${steps[1].description}`
   );
   assert.equal(
     win.document.activeElement,
@@ -345,7 +346,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   assert.equal(tour.currentIndex, 0);
   assert.equal(
     announcer.textContent,
-    `Step 1 of ${TOUR_STEPS.length}: ${TOUR_STEPS[0].title}. ${TOUR_STEPS[0].description}`
+    `Step 1 of ${steps.length}: ${steps[0].title}. ${steps[0].description}`
   );
 
   // Keyboard navigation - ArrowRight
@@ -357,7 +358,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   assert.equal(tour.currentIndex, 1);
   assert.equal(
     announcer.textContent,
-    `Step 2 of ${TOUR_STEPS.length}: ${TOUR_STEPS[1].title}. ${TOUR_STEPS[1].description}`
+    `Step 2 of ${steps.length}: ${steps[1].title}. ${steps[1].description}`
   );
 
   // Keyboard navigation - ArrowLeft
@@ -369,7 +370,7 @@ test('OnboardingTour Engine - Spotlight DOM creation, step progression, and keyb
   assert.equal(tour.currentIndex, 0);
   assert.equal(
     announcer.textContent,
-    `Step 1 of ${TOUR_STEPS.length}: ${TOUR_STEPS[0].title}. ${TOUR_STEPS[0].description}`
+    `Step 1 of ${steps.length}: ${steps[0].title}. ${steps[0].description}`
   );
 
   // Keyboard navigation - Escape skips tour
