@@ -246,6 +246,15 @@ function pointInPolygon(p, poly) {
   return inside;
 }
 
+function toFiniteCoord(val) {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : NaN;
+  if (typeof val === 'string' && val.trim() !== '') {
+    const parsed = Number(val);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  return NaN;
+}
+
 /**
  * Parses Google Maps Elevation API JSON responses.
  * Accepts string or object matching Google Maps Elevation API JSON response format.
@@ -280,6 +289,10 @@ export function parseGoogleElevationJson(input, options = {}) {
   const data = new Float32Array(results.length);
   let minElevation = Infinity;
   let maxElevation = -Infinity;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
 
   for (let i = 0; i < results.length; i++) {
     const item = results[i];
@@ -287,6 +300,20 @@ export function parseGoogleElevationJson(input, options = {}) {
     data[i] = elev;
     if (elev < minElevation) minElevation = elev;
     if (elev > maxElevation) maxElevation = elev;
+
+    if (item && typeof item === 'object') {
+      const loc = item.location && typeof item.location === 'object' ? item.location : item;
+      const rawX = loc.lng ?? loc.longitude ?? loc.x ?? item.lng ?? item.longitude ?? item.x;
+      const rawY = loc.lat ?? loc.latitude ?? loc.y ?? item.lat ?? item.latitude ?? item.y;
+      const x = toFiniteCoord(rawX);
+      const y = toFiniteCoord(rawY);
+      if (!Number.isNaN(x) && !Number.isNaN(y)) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
   }
 
   if (minElevation === Infinity) {
@@ -294,13 +321,18 @@ export function parseGoogleElevationJson(input, options = {}) {
     maxElevation = 10;
   }
 
+  const computedBounds =
+    Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY)
+      ? { minX, maxX, minY, maxY }
+      : null;
+
   return new ElevationGrid({
     width,
     height,
     data,
     minElevation: opts.minElevation ?? minElevation,
     maxElevation: opts.maxElevation ?? maxElevation,
-    bounds: opts.bounds,
+    bounds: opts.bounds ?? computedBounds,
     contourInterval: opts.contourInterval ?? 1.0,
     verticalScale: opts.verticalScale ?? 1.0,
     elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
