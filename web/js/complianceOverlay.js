@@ -1,5 +1,7 @@
 // Spatial compliance adapter converting document state & rule reports into an overlay scene graph.
 import {
+  WALLS,
+  wallSeg,
   wallPoint,
   interior,
   interiorPolygonData,
@@ -37,7 +39,8 @@ function computeStateHash(state) {
 
   let str = `${state.version || 0}:${state.levels || 1}:${state.rooms?.length || 0};`;
   for (const r of state.rooms || []) {
-    str += `${r.id}:${r.type}:${r.level || 0}:${r.x}:${r.y}:${r.w}:${r.h}:${r.ceiling}:${r.floor}:${r.cladding};`;
+    const ptsKey = Array.isArray(r.points) ? r.points.map((p) => `${p.x},${p.y}`).join('|') : '';
+    str += `${r.id}:${r.type}:${r.level || 0}:${r.x}:${r.y}:${r.w}:${r.h}:${ptsKey}:${r.ceiling}:${r.floor}:${r.cladding};`;
     if (r.items) {
       for (const i of r.items) {
         str += `${i.id}:${i.type}:${i.x}:${i.y}:${i.rot}:${i.wall}:${i.offset};`;
@@ -491,6 +494,46 @@ export class ComplianceOverlayScene {
         );
       }
 
+      // Per-wall dimension label nodes for selected/active rooms
+      if (isSelected) {
+        const wallCount = pts.length;
+        for (let wIdx = 0; wIdx < wallCount; wIdx++) {
+          const wallKey = wallCount === 4 ? WALLS[wIdx] : String(wIdx);
+          const seg = wallSeg(room, wIdx);
+          if (seg.len <= 0) continue;
+          const p1 = { x: seg.ax, y: seg.ay };
+          const p2 = { x: seg.ax + seg.dx * seg.len, y: seg.ay + seg.dy * seg.len };
+          const midX = (p1.x + p2.x) / 2 - seg.nx * 10;
+          const midY = (p1.y + p2.y) / 2 - seg.ny * 10;
+          const wallDimText = fmt(seg.len);
+          nextNodes.push(
+            new SpatialOverlayNode(
+              `node:wall-dim:${room.id}:${wallKey}`,
+              'wallDimensionLabel',
+              {
+                x: midX - 24,
+                y: midY - 10,
+                w: 48,
+                h: 20,
+              },
+              {
+                roomId: room.id,
+                wallKey,
+                wallIndex: wIdx,
+                lengthInches: seg.len,
+                dimensionText: wallDimText,
+                midX,
+                midY,
+                p1,
+                p2,
+                isValid: isValid && seg.len >= 36,
+                isSelected,
+              }
+            )
+          );
+        }
+      }
+
       // Live dimension label node centered at interior polygon centroid
       const polyData = roomEntry ? roomEntry.polyData : interiorPolygonData(room);
       const centroid = polyData ? polyData.centroid : polygonCentroid(pts);
@@ -671,6 +714,34 @@ export class ComplianceOverlayScene {
       const dx = testPoint.x - n.bounds.x;
       const dy = testPoint.y - n.bounds.y;
       if (Math.hypot(dx, dy) <= tol + 4) return n;
+    }
+
+    // Test per-wall dimension badges (interactive inline HUD triggers)
+    for (const n of this.getNodesByType('wallDimensionLabel')) {
+      const b = n.bounds;
+      if (
+        testPoint.x >= b.x - tol * 0.5 &&
+        testPoint.x <= b.x + b.w + tol * 0.5 &&
+        testPoint.y >= b.y - tol * 0.5 &&
+        testPoint.y <= b.y + b.h + tol * 0.5
+      ) {
+        return n;
+      }
+    }
+
+    // Test room center dimension labels
+    for (const n of this.getNodesByType('dimensionLabel')) {
+      const b = n.bounds;
+      const halfW = (b.w || 80) / 2;
+      const halfH = (b.h || 20) / 2;
+      if (
+        testPoint.x >= b.x - halfW &&
+        testPoint.x <= b.x + halfW &&
+        testPoint.y >= b.y - halfH &&
+        testPoint.y <= b.y + halfH
+      ) {
+        return n;
+      }
     }
 
     // Test violation fix buttons (topmost first)

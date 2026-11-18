@@ -13,6 +13,8 @@ import {
   lv,
   getRoomPoints,
   getRoomBoundingBox,
+  resolveWallIndex,
+  polygonArea,
   computeGeoBounds,
 } from './geometry.js';
 import { isRegisteredEPSG } from './epsgRegistry.js';
@@ -639,10 +641,51 @@ export function resizeRoom(room, x, y, w, h, state = null) {
   }
 }
 
+function hasPolygonSelfIntersection(points) {
+  if (!Array.isArray(points) || points.length < 3) return true;
+  const n = points.length;
+
+  function ccw(A, B, C) {
+    return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+  }
+
+  function properIntersect(A, B, C, D) {
+    return ccw(A, C, D) !== ccw(B, C, D) && ccw(A, B, C) !== ccw(A, B, D);
+  }
+
+  for (let i = 0; i < n; i++) {
+    const pPrev = points[(i - 1 + n) % n];
+    const pCurr = points[i];
+    const pNext = points[(i + 1) % n];
+    const v1x = pCurr.x - pPrev.x;
+    const v1y = pCurr.y - pPrev.y;
+    const v2x = pNext.x - pCurr.x;
+    const v2y = pNext.y - pCurr.y;
+    const l1 = Math.hypot(v1x, v1y);
+    const l2 = Math.hypot(v2x, v2y);
+    if (l1 < 1e-4 || l2 < 1e-4) return true;
+    // Detect 180-degree folded edge
+    const cos = (v1x * v2x + v1y * v2y) / (l1 * l2);
+    if (cos < -0.9999) return true;
+  }
+
+  for (let i = 0; i < n; i++) {
+    const a1 = points[i];
+    const a2 = points[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      if (Math.abs(i - j) <= 1 || (i === 0 && j === n - 1)) continue;
+      const b1 = points[j];
+      const b2 = points[(j + 1) % n];
+      if (properIntersect(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
 export function updateRoomPoints(room, points, state = null) {
   if (state) room = ensureRoomCopy(state, room);
-  room.points = points;
-  const bbox = getRoomBoundingBox(points);
+  room.points = points.map((p) => ({ x: p.x, y: p.y }));
+  const bbox = getRoomBoundingBox(room.points);
   room.x = bbox.x;
   room.y = bbox.y;
   room.w = bbox.w;
@@ -653,8 +696,122 @@ export function updateRoomPoints(room, points, state = null) {
   room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
     const len = wallLength(room, o.wall);
-    o.offset = Math.max(0, Math.min(o.offset, len - o.width));
+    if (len >= o.width + 12) {
+      o.offset = Math.max(6, Math.min(o.offset, len - o.width - 6));
+    } else {
+      o.offset = Math.max(0, Math.min(o.offset, Math.max(0, len - o.width)));
+    }
   }
+  for (const it of room.items) {
+    const def = ITEM_BY_ID[it.type];
+    if (def && def.mount === 'wall' && it.wall !== undefined) {
+      const len = wallLength(room, it.wall);
+      if (len >= 16) {
+        it.offset = Math.max(8, Math.min(it.offset, len - 8));
+      } else {
+        it.offset = Math.max(0, Math.min(it.offset, Math.max(0, len)));
+      }
+    }
+  }
+}
+
+/**
+ * Compute updated room polygon vertices when setting a single wall segment's length
+ * along its existing wall vector while preserving room closure.
+ */
+export function computeAdjustedWallPoints(room, wallKeyOrIndex, targetLength, opts = {}) {
+  const minClearSpan = typeof opts.minClearSpan === 'number' ? opts.minClearSpan : 36;
+  if (!room) {
+    return { ok: false, error: 'Room is required.' };
+  }
+  if (typeof targetLength !== 'number' || !Number.isFinite(targetLength) || targetLength <= 0) {
+    return { ok: false, error: 'Enter a valid positive wall length.' };
+  }
+  if (targetLength < minClearSpan) {
+    return {
+      ok: false,
+      error: `Wall length must be at least ${minClearSpan} in (${(minClearSpan / 12).toFixed(0)} ft) clear span.`,
+    };
+  }
+
+  const pts = getRoomPoints(room).map((p) => ({ x: p.x, y: p.y }));
+  const n = pts.length;
+  if (n < 3) {
+    return { ok: false, error: 'Room polygon requires at least 3 vertices.' };
+  }
+
+  const idx = resolveWallIndex(wallKeyOrIndex) % n;
+  let startIdx;
+  let endIdx;
+  if (n === 4) {
+    if (idx === 0) {
+      startIdx = 0;
+      endIdx = 1;
+    } else if (idx === 1) {
+      startIdx = 1;
+      endIdx = 2;
+    } else if (idx === 2) {
+      startIdx = 3;
+      endIdx = 2;
+    } else {
+      startIdx = 0;
+      endIdx = 3;
+    }
+  } else {
+    startIdx = idx;
+    endIdx = (idx + 1) % n;
+  }
+
+  const seg = wallSeg(room, idx);
+  const clean = (val) => {
+    const rounded = Math.round(val);
+    return Math.abs(val - rounded) < 1e-9 ? rounded : Number(val.toFixed(6));
+  };
+
+  const nextPts = pts.map((p) => ({ ...p }));
+  nextPts[endIdx] = {
+    x: clean(pts[startIdx].x + seg.dx * targetLength),
+    y: clean(pts[startIdx].y + seg.dy * targetLength),
+  };
+
+  if (hasPolygonSelfIntersection(nextPts)) {
+    return {
+      ok: false,
+      error: 'Wall length causes polygon self-intersection.',
+      points: nextPts,
+    };
+  }
+
+  const area = polygonArea(nextPts);
+  const bbox = getRoomBoundingBox(nextPts);
+  if (area < minClearSpan * minClearSpan * 0.25 || bbox.w < minClearSpan || bbox.h < minClearSpan) {
+    return {
+      ok: false,
+      error: `Room clear span must be at least ${minClearSpan} in (${(minClearSpan / 12).toFixed(0)} ft).`,
+      points: nextPts,
+    };
+  }
+
+  return {
+    ok: true,
+    points: nextPts,
+    wallIndex: idx,
+    startIndex: startIdx,
+    endIndex: endIdx,
+    lengthInches: targetLength,
+  };
+}
+
+/**
+ * Adjust a single wall segment's length along its wall vector and update the room polygon.
+ */
+export function adjustRoomWallLength(room, wallKeyOrIndex, targetLength, state = null, opts = {}) {
+  const computed = computeAdjustedWallPoints(room, wallKeyOrIndex, targetLength, opts);
+  if (!computed.ok) {
+    return computed;
+  }
+  updateRoomPoints(room, computed.points, state);
+  return computed;
 }
 
 const wallDir = { N: 0, S: 180, E: 90, W: 270 }; // item rotation for a back against that wall
