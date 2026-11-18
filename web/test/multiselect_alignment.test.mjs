@@ -199,6 +199,138 @@ test('distributeItems handles negative gaps when items exceed outer span and rej
   assert.ok(Math.abs(gap12 - gap23) < 1e-6);
 });
 
+test('distributeItems supports explicit center-to-center spacing horizontally and vertically', () => {
+  const state = M.newState();
+  const room = M.createRoom(state, 'living', 0, 0, 500, 500);
+  const item1 = M.addItem(state, room, 'armchair', { x: 60, y: 50 });
+  const item2 = M.addItem(state, room, 'armchair', { x: 180, y: 190 });
+  const item3 = M.addItem(state, room, 'armchair', { x: 350, y: 380 });
+
+  // Horizontal center-to-center at 48"
+  let stateCopy = M.clone(state);
+  const spacingH = M.parseDistanceInInches("4'");
+  assert.equal(spacingH, 48);
+  const resH = M.distributeItems(
+    stateCopy,
+    [item1.id, item2.id, item3.id],
+    'horizontal',
+    spacingH,
+    'center'
+  );
+  assert.equal(resH, true);
+  const hb1 = M.getBounds(stateCopy, item1.id);
+  const hb2 = M.getBounds(stateCopy, item2.id);
+  const hb3 = M.getBounds(stateCopy, item3.id);
+  assert.equal(hb1.cx, 60);
+  assert.ok(Math.abs(hb2.cx - 108) < 0.01);
+  assert.ok(Math.abs(hb3.cx - 156) < 0.01);
+
+  // Vertical center-to-center at 2' 6" (30")
+  stateCopy = M.clone(state);
+  const spacingV = M.parseDistanceInInches('2\' 6"');
+  assert.equal(spacingV, 30);
+  const resV = M.distributeItems(
+    stateCopy,
+    [item1.id, item2.id, item3.id],
+    'vertical',
+    spacingV,
+    'center'
+  );
+  assert.equal(resV, true);
+  const vb1 = M.getBounds(stateCopy, item1.id);
+  const vb2 = M.getBounds(stateCopy, item2.id);
+  const vb3 = M.getBounds(stateCopy, item3.id);
+  assert.equal(vb1.cy, 50);
+  assert.ok(Math.abs(vb2.cy - 80) < 0.01);
+  assert.ok(Math.abs(vb3.cy - 110) < 0.01);
+});
+
+test('distributeItems supports explicit edge-to-edge gap spacing for items with unequal dimensions', () => {
+  const state = M.newState();
+  const room = M.createRoom(state, 'living', 0, 0, 600, 600);
+  // Unequal dimensions: sofa (84x36), wardrobe (48x24), nightstand (18x16)
+  const sofa = M.addItem(state, room, 'sofa', { x: 70, y: 60, rot: 0 });
+  const wardrobe = M.addItem(state, room, 'wardrobe', { x: 220, y: 200, rot: 0 });
+  const nightstand = M.addItem(state, room, 'nightstand', { x: 400, y: 360, rot: 0 });
+
+  // Horizontal edge-to-edge gap of 16"
+  let stateCopy = M.clone(state);
+  const gapH = M.parseDistanceInInches('16"');
+  assert.equal(gapH, 16);
+  const resH = M.distributeItems(
+    stateCopy,
+    [sofa.id, wardrobe.id, nightstand.id],
+    'horizontal',
+    gapH,
+    'gap'
+  );
+  assert.equal(resH, true);
+  const hb1 = M.getBounds(stateCopy, sofa.id);
+  const hb2 = M.getBounds(stateCopy, wardrobe.id);
+  const hb3 = M.getBounds(stateCopy, nightstand.id);
+  assert.notEqual(hb1.w, hb2.w);
+  assert.notEqual(hb2.w, hb3.w);
+  assert.ok(Math.abs(hb2.x - (hb1.x + hb1.w) - 16) < 0.01);
+  assert.ok(Math.abs(hb3.x - (hb2.x + hb2.w) - 16) < 0.01);
+
+  // Vertical edge-to-edge gap of 16 1/2" (fractional inches)
+  stateCopy = M.clone(state);
+  const gapV = M.parseDistanceInInches('16 1/2"');
+  assert.equal(gapV, 16.5);
+  const resV = M.distributeItems(
+    stateCopy,
+    [sofa.id, wardrobe.id, nightstand.id],
+    'vertical',
+    gapV,
+    'gap'
+  );
+  assert.equal(resV, true);
+  const vb1 = M.getBounds(stateCopy, sofa.id);
+  const vb2 = M.getBounds(stateCopy, wardrobe.id);
+  const vb3 = M.getBounds(stateCopy, nightstand.id);
+  assert.notEqual(vb1.h, vb2.h);
+  assert.notEqual(vb2.h, vb3.h);
+  assert.ok(Math.abs(vb2.y - (vb1.y + vb1.h) - 16.5) < 0.01);
+  assert.ok(Math.abs(vb3.y - (vb2.y + vb2.h) - 16.5) < 0.01);
+});
+
+test('distributeItems falls back to auto-span when spacing is null, non-numeric, zero, or negative', () => {
+  const state = M.newState();
+  const room = M.createRoom(state, 'living', 0, 0, 400, 400);
+  const item1 = M.addItem(state, room, 'armchair', { x: 40, y: 40 });
+  const item2 = M.addItem(state, room, 'armchair', { x: 90, y: 110 });
+  const item3 = M.addItem(state, room, 'armchair', { x: 240, y: 260 });
+
+  for (const invalidInput of [
+    null,
+    undefined,
+    '',
+    'abc',
+    0,
+    -24,
+    M.parseDistanceInInches('abc'),
+    M.parseDistanceInInches('-16"'),
+    M.parseDistanceInInches("-2'"),
+  ]) {
+    const stateCopy = M.clone(state);
+    const res = M.distributeItems(
+      stateCopy,
+      [item1.id, item2.id, item3.id],
+      'horizontal',
+      invalidInput,
+      'gap'
+    );
+    assert.equal(res, true);
+    const b1 = M.getBounds(stateCopy, item1.id);
+    const b2 = M.getBounds(stateCopy, item2.id);
+    const b3 = M.getBounds(stateCopy, item3.id);
+    // Auto-span keeps endpoints fixed at 40 and 240 and places middle item at 140
+    assert.equal(b1.cx, 40);
+    assert.ok(Math.abs(b2.cx - 140) < 0.01);
+    assert.equal(b3.cx, 240);
+  }
+});
+
 test('removeSet deletes multiple selected items atomically', () => {
   const state = M.newState();
   const room = M.createRoom(state, 'living', 0, 0, 200, 200);
