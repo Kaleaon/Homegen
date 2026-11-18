@@ -87,6 +87,8 @@ export class OnboardingTour {
     this.svgEl = null;
     this.pathEl = null;
     this.ringEl = null;
+    this.announcerEl = null;
+    this.inertElements = [];
     this.previousFocusEl = null;
 
     this.onKeyDown = this.onKeyDown.bind(this);
@@ -100,11 +102,42 @@ export class OnboardingTour {
     this.previousFocusEl = document.activeElement;
 
     this.createDom();
+    this.applyBackgroundInert();
     window.addEventListener('keydown', this.onKeyDown, true);
     window.addEventListener('resize', this.onResize);
     window.addEventListener('scroll', this.onResize, true);
 
     this.renderStep(this.currentIndex);
+  }
+
+  applyBackgroundInert() {
+    this.inertElements = [];
+    const ignoredTags = new Set(['SCRIPT', 'STYLE', 'LINK', 'TEMPLATE', 'NOSCRIPT']);
+    const children = Array.from(document.body?.children || []);
+    for (const el of children) {
+      if (!el || el === this.overlayEl || el.id === 'onboarding-overlay') continue;
+      if (el.tagName && ignoredTags.has(el.tagName.toUpperCase())) continue;
+      if (typeof el.setAttribute !== 'function') continue;
+
+      const alreadyInert =
+        typeof el.hasAttribute === 'function'
+          ? el.hasAttribute('inert')
+          : el.getAttribute?.('inert') !== null && el.getAttribute?.('inert') !== undefined;
+
+      if (!alreadyInert) {
+        el.setAttribute('inert', '');
+        this.inertElements.push(el);
+      }
+    }
+  }
+
+  restoreBackgroundInert() {
+    for (const el of this.inertElements) {
+      if (el && typeof el.removeAttribute === 'function') {
+        el.removeAttribute('inert');
+      }
+    }
+    this.inertElements = [];
   }
 
   createDom() {
@@ -127,11 +160,12 @@ export class OnboardingTour {
         <rect class="onboarding-focus-ring" rx="8" ry="8" />
       </svg>
       <div id="onboarding-popover" class="onboarding-popover k-overlay-dialog" role="dialog" aria-modal="true" aria-labelledby="spotlight-title" aria-describedby="spotlight-desc">
+        <div id="spotlight-live-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         <div class="spotlight-header">
           <span id="spotlight-step-badge" class="spotlight-badge">Step 1 of 5</span>
           <k-button type="button" class="spotlight-close" aria-label="Close tour">✕</k-button>
         </div>
-        <h3 id="spotlight-title" class="spotlight-title"></h3>
+        <h3 id="spotlight-title" class="spotlight-title" tabindex="-1"></h3>
         <p id="spotlight-desc" class="spotlight-desc"></p>
         <div class="spotlight-footer">
           <k-button type="button" class="spotlight-btn spotlight-btn-skip">Skip</k-button>
@@ -150,6 +184,7 @@ export class OnboardingTour {
     this.svgEl = overlay.querySelector('.onboarding-svg');
     this.pathEl = overlay.querySelector('.onboarding-mask-path');
     this.ringEl = overlay.querySelector('.onboarding-focus-ring');
+    this.announcerEl = overlay.querySelector('#spotlight-live-announcer');
 
     const closeBtn = overlay.querySelector('.spotlight-close');
     const skipBtn = overlay.querySelector('.spotlight-btn-skip');
@@ -190,9 +225,16 @@ export class OnboardingTour {
     const backBtn = this.overlayEl?.querySelector('.spotlight-btn-back');
     const nextBtn = this.overlayEl?.querySelector('.spotlight-btn-next');
 
-    if (badge) badge.textContent = `Step ${index + 1} of ${this.steps.length}`;
+    const stepBadgeText = `Step ${index + 1} of ${this.steps.length}`;
+    if (badge) badge.textContent = stepBadgeText;
     if (title) title.textContent = step.title;
     if (desc) desc.textContent = step.description;
+
+    const announcer =
+      this.announcerEl || this.overlayEl?.querySelector('#spotlight-live-announcer');
+    if (announcer) {
+      announcer.textContent = `${stepBadgeText}: ${step.title}. ${step.description}`;
+    }
 
     if (backBtn) {
       backBtn.disabled = index === 0;
@@ -207,10 +249,10 @@ export class OnboardingTour {
 
     this.updatePosition();
 
-    // Set focus to next button for accessibility
-    setTimeout(() => {
-      if (nextBtn) nextBtn.focus();
-    }, 50);
+    // Shift focus to step title so screen readers announce step guidance first
+    if (title && typeof title.focus === 'function') {
+      title.focus({ preventScroll: true });
+    }
   }
 
   updatePosition() {
@@ -401,6 +443,9 @@ export class OnboardingTour {
       this.overlayEl.remove();
       this.overlayEl = null;
     }
+    this.announcerEl = null;
+
+    this.restoreBackgroundInert();
 
     setOnboardingStatus(status);
 
