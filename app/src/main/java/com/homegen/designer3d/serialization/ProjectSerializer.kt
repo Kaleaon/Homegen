@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
 
 class ProjectSerializer(
@@ -89,23 +90,57 @@ class ProjectSerializer(
     }
 
     fun decodeWithSpatial(rawJson: String): Pair<List<HomeObject>, SpatialCoreJni> {
+        val objects = decode(rawJson)
+
         val bytes = rawJson.toByteArray(Charsets.UTF_8)
         val buffer = ByteBuffer.allocateDirect(bytes.size)
         buffer.put(bytes)
         buffer.rewind()
-        return decodeBufferWithSpatial(buffer, bytes.size)
+
+        val spatialJni = SpatialCoreJni()
+        try {
+            spatialJni.loadJsonBuffer(buffer, bytes.size)
+        } catch (t: Throwable) {
+            spatialJni.close()
+            throw t
+        }
+
+        return objects to spatialJni
     }
 
     fun decodeBufferWithSpatial(buffer: ByteBuffer, length: Int): Pair<List<HomeObject>, SpatialCoreJni> {
+        require(length >= 0) { "Length must be non-negative: $length" }
         val dup = buffer.duplicate()
-        val bytes = ByteArray(length)
-        dup.get(bytes, 0, length)
-        val rawJson = String(bytes, Charsets.UTF_8)
+        if (length > dup.remaining()) {
+            throw BufferUnderflowException()
+        }
+        dup.limit(dup.position() + length)
+        val slice = dup.slice()
+        val rawJson = Charsets.UTF_8.decode(slice).toString()
 
         val objects = decode(rawJson)
 
+        val jniBuffer = if (buffer.isDirect) {
+            if (buffer.position() == 0) {
+                buffer
+            } else {
+                slice.apply { rewind() }
+            }
+        } else {
+            ByteBuffer.allocateDirect(length).apply {
+                slice.rewind()
+                put(slice)
+                rewind()
+            }
+        }
+
         val spatialJni = SpatialCoreJni()
-        spatialJni.loadJsonBuffer(buffer, length)
+        try {
+            spatialJni.loadJsonBuffer(jniBuffer, length)
+        } catch (t: Throwable) {
+            spatialJni.close()
+            throw t
+        }
 
         return objects to spatialJni
     }
