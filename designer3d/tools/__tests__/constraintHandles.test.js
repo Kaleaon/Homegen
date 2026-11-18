@@ -5,6 +5,7 @@ import {
   stepResize,
   validateRoomDimensions,
   fmtDimensionText,
+  fmtLenInches,
 } from '../constraintHandles.mjs';
 
 describe('Constraint Handles & Dynamic Dimension Resizing', () => {
@@ -159,6 +160,8 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
 
   test('fmtDimensionText formats inches into feet and inches', () => {
     expect(fmtDimensionText(144, 126)).toBe('12\' 0" × 10\' 6"');
+    expect(fmtDimensionText(150.5, 126.375)).toBe('12\' 6 1/2" × 10\' 6 3/8"');
+    expect(fmtLenInches(11.99)).toBe('1\' 0"');
   });
 
   test('getConstraintHandles creates handle nodes for all N vertices of non-rectangular polygon room', () => {
