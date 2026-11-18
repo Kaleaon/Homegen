@@ -171,22 +171,34 @@ export function daylight(state, room) {
   return { glaze, operable, egress, needGlaze: area * 0.08, needVent: area * 0.04, maxSillOk };
 }
 
-/** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
-export function outletSegments(state, room) {
-  const segs = [];
+/** Precompute unbroken wall intervals (excluding doors) per wall of `room`. */
+export function computeWallIntervals(state, room) {
   const walls = getRoomWallKeys(room);
+  const wallIntervals = [];
   for (const wall of walls) {
     const len = wallLength(room, wall);
     let iv = [[WT / 2, len - WT / 2]];
     for (const { o, from, to } of wallOpenings(state, room, wall))
       if (o.kind === 'door') iv = subtractInterval(iv, [from, to]);
+    wallIntervals.push({ wall, intervals: iv });
+  }
+  return wallIntervals;
+}
+
+/** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
+export function outletSegments(state, room, wallIntervals = null) {
+  const segs = [];
+  const resolvedIntervals = wallIntervals ?? computeWallIntervals(state, room);
+  for (const { wall, intervals } of resolvedIntervals) {
+    if (!intervals.some(([a, b]) => b - a >= 24)) continue;
+    const wallIdx = resolveWallIndex(wall);
     const outs = room.items.filter(
       (i) =>
-        resolveWallIndex(i.wall) === resolveWallIndex(wall) &&
+        resolveWallIndex(i.wall) === wallIdx &&
         ITEM_BY_ID[i.type]?.cat === 'electrical' &&
         ITEM_BY_ID[i.type]?.shape === 'outlet'
     );
-    for (const [a, b] of iv) {
+    for (const [a, b] of intervals) {
       if (b - a < 24) continue;
       const mine = outs
         .filter((i) => i.offset >= a - EPS && i.offset <= b + EPS)
@@ -1665,8 +1677,9 @@ export function autoComply(state, options = {}) {
           }
       const outType = t.wet ? 'outlet_gfci' : 'outlet';
       if (t.habitable || r.type === 'laundry') {
+        const wallIntervals = computeWallIntervals(state, get());
         for (let k = 0; k < 20; k++) {
-          const seg = outletSegments(state, get()).find((s) => !s.covered);
+          const seg = outletSegments(state, get(), wallIntervals).find((s) => !s.covered);
           if (!seg) break;
           const parts = seg.need;
           let placed = false;
