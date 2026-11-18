@@ -678,3 +678,132 @@
   font-size: var(--font-size-xs, 12px);
   cursor: pointer;
 }
+
+/* 12. Parametric Curve Drafting HUD & Inspector Controls */
+.k-overlay-hud[hidden],
+.curve-drafting-hud[hidden],
+.curve-input-error[hidden] {
+  display: none !important;
+}
+
+.curve-drafting-hud {
+  top: auto;
+  bottom: 18px;
+  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 14px;
+  max-width: calc(100% - 28px);
+  color: var(--overlay-color);
+}
+
+.curve-drafting-hud .hud-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.curve-hud-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.curve-hud-field label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--overlay-color);
+  white-space: nowrap;
+}
+
+.curve-hud-field input,
+.curve-hud-field select {
+  width: 78px;
+  min-height: 26px;
+  padding: 2px 6px;
+  font-size: var(--font-size-xs);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  box-sizing: border-box;
+}
+
+.curve-hud-field select {
+  width: 118px;
+}
+
+.curve-hud-field input[aria-invalid='true'],
+.curve-inspector-group input[aria-invalid='true'] {
+  border-color: var(--ktheme-critical);
+  outline: 1px solid var(--ktheme-critical);
+}
+
+.curve-hud-meta,
+.curve-chord-badge {
+  font-size: var(--font-size-xs);
+  color: var(--ktheme-text-muted);
+  white-space: nowrap;
+}
+
+.curve-drafting-hud button {
+  padding: 3px 8px;
+  font-size: var(--font-size-xs);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.curve-drafting-hud button:hover {
+  border-color: var(--ktheme-accent);
+}
+
+.curve-inspector-group {
+  margin-top: 10px;
+  padding: 8px;
+  background: var(--ktheme-bg-muted, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-sm);
+}
+
+.curve-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.curve-inspector-head h4 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.curve-inspector-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.curve-inspector-actions button {
+  flex: 1;
+  min-height: 26px;
+  font-size: var(--font-size-xs);
+  padding: 3px 6px;
+}
+
+.curve-input-error {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--ktheme-critical);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-critical);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.35;
+  flex-basis: 100%;
+}

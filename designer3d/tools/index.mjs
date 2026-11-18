@@ -31,6 +31,18 @@ import {
   fmtDimensionText,
   fmtLenInches,
 } from './constraintHandles.mjs';
+import {
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  closestPointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
+} from './math2d.mjs';
 
 export {
   InteractionLayer,
@@ -65,4 +77,14 @@ export {
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  closestPointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
 };
