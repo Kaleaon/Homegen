@@ -196,6 +196,23 @@ export class InteractionLayer {
     return this.roomTool.getPoints();
   }
 
+  getRoomBulges() {
+    return this.roomTool.getBulges();
+  }
+
+  setEdgeBulge(index, bulge) {
+    this.roomTool.setEdgeBulge(index, bulge);
+    return this.roomTool.getEdgeBulge(index);
+  }
+
+  getEdgeBulge(index) {
+    return this.roomTool.getEdgeBulge(index);
+  }
+
+  adjustBulge(index, delta) {
+    return this.roomTool.adjustBulge(index, delta);
+  }
+
   canCloseRoom() {
     return this.roomTool.canClose();
   }
