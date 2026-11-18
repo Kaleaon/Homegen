@@ -2,7 +2,7 @@ import { createGridSettings } from './gridSettings.mjs';
 import { SnapModeState } from './snapModes.mjs';
 import { TransformGizmo } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
-import { validatePlacement, createPlacementFeedback } from './collision.mjs';
+import { validatePlacement, createPlacementFeedback, invalidateBoundingBox } from './collision.mjs';
 import {
   parseExplicitLengthInches,
   computeVectorAngle,
@@ -23,6 +23,15 @@ export class InteractionLayer {
     this.snapModes = new SnapModeState(options.snapModes);
     this.transformGizmo = new TransformGizmo(this.gridSettings, this.snapModes);
     this.roomTool = new RoomDrawingTool(this.gridSettings, this.snapModes);
+    this._boundingBoxCache = new WeakMap();
+  }
+
+  invalidatePolygonCache(polygon) {
+    if (polygon === undefined) {
+      this._boundingBoxCache = new WeakMap();
+      return;
+    }
+    invalidateBoundingBox(polygon, this._boundingBoxCache);
   }
 
   getConstraintHandles(room, options = {}) {
@@ -77,7 +86,11 @@ export class InteractionLayer {
         x: p.x + offset.x,
         y: p.y + offset.y,
       }));
-      const validation = validatePlacement(movedPolygon, context.existingPolygons);
+      const validation = validatePlacement(movedPolygon, context.existingPolygons, {
+        boundingBoxCache: this._boundingBoxCache,
+        existingBoundingBoxes: context.existingBoundingBoxes,
+        dynamicPolygons: context.dynamicPolygons,
+      });
       result.placementFeedback = createPlacementFeedback(movedPolygon, validation);
     }
 
@@ -113,7 +126,11 @@ export class InteractionLayer {
         x: entity.position.x + (p.x - entity.position.x) * scaleFactor,
         y: entity.position.y + (p.y - entity.position.y) * scaleFactor,
       }));
-      const validation = validatePlacement(scaledPolygon, context.existingPolygons);
+      const validation = validatePlacement(scaledPolygon, context.existingPolygons, {
+        boundingBoxCache: this._boundingBoxCache,
+        existingBoundingBoxes: context.existingBoundingBoxes,
+        dynamicPolygons: context.dynamicPolygons,
+      });
       result.placementFeedback = createPlacementFeedback(scaledPolygon, validation);
     }
 
