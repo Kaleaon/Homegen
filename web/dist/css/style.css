@@ -188,7 +188,8 @@ a:focus-visible {
 k-button,
 k-tab,
 k-card,
-k-input {
+k-input,
+k-kbd {
   display: inline-block;
 }
 * {
@@ -1051,14 +1052,14 @@ input.error {
   font-size: var(--font-size-md);
   border: 1px solid var(--ktheme-border);
   border-radius: var(--radius-md);
-  background: var(--ktheme-bg);
+  background: var(--ktheme-bg-surface);
   color: var(--ktheme-text);
   outline: none;
   box-sizing: border-box;
 }
 #cmd-search:focus {
   border-color: var(--ktheme-accent);
-  box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.2);
+  box-shadow: 0 0 0 2px var(--ktheme-accent-muted);
 }
 #cmd-list {
   list-style: none;
@@ -1069,6 +1070,7 @@ input.error {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  background: var(--ktheme-bg-surface);
 }
 #cmd-list li {
   display: flex;
@@ -1078,12 +1080,15 @@ input.error {
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13.5px;
-  transition: background 0.1s ease;
+  color: var(--ktheme-text);
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 #cmd-list li:hover,
 #cmd-list li.selected,
 #cmd-list li[aria-selected='true'] {
-  background: var(--ktheme-bg);
+  background: var(--ktheme-bg-hover);
   color: var(--ktheme-accent);
 }
 .cmd-item-main {
@@ -1097,8 +1102,9 @@ input.error {
   letter-spacing: 0.5px;
   padding: 2px 6px;
   border-radius: var(--radius-xs);
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--ktheme-bg-elevated);
   color: var(--ktheme-text-muted);
+  border: 1px solid var(--ktheme-border);
 }
 .cmd-no-results {
   padding: 12px;
@@ -1107,7 +1113,8 @@ input.error {
   font-size: 13px;
 }
 
-/* Shortcut Badges (<kbd>) */
+/* Shortcut Badges (<k-kbd>) */
+k-kbd:not(:defined),
 kbd {
   display: inline-block;
   padding: 2px 6px;
@@ -1115,7 +1122,7 @@ kbd {
   font-size: var(--font-size-xs);
   line-height: 1.2;
   color: var(--ktheme-text);
-  background-color: var(--ktheme-bg);
+  background-color: var(--ktheme-bg-elevated);
   border: 1px solid var(--ktheme-border);
   border-radius: var(--radius-xs);
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.15);
@@ -1149,11 +1156,17 @@ kbd {
   align-items: center;
   padding: 4px 0;
   font-size: 13px;
+  color: var(--ktheme-text);
+  border-bottom: 1px solid var(--ktheme-border);
+}
+.shortcut-row:last-child {
+  border-bottom: none;
 }
 .shortcut-row .keys {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  color: var(--ktheme-text-muted);
 }
 
 .sr-only {

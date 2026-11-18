@@ -5527,7 +5527,7 @@ function renderCommandList(query = '') {
       const isSelected = idx === selectedCmdIndex;
       const optionId = `cmd-option-${idx}`;
       const kbdHtml = cmd.shortcut
-        ? `<span class="keys"><kbd>${esc(cmd.shortcut)}</kbd></span>`
+        ? `<span class="keys"><k-kbd>${esc(cmd.shortcut)}</k-kbd></span>`
         : '';
       return `<li id="${optionId}" data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
         <div class="cmd-item-main">
