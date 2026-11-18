@@ -377,3 +377,169 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
   assert.equal(ctx.strokeStyle, getToken('--ktheme-warning', '#f59e0b'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-warning', '#f59e0b'));
 });
+
+test('Bidirectional conversions between arc radius, sagitta, and bulge factor', async () => {
+  const { sagittaFromBulge, bulgeFromSagitta, radiusFromBulge, bulgeFromRadius, getArcParameters } =
+    await import('../js/geometry.js');
+
+  const chordLen = 120;
+
+  // Semicircle: bulge = 1 => sagitta = 60, radius = 60
+  assert.ok(Math.abs(sagittaFromBulge(chordLen, 1) - 60) < 1e-9);
+  assert.ok(Math.abs(bulgeFromSagitta(chordLen, 60) - 1) < 1e-9);
+  assert.ok(Math.abs(radiusFromBulge(chordLen, 1) - 60) < 1e-9);
+  const semiRes = bulgeFromRadius(chordLen, 60);
+  assert.equal(semiRes.ok, true);
+  assert.ok(Math.abs(semiRes.bulge - 1) < 1e-9);
+
+  // Quarter-arc / shallow curve: bulge = 0.5 => sagitta = 30, radius = 75
+  const b = 0.5;
+  const s = sagittaFromBulge(chordLen, b);
+  const r = radiusFromBulge(chordLen, b);
+  assert.ok(Math.abs(s - 30) < 1e-9);
+  assert.ok(Math.abs(r - 75) < 1e-9);
+
+  const fromSagitta = bulgeFromSagitta(chordLen, s);
+  assert.ok(Math.abs(fromSagitta - b) < 1e-9);
+
+  const fromRadius = bulgeFromRadius(chordLen, r);
+  assert.equal(fromRadius.ok, true);
+  assert.equal(fromRadius.isLinear, false);
+  assert.ok(Math.abs(fromRadius.bulge - b) < 1e-9);
+  assert.ok(Math.abs(fromRadius.sagitta - s) < 1e-9);
+
+  // Verify consistency with getArcParameters
+  const arc = getArcParameters({ x: 0, y: 0 }, { x: chordLen, y: 0 }, fromRadius.bulge);
+  assert.ok(Math.abs(arc.radius - r) < 1e-9);
+  assert.ok(Math.abs(arc.sagitta - s) < 1e-9);
+});
+
+test('Curve conversion edge cases: infinite radius linear fallback, negative concavity inversion, and L > 2R error feedback', async () => {
+  const {
+    sagittaFromBulge,
+    bulgeFromSagitta,
+    radiusFromBulge,
+    bulgeFromRadius,
+    parseCurveHudInput,
+    pointOnArc,
+  } = await import('../js/geometry.js');
+
+  const chordLen = 100;
+
+  // 1. Zero-bulge linear wall fallback when radius approaches infinity
+  assert.equal(radiusFromBulge(chordLen, 0), Infinity);
+  assert.equal(sagittaFromBulge(chordLen, 0), 0);
+
+  for (const infInput of [Infinity, -Infinity, 1e9, 1e12, 'Infinity', '∞', 'inf', '']) {
+    const res = parseCurveHudInput('radius', infInput, chordLen, 0.4);
+    assert.equal(res.ok, true, `Expected linear fallback ok for ${String(infInput)}`);
+    assert.equal(res.isLinear, true);
+    assert.equal(res.bulge, 0);
+    assert.equal(res.sagitta, 0);
+    assert.equal(res.radius, Infinity);
+    assert.equal(res.error, null);
+  }
+
+  // 2. Invert curve concavity for negative bulge factors
+  const negBulge = -0.5; // chord 100 => radius = 62.5, sagitta = -25
+  const negSagitta = sagittaFromBulge(chordLen, negBulge);
+  assert.ok(Math.abs(negSagitta - -25) < 1e-9);
+  assert.ok(Math.abs(bulgeFromSagitta(chordLen, -25) - negBulge) < 1e-9);
+
+  // Midpoint concavity flips across the chord for positive vs negative bulge
+  const posMid = pointOnArc({ x: 0, y: 0 }, { x: chordLen, y: 0 }, 0.5, 0.5);
+  const negMid = pointOnArc({ x: 0, y: 0 }, { x: chordLen, y: 0 }, -0.5, 0.5);
+  assert.ok(posMid.y > 0);
+  assert.ok(negMid.y < 0);
+  assert.ok(Math.abs(posMid.y + negMid.y) < 1e-9);
+
+  // Negative radius or negative currentBulge preserves inverted concavity
+  const fromNegRadius = bulgeFromRadius(chordLen, -62.5);
+  assert.equal(fromNegRadius.ok, true);
+  assert.ok(Math.abs(fromNegRadius.bulge - -0.5) < 1e-9);
+
+  const preservedConcavity = parseCurveHudInput('radius', '62.5', chordLen, -0.25);
+  assert.equal(preservedConcavity.ok, true);
+  assert.ok(Math.abs(preservedConcavity.bulge - -0.5) < 1e-9);
+  assert.ok(Math.abs(preservedConcavity.sagitta - -25) < 1e-9);
+
+  // 3. Error feedback when chord length exceeds twice the entered arc radius (L > 2R)
+  const tooSmallRadius = bulgeFromRadius(chordLen, 40); // 100 > 2 * 40 = 80
+  assert.equal(tooSmallRadius.ok, false);
+  assert.equal(tooSmallRadius.isValid, false);
+  assert.equal(tooSmallRadius.bulge, null);
+  assert.match(tooSmallRadius.error, /exceeds twice/i);
+
+  const hudTooSmall = parseCurveHudInput('radius', '49.9', chordLen, 0);
+  assert.equal(hudTooSmall.ok, false);
+  assert.match(hudTooSmall.error, /exceeds twice/i);
+
+  const zeroRadius = bulgeFromRadius(chordLen, 0);
+  assert.equal(zeroRadius.ok, false);
+  assert.match(zeroRadius.error, /exceeds twice/i);
+});
+
+test('InteractionLayer delegates setEdgeBulge and SnappingBridge snaps accurately to curved room walls', async () => {
+  const { parseCurveHudInput } = await import('../js/geometry.js');
+  const M = await import('../js/model.js');
+
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+    },
+    snapModes: { grid: false, edge: true, midpoint: true, perpendicular: false },
+  });
+
+  // Draft a 4-corner room and apply parametric radius via HUD parser -> setEdgeBulge
+  interaction.addRoomCorner({ x: 0, y: 0 });
+  interaction.addRoomCorner({ x: 120, y: 0 });
+  interaction.addRoomCorner({ x: 120, y: 120 });
+  interaction.addRoomCorner({ x: 0, y: 120 });
+
+  const parsed = parseCurveHudInput('radius', '75', 120, 0);
+  assert.equal(parsed.ok, true);
+  assert.ok(Math.abs(parsed.bulge - 0.5) < 1e-9);
+
+  interaction.setEdgeBulge(0, parsed.bulge);
+  assert.ok(Math.abs(interaction.getEdgeBulge(0) - 0.5) < 1e-9);
+
+  const closed = interaction.closeRoom({ existingRooms: [] });
+  assert.equal(closed.ok, true);
+  assert.ok(Math.abs(closed.room.bulges[0] - 0.5) < 1e-9);
+
+  // Persist into plan model and verify SnappingBridge snaps to curved North wall apex (60, 30)
+  const state = M.newState();
+  const room = M.addRoom(state, 0, 0, 120, 120, 'living', {
+    points: closed.room.corners,
+    bulges: closed.room.bulges,
+  });
+  assert.ok(Math.abs(M.getWallBulge(room, 'N') - 0.5) < 1e-9);
+
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => state.rooms,
+  });
+
+  // 1. Edge snap along curved North wall (chord (0,0)->(120,0), bulge +0.5 => center (60,-45), R=75)
+  const edgeSnap = bridge.computeSnap({ x: 60, y: 31.5 });
+  assert.equal(edgeSnap.snap?.type, 'edge');
+  assert.ok(Math.abs(edgeSnap.point.x - 60) < 1e-6);
+  assert.ok(Math.abs(edgeSnap.point.y - 30) < 1e-6);
+
+  // 2. Midpoint snap at curved North wall apex (60, 30) when midpoint mode is isolated
+  interaction.toggleSnapMode(SNAP_MODES.EDGE, false);
+  const midSnap = bridge.computeSnap({ x: 60.4, y: 29.6 });
+  assert.equal(midSnap.snap?.type, 'midpoint');
+  assert.ok(Math.abs(midSnap.point.x - 60) < 1e-6);
+  assert.ok(Math.abs(midSnap.point.y - 30) < 1e-6);
+
+  // 3. Invert concavity via model helper setWallBulge -> apex flips to (60, -30)
+  M.setWallBulge(room, 'N', -0.5, state);
+  const invertedSnap = bridge.computeSnap({ x: 59.7, y: -29.8 });
+  assert.equal(invertedSnap.snap?.type, 'midpoint');
+  assert.ok(Math.abs(invertedSnap.point.x - 60) < 1e-6);
+  assert.ok(Math.abs(invertedSnap.point.y - -30) < 1e-6);
+});

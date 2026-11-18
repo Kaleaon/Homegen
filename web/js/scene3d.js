@@ -18,7 +18,8 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
+  tessellateArc,
+  getWallBulge,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -641,12 +642,21 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return arr;
   };
 
-  function buildRoomShape(pts) {
+  function buildRoomShape(pts, room = null) {
     const shape = new THREE.Shape();
     if (!pts || pts.length < 3) return shape;
     shape.moveTo(pts[0].x * S, pts[0].y * S);
-    for (let i = 1; i < pts.length; i++) {
-      shape.lineTo(pts[i].x * S, pts[i].y * S);
+    for (let i = 0; i < pts.length; i++) {
+      const next = pts[(i + 1) % pts.length];
+      const bulge = room ? getWallBulge(room, i) : 0;
+      if (Math.abs(bulge) > 1e-9) {
+        const arcPts = tessellateArc(pts[i], next, bulge, 20);
+        for (let k = 1; k < arcPts.length; k++) {
+          shape.lineTo(arcPts[k].x * S, arcPts[k].y * S);
+        }
+      } else if (i < pts.length - 1) {
+        shape.lineTo(next.x * S, next.y * S);
+      }
     }
     shape.closePath();
     return shape;
@@ -656,8 +666,14 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const pts = getRoomPoints(room);
     const mesh = room.floorMesh;
     const n = pts.length;
-    if (!mesh || !Array.isArray(mesh.VertexZArray) || mesh.VertexZArray.length !== n) {
-      const shape = buildRoomShape(pts);
+    const hasCurvedWall = pts.some((_, idx) => Math.abs(getWallBulge(room, idx)) > 1e-9);
+    if (
+      hasCurvedWall ||
+      !mesh ||
+      !Array.isArray(mesh.VertexZArray) ||
+      mesh.VertexZArray.length !== n
+    ) {
+      const shape = buildRoomShape(pts, room);
       return new THREE.ExtrudeGeometry(shape, { depth: SLAB * S, bevelEnabled: false });
     }
 
@@ -1054,7 +1070,10 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const s = wallSeg(room, wall);
     const start = { x: s.ax, y: s.ay };
     const end = { x: s.ax + s.dx * len, y: s.ay + s.dy * len };
-    const arc = getArcParameters(start, end, bulge);
+    const pts = getRoomPoints(room);
+    const wIdx = resolveWallIndex(wall) % pts.length;
+    const effectiveBulge = pts.length === 4 && (wIdx === 2 || wIdx === 3) ? -bulge : bulge;
+    const arc = getArcParameters(start, end, effectiveBulge);
 
     if (arc.isLinear || Math.abs(t1 - t0) <= 0.01 || Math.abs(y1 - y0) <= 0.01) {
       addWallBox(group, room, wall, t0, t1, y0, y1, d0, d1, elev, mat);
@@ -1067,7 +1086,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
     let camDist = 20;
     if (camera && camera.position) {
-      const midPoint = pointOnArc(start, end, bulge, (u0 + u1) / 2);
+      const midPoint = pointOnArc(start, end, effectiveBulge, (u0 + u1) / 2);
       camDist = Math.hypot(camera.position.x - midPoint.x * S, camera.position.z - midPoint.y * S);
     }
     const maxSegLen = Math.max(2, Math.min(12, camDist * 0.5));
@@ -1084,7 +1103,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
     for (let k = 0; k <= N; k++) {
       const uk = u0 + (k / N) * (u1 - u0);
-      const pt = pointOnArc(start, end, bulge, uk);
+      const pt = pointOnArc(start, end, effectiveBulge, uk);
       const angle = arc.startAngle + uk * arc.sweepAngle;
       const nx = Math.cos(angle);
       const ny = Math.sin(angle);
@@ -1283,9 +1302,12 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       activeKeys.add(slabKey);
       const ff = FLOOR_BY_ID[room.floor] || FLOOR_BY_ID.floor_oak;
       const pts = getRoomPoints(room);
-      const hasFloorMesh = room.floorMesh && Array.isArray(room.floorMesh.VertexZArray);
+      const hasCurvedSlab = pts.some((_, idx) => Math.abs(getWallBulge(room, idx)) > 1e-9);
+      const hasFloorMesh =
+        !hasCurvedSlab && room.floorMesh && Array.isArray(room.floorMesh.VertexZArray);
       const slabSig = JSON.stringify({
         pts,
+        bulges: room.bulges,
         floor: room.floor,
         hd: opts.hd,
         z: room.floorMesh?.VertexZArray,
@@ -1336,11 +1358,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (opts.ceilings) {
         const ceilKey = `${room.id}:ceiling`;
         activeKeys.add(ceilKey);
-        const ceilSig = JSON.stringify({ pts, ceiling: room.ceiling });
+        const ceilSig = JSON.stringify({ pts, bulges: room.bulges, ceiling: room.ceiling });
         let ceilMesh = entityMap.get(ceilKey);
         if (!ceilMesh || ceilMesh.userData.sig !== ceilSig) {
           if (ceilMesh) disposeNode(ceilMesh);
-          const shape = buildRoomShape(pts);
+          const shape = buildRoomShape(pts, room);
           const geom = new THREE.ShapeGeometry(shape);
           ceilMesh = new THREE.Mesh(geom, plain('#f4f2ec', 0.95, { side: THREE.FrontSide }));
           ceilMesh.rotation.x = Math.PI / 2;
@@ -1380,6 +1402,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           );
           const wallSig = JSON.stringify({
             pts,
+            bulge: getWallBulge(room, wall),
             ceiling: room.ceiling,
             finish: finishId,
             cladding: extFinId,
@@ -1783,13 +1806,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const assembly = resolveWallAssembly(finishId, extFinId, wallOverrides);
     const wallThick = assembly.totalThickness;
 
-    const wallIndex = WALLS.indexOf(wall);
-    let bulge = 0;
-    if (room.bulges) {
-      if (typeof room.bulges[wall] === 'number') bulge = room.bulges[wall];
-      else if (Array.isArray(room.bulges) && typeof room.bulges[wallIndex] === 'number')
-        bulge = room.bulges[wallIndex];
-    }
+    const bulge = getWallBulge(room, wall);
 
     // Exterior shell interval calculation (where nothing is behind the wall)
     let ext;
@@ -1997,28 +2014,25 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   }
 
   function placeInWall(room, wall, t, y, depth, elev, mesh) {
-    const wallIndex = WALLS.indexOf(wall);
-    let bulge = 0;
-    if (room.bulges) {
-      if (typeof room.bulges[wall] === 'number') bulge = room.bulges[wall];
-      else if (Array.isArray(room.bulges) && typeof room.bulges[wallIndex] === 'number')
-        bulge = room.bulges[wallIndex];
-    }
+    const bulge = getWallBulge(room, wall);
 
     if (bulge) {
       const len = wallLength(room, wall);
       const s = wallSeg(room, wall);
       const start = { x: s.ax, y: s.ay };
       const end = { x: s.ax + s.dx * len, y: s.ay + s.dy * len };
-      const arc = getArcParameters(start, end, bulge);
+      const pts = getRoomPoints(room);
+      const wIdx = resolveWallIndex(wall) % pts.length;
+      const effectiveBulge = pts.length === 4 && (wIdx === 2 || wIdx === 3) ? -bulge : bulge;
+      const arc = getArcParameters(start, end, effectiveBulge);
       const u = t / len;
-      const pt = pointOnArc(start, end, bulge, u);
+      const pt = pointOnArc(start, end, effectiveBulge, u);
       const angle = arc.startAngle + u * arc.sweepAngle;
       const nx = Math.cos(angle);
       const ny = Math.sin(angle);
 
       mesh.position.set((pt.x + depth * nx) * S, (elev + y) * S, (pt.y + depth * ny) * S);
-      const tangentAngle = angle + (Math.PI / 2) * Math.sign(bulge);
+      const tangentAngle = angle + (Math.PI / 2) * Math.sign(effectiveBulge);
       mesh.rotation.y = -tangentAngle;
       return mesh;
     }

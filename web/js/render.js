@@ -10,6 +10,9 @@ import {
   footprint,
   floorAreaSqFt,
   getRoomPoints,
+  getWallBulge,
+  getArcParameters,
+  tessellateArc,
   reproject,
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
@@ -646,16 +649,30 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
   }
 }
 
+function traceRoomBoundaryPath(ctx, room) {
+  const pts = getRoomPoints(room);
+  if (!pts.length) return;
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0; i < pts.length; i++) {
+    const next = pts[(i + 1) % pts.length];
+    const bulge = getWallBulge(room, i);
+    if (Math.abs(bulge) > 1e-9) {
+      const arcPts = tessellateArc(pts[i], next, bulge, 24);
+      for (let k = 1; k < arcPts.length; k++) {
+        ctx.lineTo(arcPts[k].x, arcPts[k].y);
+      }
+    } else if (i < pts.length - 1) {
+      ctx.lineTo(next.x, next.y);
+    }
+  }
+  ctx.closePath();
+}
+
 function drawFloor(ctx, room, opts, bad) {
   const f = FLOOR_BY_ID[room.floor];
   ctx.fillStyle = f ? patternFor(ctx, f) : ROOM_TYPES[room.type].color;
-  const pts = getRoomPoints(room);
   ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(pts[i].x, pts[i].y);
-  }
-  ctx.closePath();
+  traceRoomBoundaryPath(ctx, room);
   ctx.fill();
 
   const isBadRoom = bad && bad.has(room.id);
@@ -714,6 +731,64 @@ function drawWalls(ctx, state, room, bad, _opts) {
         bad.has(wallKey) ||
         bad.has(`${room.id}:wall`) ||
         (isBadRoom && bad.has(`${room.id}:wall`)));
+
+    const bulge = getWallBulge(room, i);
+    if (Math.abs(bulge) > 1e-9) {
+      const startPt = pts[i];
+      const endPt = pts[(i + 1) % pts.length];
+      const arc = getArcParameters(startPt, endPt, bulge);
+      if (!arc.isLinear) {
+        const arcPts = tessellateArc(startPt, endPt, bulge, 24);
+        const inwardSign = 1;
+        const traceBand = (d0, d1) => {
+          ctx.beginPath();
+          for (let k = 0; k < arcPts.length; k++) {
+            const uk = k / (arcPts.length - 1);
+            const ang = arc.startAngle + uk * arc.sweepAngle;
+            // Radial outward from arc center is (cos(ang), sin(ang));
+            // For bulge > 0, left-normal points away from center (bulge > 0 => sweep < 0) or toward center depending on m.
+            // Tangent along start->end at uk:
+            const dirSign = arc.sweepAngle >= 0 ? 1 : -1;
+            const tx = -Math.sin(ang) * dirSign;
+            const ty = Math.cos(ang) * dirSign;
+            // Left normal of start->end (inward for clockwise room polygon) is (-ty, tx)
+            const inNx = -ty * inwardSign;
+            const inNy = tx * inwardSign;
+            const px = arcPts[k].x + inNx * d0;
+            const py = arcPts[k].y + inNy * d0;
+            if (k === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          for (let k = arcPts.length - 1; k >= 0; k--) {
+            const uk = k / (arcPts.length - 1);
+            const ang = arc.startAngle + uk * arc.sweepAngle;
+            const dirSign = arc.sweepAngle >= 0 ? 1 : -1;
+            const tx = -Math.sin(ang) * dirSign;
+            const ty = Math.cos(ang) * dirSign;
+            const inNx = -ty * inwardSign;
+            const inNy = tx * inwardSign;
+            ctx.lineTo(arcPts[k].x + inNx * d1, arcPts[k].y + inNy * d1);
+          }
+          ctx.closePath();
+        };
+
+        ctx.save();
+        if (isBadWall) {
+          ctx.fillStyle = getToken('--ktheme-critical', '#d33');
+          traceBand(-WT / 2 - 1, WT / 2 + 1);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = getToken('--ktheme-border', '#3c3a38');
+          traceBand(-WT / 2, 0);
+          ctx.fill();
+        }
+        ctx.fillStyle = fin ? patternFor(ctx, fin) : '#ddd';
+        traceBand(0, WT / 2);
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
+    }
 
     ctx.save();
     ctx.translate(s.ax, s.ay);
@@ -1144,12 +1219,7 @@ function drawSelection(ctx, state, selection, view) {
       if (room.id === id) {
         drawRing(() => {
           ctx.beginPath();
-          const pts = getRoomPoints(room);
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < pts.length; i++) {
-            ctx.lineTo(pts[i].x, pts[i].y);
-          }
-          ctx.closePath();
+          traceRoomBoundaryPath(ctx, room);
         });
         updateGroupBounds(room.x, room.y, room.w, room.h);
 
