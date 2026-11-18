@@ -25,6 +25,10 @@ const runInSubproject = (subprojectDir, command) => (filenames) => {
 };
 
 export default {
+  '**/*.{js,mjs}': (filenames) =>
+    filenames
+      .filter((file) => !file.includes('/vendor/') && !file.includes('\\vendor\\'))
+      .map((file) => `node --check ${JSON.stringify(file)}`),
   'web/**/*.{js,mjs}': runInSubproject('web', 'eslint'),
   'web/**/*.{js,mjs,json,css,html}': runInSubproject(
     'web',
