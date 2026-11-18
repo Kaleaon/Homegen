@@ -1,4 +1,8 @@
 export default {
+  '**/*.{js,mjs}': (filenames) =>
+    filenames
+      .filter((file) => !file.includes('/vendor/') && !file.includes('\\vendor\\'))
+      .map((file) => `node --check ${JSON.stringify(file)}`),
   'web/**/*.{js,mjs}': 'npx --prefix web eslint',
   'web/**/*.{js,mjs,json,css,html}': 'npx --prefix web prettier --check --ignore-path web/.prettierignore',
   'web/css/**/*.css': 'node web/scripts/lint-css.mjs',

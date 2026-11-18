@@ -55,7 +55,7 @@ function computeStateHash(state) {
   return fnv1aHash(str);
 }
 
-export class SpatialOverlayNode {
+class SpatialOverlayNode {
   constructor(id, type, bounds, data = {}) {
     this.id = id;
     this.type = type; // 'violation' | 'fixtureClearance' | 'egressReach' | 'constraintHandle' | 'dimensionLabel' | 'activeDragRejection'

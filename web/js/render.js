@@ -312,7 +312,7 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-export function drawComplianceScene(ctx, complianceScene, view, opts = {}) {
+function drawComplianceScene(ctx, complianceScene, view, opts = {}) {
   if (!complianceScene) return;
   const nodes = complianceScene.getNodes();
 
@@ -1260,7 +1260,7 @@ export const handles = (r) => {
   return pts.map((p) => [p.x, p.y]);
 };
 
-export function findDiffTarget(state, id) {
+function findDiffTarget(state, id) {
   if (!id) return null;
   for (const room of state.rooms) {
     if (room.id === id) {
@@ -1320,7 +1320,7 @@ export function findDiffTarget(state, id) {
   return null;
 }
 
-export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
+function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   if (!diffs || !diffs.length) return;
 
   const placedBadges = [];
@@ -1468,7 +1468,7 @@ export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   }
 }
 
-export function drawSnapGuides(ctx, snapResult, view) {
+function drawSnapGuides(ctx, snapResult, view) {
   if (!snapResult) return;
   if (
     !snapResult.snap &&
