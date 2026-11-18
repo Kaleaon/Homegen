@@ -1397,17 +1397,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
             extFinId = room.walls[wall];
           }
-          const wallAssembly = resolveWallAssembly(
-            finishId,
-            extFinId,
-            room.wallAssemblyOverrides?.[wall]
-          );
+          const extFin = getCladdingMaterial(extFinId);
+          extFinId = extFin.id || extFinId || 'cladding_siding_white';
+          const wallOverrides = room.wallAssemblyOverrides?.[wall] || null;
+          const wallAssembly = resolveWallAssembly(finishId, extFinId, wallOverrides || {});
           const wallSig = JSON.stringify({
             pts,
             ceiling: room.ceiling,
             finish: finishId,
             cladding: extFinId,
             assembly: wallAssembly,
+            wallOverrides,
             uv: getWallUV(room, wall),
             e,
             wallH,
@@ -1466,7 +1466,12 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const t = it.offset;
             const y = def.shape === 'switch' ? 48 : 16;
             const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
-            const extFinId = room.cladding || room.exteriorCladding;
+            let extFinId = room.cladding || room.exteriorCladding;
+            if (!extFinId && room.walls[it.wall] && WALL_BY_ID[room.walls[it.wall]]?.exterior) {
+              extFinId = room.walls[it.wall];
+            }
+            const extFin = getCladdingMaterial(extFinId);
+            extFinId = extFin.id || extFinId || 'cladding_siding_white';
             const wAssembly = resolveWallAssembly(
               finishId,
               extFinId,
@@ -2147,11 +2152,24 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const s = wallSeg(room, it.wall);
       const t = it.offset;
       const y = def.shape === 'switch' ? 48 : 16;
+      const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
+      let extFinId = room.cladding || room.exteriorCladding;
+      if (!extFinId && room.walls[it.wall] && WALL_BY_ID[room.walls[it.wall]]?.exterior) {
+        extFinId = room.walls[it.wall];
+      }
+      const extFin = getCladdingMaterial(extFinId);
+      extFinId = extFin.id || extFinId || 'cladding_siding_white';
+      const wAssembly = resolveWallAssembly(
+        finishId,
+        extFinId,
+        room.wallAssemblyOverrides?.[it.wall]
+      );
+      const itemDepthOff = wAssembly.totalThickness / 2 + 0.3;
       const m = wallAlignedBox(room, it.wall, 2.8, 4.5, 0.6, plain('#f5f3ee', 0.5));
       m.position.set(
-        (s.ax + s.dx * t + s.nx * (WT / 2 + 0.3)) * S,
+        (s.ax + s.dx * t + s.nx * itemDepthOff) * S,
         (e + y) * S,
-        (s.ay + s.dy * t + s.ny * (WT / 2 + 0.3)) * S
+        (s.ay + s.dy * t + s.ny * itemDepthOff) * S
       );
       return m;
     }
