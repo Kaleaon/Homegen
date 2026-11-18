@@ -301,6 +301,20 @@
   <div class="dlg-body">
     <div class="row"><label for="p-room">Room</label><k-select id="p-room"></k-select></div>
     <div class="row"><label for="p-style">Style</label><k-select id="p-style"></k-select></div>
+    <div class="row">
+      <label for="p-resolution-tier">Resolution</label>
+      <select id="p-resolution-tier">
+        <option value="sd" selected>SD (576p) — Free</option>
+        <option value="hd">HD (1024p) — Pro 🔒</option>
+        <option value="4k">4K (2048p) — Enterprise 🔒</option>
+      </select>
+    </div>
+    <div id="p-tier-badges" class="p-tier-badges" role="group" aria-label="Resolution plan tiers">
+      <span class="tier-badge tier-free active" data-tier="sd">Free</span>
+      <span class="tier-badge tier-pro is-locked" data-tier="hd">Pro <span class="lock-icon" aria-hidden="true">🔒</span></span>
+      <span class="tier-badge tier-enterprise is-locked" data-tier="4k">Enterprise <span class="lock-icon" aria-hidden="true">🔒</span></span>
+    </div>
+    <p id="p-upgrade-hint" class="p-upgrade-hint note" role="status" aria-live="polite" hidden></p>
     <div class="row"><label for="p-prompt">Prompt</label><textarea id="p-prompt" rows="5"></textarea></div>
     <div class="thumbs"><figure><img id="p-beauty" alt="Beauty capture"><figcaption>3D capture</figcaption></figure><figure><img id="p-depth" alt="Depth guide"><figcaption>Depth guide (near = white)</figcaption></figure></div>
     <div class="btns">

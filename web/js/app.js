@@ -149,6 +149,7 @@ let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | 
 let tab = 'build';
 let selectionSet = new Set();
 let selection = null;
+let view3d = null;
 
 function isSelected(id) {
   return selectionSet.has(id);
@@ -174,6 +175,8 @@ let calibPoints = [];
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
+let distSpacingInput = '';
+let distSpacingType = 'center';
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -523,9 +526,27 @@ function persist() {
   }
 }
 
-function renderSnapToggles() {
+function is3DViewActive() {
+  if (view3d && typeof view3d.isThree === 'function' && view3d.isThree()) {
+    return true;
+  }
+  const view3dBtn = $('#toolbar [data-view="3d"]') || $('[data-view="3d"]');
+  if (
+    view3dBtn &&
+    view3dBtn.classList &&
+    typeof view3dBtn.classList.contains === 'function' &&
+    view3dBtn.classList.contains('on')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
+  const is3d = is3DViewActive();
+  const disabledAttr = is3d ? 'disabled' : '';
   const viewModels = buildToggleViewModel(interaction);
   const gridVm = buildGridSettingsViewModel(interaction);
   const activeCount = viewModels.filter((vm) => vm.enabled).length;
@@ -535,8 +556,8 @@ function renderSnapToggles() {
 
   const existingPopover =
     typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
-  const wasOpen = existingPopover ? existingPopover.open : false;
-  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const wasOpen = !is3d && existingPopover ? existingPopover.open : false;
+  const activeEl = !is3d && typeof document !== 'undefined' ? document.activeElement : null;
   const isContained =
     activeEl &&
     (typeof container.contains === 'function'
@@ -551,7 +572,7 @@ function renderSnapToggles() {
         const tokenHover = vm.tokenHover || '--ktheme-accent-hover';
         const styleAttr = `--snap-accent: var(${token}); --snap-accent-hover: var(${tokenHover});`;
         return `
-        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
+        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} ${disabledAttr} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
           <span>${esc(vm.label)}</span>
           <span class="snap-status">${vm.enabled ? 'ON' : 'OFF'}</span>
         </k-button>
@@ -561,7 +582,7 @@ function renderSnapToggles() {
 
   container.innerHTML = `
     <k-popover id="snap-popover">
-      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} title="Snapping modes (${activeCount} enabled)">
+      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} ${disabledAttr} title="Snapping modes (${activeCount} enabled)">
         <span aria-hidden="true">🧲</span> Snapping <span class="snap-badge badge">${activeCount}</span>
       </k-button>
       <div class="snap-popover-menu">
@@ -596,8 +617,26 @@ function renderSnapToggles() {
 
   const newPopover =
     typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
-  if (newPopover && wasOpen) {
-    newPopover.open = true;
+  if (newPopover) {
+    if (wasOpen && !is3d) {
+      newPopover.open = true;
+    } else if (is3d) {
+      newPopover.open = false;
+      if (typeof newPopover.removeAttribute === 'function') {
+        newPopover.removeAttribute('open');
+      }
+    }
+  }
+
+  const snapTrigger =
+    typeof container.querySelector === 'function' ? container.querySelector('#snap-trigger') : null;
+  if (snapTrigger) {
+    snapTrigger.disabled = is3d;
+    if (is3d) {
+      if (typeof snapTrigger.setAttribute === 'function') snapTrigger.setAttribute('disabled', '');
+    } else if (typeof snapTrigger.removeAttribute === 'function') {
+      snapTrigger.removeAttribute('disabled');
+    }
   }
 
   if (focusedInputId && typeof container.querySelector === 'function') {
@@ -608,8 +647,21 @@ function renderSnapToggles() {
   }
 
   container.querySelectorAll('[data-snap-id]').forEach((btn) => {
+    btn.disabled = is3d;
+    if (is3d) {
+      if (typeof btn.setAttribute === 'function') btn.setAttribute('disabled', '');
+    } else if (typeof btn.removeAttribute === 'function') {
+      btn.removeAttribute('disabled');
+    }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (
+        is3DViewActive() ||
+        btn.disabled ||
+        (typeof btn.hasAttribute === 'function' && btn.hasAttribute('disabled'))
+      ) {
+        return;
+      }
       const id = btn.dataset.snapId;
       const vm = viewModels.find((x) => x.id === id);
       if (vm) {
@@ -1511,9 +1563,22 @@ function renderInspector() {
       </div>
       <div class="align-section" style="margin-top:10px">
         <div class="align-label">Distribute</div>
-        <div class="align-grid">
-          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 ? 'disabled' : ''}>Horizontal</button>
-          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 ? 'disabled' : ''}>Vertical</button>
+        ${formRow(
+          'dist-spacing-input',
+          'Spacing',
+          `<input id="dist-spacing-input" type="text" placeholder="Auto (e.g. 16&quot;, 2' 6&quot;)" value="${esc(distSpacingInput)}">`
+        )}
+        ${formRow(
+          'dist-spacing-type',
+          'Mode',
+          `<select id="dist-spacing-type">
+            <option value="center" ${distSpacingType === 'center' ? 'selected' : ''}>Center-to-Center</option>
+            <option value="gap" ${distSpacingType === 'gap' ? 'selected' : ''}>Edge-to-Edge Gap</option>
+          </select>`
+        )}
+        <div class="align-grid" style="margin-top:6px">
+          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Horizontal</button>
+          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Vertical</button>
         </div>
       </div>
       <div class="btns" style="margin-top:14px">
@@ -1539,12 +1604,44 @@ function renderInspector() {
       apply((n) => M.alignItems(n, selectedList, 'bottom'), 'Align Bottom')
     );
 
-    $('#dist-h')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'horizontal'), 'Distribute Horizontally')
-    );
-    $('#dist-v')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'vertical'), 'Distribute Vertically')
-    );
+    const syncDistControls = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const hasExplicit = typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0;
+      const canDistribute = selectedList.length >= 3 || (selectedList.length >= 2 && hasExplicit);
+      const btnH = $('#dist-h');
+      const btnV = $('#dist-v');
+      if (btnH) btnH.disabled = !canDistribute;
+      if (btnV) btnV.disabled = !canDistribute;
+    };
+
+    const readDistOptions = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const spacing =
+        typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      return { spacing, spacingType: distSpacingType };
+    };
+
+    $('#dist-spacing-input')?.addEventListener('input', syncDistControls);
+    $('#dist-spacing-type')?.addEventListener('change', syncDistControls);
+
+    $('#dist-h')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'horizontal', spacing, spacingType),
+        'Distribute Horizontally'
+      );
+    });
+    $('#dist-v')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'vertical', spacing, spacingType),
+        'Distribute Vertically'
+      );
+    });
 
     $('#i-del-all')?.addEventListener('click', () => {
       apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
@@ -5334,7 +5431,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-export const SAMPLE_MUNICIPAL_GIS = {
+const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -5400,7 +5497,7 @@ function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-export function openGISDialog() {
+function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisCrsSelect = $('#gis-crs');
@@ -5457,7 +5554,6 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
-export { renderGISSegments };
 
 $('#report')?.addEventListener('click', () =>
   download(
@@ -5636,7 +5732,6 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   }
 }
 
-let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
   initShortcutOverlayUI();
@@ -6929,3 +7024,5 @@ if (typeof window !== 'undefined')
     setCatalogFilters,
     resetCatalogFilters,
   };
+
+export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
