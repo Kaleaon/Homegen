@@ -4,7 +4,12 @@ import { SNAP_MODES, SnapModeState } from './snapModes.mjs';
 import { TransformGizmo } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback } from './collision.mjs';
-import { buildToggleViewModel, SNAP_TOGGLE_DEFINITIONS } from './uiSnapToggles.mjs';
+import {
+  buildToggleViewModel,
+  buildGridSettingsViewModel,
+  isValidGridIncrement,
+  SNAP_TOGGLE_DEFINITIONS,
+} from './uiSnapToggles.mjs';
 import { getSnappedPoint, snapAngle } from './snapping.mjs';
 import {
   getSnappedPoint3D,
@@ -26,6 +31,18 @@ import {
   fmtDimensionText,
   fmtLenInches,
 } from './constraintHandles.mjs';
+import {
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  closestPointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
+} from './math2d.mjs';
 
 export {
   InteractionLayer,
@@ -39,6 +56,8 @@ export {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  buildGridSettingsViewModel,
+  isValidGridIncrement,
   SNAP_TOGGLE_DEFINITIONS,
   getSnappedPoint,
   snapAngle,
@@ -58,4 +77,14 @@ export {
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  closestPointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
 };

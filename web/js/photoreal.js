@@ -12,6 +12,36 @@ export const STYLES = {
   boho: 'bohemian eclectic',
 };
 
+export const RESOLUTION_TIERS = {
+  sd: {
+    id: 'sd',
+    label: 'SD (576p)',
+    plan: 'Free',
+    badge: 'Free',
+    locked: false,
+    width: 576,
+    height: 448,
+  },
+  hd: {
+    id: 'hd',
+    label: 'HD (1024p)',
+    plan: 'Pro',
+    badge: 'Pro 🔒',
+    locked: true,
+    width: 1024,
+    height: 768,
+  },
+  '4k': {
+    id: '4k',
+    label: '4K (2048p)',
+    plan: 'Enterprise',
+    badge: 'Enterprise 🔒',
+    locked: true,
+    width: 2048,
+    height: 1536,
+  },
+};
+
 export const NEGATIVE =
   'cartoon, illustration, 3d render, cgi, low quality, blurry, distorted perspective, warped furniture, text, watermark, people';
 
@@ -123,8 +153,26 @@ export async function toWebpDataUrl(pngDataUrl, width = 768) {
   }
 }
 
-/** Anonymous Horde users are capped at 576x576 total work; registered keys can go larger (checked with the service's dry_run). */
-export const hordeWidth = (apikey) => (apikey === '0000000000' ? 576 : 768);
+export function isAnonymousKey(apikey) {
+  const trimmed = typeof apikey === 'string' ? apikey.trim() : '';
+  return !trimmed || trimmed === '0000000000';
+}
+
+export function resolveResolutionTier(tierId = 'sd', apikey = '0000000000') {
+  const key = typeof tierId === 'object' && tierId !== null ? tierId.id : tierId;
+  const requested = RESOLUTION_TIERS[key] || RESOLUTION_TIERS.sd;
+  const downgraded = Boolean(requested.locked && isAnonymousKey(apikey));
+  const effective = downgraded ? RESOLUTION_TIERS.sd : requested;
+  return {
+    requested,
+    effective,
+    downgraded,
+  };
+}
+
+/** Anonymous Horde users are capped at 576x576 total work; registered keys can unlock higher resolution tiers. */
+export const hordeWidth = (apikey = '0000000000', tierId = 'sd') =>
+  resolveResolutionTier(tierId, apikey).effective.width;
 
 export class HordeError extends Error {
   constructor(message, type, status = null) {
@@ -135,17 +183,38 @@ export class HordeError extends Error {
   }
 }
 
+export const DEFAULT_RETRY_DELAYS = [250, 500, 1000];
+
+function createAbortError() {
+  return new DOMException('Cancelled', 'AbortError');
+}
+
+function getRetryDelayMs(attempt, retryDelays = DEFAULT_RETRY_DELAYS) {
+  if (typeof retryDelays === 'number') {
+    return Math.max(0, retryDelays) * 2 ** attempt;
+  }
+  if (Array.isArray(retryDelays) && retryDelays.length > 0) {
+    if (attempt < retryDelays.length) {
+      return Math.max(0, retryDelays[attempt]);
+    }
+    const lastDelay = Math.max(0, retryDelays[retryDelays.length - 1]);
+    return lastDelay * 2 ** (attempt - retryDelays.length + 1);
+  }
+  return 0;
+}
+
 function sleep(ms, signal) {
-  if (signal?.aborted) return Promise.reject(new DOMException('Cancelled', 'AbortError'));
+  if (signal?.aborted) return Promise.reject(createAbortError());
+  const delayMs = Math.max(0, Number(ms) || 0);
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(createAbortError());
+    };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException('Cancelled', 'AbortError'));
-    };
+    }, delayMs);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
@@ -156,23 +225,23 @@ async function fetchWithRetry(
   fetchImpl,
   signal,
   retries = 3,
-  retryDelays = [1000, 2000, 4000]
+  retryDelays = DEFAULT_RETRY_DELAYS
 ) {
   let lastErr = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (signal?.aborted) {
-      throw new DOMException('Cancelled', 'AbortError');
+      throw createAbortError();
     }
     try {
       const res = await rateLimitedFetch(url, { ...options, signal, fetchImpl });
       return res;
     } catch (err) {
-      if (err.name === 'AbortError' || signal?.aborted) {
-        throw err;
+      if (err?.name === 'AbortError' || signal?.aborted) {
+        throw err?.name === 'AbortError' ? err : createAbortError();
       }
       lastErr = err;
       if (attempt < retries) {
-        const delay = retryDelays[attempt] ?? 4000;
+        const delay = getRetryDelayMs(attempt, retryDelays);
         await sleep(delay, signal);
       }
     }
@@ -202,6 +271,16 @@ function classifyResponseError(status, message) {
   return new HordeError(message || `AI Horde request failed (${status})`, 'generic', status);
 }
 
+function cancelHordeJob(fetchImpl, jobId) {
+  try {
+    Promise.resolve(fetchImpl(`${HORDE}/generate/status/${jobId}`, { method: 'DELETE' })).catch(
+      () => {}
+    );
+  } catch {
+    // Ignore cleanup errors when cancelling a remote job
+  }
+}
+
 /**
  * Photoreal render via AI Horde with a depth ControlNet so the result follows the 3D layout.
  * `depthDataUrl` must be the app's depth guide (near = white). Resolves to an image URL.
@@ -209,6 +288,7 @@ function classifyResponseError(status, message) {
 export async function hordeRender({
   prompt,
   depthWebp,
+  width,
   apikey = '0000000000',
   strength = 1,
   dryRun = false,
@@ -216,16 +296,19 @@ export async function hordeRender({
   signal,
   fetchImpl = fetch,
   pollIntervalMs = 4000,
-  retryDelays = [1000, 2000, 4000],
+  retryDelays = DEFAULT_RETRY_DELAYS,
   maxDurationMs = 15 * 60 * 1000,
 }) {
-  const [w, h] = depthWebp.size || [768, 576];
+  const fallbackW = width ? Math.round(width / 64) * 64 : hordeWidth(apikey);
+  const fallbackH = Math.round((fallbackW * 3) / 4 / 64) * 64;
+  const [w, h] = depthWebp.size || [fallbackW, fallbackH];
+  const anon = isAnonymousKey(apikey);
   const body = {
     prompt: `${prompt} ### ${NEGATIVE}`,
     params: {
       sampler_name: 'k_euler_a',
       cfg_scale: 7,
-      steps: apikey === '0000000000' ? 20 : 28,
+      steps: anon ? 20 : 28,
       n: 1,
       width: w,
       height: h,
@@ -266,12 +349,11 @@ export async function hordeRender({
 
   for (;;) {
     try {
-      await sleep(pollIntervalMs, signal);
       if (signal?.aborted) {
-        throw new DOMException('Cancelled', 'AbortError');
+        throw createAbortError();
       }
       if (Date.now() - startTime > maxDurationMs) {
-        fetchImpl(`${HORDE}/generate/status/${job.id}`, { method: 'DELETE' }).catch(() => {});
+        cancelHordeJob(fetchImpl, job.id);
         throw new HordeError('AI Horde render job timed out after 15 minutes.', 'timeout');
       }
 
@@ -298,10 +380,16 @@ export async function hordeRender({
           : `Queue position ${c.queue_position ?? '?'} · ~${c.wait_time ?? '?'}s${apikey === '0000000000' ? ' (anonymous; a free key is faster)' : ''}`
       );
       if (c.done) break;
+
+      if (Date.now() - startTime > maxDurationMs) {
+        cancelHordeJob(fetchImpl, job.id);
+        throw new HordeError('AI Horde render job timed out after 15 minutes.', 'timeout');
+      }
+      await sleep(pollIntervalMs, signal);
     } catch (err) {
-      if (err.name === 'AbortError' || signal?.aborted) {
-        fetchImpl(`${HORDE}/generate/status/${job.id}`, { method: 'DELETE' }).catch(() => {});
-        throw err;
+      if (err?.name === 'AbortError' || signal?.aborted) {
+        cancelHordeJob(fetchImpl, job.id);
+        throw err?.name === 'AbortError' ? err : createAbortError();
       }
       throw err;
     }
@@ -320,6 +408,9 @@ export async function hordeRender({
     throw classifyResponseError(stRes.status, stErrData.message);
   }
   const st = await stRes.json();
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
   const gen = st.generations?.[0];
   if (!gen) throw new HordeError('AI Horde returned no image.', 'fault');
 

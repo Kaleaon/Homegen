@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InteractionLayer, SNAP_MODES } from '../../designer3d/tools/index.mjs';
 import { SnappingBridge } from '../js/snapping-bridge.js';
-import { drawSnapGuides } from '../js/render.js';
+import { draw, drawSnapGuides } from '../js/render.js';
 import { getToken } from '../js/kthemeTokens.js';
 
 test('SnappingBridge computes snap points and guide lines during pointer move', () => {
@@ -288,6 +288,9 @@ test('SnappingBridge computeMultiSnap calculates group anchor snapping during mu
 test('drawSnapGuides does not abort when snapResult.snap is null and renders semantic tokens', () => {
   const calls = [];
   const ctx = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
+    fillRect() {},
     save() {
       calls.push('save');
     },
@@ -320,7 +323,8 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     lineWidth: 0,
   };
 
-  const view = { scale: 1 };
+  const state = { rooms: [] };
+  const view = { scale: 1, ox: 0, oy: 0 };
 
   // 1. Null snap with indicator
   const nullSnapWithIndicator = {
@@ -328,7 +332,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 50, y: 60 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, nullSnapWithIndicator, view);
+  draw(ctx, state, view, { snapResult: nullSnapWithIndicator });
   assert.ok(calls.includes('beginPath'));
   assert.ok(calls.includes('arc(50,60,8)'));
   assert.ok(calls.includes('arc(50,60,3.5)'));
@@ -340,7 +344,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: null,
     guideLines: [{ start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, type: 'angle' }],
   };
-  drawSnapGuides(ctx, nullSnapWithGuides, view);
+  draw(ctx, state, view, { snapResult: nullSnapWithGuides });
   assert.ok(calls.includes('moveTo(0,0)'));
   assert.ok(calls.includes('lineTo(100,0)'));
 
@@ -351,7 +355,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 24, y: 48 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, gridSnap, view);
+  draw(ctx, state, view, { snapResult: gridSnap });
   assert.equal(ctx.strokeStyle, getToken('--ktheme-success', '#10b981'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-success', '#10b981'));
 
@@ -362,7 +366,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 60, y: 0 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, midpointSnap, view);
+  draw(ctx, state, view, { snapResult: midpointSnap });
   assert.equal(ctx.strokeStyle, getToken('--ktheme-info', '#a855f7'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-info', '#a855f7'));
 
@@ -373,7 +377,428 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 50, y: 50 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, perpSnap, view);
+  draw(ctx, state, view, { snapResult: perpSnap });
   assert.equal(ctx.strokeStyle, getToken('--ktheme-warning', '#f59e0b'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-warning', '#f59e0b'));
+});
+
+test('Bidirectional conversions between arc radius, sagitta, and bulge factor', async () => {
+  const { sagittaFromBulge, bulgeFromSagitta, radiusFromBulge, bulgeFromRadius, getArcParameters } =
+    await import('../js/geometry.js');
+
+  const chordLen = 120;
+
+  // Semicircle: bulge = 1 => sagitta = 60, radius = 60
+  assert.ok(Math.abs(sagittaFromBulge(chordLen, 1) - 60) < 1e-9);
+  assert.ok(Math.abs(bulgeFromSagitta(chordLen, 60) - 1) < 1e-9);
+  assert.ok(Math.abs(radiusFromBulge(chordLen, 1) - 60) < 1e-9);
+  const semiRes = bulgeFromRadius(chordLen, 60);
+  assert.equal(semiRes.ok, true);
+  assert.ok(Math.abs(semiRes.bulge - 1) < 1e-9);
+
+  // Quarter-arc / shallow curve: bulge = 0.5 => sagitta = 30, radius = 75
+  const b = 0.5;
+  const s = sagittaFromBulge(chordLen, b);
+  const r = radiusFromBulge(chordLen, b);
+  assert.ok(Math.abs(s - 30) < 1e-9);
+  assert.ok(Math.abs(r - 75) < 1e-9);
+
+  const fromSagitta = bulgeFromSagitta(chordLen, s);
+  assert.ok(Math.abs(fromSagitta - b) < 1e-9);
+
+  const fromRadius = bulgeFromRadius(chordLen, r);
+  assert.equal(fromRadius.ok, true);
+  assert.equal(fromRadius.isLinear, false);
+  assert.ok(Math.abs(fromRadius.bulge - b) < 1e-9);
+  assert.ok(Math.abs(fromRadius.sagitta - s) < 1e-9);
+
+  // Verify consistency with getArcParameters
+  const arc = getArcParameters({ x: 0, y: 0 }, { x: chordLen, y: 0 }, fromRadius.bulge);
+  assert.ok(Math.abs(arc.radius - r) < 1e-9);
+  assert.ok(Math.abs(arc.sagitta - s) < 1e-9);
+});
+
+test('Curve conversion edge cases: infinite radius linear fallback, negative concavity inversion, and L > 2R error feedback', async () => {
+  const {
+    sagittaFromBulge,
+    bulgeFromSagitta,
+    radiusFromBulge,
+    bulgeFromRadius,
+    parseCurveHudInput,
+    pointOnArc,
+  } = await import('../js/geometry.js');
+
+  const chordLen = 100;
+
+  // 1. Zero-bulge linear wall fallback when radius approaches infinity
+  assert.equal(radiusFromBulge(chordLen, 0), Infinity);
+  assert.equal(sagittaFromBulge(chordLen, 0), 0);
+
+  for (const infInput of [Infinity, -Infinity, 1e9, 1e12, 'Infinity', '∞', 'inf', '']) {
+    const res = parseCurveHudInput('radius', infInput, chordLen, 0.4);
+    assert.equal(res.ok, true, `Expected linear fallback ok for ${String(infInput)}`);
+    assert.equal(res.isLinear, true);
+    assert.equal(res.bulge, 0);
+    assert.equal(res.sagitta, 0);
+    assert.equal(res.radius, Infinity);
+    assert.equal(res.error, null);
+  }
+
+  // 2. Invert curve concavity for negative bulge factors
+  const negBulge = -0.5; // chord 100 => radius = 62.5, sagitta = -25
+  const negSagitta = sagittaFromBulge(chordLen, negBulge);
+  assert.ok(Math.abs(negSagitta - -25) < 1e-9);
+  assert.ok(Math.abs(bulgeFromSagitta(chordLen, -25) - negBulge) < 1e-9);
+
+  // Midpoint concavity flips across the chord for positive vs negative bulge
+  const posMid = pointOnArc({ x: 0, y: 0 }, { x: chordLen, y: 0 }, 0.5, 0.5);
+  const negMid = pointOnArc({ x: 0, y: 0 }, { x: chordLen, y: 0 }, -0.5, 0.5);
+  assert.ok(posMid.y > 0);
+  assert.ok(negMid.y < 0);
+  assert.ok(Math.abs(posMid.y + negMid.y) < 1e-9);
+
+  // Negative radius or negative currentBulge preserves inverted concavity
+  const fromNegRadius = bulgeFromRadius(chordLen, -62.5);
+  assert.equal(fromNegRadius.ok, true);
+  assert.ok(Math.abs(fromNegRadius.bulge - -0.5) < 1e-9);
+
+  const preservedConcavity = parseCurveHudInput('radius', '62.5', chordLen, -0.25);
+  assert.equal(preservedConcavity.ok, true);
+  assert.ok(Math.abs(preservedConcavity.bulge - -0.5) < 1e-9);
+  assert.ok(Math.abs(preservedConcavity.sagitta - -25) < 1e-9);
+
+  // 3. Error feedback when chord length exceeds twice the entered arc radius (L > 2R)
+  const tooSmallRadius = bulgeFromRadius(chordLen, 40); // 100 > 2 * 40 = 80
+  assert.equal(tooSmallRadius.ok, false);
+  assert.equal(tooSmallRadius.isValid, false);
+  assert.equal(tooSmallRadius.bulge, null);
+  assert.match(tooSmallRadius.error, /exceeds twice/i);
+
+  const hudTooSmall = parseCurveHudInput('radius', '49.9', chordLen, 0);
+  assert.equal(hudTooSmall.ok, false);
+  assert.match(hudTooSmall.error, /exceeds twice/i);
+
+  const zeroRadius = bulgeFromRadius(chordLen, 0);
+  assert.equal(zeroRadius.ok, false);
+  assert.match(zeroRadius.error, /exceeds twice/i);
+});
+
+test('InteractionLayer delegates setEdgeBulge and SnappingBridge snaps accurately to curved room walls', async () => {
+  const { parseCurveHudInput } = await import('../js/geometry.js');
+  const M = await import('../js/model.js');
+
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+    },
+    snapModes: { grid: false, edge: true, midpoint: true, perpendicular: false },
+  });
+
+  // Draft a 4-corner room and apply parametric radius via HUD parser -> setEdgeBulge
+  interaction.addRoomCorner({ x: 0, y: 0 });
+  interaction.addRoomCorner({ x: 120, y: 0 });
+  interaction.addRoomCorner({ x: 120, y: 120 });
+  interaction.addRoomCorner({ x: 0, y: 120 });
+
+  const parsed = parseCurveHudInput('radius', '75', 120, 0);
+  assert.equal(parsed.ok, true);
+  assert.ok(Math.abs(parsed.bulge - 0.5) < 1e-9);
+
+  interaction.setEdgeBulge(0, parsed.bulge);
+  assert.ok(Math.abs(interaction.getEdgeBulge(0) - 0.5) < 1e-9);
+
+  const closed = interaction.closeRoom({ existingRooms: [] });
+  assert.equal(closed.ok, true);
+  assert.ok(Math.abs(closed.room.bulges[0] - 0.5) < 1e-9);
+
+  // Persist into plan model and verify SnappingBridge snaps to curved North wall apex (60, 30)
+  const state = M.newState();
+  const room = M.addRoom(state, 0, 0, 120, 120, 'living', {
+    points: closed.room.corners,
+    bulges: closed.room.bulges,
+  });
+  assert.ok(Math.abs(M.getWallBulge(room, 'N') - 0.5) < 1e-9);
+
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => state.rooms,
+  });
+
+  // 1. Edge snap along curved North wall (chord (0,0)->(120,0), bulge +0.5 => center (60,-45), R=75)
+  const edgeSnap = bridge.computeSnap({ x: 60, y: 31.5 });
+  assert.equal(edgeSnap.snap?.type, 'edge');
+  assert.ok(Math.abs(edgeSnap.point.x - 60) < 1e-6);
+  assert.ok(Math.abs(edgeSnap.point.y - 30) < 1e-6);
+
+  // 2. Midpoint snap at curved North wall apex (60, 30) when midpoint mode is isolated
+  interaction.toggleSnapMode(SNAP_MODES.EDGE, false);
+  const midSnap = bridge.computeSnap({ x: 60.4, y: 29.6 });
+  assert.equal(midSnap.snap?.type, 'midpoint');
+  assert.ok(Math.abs(midSnap.point.x - 60) < 1e-6);
+  assert.ok(Math.abs(midSnap.point.y - 30) < 1e-6);
+
+  // 3. Invert concavity via model helper setWallBulge -> apex flips to (60, -30)
+  M.setWallBulge(room, 'N', -0.5, state);
+  const invertedSnap = bridge.computeSnap({ x: 59.7, y: -29.8 });
+  assert.equal(invertedSnap.snap?.type, 'midpoint');
+  assert.ok(Math.abs(invertedSnap.point.x - 60) < 1e-6);
+  assert.ok(Math.abs(invertedSnap.point.y - -30) < 1e-6);
+});
+
+test('drawSnapGuides renders angle degree status badge with roundRect and skips non-angle or undefined angleDegrees', () => {
+  const calls = [];
+  const textCalls = [];
+  const roundRectCalls = [];
+  const ctx = {
+    save() {
+      calls.push('save');
+    },
+    restore() {
+      calls.push('restore');
+    },
+    beginPath() {
+      calls.push('beginPath');
+    },
+    moveTo(x, y) {
+      calls.push(`moveTo(${x},${y})`);
+    },
+    lineTo(x, y) {
+      calls.push(`lineTo(${x},${y})`);
+    },
+    arc(x, y, r) {
+      calls.push(`arc(${x},${y},${r})`);
+    },
+    roundRect(x, y, w, h, r) {
+      roundRectCalls.push({ x, y, w, h, r });
+      calls.push('roundRect');
+    },
+    rect(x, y, w, h) {
+      calls.push(`rect(${x},${y},${w},${h})`);
+    },
+    stroke() {
+      calls.push('stroke');
+    },
+    fill() {
+      calls.push('fill');
+    },
+    setLineDash(d) {
+      calls.push(`setLineDash(${JSON.stringify(d)})`);
+    },
+    measureText(text) {
+      calls.push(`measureText(${text})`);
+      return { width: text.length * 7 };
+    },
+    fillText(text, x, y) {
+      textCalls.push({ text, x, y });
+      calls.push(`fillText(${text})`);
+    },
+    strokeStyle: '',
+    fillStyle: '',
+    lineWidth: 0,
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+  };
+
+  const view = { scale: 2 };
+
+  // 1. Active angle snap with angleDegrees = 45 renders rounded badge and "45°" text
+  const angleSnap45 = {
+    snap: { type: 'angle', angleDegrees: 45, point: { x: 100, y: 120 } },
+    indicator: { x: 100, y: 120 },
+    guideLines: [{ start: { x: 50, y: 70 }, end: { x: 100, y: 120 }, type: 'angle' }],
+  };
+  drawSnapGuides(ctx, angleSnap45, view);
+  assert.equal(roundRectCalls.length, 1);
+  assert.ok(roundRectCalls[0].x > 100);
+  assert.ok(roundRectCalls[0].y < 120);
+  assert.equal(roundRectCalls[0].h, 20 / view.scale);
+  assert.equal(roundRectCalls[0].r, 5 / view.scale);
+  assert.equal(textCalls.length, 1);
+  assert.equal(textCalls[0].text, '45°');
+
+  // 2. Angle snap at 0 degrees (and -0) renders "0°"
+  calls.length = 0;
+  textCalls.length = 0;
+  roundRectCalls.length = 0;
+  drawSnapGuides(
+    ctx,
+    {
+      snap: { type: 'angle', angleDegrees: -0, point: { x: 80, y: 40 } },
+      indicator: { x: 80, y: 40 },
+      guideLines: [],
+    },
+    { scale: 1 }
+  );
+  assert.equal(roundRectCalls.length, 1);
+  assert.equal(textCalls.length, 1);
+  assert.equal(textCalls[0].text, '0°');
+
+  // 3. Angle snap with undefined angleDegrees skips badge rendering
+  calls.length = 0;
+  textCalls.length = 0;
+  roundRectCalls.length = 0;
+  drawSnapGuides(
+    ctx,
+    {
+      snap: { type: 'angle', point: { x: 80, y: 40 } },
+      indicator: { x: 80, y: 40 },
+      guideLines: [],
+    },
+    { scale: 1 }
+  );
+  assert.equal(roundRectCalls.length, 0);
+  assert.equal(textCalls.length, 0);
+
+  // 4. Non-angle snap types (grid, edge, midpoint, perpendicular) skip badge rendering
+  for (const type of ['grid', 'edge', 'midpoint', 'perpendicular']) {
+    calls.length = 0;
+    textCalls.length = 0;
+    roundRectCalls.length = 0;
+    drawSnapGuides(
+      ctx,
+      {
+        snap: { type, point: { x: 40, y: 40 } },
+        indicator: { x: 40, y: 40 },
+        guideLines: [],
+      },
+      { scale: 1 }
+    );
+    assert.equal(roundRectCalls.length, 0, `Expected no roundRect for ${type}`);
+    assert.equal(textCalls.length, 0, `Expected no fillText for ${type}`);
+  }
+});
+
+test('drawSnapGuides falls back to standard rectangle drawing when ctx.roundRect is unavailable', () => {
+  const rectCalls = [];
+  const textCalls = [];
+  const ctxWithRect = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    arc() {},
+    rect(x, y, w, h) {
+      rectCalls.push({ x, y, w, h });
+    },
+    stroke() {},
+    fill() {},
+    setLineDash() {},
+    measureText: (t) => ({ width: t.length * 7 }),
+    fillText(text, x, y) {
+      textCalls.push({ text, x, y });
+    },
+  };
+
+  drawSnapGuides(
+    ctxWithRect,
+    {
+      snap: { type: 'angle', angleDegrees: -90, point: { x: 50, y: 50 } },
+      indicator: { x: 50, y: 50 },
+      guideLines: [],
+    },
+    { scale: 1 }
+  );
+  assert.equal(rectCalls.length, 1);
+  assert.equal(textCalls.length, 1);
+  assert.equal(textCalls[0].text, '-90°');
+
+  // Also verify fillRect / strokeRect fallback when both roundRect and rect are absent
+  const fillRectCalls = [];
+  const strokeRectCalls = [];
+  const ctxWithFillRect = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    arc() {},
+    stroke() {},
+    fill() {},
+    setLineDash() {},
+    fillRect(x, y, w, h) {
+      fillRectCalls.push({ x, y, w, h });
+    },
+    strokeRect(x, y, w, h) {
+      strokeRectCalls.push({ x, y, w, h });
+    },
+    fillText(text) {
+      textCalls.push({ text });
+    },
+  };
+
+  textCalls.length = 0;
+  drawSnapGuides(
+    ctxWithFillRect,
+    {
+      snap: { type: 'angle', angleDegrees: 30, point: { x: 20, y: 30 } },
+      indicator: { x: 20, y: 30 },
+      guideLines: [],
+    },
+    { scale: 1 }
+  );
+  assert.equal(fillRectCalls.length, 1);
+  assert.equal(strokeRectCalls.length, 1);
+  assert.equal(textCalls.length, 1);
+  assert.equal(textCalls[0].text, '30°');
+});
+
+test('SnappingBridge retains snap.angleDegrees across synchronous and asynchronous worker calculations', async () => {
+  const interaction = new InteractionLayer({
+    gridSettings: { unitSize: 6, angleSnapDegrees: 15, magneticThreshold: 20 },
+    snapModes: { grid: false, edge: false, midpoint: false, perpendicular: false, angle: true },
+  });
+
+  const anchor = { x: 0, y: 0 };
+  const targetNear45 = { x: 100, y: 102 }; // Snaps to 45°
+
+  const onSnapResults = [];
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => [],
+    onSnap: (snapState) => {
+      onSnapResults.push(snapState);
+    },
+  });
+
+  const syncRes = bridge.computeSnap(targetNear45, anchor);
+  assert.equal(syncRes.snap?.type, 'angle');
+  assert.equal(syncRes.snap?.angleDegrees, 45);
+  assert.equal(bridge.getActiveSnap()?.snap?.angleDegrees, 45);
+
+  // Wait for async worker microtask completion
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const asyncActive = bridge.getActiveSnap();
+  assert.ok(asyncActive);
+  assert.equal(asyncActive.snap?.type, 'angle');
+  assert.equal(asyncActive.snap?.angleDegrees, 45);
+  assert.ok(asyncActive.guideLines.some((g) => g.type === 'angle'));
+  assert.ok(onSnapResults.length >= 2);
+  assert.equal(onSnapResults[onSnapResults.length - 1].snap?.angleDegrees, 45);
+
+  // Verify fallback preservation if custom async worker omits angleDegrees on an angle snap
+  const customWorkerClient = {
+    syncSceneDiff() {},
+    computeSnapAsync(pt, anc) {
+      return Promise.resolve({
+        point: { x: 101, y: 101 },
+        rawPoint: pt,
+        anchor: anc,
+        snap: { type: 'angle', point: { x: 101, y: 101 } },
+        guideLines: [],
+      });
+    },
+  };
+  const bridgeCustom = new SnappingBridge({
+    interaction,
+    getRooms: () => [],
+    workerClient: customWorkerClient,
+  });
+  bridgeCustom.computeSnap(targetNear45, anchor);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(bridgeCustom.getActiveSnap()?.snap?.type, 'angle');
+  assert.equal(bridgeCustom.getActiveSnap()?.snap?.angleDegrees, 45);
+  assert.ok(bridgeCustom.getActiveSnap()?.guideLines.some((g) => g.type === 'angle'));
 });

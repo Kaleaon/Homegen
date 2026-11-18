@@ -585,3 +585,272 @@ test('daylight calculation validates egress sill height against EGRESS.maxSill a
   assert.equal(d2.egress, true);
   assert.equal(d2.maxSillOk, true);
 });
+
+test('outletSegments uses precomputed wallIntervals without recalculating wall keys or doors', () => {
+  const s = m.newState();
+  const room = m.createRoom(s, 'bedroom', 0, 0, 180, 144);
+  m.addOpening(s, room, 'door_entry_36', 'S', 60);
+  m.addItem(s, room, 'outlet', { wall: 'N', offset: 48 });
+  m.addItem(s, room, 'outlet', { wall: 'N', offset: 132 });
+
+  const precomputed = c.computeWallIntervals(s, room);
+  const segsDefault = c.outletSegments(s, room);
+  const segsPrecomputed = c.outletSegments(s, room, precomputed);
+  assert.deepEqual(segsPrecomputed, segsDefault);
+
+  // Passing null state when wallIntervals is provided proves wallOpenings(state, ...) is skipped
+  const segsWithoutState = c.outletSegments(null, room, precomputed);
+  assert.deepEqual(segsWithoutState, segsDefault);
+});
+
+test('autoComply with precomputed wall intervals places outlets in rooms without doors', () => {
+  const s = m.newState();
+  s.levels = 2;
+  // Upper-level habitable room has no exterior door added on level 1 and no neighbors -> zero doors
+  const room = m.createRoom(s, 'bedroom', 0, 0, 144, 144, { level: 1 });
+
+  c.autoComply(s);
+  const updated = s.rooms.find((r) => r.id === room.id);
+  assert.equal(
+    updated.openings.filter((o) => o.kind === 'door').length,
+    0,
+    'upper isolated room stays without doors'
+  );
+
+  const segs = c.outletSegments(s, updated);
+  assert.equal(segs.length, 4, 'all four unbroken walls require coverage');
+  assert.ok(
+    segs.every((seg) => seg.covered),
+    'every wall segment is covered by placed outlets'
+  );
+  const outletViolations = c
+    .evaluate(s)
+    .violations.filter((v) => v.rule === 'outlets' && v.roomId === room.id);
+  assert.equal(outletViolations.length, 0);
+});
+
+test('autoComply handles rooms with wall-spanning doors leaving < 24 in wall remnants', () => {
+  const s = m.newState();
+  // 96" wide x 144" deep office; place two 36" entry doors on N wall leaving < 24" segments:
+  // Wall N usable range is [3, 93]. Doors at [6, 42] and [54, 90] leave [3, 6], [42, 54], [90, 93] (all < 24").
+  const room = m.createRoom(s, 'office', 0, 0, 96, 144);
+  m.addOpening(s, room, 'door_entry_36', 'N', 6);
+  m.addOpening(s, room, 'door_entry_36', 'N', 54);
+
+  const intervals = c.computeWallIntervals(s, room);
+  const northIntervals = intervals.find((entry) => entry.wall === 'N');
+  assert.ok(
+    northIntervals.intervals.every(([a, b]) => b - a < 24),
+    'north wall has no >= 24 in unbroken space'
+  );
+
+  c.autoComply(s);
+  const updated = s.rooms.find((r) => r.id === room.id);
+  const outletsOnNorth = updated.items.filter((i) => i.wall === 'N' && /outlet/.test(i.type));
+  assert.equal(outletsOnNorth.length, 0, 'no outlet placed on door-spanned north wall');
+
+  for (const wall of ['E', 'S', 'W']) {
+    assert.ok(
+      updated.items.some((i) => i.wall === wall && i.type === 'outlet'),
+      `expected outlet on ${wall} wall`
+    );
+  }
+  const roomErrors = c
+    .evaluate(s)
+    .violations.filter((v) => v.roomId === room.id && v.severity === 'error');
+  assert.equal(roomErrors.length, 0);
+});
+
+test('autoComply places multiple outlets across distinct long walls and GFCI outlets in laundry', () => {
+  const s = m.newState();
+  // Large 320" x 280" living room needs multiple outlets per wall (> 144" each) across all 4 walls
+  const living = m.createRoom(s, 'living', 0, 0, 320, 280);
+  // Adjacent 160" x 120" laundry room requires GFCI outlets across distinct walls
+  const laundry = m.createRoom(s, 'laundry', 320, 0, 160, 120);
+
+  c.autoComply(s);
+
+  const livingAfter = s.rooms.find((r) => r.id === living.id);
+  const livingOutlets = livingAfter.items.filter((i) => i.type === 'outlet');
+  assert.ok(
+    livingOutlets.length >= 8,
+    `expected >= 8 outlets in large living room, got ${livingOutlets.length}`
+  );
+  for (const wall of ['N', 'E', 'S', 'W']) {
+    const countOnWall = livingOutlets.filter((i) => i.wall === wall).length;
+    assert.ok(countOnWall >= 2, `expected >= 2 outlets on ${wall} wall, got ${countOnWall}`);
+  }
+  assert.ok(c.outletSegments(s, livingAfter).every((seg) => seg.covered));
+
+  const laundryAfter = s.rooms.find((r) => r.id === laundry.id);
+  const laundryOutlets = laundryAfter.items.filter((i) => /outlet/.test(i.type));
+  assert.ok(laundryOutlets.length >= 3);
+  assert.ok(laundryOutlets.every((i) => i.type === 'outlet_gfci'));
+  assert.ok(c.outletSegments(s, laundryAfter).every((seg) => seg.covered));
+
+  const outletViolations = c.evaluate(s).violations.filter((v) => v.rule === 'outlets');
+  assert.equal(outletViolations.length, 0);
+});
+
+test('autoComply remediates non-compliant moisture finishes across all numeric segments of polygonal wet rooms', () => {
+  const s = m.newState();
+  const lShapePoints = [
+    { x: 0, y: 0 },
+    { x: 144, y: 0 },
+    { x: 144, y: 72 },
+    { x: 72, y: 72 },
+    { x: 72, y: 144 },
+    { x: 0, y: 144 },
+  ];
+  const bath = m.createRoom(s, 'bathroom', 0, 0, 144, 144, {
+    points: lShapePoints,
+    floor: 'floor_carpet_gray',
+    walls: {
+      0: 'wp_floral',
+      1: 'wp_floral',
+      2: 'wp_vinyl_leaf', // already moisture-rated
+      3: 'wp_floral',
+      4: 'wp_floral',
+      5: 'wp_floral',
+    },
+  });
+
+  const pentagonPoints = [
+    { x: 240, y: 0 },
+    { x: 360, y: 0 },
+    { x: 384, y: 72 },
+    { x: 300, y: 144 },
+    { x: 240, y: 96 },
+  ];
+  const laundry = m.createRoom(s, 'laundry', 240, 0, 144, 144, {
+    points: pentagonPoints,
+    walls: {
+      0: 'wp_floral',
+      1: 'wp_damask',
+      2: 'paint_sage', // already moisture-rated
+      3: 'wp_geo',
+      4: 'wp_dots',
+    },
+  });
+
+  const beforeRep = c.evaluate(s);
+  const bathWallViolations = beforeRep.violations.filter(
+    (v) => v.rule === 'wet-wall' && v.roomId === bath.id
+  );
+  assert.deepEqual(
+    bathWallViolations.map((v) => v.id),
+    [0, 1, 3, 4, 5].map((i) => `wet-wall:${bath.id}:${i}`)
+  );
+
+  const laundryWallViolations = beforeRep.violations.filter(
+    (v) => v.rule === 'wet-wall' && v.roomId === laundry.id
+  );
+  assert.deepEqual(
+    laundryWallViolations.map((v) => v.id),
+    [0, 1, 3, 4].map((i) => `wet-wall:${laundry.id}:${i}`)
+  );
+
+  const log = c.autoComply(s);
+
+  for (const idx of [0, 1, 3, 4, 5]) {
+    assert.equal(bath.walls[idx], 'wall_tile_white');
+    assert.ok(log.some((d) => d.id === `${bath.id}:${idx}` && d.type === 'wall'));
+  }
+  assert.equal(bath.walls[2], 'wp_vinyl_leaf');
+
+  for (const idx of [0, 1, 3, 4]) {
+    assert.equal(laundry.walls[idx], 'paint_white');
+    assert.ok(log.some((d) => d.id === `${laundry.id}:${idx}` && d.type === 'wall'));
+  }
+  assert.equal(laundry.walls[2], 'paint_sage');
+
+  const afterRep = c.evaluate(s);
+  assert.equal(
+    afterRep.violations.filter((v) => v.rule === 'wet-wall').length,
+    0,
+    'all polygonal wet-wall violations should be resolved'
+  );
+});
+
+test('polygonal wet rooms without explicit numeric wall keys receive moisture-resistant finishes and preserve cardinal rooms', () => {
+  const s = m.newState();
+  // Polygonal bathroom created without opts.walls leaves numeric keys 0..5 undefined
+  const polyBath = m.createRoom(s, 'bathroom', 0, 0, 144, 144, {
+    points: [
+      { x: 0, y: 0 },
+      { x: 144, y: 0 },
+      { x: 144, y: 72 },
+      { x: 72, y: 72 },
+      { x: 72, y: 144 },
+      { x: 0, y: 144 },
+    ],
+  });
+  // Standard 4-wall rectangular bathroom uses N, E, S, W keys
+  const rectBath = m.createRoom(s, 'bathroom', 200, 0, 96, 120, {
+    wallFinish: 'wp_floral',
+  });
+
+  const beforeRep = c.evaluate(s);
+  assert.equal(
+    beforeRep.violations.filter((v) => v.rule === 'wet-wall' && v.roomId === polyBath.id).length,
+    6
+  );
+  assert.deepEqual(
+    beforeRep.violations
+      .filter((v) => v.rule === 'wet-wall' && v.roomId === rectBath.id)
+      .map((v) => v.id),
+    ['N', 'E', 'S', 'W'].map((w) => `wet-wall:${rectBath.id}:${w}`)
+  );
+
+  c.autoComply(s);
+
+  for (let i = 0; i < 6; i++) {
+    assert.equal(polyBath.walls[i], 'wall_tile_white');
+  }
+  for (const w of ['N', 'E', 'S', 'W']) {
+    assert.equal(rectBath.walls[w], 'wall_tile_white');
+  }
+  assert.equal(polyBath.walls[6], undefined);
+  assert.equal(rectBath.walls[0], undefined);
+});
+
+test('targeted autoComply with dynamic wall segment IDs updates only the specified wall segment', () => {
+  const s = m.newState();
+  // 12-vertex polygon to also verify segment 1 does not collide with segment 10 or 11
+  const pts12 = Array.from({ length: 12 }, (_, i) => {
+    const angle = (i * 2 * Math.PI) / 12;
+    return {
+      x: Math.round(120 + 84 * Math.cos(angle)),
+      y: Math.round(120 + 84 * Math.sin(angle)),
+    };
+  });
+  const walls = {};
+  for (let i = 0; i < 12; i++) walls[i] = 'wp_floral';
+
+  const bath = m.createRoom(s, 'bathroom', 0, 0, 240, 240, {
+    points: pts12,
+    floor: 'floor_carpet_gray',
+    walls,
+  });
+
+  // Target r1:0 directly
+  const log0 = c.autoComply(s, { targetId: `${bath.id}:0` });
+  assert.equal(log0.length, 1);
+  assert.equal(log0[0].id, `${bath.id}:0`);
+  assert.equal(bath.walls[0], 'wall_tile_white');
+  assert.equal(bath.floor, 'floor_carpet_gray');
+  for (let i = 1; i < 12; i++) {
+    assert.equal(bath.walls[i], 'wp_floral');
+  }
+
+  // Target wet-wall:r1:1 via violation ID (must not touch segment 10 or 11)
+  const rep = c.evaluate(s);
+  const v1 = rep.violations.find((v) => v.id === `wet-wall:${bath.id}:1`);
+  assert.ok(v1);
+  const log1 = c.autoComply(s, { targetId: v1.id });
+  assert.equal(log1.length, 1);
+  assert.equal(log1[0].id, `${bath.id}:1`);
+  assert.equal(bath.walls[1], 'wall_tile_white');
+  assert.equal(bath.walls[10], 'wp_floral');
+  assert.equal(bath.walls[11], 'wp_floral');
+});

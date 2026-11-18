@@ -10,18 +10,21 @@ import {
   footprint,
   floorAreaSqFt,
   getRoomPoints,
+  getWallBulge,
+  getArcParameters,
+  tessellateArc,
   reproject,
 } from './geometry.js';
+import { isRegisteredEPSG, normalizeCode } from './epsgRegistry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { patternFor } from './patterns.js';
 // import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
-const fmt = (inches) =>
-  `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
-export const fmtLen = fmt;
+export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
 
 let bgCache = { dataUrl: null, img: null };
 const logoCache = new Map();
@@ -309,10 +312,726 @@ export function draw(ctx, state, view, opts = {}) {
   else if (opts.snappingBridge?.getActiveSnap())
     drawSnapGuides(ctx, opts.snappingBridge.getActiveSnap(), view);
   if (opts.overlay) opts.overlay(ctx, view);
+  if (
+    opts.showSpatialOverlay !== false &&
+    (opts.showSpatialOverlay ||
+      opts.activeCRS ||
+      opts.crs ||
+      state?.crs ||
+      state?.site?.crs ||
+      state?.background?.isGeospatial ||
+      state?.background?.worldfileCRS)
+  ) {
+    drawSpatialReferenceOverlay(ctx, state, view, opts);
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (opts.showRulers !== false) {
+    drawRulers(ctx, view, w / dpr, h / dpr, opts);
+  }
 }
 
-export function drawComplianceScene(ctx, complianceScene, view) {
+export const RULER_SIZE = 22;
+
+export function formatRulerCoord(inches) {
+  if (!Number.isFinite(inches) || Math.abs(inches) < 1e-6) return "0'";
+  const sign = inches < 0 ? '-' : '';
+  const abs = Math.abs(inches);
+  const rounded = Math.round(abs * 100) / 100;
+  const wholeFeet = Math.floor((rounded + 1e-6) / 12);
+  const remInches = Math.round((rounded - wholeFeet * 12) * 10) / 10;
+  if (remInches >= 12 - 1e-6) {
+    return `${sign}${wholeFeet + 1}'`;
+  }
+  if (wholeFeet === 0) {
+    return `${sign}${remInches}"`;
+  }
+  if (remInches < 1e-6) {
+    return `${sign}${wholeFeet}'`;
+  }
+  return `${sign}${wholeFeet}' ${remInches}"`;
+}
+
+export function computeRulerSteps(scale, opts = {}) {
+  const rawUnit =
+    opts.gridSettings?.unitSize ??
+    opts.unitSize ??
+    opts.snappingBridge?.interaction?.gridSettings?.unitSize ??
+    6;
+  const rawMinor = opts.gridSettings?.minorGrid ?? opts.minorGrid ?? 12;
+  const rawMajor = opts.gridSettings?.majorGrid ?? opts.majorGrid ?? 60;
+
+  const unitSize = Number.isFinite(rawUnit) && rawUnit > 0 ? rawUnit : 6;
+  const minorGrid = Number.isFinite(rawMinor) && rawMinor > 0 ? rawMinor : 12;
+  const majorGrid = Number.isFinite(rawMajor) && rawMajor > 0 ? rawMajor : 60;
+
+  const candidates = [];
+  if (unitSize * scale >= 36) {
+    candidates.push(1);
+    if (unitSize >= 4 && Number.isInteger(unitSize / 2)) {
+      candidates.push(unitSize / 2);
+    }
+  }
+  candidates.push(
+    unitSize,
+    minorGrid,
+    majorGrid,
+    majorGrid * 2,
+    majorGrid * 5,
+    majorGrid * 10,
+    majorGrid * 20,
+    majorGrid * 50,
+    majorGrid * 100
+  );
+
+  const uniqueSteps = [...new Set(candidates.filter((s) => Number.isFinite(s) && s > 0))].sort(
+    (a, b) => a - b
+  );
+
+  const minLabelPx = 48;
+  const minTickPx = 6;
+
+  let maxCandidate = uniqueSteps[uniqueSteps.length - 1] || 60;
+  const scaleMultipliers = [2, 2.5, 2];
+  let multIdx = 0;
+  while (maxCandidate * scale < minLabelPx && maxCandidate < 1e9) {
+    maxCandidate = Math.round(maxCandidate * scaleMultipliers[multIdx % 3]);
+    uniqueSteps.push(maxCandidate);
+    multIdx++;
+  }
+
+  const labelStep = uniqueSteps.find((s) => s * scale >= minLabelPx) || maxCandidate;
+  const subCandidates = uniqueSteps.filter((s) => s < labelStep && s * scale >= minTickPx);
+  const minorStep = subCandidates.length > 0 ? subCandidates[subCandidates.length - 1] : null;
+  const subStep = subCandidates.length > 1 ? subCandidates[subCandidates.length - 2] : null;
+
+  return { labelStep, minorStep, subStep, unitSize, minorGrid, majorGrid };
+}
+
+function isMultipleOf(val, step) {
+  if (!step) return false;
+  const ratio = val / step;
+  return Math.abs(ratio - Math.round(ratio)) < 1e-6;
+}
+
+export function drawRulers(ctx, view, cw, ch, opts = {}) {
+  if (cw !== undefined && typeof cw === 'object') {
+    opts = cw;
+    cw = undefined;
+    ch = undefined;
+  }
+  if (!ctx || !view || !Number.isFinite(view.scale) || view.scale <= 0) return;
+  if (!Number.isFinite(view.ox) || !Number.isFinite(view.oy)) return;
+
+  const dpr = opts.dpr || 1;
+  const width = cw ?? (ctx.canvas ? ctx.canvas.width / dpr : NaN);
+  const height = ch ?? (ctx.canvas ? ctx.canvas.height / dpr : NaN);
+  const rulerSize = opts.rulerSize ?? RULER_SIZE;
+
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+  if (width <= rulerSize || height <= rulerSize) return;
+
+  const { labelStep, minorStep, subStep } = computeRulerSteps(view.scale, opts);
+
+  const surfaceColor = getToken('--ktheme-bg-surface', '#1a1c25');
+  const elevatedColor = getToken('--ktheme-bg-elevated', '#22252f');
+  const borderColor = getToken('--ktheme-border', '#2e3140');
+  const subTickColor = getToken('--ktheme-border-light', '#3b3f50');
+  const minorTickColor = getToken('--ktheme-text-dim', '#6b7280');
+  const majorTickColor = getToken('--ktheme-text-muted', '#9ca3af');
+  const textColor = getToken('--ktheme-text', '#f3f4f6');
+  const accentColor = getToken('--ktheme-accent', '#818cf8');
+  const monoFont = getToken('--font-family-mono', 'monospace');
+
+  const hover = opts.hover;
+  const hasHover = Boolean(hover) && Number.isFinite(hover.x) && Number.isFinite(hover.y);
+  const hx = hasHover ? hover.x * view.scale + view.ox : NaN;
+  const hy = hasHover ? hover.y * view.scale + view.oy : NaN;
+  const hoverXInBounds = hasHover && hx >= rulerSize && hx <= width;
+  const hoverYInBounds = hasHover && hy >= rulerSize && hy <= height;
+
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // 1. Cursor projection guide lines across interior canvas viewport
+  if (hoverXInBounds || hoverYInBounds) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1;
+    if (ctx.setLineDash) ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    if (hoverXInBounds) {
+      ctx.moveTo(hx, rulerSize);
+      ctx.lineTo(hx, height);
+    }
+    if (hoverYInBounds) {
+      ctx.moveTo(rulerSize, hy);
+      ctx.lineTo(width, hy);
+    }
+    ctx.stroke();
+    if (ctx.setLineDash) ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // 2. Top and left perimeter ruler bar backgrounds
+  ctx.globalAlpha = 0.96;
+  ctx.fillStyle = surfaceColor;
+  ctx.fillRect(rulerSize, 0, width - rulerSize, rulerSize);
+  ctx.fillRect(0, rulerSize, rulerSize, height - rulerSize);
+  ctx.globalAlpha = 1;
+
+  const xMin = (rulerSize - view.ox) / view.scale;
+  const xMax = (width - view.ox) / view.scale;
+  const yMin = (rulerSize - view.oy) / view.scale;
+  const yMax = (height - view.oy) / view.scale;
+
+  // 3. Top horizontal ruler ticks & coordinate labels (restricted to [rulerSize, width])
+  ctx.save();
+  if (ctx.clip && ctx.rect) {
+    ctx.beginPath();
+    ctx.rect(rulerSize, 0, width - rulerSize, rulerSize);
+    ctx.clip();
+  }
+
+  if (subStep) {
+    ctx.strokeStyle = subTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(xMin / subStep - 1e-9);
+    const endIdx = Math.floor(xMax / subStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wx = i * subStep;
+      if (isMultipleOf(wx, minorStep) || isMultipleOf(wx, labelStep)) continue;
+      const sx = wx * view.scale + view.ox;
+      if (sx < rulerSize || sx > width) continue;
+      ctx.moveTo(sx, rulerSize - 4.5);
+      ctx.lineTo(sx, rulerSize);
+    }
+    ctx.stroke();
+  }
+
+  if (minorStep) {
+    ctx.strokeStyle = minorTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(xMin / minorStep - 1e-9);
+    const endIdx = Math.floor(xMax / minorStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wx = i * minorStep;
+      if (isMultipleOf(wx, labelStep)) continue;
+      const sx = wx * view.scale + view.ox;
+      if (sx < rulerSize || sx > width) continue;
+      ctx.moveTo(sx, rulerSize - 8);
+      ctx.lineTo(sx, rulerSize);
+    }
+    ctx.stroke();
+  }
+
+  {
+    ctx.strokeStyle = majorTickColor;
+    ctx.lineWidth = 1;
+    ctx.font = `500 9.5px ${monoFont}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.beginPath();
+    const startIdx = Math.ceil(xMin / labelStep - 1e-9);
+    const endIdx = Math.floor(xMax / labelStep + 1e-9);
+    const labels = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wx = i * labelStep;
+      const sx = wx * view.scale + view.ox;
+      if (sx < rulerSize || sx > width) continue;
+      ctx.moveTo(sx, 2);
+      ctx.lineTo(sx, rulerSize);
+      labels.push({ wx, sx });
+    }
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      for (const { wx, sx } of labels) {
+        const label = formatRulerCoord(wx);
+        const tw = ctx.measureText ? ctx.measureText(label).width : label.length * 5.8;
+        if (sx + 3 + tw <= width - 2) {
+          ctx.fillStyle = Math.abs(wx) < 1e-6 ? textColor : majorTickColor;
+          ctx.fillText(label, sx + 3, 2);
+        }
+      }
+    }
+  }
+
+  // Active X cursor marker & live coordinate badge on top ruler
+  if (hoverXInBounds) {
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(hx, 0);
+    ctx.lineTo(hx, rulerSize);
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      const coordLabel = formatRulerCoord(hover.x);
+      ctx.font = `600 9px ${monoFont}`;
+      const tw = ctx.measureText ? ctx.measureText(coordLabel).width : coordLabel.length * 5.6;
+      const padX = 4;
+      const badgeW = tw + padX * 2;
+      const badgeH = 13;
+      const clampedX = Math.max(rulerSize + 2, Math.min(width - badgeW - 2, hx + 4));
+      if (clampedX >= rulerSize + 1 && clampedX + badgeW <= width) {
+        ctx.fillStyle = elevatedColor;
+        ctx.fillRect(clampedX, 2, badgeW, badgeH);
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 1;
+        if (ctx.strokeRect) ctx.strokeRect(clampedX, 2, badgeW, badgeH);
+        ctx.fillStyle = textColor;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(coordLabel, clampedX + padX, 2 + badgeH / 2);
+      }
+    }
+  }
+  ctx.restore();
+
+  // 4. Left vertical ruler ticks & coordinate labels (restricted to [rulerSize, height])
+  ctx.save();
+  if (ctx.clip && ctx.rect) {
+    ctx.beginPath();
+    ctx.rect(0, rulerSize, rulerSize, height - rulerSize);
+    ctx.clip();
+  }
+
+  if (subStep) {
+    ctx.strokeStyle = subTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(yMin / subStep - 1e-9);
+    const endIdx = Math.floor(yMax / subStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wy = i * subStep;
+      if (isMultipleOf(wy, minorStep) || isMultipleOf(wy, labelStep)) continue;
+      const sy = wy * view.scale + view.oy;
+      if (sy < rulerSize || sy > height) continue;
+      ctx.moveTo(rulerSize - 4.5, sy);
+      ctx.lineTo(rulerSize, sy);
+    }
+    ctx.stroke();
+  }
+
+  if (minorStep) {
+    ctx.strokeStyle = minorTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(yMin / minorStep - 1e-9);
+    const endIdx = Math.floor(yMax / minorStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wy = i * minorStep;
+      if (isMultipleOf(wy, labelStep)) continue;
+      const sy = wy * view.scale + view.oy;
+      if (sy < rulerSize || sy > height) continue;
+      ctx.moveTo(rulerSize - 8, sy);
+      ctx.lineTo(rulerSize, sy);
+    }
+    ctx.stroke();
+  }
+
+  {
+    ctx.strokeStyle = majorTickColor;
+    ctx.lineWidth = 1;
+    ctx.font = `500 9.5px ${monoFont}`;
+    ctx.beginPath();
+    const startIdx = Math.ceil(yMin / labelStep - 1e-9);
+    const endIdx = Math.floor(yMax / labelStep + 1e-9);
+    const labels = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wy = i * labelStep;
+      const sy = wy * view.scale + view.oy;
+      if (sy < rulerSize || sy > height) continue;
+      ctx.moveTo(2, sy);
+      ctx.lineTo(rulerSize, sy);
+      labels.push({ wy, sy });
+    }
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      for (const { wy, sy } of labels) {
+        const label = formatRulerCoord(wy);
+        const tw = ctx.measureText ? ctx.measureText(label).width : label.length * 5.8;
+        if (sy + 3 + tw <= height - 2) {
+          ctx.fillStyle = Math.abs(wy) < 1e-6 ? textColor : majorTickColor;
+          if (ctx.translate && ctx.rotate) {
+            ctx.save();
+            ctx.translate(2, sy + 3);
+            ctx.rotate(-Math.PI / 2);
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'top';
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+          } else {
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(label, 2, sy + 3);
+          }
+        }
+      }
+    }
+  }
+
+  // Active Y cursor marker & live coordinate badge on left ruler
+  if (hoverYInBounds) {
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, hy);
+    ctx.lineTo(rulerSize, hy);
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      const coordLabel = formatRulerCoord(hover.y);
+      ctx.font = `600 9px ${monoFont}`;
+      const tw = ctx.measureText ? ctx.measureText(coordLabel).width : coordLabel.length * 5.6;
+      const padY = 4;
+      const badgeLen = tw + padY * 2;
+      const badgeThick = 13;
+      const clampedY = Math.max(rulerSize + 2, Math.min(height - badgeLen - 2, hy + 4));
+      if (clampedY >= rulerSize + 1 && clampedY + badgeLen <= height) {
+        ctx.fillStyle = elevatedColor;
+        ctx.fillRect(2, clampedY, badgeThick, badgeLen);
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 1;
+        if (ctx.strokeRect) ctx.strokeRect(2, clampedY, badgeThick, badgeLen);
+        ctx.fillStyle = textColor;
+        if (ctx.translate && ctx.rotate) {
+          ctx.save();
+          ctx.translate(2 + badgeThick / 2, clampedY + padY);
+          ctx.rotate(-Math.PI / 2);
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(coordLabel, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(coordLabel, 2, clampedY + padY);
+        }
+      }
+    }
+  }
+  ctx.restore();
+
+  // 5. Ruler perimeter borders & top-left unit corner box
+  ctx.fillStyle = elevatedColor;
+  ctx.fillRect(0, 0, rulerSize, rulerSize);
+
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, rulerSize);
+  ctx.lineTo(width, rulerSize);
+  ctx.moveTo(rulerSize, 0);
+  ctx.lineTo(rulerSize, height);
+  ctx.stroke();
+
+  if (ctx.fillText) {
+    const unitLabel = labelStep < 12 ? 'in' : 'ft';
+    ctx.font = `600 8.5px ${monoFont}`;
+    ctx.fillStyle = majorTickColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(unitLabel, rulerSize / 2, rulerSize / 2);
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.restore();
+}
+
+const DEFAULT_PLAN_ORIGIN = [-122.4194, 37.7749];
+const INCH_TO_METER = 0.0254;
+
+function niceTickStep(rawStep) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 120;
+  const exp = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const frac = rawStep / exp;
+  if (frac <= 1.5) return exp;
+  if (frac <= 3.5) return 2.5 * exp;
+  if (frac <= 7.5) return 5 * exp;
+  return 10 * exp;
+}
+
+function resolveSpatialReference(state, opts = {}) {
+  const rawCRS =
+    opts.activeCRS ??
+    opts.crs ??
+    state?.crs ??
+    state?.site?.crs ??
+    state?.background?.worldfileCRS ??
+    null;
+
+  let isLocalPlan = false;
+  let epsg = 'EPSG:4326';
+
+  if (typeof rawCRS === 'string') {
+    const upper = rawCRS.trim().toUpperCase();
+    if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') {
+      isLocalPlan = true;
+      epsg = 'PLAN';
+    } else {
+      const normalized = normalizeCode(rawCRS);
+      epsg = normalized && isRegisteredEPSG(normalized) ? normalized : 'EPSG:4326';
+    }
+  } else if (typeof rawCRS === 'number') {
+    const normalized = `EPSG:${rawCRS}`;
+    epsg = isRegisteredEPSG(normalized) ? normalized : 'EPSG:4326';
+  } else if (rawCRS && typeof rawCRS === 'object') {
+    const rawCode = rawCRS.epsg ?? rawCRS.code ?? rawCRS.crs ?? '';
+    const upper = String(rawCode).trim().toUpperCase();
+    if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') {
+      isLocalPlan = true;
+      epsg = 'PLAN';
+    } else {
+      const normalized =
+        typeof rawCode === 'number' ? `EPSG:${rawCode}` : normalizeCode(String(rawCode));
+      epsg = normalized && isRegisteredEPSG(normalized) ? normalized : 'EPSG:4326';
+    }
+  }
+
+  let origin = DEFAULT_PLAN_ORIGIN;
+  const crsObj =
+    (opts.crs && typeof opts.crs === 'object' ? opts.crs : null) ||
+    (state?.crs && typeof state.crs === 'object' ? state.crs : null);
+  const rawOrigin = opts.origin ?? crsObj?.origin;
+  if (Array.isArray(rawOrigin) && rawOrigin.length >= 2) {
+    const lon = Number(rawOrigin[0]);
+    const lat = Number(rawOrigin[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      origin = [lon, lat];
+    }
+  } else if (rawOrigin && typeof rawOrigin === 'object') {
+    const lon = Number(
+      rawOrigin.longitude ?? rawOrigin.lon ?? rawOrigin.x ?? DEFAULT_PLAN_ORIGIN[0]
+    );
+    const lat = Number(
+      rawOrigin.latitude ?? rawOrigin.lat ?? rawOrigin.y ?? DEFAULT_PLAN_ORIGIN[1]
+    );
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      origin = [lon, lat];
+    }
+  }
+
+  return { isLocalPlan, epsg, origin };
+}
+
+function projectPlanCoord(planPt, originLonLat, epsg) {
+  try {
+    const isDefaultOrigin =
+      Math.abs(originLonLat[0] - DEFAULT_PLAN_ORIGIN[0]) < 1e-9 &&
+      Math.abs(originLonLat[1] - DEFAULT_PLAN_ORIGIN[1]) < 1e-9;
+    if (isDefaultOrigin) {
+      const res = reproject(planPt, 'PLAN', epsg);
+      if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+        return res;
+      }
+    } else {
+      const originMerc = reproject(originLonLat, 'EPSG:4326', 'EPSG:3857');
+      if (
+        Array.isArray(originMerc) &&
+        Number.isFinite(originMerc[0]) &&
+        Number.isFinite(originMerc[1])
+      ) {
+        const mercPt = [
+          originMerc[0] + planPt[0] * INCH_TO_METER,
+          originMerc[1] - planPt[1] * INCH_TO_METER,
+        ];
+        const res = epsg === 'EPSG:3857' ? mercPt : reproject(mercPt, 'EPSG:3857', epsg);
+        if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+          return res;
+        }
+      }
+    }
+  } catch {
+    // Fall back safely on reprojection failure
+  }
+  return originLonLat;
+}
+
+function formatProjectedTick(val, epsg) {
+  if (!Number.isFinite(val)) return '';
+  if (epsg === 'EPSG:4326') {
+    return `${val.toFixed(5)}°`;
+  }
+  return `${val.toFixed(1)}`;
+}
+
+export function drawSpatialReferenceOverlay(ctx, state, view, opts = {}) {
+  if (!ctx) return;
+  const canvasW = ctx.canvas?.width || 800;
+  const canvasH = ctx.canvas?.height || 600;
+  const dpr = opts.dpr || 1;
+  const scale = Number.isFinite(view?.scale) && view.scale > 0 ? view.scale : 1;
+  const ox = Number.isFinite(view?.ox) ? view.ox : 0;
+  const oy = Number.isFinite(view?.oy) ? view.oy : 0;
+
+  const { isLocalPlan, epsg, origin } = resolveSpatialReference(state, opts);
+
+  if (typeof ctx.save === 'function') ctx.save();
+  if (typeof ctx.setTransform === 'function') ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1.0;
+  if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+
+  // 1. Planar origin (0, 0) crosshairs in screen space
+  const originScreenX = ox * dpr;
+  const originScreenY = oy * dpr;
+  const crosshairArm = 10 * dpr;
+  const crosshairColor = getToken('--ktheme-info', '#2a7fff');
+
+  ctx.strokeStyle = crosshairColor;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.moveTo(originScreenX - crosshairArm, originScreenY);
+  ctx.lineTo(originScreenX + crosshairArm, originScreenY);
+  ctx.moveTo(originScreenX, originScreenY - crosshairArm);
+  ctx.lineTo(originScreenX, originScreenY + crosshairArm);
+  ctx.stroke();
+
+  if (typeof ctx.arc === 'function') {
+    ctx.beginPath();
+    ctx.arc(originScreenX, originScreenY, 4 * dpr, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Compute active CRS badge layout so left-margin tick labels never overlap it
+  let badgeText;
+  if (isLocalPlan) {
+    badgeText = 'CRS: PLAN (Local) · Origin (0, 0)';
+  } else {
+    const projOrigin = projectPlanCoord([0, 0], origin, epsg);
+    const originText =
+      epsg === 'EPSG:4326'
+        ? `${projOrigin[1].toFixed(4)}°, ${projOrigin[0].toFixed(4)}°`
+        : `${projOrigin[0].toFixed(1)}, ${projOrigin[1].toFixed(1)}`;
+    badgeText = `CRS: ${epsg} · Origin (${originText})`;
+  }
+
+  const badgeFontSize = 11 * dpr;
+  ctx.font = `${badgeFontSize}px sans-serif`;
+  const paddingX = 8 * dpr;
+  const paddingY = 5 * dpr;
+  const margin = 10 * dpr;
+  const badgeTextWidth =
+    typeof ctx.measureText === 'function'
+      ? ctx.measureText(badgeText).width
+      : badgeText.length * 6.5 * dpr;
+  const badgeWidth = badgeTextWidth + paddingX * 2;
+  const badgeHeight = badgeFontSize + paddingY * 2;
+  const badgeX = margin;
+  const badgeY = Math.max(margin, canvasH - margin - badgeHeight);
+
+  // 2. Projected coordinate tick marks along top and left viewport margins
+  if (!isLocalPlan) {
+    const viewW = canvasW / dpr;
+    const viewH = canvasH / dpr;
+    const x0 = -ox / scale;
+    const y0 = -oy / scale;
+    const x1 = x0 + viewW / scale;
+    const y1 = y0 + viewH / scale;
+
+    const minDim = Math.min(viewW, viewH);
+    const targetPx = opts.tickSpacing ?? Math.min(120, Math.max(36, minDim / 3));
+    const planStep = niceTickStep(targetPx / scale);
+    const tickLen = 6 * dpr;
+    const tickStrokeColor = getToken('--ktheme-text-muted', '#5f5950');
+    const tickLabelColor = getToken('--ktheme-text', '#2b2824');
+    const tickFontSize = 9.5 * dpr;
+
+    ctx.strokeStyle = tickStrokeColor;
+    ctx.lineWidth = 1 * dpr;
+    ctx.font = `${tickFontSize}px ${getToken('--font-family-mono', 'monospace')}`;
+    ctx.fillStyle = tickLabelColor;
+
+    const startXIdx = Math.ceil(x0 / planStep);
+    const endXIdx = Math.floor(x1 / planStep);
+    const startYIdx = Math.ceil(y0 / planStep);
+    const endYIdx = Math.floor(y1 / planStep);
+
+    ctx.beginPath();
+    for (let i = startXIdx; i <= endXIdx; i++) {
+      const planX = i * planStep;
+      const sx = (planX * scale + ox) * dpr;
+      if (sx < 0 || sx > canvasW) continue;
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, tickLen);
+    }
+    for (let j = startYIdx; j <= endYIdx; j++) {
+      const planY = j * planStep;
+      const sy = (planY * scale + oy) * dpr;
+      if (sy < 0 || sy > canvasH) continue;
+      ctx.moveTo(0, sy);
+      ctx.lineTo(tickLen, sy);
+    }
+    ctx.stroke();
+
+    if (typeof ctx.fillText === 'function') {
+      const minXPad = Math.min(18 * dpr, canvasW * 0.15);
+      const maxXPad = canvasW - Math.min(52 * dpr, canvasW * 0.35);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      for (let i = startXIdx; i <= endXIdx; i++) {
+        const planX = i * planStep;
+        const sx = (planX * scale + ox) * dpr;
+        if (sx < minXPad || sx > maxXPad) continue;
+        const proj = projectPlanCoord([planX, 0], origin, epsg);
+        const label = formatProjectedTick(proj[0], epsg);
+        if (label) {
+          ctx.fillText(label, sx + 3 * dpr, tickLen + 2 * dpr);
+        }
+      }
+
+      const minYPad = Math.min(22 * dpr, canvasH * 0.18);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      for (let j = startYIdx; j <= endYIdx; j++) {
+        const planY = j * planStep;
+        const sy = (planY * scale + oy) * dpr;
+        if (sy < minYPad || sy > badgeY - 8 * dpr) continue;
+        const proj = projectPlanCoord([0, planY], origin, epsg);
+        const label = formatProjectedTick(proj[1], epsg);
+        if (label) {
+          ctx.fillText(label, tickLen + 3 * dpr, sy);
+        }
+      }
+    }
+  }
+
+  // 3. Active CRS overlay badge in screen space (bottom-left)
+  ctx.font = `${badgeFontSize}px sans-serif`;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1 * dpr;
+
+  if (typeof ctx.roundRect === 'function' && typeof ctx.fill === 'function') {
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4 * dpr);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    if (typeof ctx.fillRect === 'function') {
+      ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    }
+    if (typeof ctx.strokeRect === 'function') {
+      ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    }
+  }
+
+  if (typeof ctx.fillText === 'function') {
+    ctx.fillStyle = '#f8fafc';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, badgeX + paddingX, badgeY + badgeHeight / 2);
+  }
+
+  if (typeof ctx.restore === 'function') ctx.restore();
+}
+
+function drawComplianceScene(ctx, complianceScene, view) {
   if (!complianceScene) return;
   const nodes = complianceScene.getNodes();
 
@@ -646,16 +1365,30 @@ export function drawGrid(ctx, view, cw, ch, opts = {}) {
   }
 }
 
+function traceRoomBoundaryPath(ctx, room) {
+  const pts = getRoomPoints(room);
+  if (!pts.length) return;
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0; i < pts.length; i++) {
+    const next = pts[(i + 1) % pts.length];
+    const bulge = getWallBulge(room, i);
+    if (Math.abs(bulge) > 1e-9) {
+      const arcPts = tessellateArc(pts[i], next, bulge, 24);
+      for (let k = 1; k < arcPts.length; k++) {
+        ctx.lineTo(arcPts[k].x, arcPts[k].y);
+      }
+    } else if (i < pts.length - 1) {
+      ctx.lineTo(next.x, next.y);
+    }
+  }
+  ctx.closePath();
+}
+
 function drawFloor(ctx, room, opts, bad) {
   const f = FLOOR_BY_ID[room.floor];
   ctx.fillStyle = f ? patternFor(ctx, f) : ROOM_TYPES[room.type].color;
-  const pts = getRoomPoints(room);
   ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(pts[i].x, pts[i].y);
-  }
-  ctx.closePath();
+  traceRoomBoundaryPath(ctx, room);
   ctx.fill();
 
   const isBadRoom = bad && bad.has(room.id);
@@ -714,6 +1447,64 @@ function drawWalls(ctx, state, room, bad, _opts) {
         bad.has(wallKey) ||
         bad.has(`${room.id}:wall`) ||
         (isBadRoom && bad.has(`${room.id}:wall`)));
+
+    const bulge = getWallBulge(room, i);
+    if (Math.abs(bulge) > 1e-9) {
+      const startPt = pts[i];
+      const endPt = pts[(i + 1) % pts.length];
+      const arc = getArcParameters(startPt, endPt, bulge);
+      if (!arc.isLinear) {
+        const arcPts = tessellateArc(startPt, endPt, bulge, 24);
+        const inwardSign = 1;
+        const traceBand = (d0, d1) => {
+          ctx.beginPath();
+          for (let k = 0; k < arcPts.length; k++) {
+            const uk = k / (arcPts.length - 1);
+            const ang = arc.startAngle + uk * arc.sweepAngle;
+            // Radial outward from arc center is (cos(ang), sin(ang));
+            // For bulge > 0, left-normal points away from center (bulge > 0 => sweep < 0) or toward center depending on m.
+            // Tangent along start->end at uk:
+            const dirSign = arc.sweepAngle >= 0 ? 1 : -1;
+            const tx = -Math.sin(ang) * dirSign;
+            const ty = Math.cos(ang) * dirSign;
+            // Left normal of start->end (inward for clockwise room polygon) is (-ty, tx)
+            const inNx = -ty * inwardSign;
+            const inNy = tx * inwardSign;
+            const px = arcPts[k].x + inNx * d0;
+            const py = arcPts[k].y + inNy * d0;
+            if (k === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          for (let k = arcPts.length - 1; k >= 0; k--) {
+            const uk = k / (arcPts.length - 1);
+            const ang = arc.startAngle + uk * arc.sweepAngle;
+            const dirSign = arc.sweepAngle >= 0 ? 1 : -1;
+            const tx = -Math.sin(ang) * dirSign;
+            const ty = Math.cos(ang) * dirSign;
+            const inNx = -ty * inwardSign;
+            const inNy = tx * inwardSign;
+            ctx.lineTo(arcPts[k].x + inNx * d1, arcPts[k].y + inNy * d1);
+          }
+          ctx.closePath();
+        };
+
+        ctx.save();
+        if (isBadWall) {
+          ctx.fillStyle = getToken('--ktheme-critical', '#d33');
+          traceBand(-WT / 2 - 1, WT / 2 + 1);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = getToken('--ktheme-border', '#3c3a38');
+          traceBand(-WT / 2, 0);
+          ctx.fill();
+        }
+        ctx.fillStyle = fin ? patternFor(ctx, fin) : '#ddd';
+        traceBand(0, WT / 2);
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
+    }
 
     ctx.save();
     ctx.translate(s.ax, s.ay);
@@ -1144,12 +1935,7 @@ function drawSelection(ctx, state, selection, view) {
       if (room.id === id) {
         drawRing(() => {
           ctx.beginPath();
-          const pts = getRoomPoints(room);
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < pts.length; i++) {
-            ctx.lineTo(pts[i].x, pts[i].y);
-          }
-          ctx.closePath();
+          traceRoomBoundaryPath(ctx, room);
         });
         updateGroupBounds(room.x, room.y, room.w, room.h);
 
@@ -1230,7 +2016,7 @@ export const handles = (r) => {
   return pts.map((p) => [p.x, p.y]);
 };
 
-export function findDiffTarget(state, id) {
+function findDiffTarget(state, id) {
   if (!id) return null;
   for (const room of state.rooms) {
     if (room.id === id) {
@@ -1290,7 +2076,7 @@ export function findDiffTarget(state, id) {
   return null;
 }
 
-export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
+function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   if (!diffs || !diffs.length) return;
 
   const placedBadges = [];
@@ -1448,12 +2234,13 @@ export function drawSnapGuides(ctx, snapResult, view) {
     return;
   }
   const { snap, guideLines, indicator } = snapResult;
+  const scale = view?.scale || 1;
   ctx.save();
 
   // Draw guide lines
   if (guideLines && guideLines.length) {
-    ctx.lineWidth = 1.5 / view.scale;
-    ctx.setLineDash([4 / view.scale, 4 / view.scale]);
+    ctx.lineWidth = 1.5 / scale;
+    ctx.setLineDash([4 / scale, 4 / scale]);
 
     for (const g of guideLines) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
@@ -1474,8 +2261,8 @@ export function drawSnapGuides(ctx, snapResult, view) {
   // Draw magnetic indicator points
   if (indicator) {
     ctx.setLineDash([]);
-    const rOuter = 8 / view.scale;
-    const rInner = 3.5 / view.scale;
+    const rOuter = 8 / scale;
+    const rInner = 3.5 / scale;
 
     let color = getToken('--ktheme-accent', '#3b82f6');
     if (snap?.type === 'midpoint') color = getToken('--ktheme-info', '#a855f7');
@@ -1483,7 +2270,7 @@ export function drawSnapGuides(ctx, snapResult, view) {
     else if (snap?.type === 'grid') color = getToken('--ktheme-success', '#10b981');
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2 / view.scale;
+    ctx.lineWidth = 2 / scale;
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rOuter, 0, 2 * Math.PI);
     ctx.stroke();
@@ -1492,6 +2279,61 @@ export function drawSnapGuides(ctx, snapResult, view) {
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rInner, 0, 2 * Math.PI);
     ctx.fill();
+  }
+
+  // Draw angle degree status badge overlay when angle snapping is active
+  const badgeAnchor = indicator || snap?.point;
+  if (
+    snap?.type === 'angle' &&
+    typeof snap.angleDegrees === 'number' &&
+    Number.isFinite(snap.angleDegrees) &&
+    badgeAnchor
+  ) {
+    const normalizedDeg = Object.is(snap.angleDegrees, -0) ? 0 : snap.angleDegrees;
+    const badgeText = `${normalizedDeg}°`;
+    const fontSize = 11 / scale;
+    const padX = 6 / scale;
+    const boxH = 20 / scale;
+    const radius = 5 / scale;
+
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.font = `600 ${fontSize}px ${getToken('--font-family-sans', 'sans-serif')}`;
+    const measured = typeof ctx.measureText === 'function' ? ctx.measureText(badgeText) : null;
+    const textWidth =
+      measured && typeof measured.width === 'number'
+        ? measured.width
+        : badgeText.length * fontSize * 0.6;
+    const boxW = textWidth + padX * 2;
+    const boxX = badgeAnchor.x + 12 / scale;
+    const boxY = badgeAnchor.y - 10 / scale - boxH;
+
+    ctx.fillStyle = getToken('--ktheme-bg-surface', 'rgba(15, 23, 42, 0.92)');
+    ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
+    ctx.lineWidth = 1.25 / scale;
+
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+      ctx.fill();
+      ctx.stroke();
+    } else if (typeof ctx.rect === 'function') {
+      ctx.beginPath();
+      ctx.rect(boxX, boxY, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      if (typeof ctx.fillRect === 'function') ctx.fillRect(boxX, boxY, boxW, boxH);
+      if (typeof ctx.strokeRect === 'function') ctx.strokeRect(boxX, boxY, boxW, boxH);
+    }
+
+    ctx.fillStyle = getToken('--ktheme-on-primary', '#ffffff');
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (typeof ctx.fillText === 'function') {
+      ctx.fillText(badgeText, boxX + boxW / 2, boxY + boxH / 2);
+    }
+    ctx.restore();
   }
 
   ctx.restore();

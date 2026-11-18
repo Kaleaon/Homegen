@@ -5,6 +5,7 @@ import {
   stepResize,
   validateRoomDimensions,
   fmtDimensionText,
+  fmtLenInches,
 } from '../constraintHandles.mjs';
 
 describe('Constraint Handles & Dynamic Dimension Resizing', () => {
@@ -83,7 +84,42 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(res.rect.h).toBe(72);
     expect(res.areaSqFt).toBe(36);
     expect(res.feedback.color).toBe('#e84040'); // resolved --ktheme-critical token
+    expect(res.feedback.handleColor).toBe('#e84040');
     expect(res.violations.some((v) => v.includes('70 sq ft'))).toBe(true);
+  });
+
+  test('resizeRoomWithConstraints falls back to aligned Ktheme tokens when getToken throws or returns empty', () => {
+    const throwingGetToken = () => {
+      throw new Error('token resolution error');
+    };
+    const emptyGetToken = () => '';
+
+    const validThrowRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 180, y: 144 },
+      { getToken: throwingGetToken }
+    );
+    expect(validThrowRes.feedback.color).toBe('#2a7fff');
+    expect(validThrowRes.feedback.handleColor).toBe('#ffffff');
+
+    const invalidThrowRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 72, y: 72 },
+      { getToken: throwingGetToken }
+    );
+    expect(invalidThrowRes.feedback.color).toBe('#e84040');
+    expect(invalidThrowRes.feedback.handleColor).toBe('#e84040');
+
+    const invalidEmptyRes = resizeRoomWithConstraints(
+      room,
+      'se',
+      { x: 72, y: 72 },
+      { getToken: emptyGetToken }
+    );
+    expect(invalidEmptyRes.feedback.color).toBe('#e84040');
+    expect(invalidEmptyRes.feedback.handleColor).toBe('#e84040');
   });
 
   test('resizeRoomWithConstraints respects custom options.getToken resolver', () => {
@@ -124,6 +160,8 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
 
   test('fmtDimensionText formats inches into feet and inches', () => {
     expect(fmtDimensionText(144, 126)).toBe('12\' 0" × 10\' 6"');
+    expect(fmtDimensionText(150.5, 126.375)).toBe('12\' 6 1/2" × 10\' 6 3/8"');
+    expect(fmtLenInches(11.99)).toBe('1\' 0"');
   });
 
   test('getConstraintHandles creates handle nodes for all N vertices of non-rectangular polygon room', () => {

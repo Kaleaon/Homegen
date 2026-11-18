@@ -39,6 +39,10 @@ export class RoomDrawingTool {
     return [...this.points];
   }
 
+  getBulges() {
+    return [...this.bulges];
+  }
+
   canClose() {
     return this.points.length >= 3;
   }
@@ -85,11 +89,20 @@ export class RoomDrawingTool {
 
     const candidate = [...this.points, point];
     const validation = validatePlacement(candidate, context.existingRooms || []);
-    const feedback = createPlacementFeedback(candidate, validation);
+    const feedback = createPlacementFeedback(candidate, validation, context);
+
+    const previewBulges = [];
+    for (let i = 0; i < candidate.length - 1; i += 1) {
+      if (i === candidate.length - 2 && context.bulge !== undefined) {
+        previewBulges.push(context.bulge);
+      } else {
+        previewBulges.push(this.bulges[i] || 0);
+      }
+    }
 
     return {
       ...feedback,
-      bulges: [...this.bulges, context.bulge || 0],
+      bulges: previewBulges,
     };
   }
 
@@ -108,7 +121,7 @@ export class RoomDrawingTool {
     if (!validation.valid) {
       return {
         ok: false,
-        feedback: createPlacementFeedback(closedPoints, validation),
+        feedback: createPlacementFeedback(closedPoints, validation, context),
       };
     }
 

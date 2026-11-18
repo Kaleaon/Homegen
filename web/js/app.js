@@ -15,6 +15,13 @@ import {
   reproject,
   getRoomPoints,
   getRoomBoundingBox,
+  getWallEdgeSegment,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
   polygonArea,
   parseWorldfile,
   solveAffineTransform,
@@ -63,6 +70,7 @@ import {
   applyCladdingMaterial,
   resolveWindowStyle,
   resolveDoorStyle,
+  resolveWallAssembly,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
@@ -71,6 +79,7 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  buildGridSettingsViewModel,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -145,6 +154,7 @@ let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | 
 let tab = 'build';
 let selectionSet = new Set();
 let selection = null;
+let view3d = null;
 
 function isSelected(id) {
   return selectionSet.has(id);
@@ -170,6 +180,242 @@ let calibPoints = [];
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
+let distSpacingInput = '';
+let distSpacingType = 'center';
+let activeDraftCurveEdge = null;
+let draftConcavitySign = 1;
+let inspectorConcavitySign = 1;
+
+function formatCurveNumber(val, decimals = 2) {
+  if (!Number.isFinite(val)) return '';
+  const rounded = Number(val.toFixed(decimals));
+  return Object.is(rounded, -0) ? '0' : String(rounded);
+}
+
+function formatCurveRadiusDisplay(chordLen, bulge) {
+  if (!bulge || Math.abs(bulge) < 1e-9 || !Number.isFinite(chordLen) || chordLen <= 1e-9) {
+    return '';
+  }
+  const r = radiusFromBulge(chordLen, bulge);
+  return Number.isFinite(r) ? formatCurveNumber(r, 2) : '';
+}
+
+function getDraftCurveSegments() {
+  const pts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (!pts || pts.length === 0) return [];
+  const segments = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const start = pts[i];
+    const end = pts[i + 1];
+    const chordLen = Math.hypot(end.x - start.x, end.y - start.y);
+    segments.push({
+      key: String(i),
+      edgeIndex: i,
+      label: `Wall ${i + 1} (${i + 1}→${i + 2})`,
+      start,
+      end,
+      chordLen,
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(i) : 0,
+    });
+  }
+  if (pts.length >= 3) {
+    const closeIdx = pts.length - 1;
+    const start = pts[closeIdx];
+    const end = pts[0];
+    segments.push({
+      key: `close:${closeIdx}`,
+      edgeIndex: closeIdx,
+      label: `Closing (${pts.length}→1)`,
+      start,
+      end,
+      chordLen: Math.hypot(end.x - start.x, end.y - start.y),
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(closeIdx) : 0,
+    });
+  } else {
+    const activeIdx = pts.length - 1;
+    const start = pts[activeIdx];
+    const end = hover || { x: start.x + 120, y: start.y };
+    const rawChord = Math.hypot(end.x - start.x, end.y - start.y);
+    segments.push({
+      key: `preview:${activeIdx}`,
+      edgeIndex: activeIdx,
+      label: `Active (${pts.length}→Next)`,
+      start,
+      end,
+      chordLen: rawChord > 1e-6 ? rawChord : 120,
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(activeIdx) : 0,
+    });
+  }
+  return segments;
+}
+
+function setCurveErrorUI(errEl, inputEls, message) {
+  if (!errEl) return;
+  if (message) {
+    errEl.textContent = message;
+    errEl.hidden = false;
+  } else {
+    errEl.textContent = '';
+    errEl.hidden = true;
+    inputEls.forEach((el) => el?.removeAttribute('aria-invalid'));
+  }
+}
+
+function syncDraftingCurveHud(options = {}) {
+  const hud = $('#curve-drafting-hud');
+  if (!hud) return;
+  const pts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (tool.kind !== 'room' || !pts || pts.length === 0) {
+    hud.hidden = true;
+    activeDraftCurveEdge = null;
+    return;
+  }
+  hud.hidden = false;
+  const segments = getDraftCurveSegments();
+  if (!segments.length) return;
+
+  const edgeSel = $('#hud-curve-edge');
+  const radiusEl = $('#hud-curve-radius');
+  const sagittaEl = $('#hud-curve-sagitta');
+  const bulgeEl = $('#hud-curve-bulge');
+  const chordEl = $('#hud-curve-chord');
+  const errEl = $('#hud-curve-error');
+
+  let selectedSeg =
+    activeDraftCurveEdge !== null
+      ? segments.find((s) => s.edgeIndex === activeDraftCurveEdge)
+      : null;
+  if (!selectedSeg) {
+    selectedSeg = pts.length >= 2 ? segments[pts.length - 2] : segments[0];
+    activeDraftCurveEdge = selectedSeg.edgeIndex;
+  }
+
+  if (edgeSel && document.activeElement !== edgeSel) {
+    edgeSel.innerHTML = segments
+      .map((s) => {
+        const mark = Math.abs(s.bulge) > 1e-9 ? ' ⌒' : '';
+        return `<option value="${s.edgeIndex}" ${s.edgeIndex === selectedSeg.edgeIndex ? 'selected' : ''}>${esc(s.label)}${mark}</option>`;
+      })
+      .join('');
+  }
+
+  if (chordEl) {
+    chordEl.textContent = `Chord: ${formatCurveNumber(selectedSeg.chordLen, 1)}"`;
+  }
+
+  const preserveField = options.preserveField || null;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (radiusEl && preserveField !== 'radius' && activeEl !== radiusEl) {
+    radiusEl.value = formatCurveRadiusDisplay(selectedSeg.chordLen, selectedSeg.bulge);
+  }
+  if (sagittaEl && preserveField !== 'sagitta' && activeEl !== sagittaEl) {
+    sagittaEl.value = formatCurveNumber(
+      sagittaFromBulge(selectedSeg.chordLen, selectedSeg.bulge),
+      2
+    );
+  }
+  if (bulgeEl && preserveField !== 'bulge' && activeEl !== bulgeEl) {
+    bulgeEl.value = formatCurveNumber(selectedSeg.bulge, 4);
+  }
+  if (!options.keepError) {
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+  }
+}
+
+function setupDraftingCurveHud() {
+  const edgeSel = $('#hud-curve-edge');
+  const radiusEl = $('#hud-curve-radius');
+  const sagittaEl = $('#hud-curve-sagitta');
+  const bulgeEl = $('#hud-curve-bulge');
+  const invertBtn = $('#hud-curve-invert');
+  const resetBtn = $('#hud-curve-reset');
+  const errEl = $('#hud-curve-error');
+
+  if (!edgeSel || !radiusEl || !sagittaEl || !bulgeEl) return;
+
+  edgeSel.addEventListener('change', (e) => {
+    activeDraftCurveEdge = parseInt(e.target.value, 10) || 0;
+    const curB = interaction.getEdgeBulge(activeDraftCurveEdge);
+    if (curB !== 0) draftConcavitySign = curB < 0 ? -1 : 1;
+    syncDraftingCurveHud();
+    redraw();
+  });
+
+  const handleHudFieldInput = (field, inputEl, commitNormalize = false) => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    const seg = segments.find((s) => s.edgeIndex === edgeIdx) || {
+      edgeIndex: edgeIdx,
+      chordLen: 120,
+      bulge: interaction.getEdgeBulge(edgeIdx),
+    };
+    const signHint = seg.bulge !== 0 ? seg.bulge : draftConcavitySign < 0 ? -1e-6 : 0;
+    const res = parseCurveHudInput(field, inputEl.value, seg.chordLen, signHint);
+
+    if (!res.ok) {
+      inputEl.setAttribute('aria-invalid', 'true');
+      setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], res.error);
+      return;
+    }
+
+    inputEl.removeAttribute('aria-invalid');
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    if (res.bulge !== 0) {
+      draftConcavitySign = res.bulge < 0 ? -1 : 1;
+    }
+    interaction.setEdgeBulge(edgeIdx, res.bulge);
+
+    if (commitNormalize) {
+      radiusEl.value = formatCurveRadiusDisplay(seg.chordLen, res.bulge);
+      sagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, res.bulge), 2);
+      bulgeEl.value = formatCurveNumber(res.bulge, 4);
+    } else {
+      syncDraftingCurveHud({ preserveField: field });
+    }
+    redraw();
+  };
+
+  radiusEl.addEventListener('input', () => handleHudFieldInput('radius', radiusEl, false));
+  radiusEl.addEventListener('change', () => handleHudFieldInput('radius', radiusEl, true));
+  sagittaEl.addEventListener('input', () => handleHudFieldInput('sagitta', sagittaEl, false));
+  sagittaEl.addEventListener('change', () => handleHudFieldInput('sagitta', sagittaEl, true));
+  bulgeEl.addEventListener('input', () => handleHudFieldInput('bulge', bulgeEl, false));
+  bulgeEl.addEventListener('change', () => handleHudFieldInput('bulge', bulgeEl, true));
+
+  invertBtn?.addEventListener('click', () => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    const cur = interaction.getEdgeBulge(edgeIdx);
+    draftConcavitySign = cur !== 0 ? (cur > 0 ? -1 : 1) : -draftConcavitySign;
+    if (cur !== 0) {
+      interaction.setEdgeBulge(edgeIdx, -cur);
+    }
+    const seg = segments.find((s) => s.edgeIndex === edgeIdx);
+    const nextB = interaction.getEdgeBulge(edgeIdx);
+    if (seg) {
+      radiusEl.value = formatCurveRadiusDisplay(seg.chordLen, nextB);
+      sagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, nextB), 2);
+      bulgeEl.value = formatCurveNumber(nextB, 4);
+    }
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    redraw();
+  });
+
+  resetBtn?.addEventListener('click', () => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    draftConcavitySign = 1;
+    interaction.setEdgeBulge(edgeIdx, 0);
+    radiusEl.value = '';
+    sagittaEl.value = '0';
+    bulgeEl.value = '0';
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    redraw();
+  });
+}
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -212,25 +458,303 @@ const roomAt = (p) =>
     .filter((r) => inRect(r, p, WT / 2))
     .sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
 
-function toast(msg, err = false, ms = 4500) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.className = err ? 'err' : '';
-  t.style.display = 'block';
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => {
-    t.style.display = 'none';
-  }, ms);
+function isElementInsideToast(toastEl, dismissBtn, node) {
+  if (!node || !toastEl) return false;
+  if (node === toastEl || (dismissBtn && node === dismissBtn)) return true;
+  if (typeof toastEl.contains === 'function') return toastEl.contains(node);
+  return false;
 }
 
+function ensureToastElements(t) {
+  let msgEl = typeof t.querySelector === 'function' ? t.querySelector('.toast-msg') : null;
+  let dismissBtn = typeof t.querySelector === 'function' ? t.querySelector('.toast-dismiss') : null;
+
+  if (
+    (!msgEl || !dismissBtn) &&
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function' &&
+    typeof t.appendChild === 'function'
+  ) {
+    t.textContent = '';
+    msgEl = document.createElement('span');
+    msgEl.className = 'toast-msg';
+    if (typeof msgEl.setAttribute === 'function') msgEl.setAttribute('class', 'toast-msg');
+
+    dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'toast-dismiss';
+    if (typeof dismissBtn.setAttribute === 'function') {
+      dismissBtn.setAttribute('type', 'button');
+      dismissBtn.setAttribute('class', 'toast-dismiss');
+      dismissBtn.setAttribute('aria-label', 'Dismiss notification');
+    }
+    const iconSpan = document.createElement('span');
+    if (typeof iconSpan.setAttribute === 'function') {
+      iconSpan.setAttribute('aria-hidden', 'true');
+    }
+    iconSpan.textContent = '✕';
+    if (typeof dismissBtn.appendChild === 'function') {
+      dismissBtn.appendChild(iconSpan);
+    } else {
+      dismissBtn.textContent = '✕';
+    }
+
+    t.appendChild(msgEl);
+    t.appendChild(dismissBtn);
+  }
+
+  return { msgEl, dismissBtn };
+}
+
+function focusElementCleanly(el) {
+  if (!el) return false;
+  const shadowFocusable =
+    el.shadowRoot && typeof el.shadowRoot.querySelector === 'function'
+      ? el.shadowRoot.querySelector(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      : null;
+  if (shadowFocusable && typeof shadowFocusable.focus === 'function') {
+    shadowFocusable.focus();
+    return true;
+  }
+  if (typeof el.focus === 'function') {
+    el.focus();
+    return true;
+  }
+  return false;
+}
+
+export function dismissToast({ restoreFocus = false } = {}) {
+  clearTimeout(toast.t);
+  toast.t = null;
+  const state = toast._state;
+  if (state) state.active = false;
+
+  const t = $('#toast');
+  if (!t) return;
+
+  const dismissBtn =
+    typeof t.querySelector === 'function' ? t.querySelector('.toast-dismiss') : null;
+  const msgEl = typeof t.querySelector === 'function' ? t.querySelector('.toast-msg') : null;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const focusWasInside = isElementInsideToast(t, dismissBtn, activeEl);
+
+  t._toastHovered = false;
+  t._toastFocused = false;
+  if (t.style) t.style.display = 'none';
+  if (msgEl) msgEl.textContent = '';
+
+  if (restoreFocus) {
+    const returnEl = toast._returnFocusEl;
+    toast._returnFocusEl = null;
+    if (!focusElementCleanly(returnEl) && focusWasInside) {
+      const fallback = ($('#plan') && !$('#plan').hidden ? $('#plan') : null) || $('#stage');
+      focusElementCleanly(fallback);
+    }
+  }
+}
+
+function pauseActiveToastTimer() {
+  const state = toast._state;
+  if (!state || !state.active || state.err || state.paused || state.duration <= 0) return;
+  clearTimeout(toast.t);
+  toast.t = null;
+  const elapsed = Math.max(0, Date.now() - state.startTime);
+  state.remaining = Math.max(0, state.remaining - elapsed);
+  state.paused = true;
+}
+
+function resumeActiveToastTimer(t) {
+  const state = toast._state;
+  if (!state || !state.active || state.err || !state.paused || state.duration <= 0) return;
+  if (t && (t._toastHovered || t._toastFocused)) return;
+  state.paused = false;
+  state.startTime = Date.now();
+  const delay = Math.max(1, state.remaining);
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => {
+    dismissToast({ restoreFocus: false });
+  }, delay);
+}
+
+function bindToastListeners(t, dismissBtn) {
+  if (t && !t._toastListenersAttached && typeof t.addEventListener === 'function') {
+    t._toastListenersAttached = true;
+
+    t.addEventListener('mouseenter', () => {
+      t._toastHovered = true;
+      pauseActiveToastTimer();
+    });
+
+    t.addEventListener('mouseleave', () => {
+      t._toastHovered = false;
+      resumeActiveToastTimer(t);
+    });
+
+    t.addEventListener('focusin', (e) => {
+      if (
+        !toast._returnFocusEl &&
+        e?.relatedTarget &&
+        !isElementInsideToast(t, dismissBtn, e.relatedTarget)
+      ) {
+        toast._returnFocusEl = e.relatedTarget;
+      }
+      t._toastFocused = true;
+      pauseActiveToastTimer();
+    });
+
+    t.addEventListener('focusout', (e) => {
+      if (e?.relatedTarget && isElementInsideToast(t, dismissBtn, e.relatedTarget)) {
+        return;
+      }
+      t._toastFocused = false;
+      resumeActiveToastTimer(t);
+    });
+
+    t.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+  }
+
+  if (
+    dismissBtn &&
+    !dismissBtn._toastDismissBound &&
+    typeof dismissBtn.addEventListener === 'function'
+  ) {
+    dismissBtn._toastDismissBound = true;
+
+    dismissBtn.addEventListener('click', (e) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+      dismissToast({ restoreFocus: true });
+    });
+
+    dismissBtn.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+  }
+}
+
+export function toast(msg, err = false, ms = 4500) {
+  const t = $('#toast');
+  clearTimeout(toast.t);
+  toast.t = null;
+  if (toast._state) toast._state.active = false;
+  if (!t) return;
+
+  const isErr = Boolean(err);
+  const wasVisible = Boolean(t.style && t.style.display && t.style.display !== 'none');
+  if (!wasVisible) {
+    t._toastHovered = false;
+    t._toastFocused = false;
+  }
+
+  const { msgEl, dismissBtn } = ensureToastElements(t);
+  bindToastListeners(t, dismissBtn);
+
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (
+    activeEl &&
+    !isElementInsideToast(t, dismissBtn, activeEl) &&
+    activeEl.tagName !== 'BODY' &&
+    activeEl.tagName !== 'HTML'
+  ) {
+    toast._returnFocusEl = activeEl;
+  } else if (!isElementInsideToast(t, dismissBtn, activeEl)) {
+    toast._returnFocusEl = null;
+  }
+
+  t.className = isErr ? 'err' : '';
+  if (typeof t.classList?.toggle === 'function') {
+    t.classList.toggle('err', isErr);
+  }
+  if (typeof t.setAttribute === 'function') {
+    t.setAttribute('role', isErr ? 'alert' : 'status');
+    t.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
+  }
+
+  if (msgEl) {
+    msgEl.textContent = '';
+    msgEl.textContent = msg;
+  } else {
+    t.textContent = msg;
+  }
+
+  if (t.style) t.style.display = 'flex';
+
+  const effectiveMs = isErr ? 0 : Number(ms) || 0;
+  const focusInside = isElementInsideToast(t, dismissBtn, activeEl);
+  if (focusInside) t._toastFocused = true;
+  const initiallyPaused = Boolean(t._toastHovered || t._toastFocused);
+
+  const state = {
+    active: true,
+    err: isErr,
+    duration: effectiveMs,
+    remaining: effectiveMs,
+    startTime: Date.now(),
+    paused: initiallyPaused,
+  };
+  toast._state = state;
+
+  if (effectiveMs > 0 && !initiallyPaused) {
+    toast.t = setTimeout(() => {
+      dismissToast({ restoreFocus: false });
+    }, effectiveMs);
+  }
+}
+
+export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
+let zoomAnnounceTimeout = null;
+let a11yDebounceTimer = null;
 function announceToLiveRegion(msg) {
+  const live3dEl = $('#view3d-a11y-live');
+  if (live3dEl) live3dEl.textContent = msg;
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
   if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
   liveRegionTimeout = setTimeout(() => {
+    if (a11yDebounceTimer) {
+      clearTimeout(a11yDebounceTimer);
+      a11yDebounceTimer = null;
+    }
     liveEl.textContent = msg;
-  }, 100);
+  }, 220);
+}
+
+export function announceZoom(scale) {
+  if (zoomAnnounceTimeout) clearTimeout(zoomAnnounceTimeout);
+  if (a11yDebounceTimer) {
+    clearTimeout(a11yDebounceTimer);
+    a11yDebounceTimer = null;
+  }
+  if (liveRegionTimeout) {
+    clearTimeout(liveRegionTimeout);
+    liveRegionTimeout = null;
+  }
+  zoomAnnounceTimeout = setTimeout(() => {
+    zoomAnnounceTimeout = null;
+    const liveEl =
+      $('#plan-fallback-summary') ||
+      (typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('plan-fallback-summary')
+        : null);
+    if (!liveEl) return;
+    if (typeof liveEl.setAttribute === 'function' && !liveEl.getAttribute?.('role')) {
+      liveEl.setAttribute('role', 'status');
+    }
+    liveEl.textContent = `Zoom level: ${Math.round((scale / 1.6) * 100)}%`;
+  }, ZOOM_ANNOUNCE_DEBOUNCE_MS);
 }
 
 function persist() {
@@ -241,17 +765,44 @@ function persist() {
   }
 }
 
-function renderSnapToggles() {
+function is3DViewActive() {
+  if (view3d && typeof view3d.isThree === 'function' && view3d.isThree()) {
+    return true;
+  }
+  const view3dBtn = $('#toolbar [data-view="3d"]') || $('[data-view="3d"]');
+  if (
+    view3dBtn &&
+    view3dBtn.classList &&
+    typeof view3dBtn.classList.contains === 'function' &&
+    view3dBtn.classList.contains('on')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
+  const is3d = is3DViewActive();
+  const disabledAttr = is3d ? 'disabled' : '';
   const viewModels = buildToggleViewModel(interaction);
+  const gridVm = buildGridSettingsViewModel(interaction);
   const activeCount = viewModels.filter((vm) => vm.enabled).length;
 
   const basicItems = viewModels.filter((vm) => (vm.category || 'basic') === 'basic');
   const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
 
-  const existingPopover = container.querySelector('k-popover');
-  const wasOpen = existingPopover ? existingPopover.open : false;
+  const existingPopover =
+    typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
+  const wasOpen = !is3d && existingPopover ? existingPopover.open : false;
+  const activeEl = !is3d && typeof document !== 'undefined' ? document.activeElement : null;
+  const isContained =
+    activeEl &&
+    (typeof container.contains === 'function'
+      ? container.contains(activeEl)
+      : activeEl.id === 'snap-unit-size' || activeEl.id === 'snap-angle-degrees');
+  const focusedInputId = isContained && activeEl.id ? activeEl.id : null;
 
   const renderGroup = (items) =>
     items
@@ -260,7 +811,7 @@ function renderSnapToggles() {
         const tokenHover = vm.tokenHover || '--ktheme-accent-hover';
         const styleAttr = `--snap-accent: var(${token}); --snap-accent-hover: var(${tokenHover});`;
         return `
-        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
+        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} ${disabledAttr} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
           <span>${esc(vm.label)}</span>
           <span class="snap-status">${vm.enabled ? 'ON' : 'OFF'}</span>
         </k-button>
@@ -270,7 +821,7 @@ function renderSnapToggles() {
 
   container.innerHTML = `
     <k-popover id="snap-popover">
-      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} title="Snapping modes (${activeCount} enabled)">
+      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} ${disabledAttr} title="Snapping modes (${activeCount} enabled)">
         <span aria-hidden="true">🧲</span> Snapping <span class="snap-badge badge">${activeCount}</span>
       </k-button>
       <div class="snap-popover-menu">
@@ -286,18 +837,70 @@ function renderSnapToggles() {
             ${renderGroup(advancedItems)}
           </div>
         </div>
+        <div class="snap-category snap-increments-panel">
+          <div class="snap-category-title">Grid &amp; Angle Increments</div>
+          <div class="snap-increment-fields">
+            <div class="snap-increment-row">
+              <label for="snap-unit-size" class="snap-increment-label">Grid Spacing (in)</label>
+              <k-input id="snap-unit-size" class="snap-increment-input" type="number" min="0.25" step="0.25" data-grid-setting="unitSize" aria-label="Grid Spacing (in)" value="${esc(gridVm.unitSize)}"></k-input>
+            </div>
+            <div class="snap-increment-row">
+              <label for="snap-angle-degrees" class="snap-increment-label">Angle Snap (°)</label>
+              <k-input id="snap-angle-degrees" class="snap-increment-input" type="number" min="1" max="360" step="1" data-grid-setting="angleSnapDegrees" aria-label="Angle Snap (degrees)" value="${esc(gridVm.angleSnapDegrees)}"></k-input>
+            </div>
+          </div>
+        </div>
       </div>
     </k-popover>
   `;
 
-  const newPopover = container.querySelector('k-popover');
-  if (newPopover && wasOpen) {
-    newPopover.open = true;
+  const newPopover =
+    typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
+  if (newPopover) {
+    if (wasOpen && !is3d) {
+      newPopover.open = true;
+    } else if (is3d) {
+      newPopover.open = false;
+      if (typeof newPopover.removeAttribute === 'function') {
+        newPopover.removeAttribute('open');
+      }
+    }
+  }
+
+  const snapTrigger =
+    typeof container.querySelector === 'function' ? container.querySelector('#snap-trigger') : null;
+  if (snapTrigger) {
+    snapTrigger.disabled = is3d;
+    if (is3d) {
+      if (typeof snapTrigger.setAttribute === 'function') snapTrigger.setAttribute('disabled', '');
+    } else if (typeof snapTrigger.removeAttribute === 'function') {
+      snapTrigger.removeAttribute('disabled');
+    }
+  }
+
+  if (focusedInputId && typeof container.querySelector === 'function') {
+    const restoredInput = container.querySelector(`#${focusedInputId}`);
+    if (restoredInput && typeof restoredInput.focus === 'function') {
+      restoredInput.focus();
+    }
   }
 
   container.querySelectorAll('[data-snap-id]').forEach((btn) => {
+    btn.disabled = is3d;
+    if (is3d) {
+      if (typeof btn.setAttribute === 'function') btn.setAttribute('disabled', '');
+    } else if (typeof btn.removeAttribute === 'function') {
+      btn.removeAttribute('disabled');
+    }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (
+        is3DViewActive() ||
+        btn.disabled ||
+        (typeof btn.hasAttribute === 'function' && btn.hasAttribute('disabled'))
+      ) {
+        return;
+      }
       const id = btn.dataset.snapId;
       const vm = viewModels.find((x) => x.id === id);
       if (vm) {
@@ -307,14 +910,62 @@ function renderSnapToggles() {
       }
     });
   });
+
+  const bindIncrementInput = (selector, settingKey, applyFn) => {
+    const inputEl =
+      typeof container.querySelector === 'function' ? container.querySelector(selector) : null;
+    if (!inputEl) return;
+
+    const labelEl =
+      inputEl.id && typeof container.querySelector === 'function'
+        ? container.querySelector(`label[for="${inputEl.id}"]`)
+        : null;
+    if (labelEl && typeof labelEl.addEventListener === 'function') {
+      labelEl.addEventListener('click', (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof inputEl.focus === 'function') inputEl.focus();
+      });
+    }
+
+    const readRawValue = (e) =>
+      e && e.detail && e.detail.value !== undefined ? e.detail.value : inputEl.value;
+
+    inputEl.addEventListener('click', (e) => {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    });
+
+    inputEl.addEventListener('input', (e) => {
+      const updated = applyFn(readRawValue(e));
+      if (updated) {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        redraw();
+      } else if (typeof inputEl.setAttribute === 'function') {
+        inputEl.setAttribute('aria-invalid', 'true');
+      }
+    });
+
+    inputEl.addEventListener('change', (e) => {
+      const updated = applyFn(readRawValue(e));
+      if (updated) {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        redraw();
+      } else {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        inputEl.value = String(interaction.gridSettings[settingKey]);
+      }
+    });
+  };
+
+  bindIncrementInput('#snap-unit-size', 'unitSize', gridVm.onUnitSizeChange);
+  bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
-function renderBgToolbar() {
+export function renderBgToolbar() {
+  const bg = arguments.length > 0 ? arguments[0] : doc.background;
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
-  if (doc.background && (doc.background.dataUrl || doc.background.presetKey)) {
+  if (bg && (bg.dataUrl || bg.presetKey)) {
     bgBar.hidden = false;
-    const bg = doc.background;
     const vis = $('#bg-visible');
     if (vis) vis.checked = bg.visible !== false;
     const op = $('#bg-opacity');
@@ -324,19 +975,33 @@ function renderBgToolbar() {
     const gisMapSelect = $('#gis-map-preset');
     if (gisMapSelect) gisMapSelect.value = bg.presetKey || '';
     const lockBtn = $('#bg-lock-btn');
-    if (lockBtn) lockBtn.textContent = bg.locked ? '🔒 Locked' : '🔓 Unlocked';
+    if (lockBtn) {
+      lockBtn.innerHTML = `<span aria-hidden="true">${bg.locked ? '🔒' : '🔓'}</span> ${bg.locked ? 'Locked' : 'Unlocked'}`;
+      lockBtn.setAttribute('aria-pressed', bg.locked ? 'true' : 'false');
+    }
   } else {
     bgBar.hidden = true;
     const mapSelect = $('#bg-map-preset');
     if (mapSelect) mapSelect.value = '';
     const gisMapSelect = $('#gis-map-preset');
     if (gisMapSelect) gisMapSelect.value = '';
+    const lockBtn = $('#bg-lock-btn');
+    if (lockBtn) {
+      lockBtn.innerHTML = '<span aria-hidden="true">🔓</span> Unlocked';
+      lockBtn.setAttribute('aria-pressed', 'false');
+    }
   }
 }
 
 function renderHistoryTimeline() {
   const listEl = $('#history-list');
   if (!listEl) return;
+  const focusedIndex =
+    typeof document !== 'undefined' &&
+    document.activeElement?.classList?.contains?.('history-item') &&
+    (typeof listEl.contains !== 'function' || listEl.contains(document.activeElement))
+      ? document.activeElement.dataset?.index
+      : null;
   const timeline = hist.getTimeline();
   listEl.innerHTML = timeline
     .map((item) => {
@@ -379,6 +1044,14 @@ function renderHistoryTimeline() {
       }
     });
   });
+
+  if (focusedIndex !== null && focusedIndex !== undefined) {
+    const popover = $('#history-popover');
+    if (popover && !popover.hidden) {
+      const nextFocusEl = listEl.querySelector(`.history-item[data-index="${focusedIndex}"]`);
+      nextFocusEl?.focus();
+    }
+  }
 }
 
 function refresh() {
@@ -404,8 +1077,10 @@ function refresh() {
     redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   }
   renderHistoryTimeline();
-  $('#plan-name').value = doc.name;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const planNameInput = $('#plan-name');
+  if (planNameInput) planNameInput.value = doc.name;
+  const zoomLabelEl = $('#zoom-label');
+  if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
@@ -640,8 +1315,6 @@ export function badIds(rep) {
   return s;
 }
 
-let a11yDebounceTimer = null;
-
 export function updatePlanA11yTree(state, curLevel = 0) {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   if (a11yDebounceTimer) clearTimeout(a11yDebounceTimer);
@@ -674,7 +1347,7 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const state = preview ? preview.next : doc;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
   const bad = new Set([
@@ -690,18 +1363,21 @@ function redraw() {
     preview,
     freshViolations: preview?.fresh || [],
   });
-  draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
-    dpr,
-    gridSettings: interaction.gridSettings,
-    complianceScene,
-    snappingBridge,
-    bad,
-    selection,
-    under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
-    autoFixDiffs: preview ? [] : autoFixDiffs,
-    hoveredDiffIndex,
-    overlay: (c) => drawOverlay(c, state),
-  });
+  if (ctx) {
+    draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
+      dpr,
+      gridSettings: interaction.gridSettings,
+      complianceScene,
+      snappingBridge,
+      bad,
+      selection,
+      hover,
+      under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
+      autoFixDiffs: preview ? [] : autoFixDiffs,
+      hoveredDiffIndex,
+      overlay: (c) => drawOverlay(c, state),
+    });
+  }
   updatePlanA11yTree(state, curLevel);
 }
 
@@ -767,12 +1443,53 @@ function drawOverlay(c, _state) {
     c.beginPath();
     c.moveTo(sequentialPts[0].x, sequentialPts[0].y);
     for (let i = 1; i < sequentialPts.length; i++) {
-      c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+      const segBulge = interaction.getEdgeBulge ? interaction.getEdgeBulge(i - 1) : 0;
+      if (Math.abs(segBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[i - 1], sequentialPts[i], segBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+      }
     }
     if (hover) {
-      c.lineTo(hover.x, hover.y);
+      const lastIdx = sequentialPts.length - 1;
+      const previewBulge =
+        sequentialPts.length < 3 && interaction.getEdgeBulge
+          ? interaction.getEdgeBulge(lastIdx)
+          : 0;
+      if (Math.abs(previewBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[lastIdx], hover, previewBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(hover.x, hover.y);
+      }
     }
     c.stroke();
+
+    if (sequentialPts.length >= 3) {
+      const closeIdx = sequentialPts.length - 1;
+      const closeBulge = interaction.getEdgeBulge ? interaction.getEdgeBulge(closeIdx) : 0;
+      c.save();
+      c.setLineDash([5 / view.scale, 4 / view.scale]);
+      c.globalAlpha = 0.75;
+      c.beginPath();
+      c.moveTo(sequentialPts[closeIdx].x, sequentialPts[closeIdx].y);
+      if (Math.abs(closeBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[closeIdx], sequentialPts[0], closeBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(sequentialPts[0].x, sequentialPts[0].y);
+      }
+      c.stroke();
+      c.restore();
+    }
+
     for (const pt of sequentialPts) {
       c.beginPath();
       c.arc(pt.x, pt.y, 4 / view.scale, 0, Math.PI * 2);
@@ -1122,9 +1839,22 @@ function renderInspector() {
       </div>
       <div class="align-section" style="margin-top:10px">
         <div class="align-label">Distribute</div>
-        <div class="align-grid">
-          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 ? 'disabled' : ''}>Horizontal</button>
-          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 ? 'disabled' : ''}>Vertical</button>
+        ${formRow(
+          'dist-spacing-input',
+          'Spacing',
+          `<input id="dist-spacing-input" type="text" placeholder="Auto (e.g. 16&quot;, 2' 6&quot;)" value="${esc(distSpacingInput)}">`
+        )}
+        ${formRow(
+          'dist-spacing-type',
+          'Mode',
+          `<select id="dist-spacing-type">
+            <option value="center" ${distSpacingType === 'center' ? 'selected' : ''}>Center-to-Center</option>
+            <option value="gap" ${distSpacingType === 'gap' ? 'selected' : ''}>Edge-to-Edge Gap</option>
+          </select>`
+        )}
+        <div class="align-grid" style="margin-top:6px">
+          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Horizontal</button>
+          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Vertical</button>
         </div>
       </div>
       <div class="btns" style="margin-top:14px">
@@ -1150,12 +1880,44 @@ function renderInspector() {
       apply((n) => M.alignItems(n, selectedList, 'bottom'), 'Align Bottom')
     );
 
-    $('#dist-h')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'horizontal'), 'Distribute Horizontally')
-    );
-    $('#dist-v')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'vertical'), 'Distribute Vertically')
-    );
+    const syncDistControls = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const hasExplicit = typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0;
+      const canDistribute = selectedList.length >= 3 || (selectedList.length >= 2 && hasExplicit);
+      const btnH = $('#dist-h');
+      const btnV = $('#dist-v');
+      if (btnH) btnH.disabled = !canDistribute;
+      if (btnV) btnV.disabled = !canDistribute;
+    };
+
+    const readDistOptions = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const spacing =
+        typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      return { spacing, spacingType: distSpacingType };
+    };
+
+    $('#dist-spacing-input')?.addEventListener('input', syncDistControls);
+    $('#dist-spacing-type')?.addEventListener('change', syncDistControls);
+
+    $('#dist-h')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'horizontal', spacing, spacingType),
+        'Distribute Horizontally'
+      );
+    });
+    $('#dist-v')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'vertical', spacing, spacingType),
+        'Distribute Vertically'
+      );
+    });
 
     $('#i-del-all')?.addEventListener('click', () => {
       apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
@@ -1174,15 +1936,42 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     if (!window.__activeUVWall) window.__activeUVWall = 'N';
+    if (!window.__activeAssemblyScope) window.__activeAssemblyScope = 'single';
     const activeWall = window.__activeUVWall;
+    const activeAssemblyScope = window.__activeAssemblyScope;
     const uv = M.getWallUV(room, activeWall);
     const wallFinishId = room.walls?.[activeWall] || 'paint_white';
+    let activeExtFinId = room.cladding || room.exteriorCladding;
+    if (!activeExtFinId && WALL_BY_ID[wallFinishId]?.exterior) {
+      activeExtFinId = wallFinishId;
+    }
+    activeExtFinId = activeExtFinId || 'cladding_siding_white';
+    const assembly = resolveWallAssembly(
+      wallFinishId,
+      activeExtFinId,
+      room.wallAssemblyOverrides?.[activeWall]
+    );
+    const fmtInches = (v) => Number(Number(v).toFixed(3));
     const finishObj = WALL_BY_ID[wallFinishId];
     const finishLabel = finishObj
       ? finishObj.name
       : wallFinishId.startsWith('tex_')
         ? `Custom Texture (${wallFinishId.slice(0, 10)})`
         : wallFinishId;
+
+    const roomPts = getRoomPoints(room);
+    const curveWallKeys =
+      roomPts.length === 4 ? ['N', 'E', 'S', 'W'] : roomPts.map((_, idx) => String(idx));
+    if (!window.__activeCurveWall || !curveWallKeys.includes(String(window.__activeCurveWall))) {
+      const firstCurved = curveWallKeys.find((wk) => Math.abs(M.getWallBulge(room, wk)) > 1e-9);
+      window.__activeCurveWall = firstCurved || curveWallKeys[0];
+    }
+    const activeCurveWall = window.__activeCurveWall;
+    const curveSeg = getWallEdgeSegment(room, activeCurveWall);
+    const curBulge = curveSeg.bulge;
+    const curChord = curveSeg.chordLen;
+    const curSagitta = sagittaFromBulge(curChord, curBulge);
+    const curRadiusStr = formatCurveRadiusDisplay(curChord, curBulge);
 
     el.innerHTML = `<h3>${esc(room.name)}</h3>
       ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
@@ -1199,6 +1988,47 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      <div class="curve-inspector-group">
+        <div class="curve-inspector-head">
+          <h4>Parametric Wall Curve</h4>
+          <span id="i-curve-chord" class="curve-chord-badge">Chord: ${formatCurveNumber(curChord, 1)}"</span>
+        </div>
+        ${formRow(
+          'i-curve-wall',
+          'Wall Segment',
+          `<select id="i-curve-wall">${curveWallKeys
+            .map((wk, idx) => {
+              const wb = M.getWallBulge(room, wk);
+              const tag = Math.abs(wb) > 1e-9 ? ' ⌒' : '';
+              const label =
+                roomPts.length === 4
+                  ? `${{ N: 'North (N)', E: 'East (E)', S: 'South (S)', W: 'West (W)' }[wk]}${tag}`
+                  : `Wall ${idx + 1}${tag}`;
+              return `<option value="${wk}" ${String(wk) === String(activeCurveWall) ? 'selected' : ''}>${label}</option>`;
+            })
+            .join('')}</select>`
+        )}
+        ${formRow(
+          'i-curve-radius',
+          'Arc Radius (in)',
+          `<input id="i-curve-radius" type="text" inputmode="decimal" placeholder="∞ (Linear)" value="${esc(curRadiusStr)}" autocomplete="off">`
+        )}
+        ${formRow(
+          'i-curve-sagitta',
+          'Sagitta (in)',
+          `<input id="i-curve-sagitta" type="number" step="0.5" value="${formatCurveNumber(curSagitta, 2)}">`
+        )}
+        ${formRow(
+          'i-curve-bulge',
+          'Bulge Factor',
+          `<input id="i-curve-bulge" type="number" step="0.05" value="${formatCurveNumber(curBulge, 4)}">`
+        )}
+        <div class="btns curve-inspector-actions">
+          <button type="button" id="i-curve-invert" title="Invert curve concavity">⇄ Invert Concavity</button>
+          <button type="button" id="i-curve-reset" title="Reset wall to linear (zero bulge)">Linear Wall</button>
+        </div>
+        <div id="i-curve-error" class="curve-input-error" role="alert" aria-live="assertive" hidden></div>
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
@@ -1294,6 +2124,49 @@ function renderInspector() {
             <option value="plan">Whole Plan</option>
           </select>
           <button id="i-uv-reset" style="font-size:0.8rem;padding:2px 6px">Reset UV</button>
+        </div>
+      </div>
+
+      <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Wall Assembly Layer Thicknesses</h4>
+      <div class="wall-assembly-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
+        ${formRow(
+          'i-wa-gypsum',
+          'Gypsum Board (in)',
+          `<input id="i-wa-gypsum" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.gypsumThickness)}" aria-label="Gypsum board thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-stud',
+          'Stud Depth (in)',
+          `<input id="i-wa-stud" type="number" step="0.25" min="1.5" max="24" value="${fmtInches(assembly.studDepth)}" aria-label="Stud framing depth in inches">`
+        )}
+        ${formRow(
+          'i-wa-sheathing',
+          'Sheathing (in)',
+          `<input id="i-wa-sheathing" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.sheathingThickness)}" aria-label="Sheathing thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-airgap',
+          'Air Gap (in)',
+          `<input id="i-wa-airgap" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.airGapThickness)}" aria-label="Air gap thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-cladding',
+          'Exterior Cladding (in)',
+          `<input id="i-wa-cladding" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.claddingThickness)}" aria-label="Exterior cladding thickness in inches">`
+        )}
+        <div class="row" style="margin:8px 0 6px;display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;padding-top:6px;border-top:1px dashed var(--border,#ddd)">
+          <span>Total Assembly Thickness (${esc(activeWall)})</span>
+          <strong id="i-wa-total" aria-live="polite">${fmtInches(assembly.totalThickness)}"</strong>
+        </div>
+        <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <select id="i-wa-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="Wall assembly override scope">
+            <option value="single" ${activeAssemblyScope === 'single' ? 'selected' : ''}>Active Wall Only</option>
+            <option value="room" ${activeAssemblyScope === 'room' ? 'selected' : ''}>Entire Room</option>
+            <option value="level" ${activeAssemblyScope === 'level' ? 'selected' : ''}>Level</option>
+            <option value="plan" ${activeAssemblyScope === 'plan' ? 'selected' : ''}>Whole Plan</option>
+          </select>
+          <button type="button" id="i-wa-reset" style="font-size:0.8rem;padding:2px 6px">Reset Assembly</button>
         </div>
       </div>
 
@@ -1416,6 +2289,119 @@ function renderInspector() {
       renderInspector();
     });
 
+    const iCurveWallEl = $('#i-curve-wall');
+    const iCurveRadiusEl = $('#i-curve-radius');
+    const iCurveSagittaEl = $('#i-curve-sagitta');
+    const iCurveBulgeEl = $('#i-curve-bulge');
+    const iCurveErrEl = $('#i-curve-error');
+
+    iCurveWallEl?.addEventListener('change', (e) => {
+      window.__activeCurveWall = e.target.value;
+      const wb = M.getWallBulge(roomOf(doc, room.id), window.__activeCurveWall);
+      if (wb !== 0) inspectorConcavitySign = wb < 0 ? -1 : 1;
+      renderInspector();
+      redraw();
+    });
+
+    const handleInspectorCurveEdit = (field, inputEl, commitChange = false) => {
+      const latestRoom = roomOf(doc, room.id);
+      if (!latestRoom) return;
+      const wallId = window.__activeCurveWall || activeCurveWall;
+      const seg = getWallEdgeSegment(latestRoom, wallId);
+      const signHint = seg.bulge !== 0 ? seg.bulge : inspectorConcavitySign < 0 ? -1e-6 : 0;
+      const res = parseCurveHudInput(field, inputEl.value, seg.chordLen, signHint);
+
+      if (!res.ok) {
+        inputEl.setAttribute('aria-invalid', 'true');
+        setCurveErrorUI(iCurveErrEl, [iCurveRadiusEl, iCurveSagittaEl, iCurveBulgeEl], res.error);
+        preview = null;
+        redraw();
+        return;
+      }
+
+      inputEl.removeAttribute('aria-invalid');
+      setCurveErrorUI(iCurveErrEl, [iCurveRadiusEl, iCurveSagittaEl, iCurveBulgeEl], null);
+      if (res.bulge !== 0) {
+        inspectorConcavitySign = res.bulge < 0 ? -1 : 1;
+      }
+
+      if (commitChange) {
+        preview = null;
+        apply(
+          (n) => {
+            const r = roomOf(n, room.id);
+            M.setWallBulge(r, wallId, res.bulge, n);
+          },
+          { quiet: true, label: 'Update Wall Curve' }
+        );
+      } else {
+        if (iCurveRadiusEl && field !== 'radius') {
+          iCurveRadiusEl.value = formatCurveRadiusDisplay(seg.chordLen, res.bulge);
+        }
+        if (iCurveSagittaEl && field !== 'sagitta') {
+          iCurveSagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, res.bulge), 2);
+        }
+        if (iCurveBulgeEl && field !== 'bulge') {
+          iCurveBulgeEl.value = formatCurveNumber(res.bulge, 4);
+        }
+        preview = tryPreview((n) => {
+          const r = roomOf(n, room.id);
+          M.setWallBulge(r, wallId, res.bulge, n);
+        });
+        redraw();
+      }
+    };
+
+    iCurveRadiusEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('radius', iCurveRadiusEl, false)
+    );
+    iCurveRadiusEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('radius', iCurveRadiusEl, true)
+    );
+    iCurveSagittaEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('sagitta', iCurveSagittaEl, false)
+    );
+    iCurveSagittaEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('sagitta', iCurveSagittaEl, true)
+    );
+    iCurveBulgeEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('bulge', iCurveBulgeEl, false)
+    );
+    iCurveBulgeEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('bulge', iCurveBulgeEl, true)
+    );
+
+    $('#i-curve-invert')?.addEventListener('click', () => {
+      const latestRoom = roomOf(doc, room.id);
+      if (!latestRoom) return;
+      const wallId = window.__activeCurveWall || activeCurveWall;
+      const wb = M.getWallBulge(latestRoom, wallId);
+      inspectorConcavitySign = wb !== 0 ? (wb > 0 ? -1 : 1) : -inspectorConcavitySign;
+      if (wb !== 0) {
+        preview = null;
+        apply(
+          (n) => {
+            const r = roomOf(n, room.id);
+            M.setWallBulge(r, wallId, -wb, n);
+          },
+          { quiet: true, label: 'Invert Wall Curve' }
+        );
+      }
+    });
+
+    $('#i-curve-reset')?.addEventListener('click', () => {
+      const wallId = window.__activeCurveWall || activeCurveWall;
+      inspectorConcavitySign = 1;
+      preview = null;
+      apply(
+        (n) => {
+          const r = roomOf(n, room.id);
+          M.setWallBulge(r, wallId, 0, n);
+        },
+        { quiet: true, label: 'Reset Wall Curve' }
+      );
+    });
+
     $('#i-custom-tex-btn')?.addEventListener('click', () => {
       $('#i-custom-tex-file')?.click();
     });
@@ -1423,7 +2409,7 @@ function renderInspector() {
     $('#i-custom-tex-file')?.addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const texId = `tex_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const texId = `tex_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       try {
         await saveTextureBlob(texId, file, { name: file.name, mimeType: file.type });
         apply((n) => {
@@ -1504,6 +2490,110 @@ function renderInspector() {
       renderInspector();
       redraw();
       window.__scene3d?.render?.();
+    });
+
+    const readAssemblyInputs = () => {
+      const parseOr = (sel, fallback) => {
+        const val = parseFloat($(sel)?.value);
+        return Number.isFinite(val) ? val : fallback;
+      };
+      const rawOverrides = {
+        gypsumThickness: parseOr('#i-wa-gypsum', assembly.gypsumThickness),
+        studDepth: parseOr('#i-wa-stud', assembly.studDepth),
+        sheathingThickness: parseOr('#i-wa-sheathing', assembly.sheathingThickness),
+        airGapThickness: parseOr('#i-wa-airgap', assembly.airGapThickness),
+        claddingThickness: parseOr('#i-wa-cladding', assembly.claddingThickness),
+      };
+      const clamped = M.clampWallAssemblyOverrides(rawOverrides);
+      const scope = $('#i-wa-scope')?.value || 'single';
+      return { clamped, scope };
+    };
+
+    const previewAssemblyTotal = () => {
+      const { clamped } = readAssemblyInputs();
+      const resolved = resolveWallAssembly(wallFinishId, activeExtFinId, clamped);
+      const totalEl = $('#i-wa-total');
+      if (totalEl) {
+        totalEl.textContent = `${fmtInches(resolved.totalThickness)}"`;
+      }
+    };
+
+    const commitAssemblyUpdate = () => {
+      const { clamped, scope } = readAssemblyInputs();
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, clamped, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Update Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const updatedAssembly = resolveWallAssembly(
+        updatedFinish,
+        updatedExtFin,
+        updatedRoom.wallAssemblyOverrides?.[targetWall]
+      );
+      const totalInches = fmtInches(updatedAssembly.totalThickness);
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly updated to ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
+    };
+
+    ['#i-wa-gypsum', '#i-wa-stud', '#i-wa-sheathing', '#i-wa-airgap', '#i-wa-cladding'].forEach(
+      (sel) => {
+        const inputEl = $(sel);
+        if (!inputEl) return;
+        inputEl.addEventListener('input', previewAssemblyTotal);
+        inputEl.addEventListener('change', commitAssemblyUpdate);
+      }
+    );
+
+    $('#i-wa-scope')?.addEventListener('change', (e) => {
+      window.__activeAssemblyScope = e.target.value || 'single';
+    });
+
+    $('#i-wa-reset')?.addEventListener('click', () => {
+      const scope = $('#i-wa-scope')?.value || 'single';
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, null, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Reset Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const defaultAssembly = resolveWallAssembly(updatedFinish, updatedExtFin);
+      const totalInches = fmtInches(defaultAssembly.totalThickness);
+      renderInspector();
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly reset to default ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
     });
 
     const handleBuildingPresetApply = (scope) => {
@@ -2246,7 +3336,74 @@ function card(label, sub, on, attrs, swatch) {
   return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
-function renderPalette() {
+export function getCatalogFilters() {
+  return {
+    query: catalogSearchQuery,
+    maxW: catalogMaxWidth,
+    maxD: catalogMaxDepth,
+  };
+}
+
+export function setCatalogFilters({ query, maxW, maxD } = {}) {
+  if (query !== undefined) catalogSearchQuery = String(query);
+  if (maxW !== undefined) catalogMaxWidth = String(maxW);
+  if (maxD !== undefined) catalogMaxDepth = String(maxD);
+}
+
+export function resetCatalogFilters() {
+  catalogSearchQuery = '';
+  catalogMaxWidth = '';
+  catalogMaxDepth = '';
+}
+
+export function renderCatalogPanel(items = ITEMS) {
+  let h = `<div class="catalog-search-container">
+      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
+    </div>
+    <div class="catalog-filters">
+      <div class="catalog-dim-group">
+        <label for="catalog-max-w">Max W (in)</label>
+        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
+      </div>
+      <div class="catalog-dim-group">
+        <label for="catalog-max-d">Max D (in)</label>
+        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
+      </div>
+    </div>`;
+
+  const filtered = filterItems(items, {
+    query: catalogSearchQuery,
+    maxW: catalogMaxWidth,
+    maxD: catalogMaxDepth,
+  });
+
+  if (filtered.length === 0) {
+    h += `<div class="catalog-empty"><p>No matching items found</p><button id="catalog-reset-filters" class="btn secondary btn-sm catalog-reset-btn" type="button">Clear filters</button></div>`;
+  } else {
+    for (const [cat, label] of ITEM_CATEGORIES) {
+      const catItems = filtered.filter((i) => i.cat === cat);
+      if (catItems.length === 0) continue;
+      h +=
+        `<h4>${label}</h4><div class="grid">` +
+        catItems
+          .map((i) =>
+            card(
+              i.name,
+              i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
+              tool.kind === 'item' && tool.id === i.id,
+              `data-tool="item" data-id="${i.id}"`,
+              `background:${i.color}`
+            )
+          )
+          .join('') +
+        '</div>';
+    }
+  }
+
+  return h;
+}
+
+export function renderPalette() {
   const p = $('#palette');
   if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   if (!p) return;
@@ -2307,48 +3464,7 @@ function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    h += `<div class="catalog-search-container">
-      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
-    </div>
-    <div class="catalog-filters">
-      <div class="catalog-dim-group">
-        <label for="catalog-max-w">Max W (in)</label>
-        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
-      </div>
-      <div class="catalog-dim-group">
-        <label for="catalog-max-d">Max D (in)</label>
-        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
-      </div>
-    </div>`;
-
-    const filtered = filterItems(ITEMS, {
-      query: catalogSearchQuery,
-      maxW: catalogMaxWidth,
-      maxD: catalogMaxDepth,
-    });
-
-    if (filtered.length === 0) {
-      h += `<div class="catalog-empty">No matching items found</div>`;
-    } else {
-      for (const [cat, label] of ITEM_CATEGORIES) {
-        const catItems = filtered.filter((i) => i.cat === cat);
-        if (catItems.length === 0) continue;
-        h +=
-          `<h4>${label}</h4><div class="grid">` +
-          catItems
-            .map((i) =>
-              card(
-                i.name,
-                i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
-                tool.kind === 'item' && tool.id === i.id,
-                `data-tool="item" data-id="${i.id}"`,
-                `background:${i.color}`
-              )
-            )
-            .join('') +
-          '</div>';
-      }
-    }
+    h += renderCatalogPanel();
   } else if (tab === 'paint') {
     h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
@@ -2482,6 +3598,14 @@ function renderPalette() {
     catalogMaxDepth = v;
   });
 
+  $('#catalog-reset-filters')?.addEventListener('click', () => {
+    catalogSearchQuery = '';
+    catalogMaxWidth = '';
+    catalogMaxDepth = '';
+    renderPalette();
+    $('#catalog-search')?.focus?.();
+  });
+
   if (activeId && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
     const restoredEl = $(`#${activeId}`);
     if (restoredEl) {
@@ -2516,10 +3640,17 @@ const HINTS = {
 };
 
 function setTool(t) {
+  const prevKind = tool?.kind;
   tool = t;
   preview = null;
   drag = null;
   if (t.kind !== 'calibrate') calibPoints = [];
+  if (t.kind !== 'room' && prevKind === 'room') {
+    if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+    const btnClose = $('#btn-close-room');
+    if (btnClose) btnClose.hidden = true;
+  }
+  syncDraftingCurveHud();
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.classList.toggle('on', b.dataset.tool === t.kind));
@@ -2623,7 +3754,21 @@ canvas?.addEventListener('pointerdown', (e) => {
         break;
       }
       if (!isSelected(id)) {
+        const preHit = M.findOwner(doc, id);
+        if (preHit && preHit.kind === 'room') {
+          const nw = nearestWall(p, 18, preHit.room);
+          if (nw) window.__activeCurveWall = nw.wall;
+        }
         select(id);
+      } else {
+        const preHit = M.findOwner(doc, id);
+        if (preHit && preHit.kind === 'room') {
+          const nw = nearestWall(p, 18, preHit.room);
+          if (nw && window.__activeCurveWall !== nw.wall) {
+            window.__activeCurveWall = nw.wall;
+            renderInspector();
+          }
+        }
       }
       const hit = M.findOwner(doc, id);
       if (hit.kind === 'item') {
@@ -2944,6 +4089,9 @@ canvas?.addEventListener('pointermove', (e) => {
     return;
   }
   updatePreview();
+  if (tool.kind === 'room' && interaction.getCornerCount && interaction.getCornerCount() > 0) {
+    syncDraftingCurveHud({ keepError: true });
+  }
 
   // Hover violation tooltip detection
   if (p) {
@@ -2995,9 +4143,12 @@ function handleCloseRoom() {
     toast('At least 3 corners are required to close a room.', true);
     return;
   }
-  const closeRes = interaction.closeRoom({ existingRooms: levelRooms() });
+  const closeRes = interaction.closeRoom({
+    existingRooms: levelRooms().map(roomToPolygon),
+  });
   if (closeRes.ok && closeRes.room?.corners) {
     const pts = closeRes.room.corners;
+    const roomBulges = closeRes.room.bulges;
     const minX = Math.min(...pts.map((pt) => pt.x));
     const maxX = Math.max(...pts.map((pt) => pt.x));
     const minY = Math.min(...pts.map((pt) => pt.y));
@@ -3006,16 +4157,29 @@ function handleCloseRoom() {
     const h = Math.max(24, maxY - minY);
     const x = minX;
     const y = minY;
-    const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
+    const roomType = tool.kind === 'room' && tool.type ? tool.type : 'living';
+    let createdId = null;
+    const r = apply((n) => {
+      const created = M.addRoom(n, x, y, w, h, roomType, {
+        level: curLevel,
+        points: pts,
+        bulges: roomBulges,
+      });
+      createdId = created.id;
+    }, 'Close Room');
     if (r.ok) {
       announceToLiveRegion(
-        `Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+        `${ROOM_TYPES[roomType]?.name || 'Living'} room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
       );
       interaction.resetRoomDrawing();
+      activeDraftCurveEdge = null;
+      draftConcavitySign = 1;
+      syncDraftingCurveHud();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
       if (hint) hint.textContent = '';
+      if (createdId) select(createdId);
       redraw();
     }
   } else {
@@ -3132,8 +4296,13 @@ canvas?.addEventListener('pointerup', () => {
       if (!r.ok) select(null);
     } else {
       const p = hover || { x: d.x0, y: d.y0 };
-      interaction.addRoomCorner(p, { existingRooms: levelRooms() });
+      interaction.addRoomCorner(p, {
+        edges: extractRoomEdges(levelRooms()),
+        existingRooms: levelRooms().map(roomToPolygon),
+      });
       const count = interaction.getCornerCount();
+      activeDraftCurveEdge = count >= 2 ? count - 2 : 0;
+      syncDraftingCurveHud();
       const hint = $('#tool-hint');
       if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
       const btnClose = $('#btn-close-room');
@@ -3203,6 +4372,14 @@ canvas?.addEventListener('pointerleave', () => {
   preview = null;
   redraw();
 });
+export function parseRoomDimensionsInput(input) {
+  if (!input) return [];
+  return String(input)
+    .split(/[×x,]/i)
+    .map((segment) => M.parseDistanceInInches(segment, { defaultUnit: 'ft' }))
+    .filter((n) => n !== null && !isNaN(n) && n > 0);
+}
+
 canvas?.addEventListener('dblclick', (e) => {
   if (tool.kind === 'room' && interaction.canCloseRoom && interaction.canCloseRoom()) {
     handleCloseRoom();
@@ -3216,19 +4393,16 @@ canvas?.addEventListener('dblclick', (e) => {
       const currentFtW = (r.w / 12).toFixed(1);
       const currentFtH = (r.h / 12).toFixed(1);
       const input = prompt(
-        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or width in inches "144"):`,
+        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or with units "144 in"):`,
         `${currentFtW} × ${currentFtH}`
       );
       if (input) {
-        const parts = input
-          .split(/[×x,]/)
-          .map((s) => parseFloat(s.trim()))
-          .filter((n) => !isNaN(n) && n > 0);
+        const parts = parseRoomDimensionsInput(input);
         if (parts.length >= 1) {
-          const rawWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
+          const rawWInches = parts[0];
           let clamped;
           if (parts.length >= 2) {
-            const rawHInches = parts[1] < 30 ? Math.round(parts[1] * 12) : Math.round(parts[1]);
+            const rawHInches = parts[1];
             clamped = clampRoomDimensions(r, rawWInches, rawHInches);
           } else {
             const clampedW = clampRoomWidth(r, rawWInches, r.h);
@@ -3253,20 +4427,24 @@ canvas?.addEventListener(
   { passive: false }
 );
 
-function zoomAt(mx, my, f) {
+export function zoomAt(mx, my, f) {
   const ns = Math.max(0.4, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
   view.oy = my - ((my - view.oy) / view.scale) * ns;
   view.scale = ns;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const zoomLabel = $('#zoom-label');
+  if (zoomLabel) zoomLabel.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
+  announceZoom(view.scale);
 }
 
-function fit() {
-  const r = canvas.getBoundingClientRect();
+export function fit() {
+  const r = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
   if (!doc.rooms.length) {
     view = { scale: 1.6, ox: 40, oy: 40 };
-    return refresh();
+    refresh();
+    announceZoom(view.scale);
+    return;
   }
   const x0 = Math.min(...doc.rooms.map((q) => q.x));
   const y0 = Math.min(...doc.rooms.map((q) => q.y));
@@ -3279,6 +4457,7 @@ function fit() {
   view.ox = (r.width - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.oy = (r.height - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
   refresh();
+  announceZoom(view.scale);
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
@@ -3299,42 +4478,79 @@ function setDoc(next, label) {
   refresh();
 }
 
-function trapFocus(containerEl, returnFocusEl) {
+let activeDiffDrawerCleanup = null;
+let activeHistoryPopoverCleanup = null;
+
+export function trapFocus(containerEl, returnFocusEl) {
+  if (!containerEl) return () => {};
   const focusableSelector =
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-  const focusableElements = Array.from(containerEl.querySelectorAll(focusableSelector));
-  if (!focusableElements.length) return () => {};
+  const getVisibleFocusables = () =>
+    Array.from(containerEl.querySelectorAll(focusableSelector)).filter((el) => {
+      if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
+      if (typeof el.closest === 'function') {
+        const hiddenAncestor = el.closest('[hidden]');
+        if (hiddenAncestor && hiddenAncestor !== containerEl) return false;
+      }
+      let cur = el.parentElement;
+      while (cur && cur !== containerEl) {
+        if (cur.hidden || cur.hasAttribute?.('hidden')) return false;
+        cur = cur.parentElement;
+      }
+      return true;
+    });
 
-  const firstEl = focusableElements[0];
-  const lastEl = focusableElements[focusableElements.length - 1];
-
-  firstEl.focus();
+  const initialFocusables = getVisibleFocusables();
+  if (initialFocusables.length) {
+    initialFocusables[0].focus();
+  }
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      containerEl.removeEventListener('keydown', handleKeyDown);
       if (typeof containerEl.close === 'function') {
         containerEl.close();
       } else {
         containerEl.hidden = true;
         if (containerEl.id === 'diff-drawer') {
+          activeDiffDrawerCleanup = null;
           autoFixDiffs = [];
           hoveredDiffIndex = null;
           redraw();
+        } else if (containerEl.id === 'history-popover') {
+          activeHistoryPopoverCleanup = null;
+          $('#history-btn')?.setAttribute('aria-expanded', 'false');
         }
       }
-      if (returnFocusEl) returnFocusEl.focus();
+      if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
       return;
     }
 
     if (e.key !== 'Tab') return;
 
+    const focusableElements = getVisibleFocusables();
+    if (!focusableElements.length) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      return;
+    }
+
+    const firstEl = focusableElements[0];
+    const lastEl = focusableElements[focusableElements.length - 1];
+    const activeEl =
+      (containerEl.ownerDocument && containerEl.ownerDocument.activeElement) ||
+      (typeof document !== 'undefined' ? document.activeElement : null);
+    const activeOutside =
+      typeof containerEl.contains === 'function' && !containerEl.contains(activeEl);
+
     if (e.shiftKey) {
-      if (document.activeElement === firstEl) {
+      if (activeEl === firstEl || activeOutside) {
         e.preventDefault();
         lastEl.focus();
       }
     } else {
-      if (document.activeElement === lastEl) {
+      if (activeEl === lastEl || activeOutside) {
         e.preventDefault();
         firstEl.focus();
       }
@@ -3344,11 +4560,9 @@ function trapFocus(containerEl, returnFocusEl) {
   containerEl.addEventListener('keydown', handleKeyDown);
   return () => {
     containerEl.removeEventListener('keydown', handleKeyDown);
-    if (returnFocusEl) returnFocusEl.focus();
+    if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
   };
 }
-
-let activeDiffDrawerCleanup = null;
 
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
@@ -3847,6 +5061,250 @@ $('#png')?.addEventListener('click', () => {
     a.click();
   });
 });
+export const PLAN_TIER_RANKS = {
+  free: 0,
+  plus: 1,
+  pro: 2,
+};
+
+const EXPORT_UPGRADE_MESSAGES = {
+  pdf: 'Upgrade to Homegen Pro to unlock multi-page scaled Vector PDF sheets, custom branding logos, and approval stamps.',
+  csv: 'Upgrade to Homegen Plus or Pro to unlock full Bill of Materials CSV schedules, finish takeoffs, and room area metrics.',
+  dxf: 'Upgrade to Homegen Pro to unlock layered AutoCAD DXF geometry, SI metric scaling, and multi-story CAD exchange.',
+  export:
+    'Compare Homegen Plus and Pro plans for architectural PDF sheets, BOM schedules, and CAD exports.',
+};
+
+export function getCurrentPlanTier(state = doc) {
+  const fromState = state?.settings?.planTier;
+  if (typeof fromState === 'string' && PLAN_TIER_RANKS[fromState.toLowerCase()] !== undefined) {
+    return fromState.toLowerCase();
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('homegen.planTier');
+      if (stored && PLAN_TIER_RANKS[stored.toLowerCase()] !== undefined) {
+        return stored.toLowerCase();
+      }
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return 'free';
+}
+
+export function initExportModalTierState(modalEl, currentTier = getCurrentPlanTier()) {
+  if (!modalEl) return null;
+  const normalizedTier =
+    typeof currentTier === 'string' && PLAN_TIER_RANKS[currentTier.toLowerCase()] !== undefined
+      ? currentTier.toLowerCase()
+      : 'free';
+  const currentRank = PLAN_TIER_RANKS[normalizedTier];
+
+  if (modalEl.dataset) {
+    modalEl.dataset.activePlanTier = normalizedTier;
+  } else if (typeof modalEl.setAttribute === 'function') {
+    modalEl.setAttribute('data-active-plan-tier', normalizedTier);
+  }
+
+  const badges = Array.from(modalEl.querySelectorAll?.('.plan-tier-badge') || []);
+  for (const badge of badges) {
+    const rawTier =
+      badge.dataset?.tier ||
+      badge.getAttribute?.('data-tier') ||
+      (badge.classList?.contains('plan-tier-pro') ? 'pro' : 'plus');
+    const badgeTier = rawTier === 'pro' ? 'pro' : 'plus';
+    const unlocked = currentRank >= PLAN_TIER_RANKS[badgeTier];
+    const tierLabel = badgeTier === 'pro' ? 'Pro' : 'Plus';
+
+    if (badge.dataset) {
+      badge.dataset.tier = badgeTier;
+      badge.dataset.tierState = unlocked ? 'unlocked' : 'locked';
+    }
+    if (typeof badge.setAttribute === 'function') {
+      badge.setAttribute('data-tier', badgeTier);
+      badge.setAttribute('data-tier-state', unlocked ? 'unlocked' : 'locked');
+      badge.setAttribute(
+        'aria-label',
+        unlocked ? `${tierLabel} plan feature (unlocked)` : `${tierLabel} plan feature`
+      );
+    }
+    badge.classList?.toggle('is-unlocked', unlocked);
+    badge.classList?.toggle('is-locked', !unlocked);
+    badge.hidden = false;
+  }
+
+  const banners = Array.from(modalEl.querySelectorAll?.('.upgrade-trigger-banner') || []);
+  for (const banner of banners) {
+    const reqRaw =
+      banner.dataset?.requiredTier || banner.getAttribute?.('data-required-tier') || 'pro';
+    const requiredTier = PLAN_TIER_RANKS[reqRaw] !== undefined ? reqRaw : 'pro';
+    const isProTier = currentRank >= PLAN_TIER_RANKS.pro;
+    banner.hidden = isProTier;
+
+    if (banner.dataset) {
+      banner.dataset.currentTier = normalizedTier;
+      banner.dataset.requiredTier = requiredTier;
+    } else if (typeof banner.setAttribute === 'function') {
+      banner.setAttribute('data-current-tier', normalizedTier);
+      banner.setAttribute('data-required-tier', requiredTier);
+    }
+
+    const link = banner.querySelector?.('.upgrade-trigger-link');
+    if (link && !isProTier) {
+      const targetTier =
+        currentRank >= PLAN_TIER_RANKS.plus && requiredTier === 'plus' ? 'pro' : requiredTier;
+      const targetLabel = targetTier === 'pro' ? 'Pro' : 'Plus';
+      if (link.dataset) link.dataset.upgradeTier = targetTier;
+      if (typeof link.setAttribute === 'function') {
+        link.setAttribute('data-upgrade-tier', targetTier);
+      }
+      link.textContent = `Upgrade to ${targetLabel}`;
+    }
+  }
+
+  return {
+    activePlanTier: normalizedTier,
+    badgeCount: badges.length,
+    bannerCount: banners.length,
+  };
+}
+
+export function openPlanUpgradePrompt(options = {}) {
+  const {
+    tier = 'pro',
+    exportType = 'export',
+    triggerEl = null,
+    root = typeof document !== 'undefined' ? document : null,
+  } = options;
+
+  const targetTier = tier === 'plus' ? 'plus' : 'pro';
+  const message = EXPORT_UPGRADE_MESSAGES[exportType] || EXPORT_UPGRADE_MESSAGES.export;
+  const upgradeDlg = root?.querySelector?.('#dlg-plan-upgrade') || null;
+
+  if (upgradeDlg) {
+    const contextEl = upgradeDlg.querySelector?.('#upgrade-prompt-context');
+    if (contextEl) contextEl.textContent = message;
+
+    if (upgradeDlg.dataset) {
+      upgradeDlg.dataset.requestedTier = targetTier;
+      upgradeDlg.dataset.exportContext = exportType;
+    }
+    if (typeof upgradeDlg.setAttribute === 'function') {
+      upgradeDlg.setAttribute('data-requested-tier', targetTier);
+      upgradeDlg.setAttribute('data-export-context', exportType);
+    }
+
+    const cards = Array.from(upgradeDlg.querySelectorAll?.('.upgrade-tier-card') || []);
+    for (const card of cards) {
+      const cardTier = card.dataset?.tier || card.getAttribute?.('data-tier');
+      const isHighlighted = cardTier === targetTier;
+      card.classList?.toggle('highlighted', isHighlighted);
+      if (card.dataset) card.dataset.highlighted = isHighlighted ? 'true' : 'false';
+      if (typeof card.setAttribute === 'function') {
+        card.setAttribute('data-highlighted', isHighlighted ? 'true' : 'false');
+      }
+    }
+
+    if (typeof upgradeDlg.showModal === 'function') {
+      try {
+        if (!upgradeDlg.open) upgradeDlg.showModal();
+      } catch {
+        upgradeDlg.setAttribute?.('open', '');
+        upgradeDlg.open = true;
+      }
+    } else {
+      upgradeDlg.setAttribute?.('open', '');
+      upgradeDlg.open = true;
+    }
+    upgradeDlg.hidden = false;
+
+    const cleanup = trapFocus(upgradeDlg, triggerEl);
+    upgradeDlg.addEventListener?.('close', () => cleanup(), { once: true });
+  } else if ($('#toast')) {
+    toast(message);
+  }
+
+  announceToLiveRegion(message);
+  return { tier: targetTier, exportType, message, dialogOpened: Boolean(upgradeDlg) };
+}
+
+export function bindUpgradeTriggerLinks(root = typeof document !== 'undefined' ? document : null) {
+  if (!root || typeof root.querySelectorAll !== 'function') return 0;
+  let boundCount = 0;
+
+  const links = Array.from(root.querySelectorAll('.upgrade-trigger-link'));
+  for (const link of links) {
+    const alreadyBound =
+      link.dataset?.upgradeBound === 'true' || link.getAttribute?.('data-upgrade-bound') === 'true';
+    if (alreadyBound) continue;
+
+    if (link.dataset) link.dataset.upgradeBound = 'true';
+    else link.setAttribute?.('data-upgrade-bound', 'true');
+
+    link.addEventListener('click', (e) => {
+      if (typeof e?.preventDefault === 'function') e.preventDefault();
+      const targetTier =
+        link.dataset?.upgradeTier || link.getAttribute?.('data-upgrade-tier') || 'pro';
+      const exportType =
+        link.dataset?.exportType || link.getAttribute?.('data-export-type') || 'export';
+      openPlanUpgradePrompt({
+        tier: targetTier,
+        exportType,
+        triggerEl: link,
+        root,
+      });
+    });
+    boundCount++;
+  }
+
+  const upgradeDlg = root.querySelector?.('#dlg-plan-upgrade');
+  if (upgradeDlg) {
+    const dlgAlreadyBound =
+      upgradeDlg.dataset?.upgradeControlsBound === 'true' ||
+      upgradeDlg.getAttribute?.('data-upgrade-controls-bound') === 'true';
+    if (!dlgAlreadyBound) {
+      if (upgradeDlg.dataset) upgradeDlg.dataset.upgradeControlsBound = 'true';
+      else upgradeDlg.setAttribute?.('data-upgrade-controls-bound', 'true');
+
+      const closeUpgradeModal = () => {
+        if (typeof upgradeDlg.close === 'function') {
+          upgradeDlg.close();
+        } else {
+          upgradeDlg.removeAttribute?.('open');
+          upgradeDlg.open = false;
+          upgradeDlg.hidden = true;
+        }
+      };
+
+      upgradeDlg
+        .querySelector?.('#btn-upgrade-close')
+        ?.addEventListener('click', closeUpgradeModal);
+
+      const tierButtons = Array.from(upgradeDlg.querySelectorAll?.('[data-select-tier]') || []);
+      for (const btn of tierButtons) {
+        btn.addEventListener('click', () => {
+          const selected =
+            btn.dataset?.selectTier || btn.getAttribute?.('data-select-tier') || 'pro';
+          const label = selected === 'plus' ? 'Plus' : 'Pro';
+          closeUpgradeModal();
+          if ($('#toast')) {
+            toast(
+              `Homegen ${label} upgrade selected. Visit billing settings to activate ${label}.`
+            );
+          }
+        });
+      }
+    }
+  }
+
+  return boundCount;
+}
+
+if (typeof document !== 'undefined') {
+  bindUpgradeTriggerLinks(document);
+}
+
 $('#export-pdf')?.addEventListener('click', (e) => {
   if (!doc.rooms || doc.rooms.length === 0) {
     toast('Cannot export PDF: add at least one room first.', true);
@@ -3883,6 +5341,8 @@ $('#export-pdf')?.addEventListener('click', (e) => {
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
   const dlg = $('#pdf-export');
   if (dlg) {
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -3959,6 +5419,8 @@ $('#export-csv')?.addEventListener('click', (e) => {
   const returnFocusEl = e.currentTarget || document.activeElement;
   const dlg = $('#csv-export');
   if (dlg) {
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -3977,6 +5439,7 @@ $('#csv-generate')?.addEventListener('click', () => {
       includeOpenings: $('#csv-sec-openings')?.checked !== false,
       includeFinishes: $('#csv-sec-finishes')?.checked !== false,
       includeRooms: $('#csv-sec-rooms')?.checked !== false,
+      includePricing: $('#csv-inc-pricing')?.checked !== false,
     };
 
     if (
@@ -4023,6 +5486,8 @@ $('#export-dxf')?.addEventListener('click', (e) => {
         }
       }
     }
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4255,12 +5720,17 @@ if (typeof document !== 'undefined') {
   });
 
   $('#gis-crs')?.addEventListener('change', (e) => {
-    if (doc.site && doc.site.features) {
-      loadGISSubsystem(
-        { type: 'FeatureCollection', features: doc.site.features },
-        { crs: e.target.value }
-      );
+    const crs = e.detail?.value ?? e.target?.value;
+    if (crs && doc.site && doc.site.features) {
+      loadGISSubsystem({ type: 'FeatureCollection', features: doc.site.features }, { crs });
     }
+  });
+
+  document.querySelector('label[for="gis-crs"]')?.addEventListener('click', () => {
+    $('#gis-crs')?.focus();
+  });
+  document.querySelector('label[for="gis-map-preset"]')?.addEventListener('click', () => {
+    $('#gis-map-preset')?.focus();
   });
 }
 
@@ -4306,7 +5776,7 @@ export const SAMPLE_MUNICIPAL_GIS = {
   ],
 };
 
-export function loadGISSubsystem(geojson, options = {}) {
+function loadGISSubsystem(geojson, options = {}) {
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.importGeoJSON(geojson, {
     targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
@@ -4320,7 +5790,7 @@ export function loadGISSubsystem(geojson, options = {}) {
   return doc.site;
 }
 
-export function setGISSegmentSetback(segmentId, setbackDistance) {
+function setGISSegmentSetback(segmentId, setbackDistance) {
   if (!doc.site) return null;
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
@@ -4334,6 +5804,16 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
 export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  const gisCrsSelect = $('#gis-crs');
+  if (gisCrsSelect && doc.site?.crs) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
+      gisCrsSelect.value = doc.site.crs;
+    }
+  }
   const gisMapSelect = $('#gis-map-preset');
   if (gisMapSelect) gisMapSelect.value = doc.background?.presetKey || '';
   renderGISSegments();
@@ -4341,14 +5821,16 @@ export function openGISDialog() {
   else dlg.setAttribute('open', '');
 }
 
-export function closeGISDialog() {
+function closeGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
 }
 
-export function renderGISSegments() {
+export { renderGISSegments };
+
+function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
   if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
@@ -4363,7 +5845,7 @@ export function renderGISSegments() {
   for (const seg of doc.site.segments) {
     html += `<tr class="gis-table-row">
       <td class="gis-table-cell">${seg.label || seg.id}</td>
-      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" class="gis-setback-input"></k-input> in</td>
+      <td class="gis-table-cell"><k-input type="number" min="0" max="360" value="${seg.setback ?? 36}" data-seg-id="${seg.id}" aria-label="${seg.label || seg.id} setback (inches)" class="gis-setback-input"></k-input> in</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -4378,6 +5860,7 @@ export function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -4495,7 +5978,7 @@ if (typeof document !== 'undefined')
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
-function switchTab(targetBtn, shouldFocus = false) {
+export function switchTab(targetBtn, shouldFocus = false) {
   if (!targetBtn) return;
   tab = targetBtn.dataset.tab;
   const buttons = document.querySelectorAll('#tabs button, #tabs k-tab');
@@ -4555,10 +6038,11 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   }
 }
 
-let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  initShortcutOverlayUI();
   setupAddRoomDimsModal();
+  setupDraftingCurveHud();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
   window.addEventListener('keydown', (e) => {
@@ -4628,15 +6112,30 @@ if (typeof window !== 'undefined') {
       $('#redo').click();
     } else if (lk === 'r') rotateSelected();
     else if (lk === 'escape') {
+      const historyPopover = $('#history-popover');
+      const hasOpenHistory = Boolean(historyPopover && !historyPopover.hidden);
+      if (toast._state?.active && !selection && tool.kind === 'select' && !hasOpenHistory) {
+        e.preventDefault();
+        dismissToast({ restoreFocus: true });
+        return;
+      }
       if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+      activeDraftCurveEdge = null;
+      draftConcavitySign = 1;
+      syncDraftingCurveHud();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
       if (hint && tool.kind === 'room') hint.textContent = '';
-      const historyPopover = $('#history-popover');
-      if (historyPopover && !historyPopover.hidden) {
+      if (hasOpenHistory) {
         historyPopover.hidden = true;
         $('#history-btn')?.setAttribute('aria-expanded', 'false');
+        if (activeHistoryPopoverCleanup) {
+          activeHistoryPopoverCleanup();
+          activeHistoryPopoverCleanup = null;
+        } else {
+          $('#history-btn')?.focus();
+        }
       }
       setTool({ kind: 'select' });
       select(null);
@@ -4652,8 +6151,8 @@ if (typeof window !== 'undefined') {
     } else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
     else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in').click();
-    else if (k === '-') $('#zoom-out').click();
+    else if (k === '+' || k === '=') $('#zoom-in')?.click();
+    else if (k === '-') $('#zoom-out')?.click();
   });
 
   window.addEventListener('resize', resize);
@@ -4671,20 +6170,18 @@ if (typeof window !== 'undefined') {
     snappingBridge,
   });
 
-  function toggleHistoryPopover() {
-    const popover = $('#history-popover');
-    const btn = $('#history-btn');
-    if (!popover) return;
-    const isHidden = popover.hidden;
-    popover.hidden = !isHidden;
-    if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-  }
-
   $('#history-btn')?.addEventListener('click', toggleHistoryPopover);
   $('#history-close')?.addEventListener('click', () => {
     const popover = $('#history-popover');
+    const btn = $('#history-btn');
     if (popover) popover.hidden = true;
-    $('#history-btn')?.setAttribute('aria-expanded', 'false');
+    btn?.setAttribute('aria-expanded', 'false');
+    if (activeHistoryPopoverCleanup) {
+      activeHistoryPopoverCleanup();
+      activeHistoryPopoverCleanup = null;
+    } else {
+      btn?.focus();
+    }
   });
 
   renderPalette();
@@ -4697,6 +6194,24 @@ if (typeof window !== 'undefined') {
     openWelcomeWizard();
   });
 }
+function toggleHistoryPopover() {
+  const popover = $('#history-popover');
+  const btn = $('#history-btn');
+  if (!popover) return;
+  const isHidden = popover.hidden;
+  popover.hidden = !isHidden;
+  if (btn) btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+  if (isHidden) {
+    if (activeHistoryPopoverCleanup) activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = trapFocus(popover, btn);
+  } else if (activeHistoryPopoverCleanup) {
+    activeHistoryPopoverCleanup();
+    activeHistoryPopoverCleanup = null;
+  } else {
+    btn?.focus();
+  }
+}
+
 function triggerCalibrationDialog(p1, p2) {
   const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (distPx <= 0) {
@@ -4908,7 +6423,8 @@ $('#bg-map-preset')?.addEventListener('change', (e) => {
   handleMapPresetSelect(e.target.value);
 });
 $('#gis-map-preset')?.addEventListener('change', (e) => {
-  handleMapPresetSelect(e.target.value);
+  const presetKey = e.detail?.value ?? e.target?.value ?? '';
+  handleMapPresetSelect(presetKey);
 });
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
@@ -5453,9 +6969,94 @@ function closeCommandPalette() {
   dlg.open = false;
 }
 
-function openShortcutOverlay() {
+function setShortcutElementHidden(el, isHidden) {
+  if (!el) return;
+  el.hidden = isHidden;
+  if (isHidden) {
+    if (typeof el.setAttribute === 'function') el.setAttribute('hidden', '');
+  } else if (typeof el.removeAttribute === 'function') {
+    el.removeAttribute('hidden');
+  }
+}
+
+function getShortcutRowSearchText(row) {
+  if (!row) return '';
+  if (row.children && row.children.length > 0) {
+    const parts = Array.from(row.children).map((child) => child.textContent || '');
+    return `${parts.join(' ')} ${row.textContent || ''}`.toLowerCase();
+  }
+  return (row.textContent || '').toLowerCase();
+}
+
+export function filterShortcuts(query = '') {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return 0;
+  const q = String(query ?? '')
+    .trim()
+    .toLowerCase();
+  const compactQuery = q.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+  const groups =
+    typeof dlg.querySelectorAll === 'function'
+      ? Array.from(dlg.querySelectorAll('.shortcut-group'))
+      : [];
+  let totalVisible = 0;
+
+  groups.forEach((group) => {
+    const rows =
+      typeof group.querySelectorAll === 'function'
+        ? Array.from(group.querySelectorAll('.shortcut-row'))
+        : [];
+    let groupVisibleCount = 0;
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) {
+        groupVisibleCount += 1;
+        totalVisible += 1;
+      }
+    });
+    setShortcutElementHidden(group, Boolean(q) && groupVisibleCount === 0);
+  });
+
+  if (groups.length === 0 && typeof dlg.querySelectorAll === 'function') {
+    const rows = Array.from(dlg.querySelectorAll('.shortcut-row'));
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) totalVisible += 1;
+    });
+  }
+
+  const gridEl =
+    typeof dlg.querySelector === 'function' ? dlg.querySelector('.shortcut-grid') : null;
+  if (gridEl) {
+    setShortcutElementHidden(gridEl, Boolean(q) && totalVisible === 0);
+  }
+
+  const noResultsEl =
+    $('#shortcut-no-results') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-no-results') : null);
+  if (noResultsEl) {
+    setShortcutElementHidden(noResultsEl, !(Boolean(q) && totalVisible === 0));
+  }
+
+  return totalVisible;
+}
+
+export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  const searchInput =
+    $('#shortcut-search') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.value = '';
+  }
+  filterShortcuts('');
   if (typeof dlg.showModal === 'function') {
     try {
       dlg.showModal();
@@ -5466,9 +7067,12 @@ function openShortcutOverlay() {
     dlg.setAttribute('open', '');
   }
   dlg.open = true;
+  if (searchInput && typeof searchInput.focus === 'function') {
+    searchInput.focus();
+  }
 }
 
-function closeShortcutOverlay() {
+export function closeShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
@@ -5527,7 +7131,7 @@ function renderCommandList(query = '') {
       const isSelected = idx === selectedCmdIndex;
       const optionId = `cmd-option-${idx}`;
       const kbdHtml = cmd.shortcut
-        ? `<span class="keys"><kbd>${esc(cmd.shortcut)}</kbd></span>`
+        ? `<span class="keys"><k-kbd>${esc(cmd.shortcut)}</k-kbd></span>`
         : '';
       return `<li id="${optionId}" data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
         <div class="cmd-item-main">
@@ -5610,10 +7214,32 @@ function initCommandPaletteUI() {
   }
 }
 
+function initShortcutOverlayUI() {
+  const dlg = $('#shortcut-overlay');
+  const searchInput =
+    $('#shortcut-search') ||
+    (dlg && typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      const val =
+        e && e.target && typeof e.target.value === 'string' ? e.target.value : searchInput.value;
+      filterShortcuts(val);
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
+    get view() {
+      return view;
+    },
+    announceZoom,
+    zoomAt,
+    fit,
+    toast,
+    dismissToast,
     setLevel,
     formRow,
     get doc() {
@@ -5628,6 +7254,7 @@ if (typeof window !== 'undefined')
     selectTemplate,
     TEMPLATES,
     setTool,
+    parseRoomDimensionsInput,
     select,
     isSelected,
     getSelectionList,
@@ -5635,6 +7262,13 @@ if (typeof window !== 'undefined')
     moveSelectedSpatial,
     getSpatialElements,
     interaction,
+    syncDraftingCurveHud,
+    parseCurveHudInput,
+    bulgeFromRadius,
+    radiusFromBulge,
+    bulgeFromSagitta,
+    sagittaFromBulge,
+    renderSnapToggles,
     generatePDF,
     applyCalibration,
     apply3PointCalibration,
@@ -5644,6 +7278,7 @@ if (typeof window !== 'undefined')
     computeGeoBounds,
     worldfileToAffineMatrix,
     setBackgroundAttribution,
+    renderBgToolbar,
     renderCompliance,
     renderViolationItem,
     complianceScene,
@@ -5655,8 +7290,10 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    filterShortcuts,
     renderCommandList,
     trapFocus,
+    toggleHistoryPopover,
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
@@ -5678,4 +7315,14 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     SAMPLE_MUNICIPAL_GIS,
+    PLAN_TIER_RANKS,
+    getCurrentPlanTier,
+    initExportModalTierState,
+    openPlanUpgradePrompt,
+    bindUpgradeTriggerLinks,
+    renderCatalogPanel,
+    renderPalette,
+    getCatalogFilters,
+    setCatalogFilters,
+    resetCatalogFilters,
   };

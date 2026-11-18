@@ -12,6 +12,14 @@
   --overlay-blur: 12px;
   --overlay-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.4));
   --overlay-color: var(--ktheme-text, var(--ink, #f3f4f6));
+  --tier-pro-bg: var(--metallic-gold-base, var(--ktheme-primary, #d4af37));
+  --tier-pro-text: var(--ktheme-on-primary, #0a1630);
+  --tier-pro-border: var(--metallic-gold-highlight, var(--ktheme-primary, #ffd700));
+  --tier-plus-bg: var(--ktheme-accent-muted, rgba(129, 140, 248, 0.18));
+  --tier-plus-text: var(--ktheme-text, #f3f4f6);
+  --tier-plus-border: var(--ktheme-accent, #818cf8);
+  --upgrade-banner-bg: var(--ktheme-accent-muted, rgba(129, 140, 248, 0.14));
+  --upgrade-banner-border: var(--ktheme-accent, #818cf8);
 }
 
 /* 1. Modal Dialog Overlay Component */
@@ -32,6 +40,88 @@
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+
+/* Spotlight Onboarding Overlay & Non-Dismissible Backdrop Shield */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+.onboarding-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.onboarding-mask-path {
+  fill: rgba(12, 14, 20, 0.72);
+  pointer-events: auto;
+}
+
+.onboarding-focus-ring {
+  fill: none;
+  stroke: var(--ktheme-accent);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
+.onboarding-popover {
+  position: absolute;
+  z-index: 1001;
+  pointer-events: auto;
+  width: min(360px, 90vw);
+  padding: var(--space-4, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.spotlight-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.spotlight-badge {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--ktheme-accent);
+  background: var(--ktheme-accent-muted, rgba(129, 140, 248, 0.15));
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.spotlight-title {
+  margin: 0;
+  font-size: var(--font-size-lg, 16px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--overlay-color);
+}
+
+.spotlight-desc {
+  margin: 0;
+  font-size: var(--font-size-sm, 12px);
+  color: var(--ktheme-text-muted);
+  line-height: var(--line-height-normal, 1.5);
+}
+
+.spotlight-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-1, 4px);
+}
+
+.spotlight-nav-btns {
+  display: flex;
+  gap: var(--space-2, 8px);
 }
 
 /* 2. Side / Floating Drawer Component */
@@ -74,6 +164,24 @@
   padding: 8px 16px;
   font-size: 13px;
   pointer-events: auto;
+}
+
+.scene3d-hud-attribution {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  pointer-events: none;
+  z-index: 15;
+  background: var(--overlay-bg-hud, rgba(18, 24, 38, 0.88));
+  color: var(--ktheme-text, rgb(248, 250, 252));
+  padding: 5px 10px;
+  border: 1px solid var(--overlay-border, rgba(255, 255, 255, 0.25));
+  border-radius: var(--radius-xs, 4px);
+  font-size: var(--font-size-xs, 11px);
+  font-family: var(--font-family-sans);
+  backdrop-filter: blur(var(--overlay-blur, 4px));
+  -webkit-backdrop-filter: blur(var(--overlay-blur, 4px));
+  box-shadow: var(--shadow-sm);
 }
 
 /* 4. Embedded / Floating Preview Card Component */
@@ -326,4 +434,333 @@
   display: inline-block;
   min-height: 24px;
   min-width: 24px;
+}
+
+.k-overlay-dialog .row k-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 10. Plan Tier Badges & Export Upgrade Triggers */
+.dlg-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.plan-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+
+.plan-tier-pro {
+  background: var(--tier-pro-bg);
+  color: var(--tier-pro-text);
+  border-color: var(--tier-pro-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.plan-tier-plus {
+  background: var(--tier-plus-bg);
+  color: var(--tier-plus-text);
+  border-color: var(--tier-plus-border);
+}
+
+.plan-tier-badge[data-tier-state='unlocked'] {
+  opacity: 0.85;
+}
+
+.export-field-label {
+  width: auto;
+  min-width: 124px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.upgrade-trigger-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-3);
+  background: var(--upgrade-banner-bg);
+  border: 1px solid var(--upgrade-banner-border);
+  border-radius: var(--radius-md);
+  color: var(--overlay-color);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.upgrade-trigger-banner[hidden] {
+  display: none !important;
+}
+
+.upgrade-trigger-copy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.upgrade-trigger-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  min-width: 24px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--ktheme-accent);
+  color: var(--ktheme-on-primary);
+  border: 1px solid var(--ktheme-accent);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.upgrade-trigger-link:hover {
+  background: var(--ktheme-accent-hover);
+  border-color: var(--ktheme-accent-hover);
+}
+
+.upgrade-trigger-link:focus-visible {
+  outline: 2px solid var(--overlay-color);
+  outline-offset: 2px;
+}
+
+.upgrade-prompt-lead {
+  margin: 0 0 var(--space-3);
+  color: var(--ktheme-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.upgrade-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.upgrade-tier-card {
+  background: var(--ktheme-bg-elevated);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+}
+
+.upgrade-tier-card.highlighted {
+  border-color: var(--ktheme-accent);
+  box-shadow: var(--shadow-md);
+}
+
+.upgrade-tier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.upgrade-tier-head h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--overlay-color);
+}
+
+.upgrade-tier-price {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--overlay-color);
+}
+
+.upgrade-tier-features {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--ktheme-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+@media (max-width: 540px) {
+  .upgrade-trigger-banner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-3);
+  }
+
+  .upgrade-trigger-copy {
+    flex: 1 1 auto;
+    align-items: flex-start;
+  }
+
+  .upgrade-trigger-link {
+    width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+}
+
+/* 11. Parametric Curve Drafting HUD & Inspector Controls */
+.k-overlay-hud[hidden],
+.curve-drafting-hud[hidden],
+.curve-input-error[hidden] {
+  display: none !important;
+}
+
+.curve-drafting-hud {
+  top: auto;
+  bottom: 18px;
+  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 14px;
+  max-width: calc(100% - 28px);
+  color: var(--overlay-color);
+}
+
+.curve-drafting-hud .hud-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.curve-hud-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.curve-hud-field label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--overlay-color);
+  white-space: nowrap;
+}
+
+.curve-hud-field input,
+.curve-hud-field select {
+  width: 78px;
+  min-height: 26px;
+  padding: 2px 6px;
+  font-size: var(--font-size-xs);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  box-sizing: border-box;
+}
+
+.curve-hud-field select {
+  width: 118px;
+}
+
+.curve-hud-field input[aria-invalid='true'],
+.curve-inspector-group input[aria-invalid='true'] {
+  border-color: var(--ktheme-critical);
+  outline: 1px solid var(--ktheme-critical);
+}
+
+.curve-hud-meta,
+.curve-chord-badge {
+  font-size: var(--font-size-xs);
+  color: var(--ktheme-text-muted);
+  white-space: nowrap;
+}
+
+.curve-drafting-hud button {
+  padding: 3px 8px;
+  font-size: var(--font-size-xs);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.curve-drafting-hud button:hover {
+  border-color: var(--ktheme-accent);
+}
+
+.curve-inspector-group {
+  margin-top: 10px;
+  padding: 8px;
+  background: var(--ktheme-bg-muted, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-sm);
+}
+
+.curve-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.curve-inspector-head h4 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.curve-inspector-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.curve-inspector-actions button {
+  flex: 1;
+  min-height: 26px;
+  font-size: var(--font-size-xs);
+  padding: 3px 6px;
+}
+
+.curve-input-error {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--ktheme-critical);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-critical);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.35;
+  flex-basis: 100%;
 }
