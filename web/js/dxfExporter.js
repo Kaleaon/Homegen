@@ -18,56 +18,119 @@ import { computeMarchingSquares } from './elevationEngine.js';
  */
 function stitchSegmentsToPolylines(lines) {
   if (!lines || lines.length === 0) return [];
-  const remaining = lines.map((l) => ({ ...l }));
-  const polylines = [];
+  const n = lines.length;
+  const TOL_SQ = 1e-8;
+  const INV_CELL = 1e4;
+  const used = new Uint8Array(n);
+  const grid = new Map();
 
-  while (remaining.length > 0) {
-    const first = remaining.pop();
-    const pts = [
-      { x: first.x1, y: first.y1 },
-      { x: first.x2, y: first.y2 },
-    ];
+  const addEndpoint = (x, y, entry) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const gx = Math.floor(x * INV_CELL);
+    const gy = Math.floor(y * INV_CELL);
+    let col = grid.get(gx);
+    if (!col) {
+      col = new Map();
+      grid.set(gx, col);
+    }
+    let bucket = col.get(gy);
+    if (!bucket) {
+      bucket = [];
+      col.set(gy, bucket);
+    }
+    bucket.push(entry);
+  };
 
-    let extended = true;
-    while (extended) {
-      extended = false;
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
+  for (let i = 0; i < n; i++) {
+    const seg = lines[i];
+    addEndpoint(seg.x1, seg.y1, i * 2);
+    addEndpoint(seg.x2, seg.y2, i * 2 + 1);
+  }
 
-      for (let i = 0; i < remaining.length; i++) {
-        const seg = remaining[i];
-        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
-          pts.push({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(tail.x - seg.x2, tail.y - seg.y2) < 1e-4) {
-          pts.push({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
-          pts.unshift({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x1, head.y - seg.y1) < 1e-4) {
-          pts.unshift({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
+  const claimConnectedPoint = (px, py) => {
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    const gx = Math.floor(px * INV_CELL);
+    const gy = Math.floor(py * INV_CELL);
+    let bestEntry = Infinity;
+    for (let ox = -1; ox <= 1; ox++) {
+      const col = grid.get(gx + ox);
+      if (!col) continue;
+      for (let oy = -1; oy <= 1; oy++) {
+        const bucket = col.get(gy + oy);
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const entry = bucket[k];
+          if (entry >= bestEntry) break;
+          const segIdx = Math.floor(entry / 2);
+          if (used[segIdx]) continue;
+          const seg = lines[segIdx];
+          const isEnd2 = entry % 2 === 1;
+          const ex = isEnd2 ? seg.x2 : seg.x1;
+          const ey = isEnd2 ? seg.y2 : seg.y1;
+          const dx = px - ex;
+          const dy = py - ey;
+          if (dx * dx + dy * dy < TOL_SQ) {
+            bestEntry = entry;
+            break;
+          }
         }
       }
+    }
+    if (bestEntry === Infinity) return null;
+    const bestSegIdx = Math.floor(bestEntry / 2);
+    used[bestSegIdx] = 1;
+    const bestSeg = lines[bestSegIdx];
+    return bestEntry % 2 === 1
+      ? { x: bestSeg.x1, y: bestSeg.y1 }
+      : { x: bestSeg.x2, y: bestSeg.y2 };
+  };
+
+  const polylines = [];
+  for (let startIdx = n - 1; startIdx >= 0; startIdx--) {
+    if (used[startIdx]) continue;
+    used[startIdx] = 1;
+    const first = lines[startIdx];
+
+    const forward = [];
+    let tx = first.x2;
+    let ty = first.y2;
+    for (;;) {
+      const nextPt = claimConnectedPoint(tx, ty);
+      if (!nextPt) break;
+      forward.push(nextPt);
+      tx = nextPt.x;
+      ty = nextPt.y;
+    }
+
+    const backward = [];
+    let hx = first.x1;
+    let hy = first.y1;
+    for (;;) {
+      const prevPt = claimConnectedPoint(hx, hy);
+      if (!prevPt) break;
+      backward.push(prevPt);
+      hx = prevPt.x;
+      hy = prevPt.y;
+    }
+
+    const pts = new Array(backward.length + 2 + forward.length);
+    let pIdx = 0;
+    for (let b = backward.length - 1; b >= 0; b--) {
+      pts[pIdx++] = backward[b];
+    }
+    pts[pIdx++] = { x: first.x1, y: first.y1 };
+    pts[pIdx++] = { x: first.x2, y: first.y2 };
+    for (let f = 0; f < forward.length; f++) {
+      pts[pIdx++] = forward[f];
     }
 
     let isClosed = false;
     if (pts.length > 2) {
       const head = pts[0];
       const tail = pts[pts.length - 1];
-      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
+      const dx = head.x - tail.x;
+      const dy = head.y - tail.y;
+      if (dx * dx + dy * dy < TOL_SQ) {
         isClosed = true;
         pts.pop();
       }

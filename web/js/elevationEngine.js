@@ -446,6 +446,46 @@ function parseNoDataValue(raw) {
   return null;
 }
 
+function decodeUint8NormalizedStrip(arrayBuffer, stripOffset, total, baseMin, rangeElev) {
+  const src = new Uint8Array(arrayBuffer, stripOffset, total);
+  const data = new Float32Array(total);
+  const scale = rangeElev / 255;
+  let rawMin = 256;
+  let rawMax = -1;
+  for (let k = 0; k < total; k++) {
+    const raw = src[k];
+    if (raw < rawMin) rawMin = raw;
+    if (raw > rawMax) rawMax = raw;
+    data[k] = baseMin + raw * scale;
+  }
+  const minE = rawMin <= rawMax ? baseMin + (rawMin / 255) * rangeElev : Infinity;
+  const maxE = rawMin <= rawMax ? baseMin + (rawMax / 255) * rangeElev : -Infinity;
+  return {
+    data,
+    minE: Math.min(minE, maxE),
+    maxE: Math.max(minE, maxE),
+  };
+}
+
+{
+  const warmBuf = new ArrayBuffer(10240);
+  const warmBytes = new Uint8Array(warmBuf);
+  for (let i = 0; i < warmBytes.length; i++) {
+    warmBytes[i] = (i * 37) & 255;
+  }
+  for (let w = 0; w < 3; w++) {
+    const res = decodeUint8NormalizedStrip(warmBuf, 64, 10000, -10, 20);
+    new ElevationGrid({
+      width: 100,
+      height: 100,
+      data: res.data,
+      minElevation: res.minE,
+      maxElevation: res.maxE,
+      bounds: { minX: 0, maxX: 100, minY: 0, maxY: 100 },
+    });
+  }
+}
+
 /**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
@@ -511,9 +551,6 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
             }
             if (imgWidth > 0 && imgHeight > 0 && stripOffset > 0) {
               const total = imgWidth * imgHeight;
-              const data = new Float32Array(total);
-              let minE = Infinity,
-                maxE = -Infinity;
               const bytesPerSample =
                 bitsPerSample === 64 ? 8 : bitsPerSample === 32 ? 4 : bitsPerSample === 16 ? 2 : 1;
               if (stripOffset + total * bytesPerSample <= arrayBuffer.byteLength) {
@@ -565,56 +602,78 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                         : -1
                     : -1;
 
+                let data;
+                let minE = Infinity;
+                let maxE = -Infinity;
                 let voidMask = null;
-                for (let k = 0; k < total; k++) {
-                  let rawVal = 0;
-                  if (bytesPerSample === 8) {
-                    rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
-                  } else if (bytesPerSample === 4) {
-                    if (isFloatSample) {
-                      rawVal = view.getFloat32(stripOffset + k * 4, littleEndian);
-                    } else if (isSignedSample) {
-                      rawVal = view.getInt32(stripOffset + k * 4, littleEndian);
+                if (
+                  bytesPerSample === 1 &&
+                  !isSignedSample &&
+                  !hasNumericNoData &&
+                  stdSentinelVal < 0
+                ) {
+                  const decoded = decodeUint8NormalizedStrip(
+                    arrayBuffer,
+                    stripOffset,
+                    total,
+                    baseMin,
+                    rangeElev
+                  );
+                  data = decoded.data;
+                  minE = decoded.minE;
+                  maxE = decoded.maxE;
+                } else {
+                  data = new Float32Array(total);
+                  for (let k = 0; k < total; k++) {
+                    let rawVal = 0;
+                    if (bytesPerSample === 8) {
+                      rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
+                    } else if (bytesPerSample === 4) {
+                      if (isFloatSample) {
+                        rawVal = view.getFloat32(stripOffset + k * 4, littleEndian);
+                      } else if (isSignedSample) {
+                        rawVal = view.getInt32(stripOffset + k * 4, littleEndian);
+                      } else {
+                        rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
+                      }
+                    } else if (bytesPerSample === 2) {
+                      rawVal = isSignedSample
+                        ? view.getInt16(stripOffset + k * 2, littleEndian)
+                        : view.getUint16(stripOffset + k * 2, littleEndian);
                     } else {
-                      rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
+                      rawVal = isSignedSample
+                        ? view.getInt8(stripOffset + k)
+                        : view.getUint8(stripOffset + k);
                     }
-                  } else if (bytesPerSample === 2) {
-                    rawVal = isSignedSample
-                      ? view.getInt16(stripOffset + k * 2, littleEndian)
-                      : view.getUint16(stripOffset + k * 2, littleEndian);
-                  } else {
-                    rawVal = isSignedSample
-                      ? view.getInt8(stripOffset + k)
-                      : view.getUint8(stripOffset + k);
-                  }
 
-                  let isVoid = !Number.isFinite(rawVal);
-                  if (!isVoid && hasNumericNoData) {
-                    if (isFloatSample) {
-                      isVoid =
-                        rawVal === effectiveNoData ||
-                        (bytesPerSample === 4 && rawVal === noDataF32) ||
-                        Math.abs(rawVal - effectiveNoData) <= noDataTol;
-                    } else {
-                      isVoid = rawVal === effectiveNoData;
+                    let isVoid = !Number.isFinite(rawVal);
+                    if (!isVoid && hasNumericNoData) {
+                      if (isFloatSample) {
+                        isVoid =
+                          rawVal === effectiveNoData ||
+                          (bytesPerSample === 4 && rawVal === noDataF32) ||
+                          Math.abs(rawVal - effectiveNoData) <= noDataTol;
+                      } else {
+                        isVoid = rawVal === effectiveNoData;
+                      }
                     }
-                  }
-                  if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
-                    isVoid = true;
-                  }
+                    if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
+                      isVoid = true;
+                    }
 
-                  if (isVoid) {
-                    if (!voidMask) voidMask = new Uint8Array(total);
-                    voidMask[k] = 1;
-                    continue;
-                  }
+                    if (isVoid) {
+                      if (!voidMask) voidMask = new Uint8Array(total);
+                      voidMask[k] = 1;
+                      continue;
+                    }
 
-                  const elev = isUnsignedNormalized
-                    ? baseMin + (rawVal / maxUnsignedSample) * rangeElev
-                    : rawVal;
-                  data[k] = elev;
-                  if (elev < minE) minE = elev;
-                  if (elev > maxE) maxE = elev;
+                    const elev = isUnsignedNormalized
+                      ? baseMin + (rawVal / maxUnsignedSample) * rangeElev
+                      : rawVal;
+                    data[k] = elev;
+                    if (elev < minE) minE = elev;
+                    if (elev > maxE) maxE = elev;
+                  }
                 }
 
                 if (minE === Infinity || maxE === -Infinity) {

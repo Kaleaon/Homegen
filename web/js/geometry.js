@@ -16,6 +16,8 @@ if (proj4 && proj4.defs) {
   registerAllEPSG(proj4);
 }
 
+const proj4ConverterCache = new Map();
+
 function tryProj4(sDef, tDef, pt) {
   try {
     if (sDef.startsWith('EPSG:') && !isRegisteredEPSG(sDef)) {
@@ -26,7 +28,15 @@ function tryProj4(sDef, tDef, pt) {
       console.warn(`[Geometry] Unsupported EPSG projection code "${tDef}". Falling back safely.`);
       return null;
     }
-    const res = proj4(sDef, tDef, pt);
+    const pairKey = `${sDef}->${tDef}`;
+    let converter = proj4ConverterCache.get(pairKey);
+    if (!converter) {
+      converter = proj4(sDef, tDef);
+      if (proj4ConverterCache.size < 128) {
+        proj4ConverterCache.set(pairKey, converter);
+      }
+    }
+    const res = converter.forward([pt[0], pt[1]]);
     if (!res || isNaN(res[0]) || isNaN(res[1])) {
       console.warn(`[Geometry] Reprojection returned invalid coordinates for ${sDef} -> ${tDef}`);
       return null;
@@ -41,6 +51,8 @@ function tryProj4(sDef, tDef, pt) {
 function safeProj4(sDef, tDef, pt) {
   return tryProj4(sDef, tDef, pt) || [pt[0], pt[1]];
 }
+
+const crsDefCache = new Map();
 
 class SpatialCache {
   constructor(maxSize = 2000) {
@@ -63,7 +75,9 @@ class SpatialCache {
           : JSON.stringify(targetCRS);
     if (typeof coords === 'number') return `${coords}:${sStr}:${tStr}`;
     if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === 'number') {
-      return `${coords[0].toFixed(6)},${coords[1].toFixed(6)}:${sStr}:${tStr}`;
+      if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return null;
+      const base = `${Math.round(coords[0] * 1e6)},${Math.round(coords[1] * 1e6)}:${sStr}:${tStr}`;
+      return coords.length === 2 ? base : `${base}:${coords.slice(2).join(',')}`;
     }
     return null;
   }
@@ -94,9 +108,15 @@ export const reprojectionCache = new SpatialCache();
 function resolveCRSDef(crs) {
   if (!crs) return 'EPSG:4326';
   if (typeof crs === 'string') {
+    let cached = crsDefCache.get(crs);
+    if (cached !== undefined) return cached;
     const upper = crs.trim().toUpperCase();
-    if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') return 'PLAN';
-    return normalizeCode(crs) || 'EPSG:4326';
+    cached =
+      upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES'
+        ? 'PLAN'
+        : normalizeCode(crs) || 'EPSG:4326';
+    if (crsDefCache.size < 256) crsDefCache.set(crs, cached);
+    return cached;
   }
   if (typeof crs === 'object') {
     if (crs.proj4) return crs.proj4;
