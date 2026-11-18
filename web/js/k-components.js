@@ -1,6 +1,6 @@
 /**
  * Ktheme Web Components Wrapper for UI Controls
- * Defines <k-button>, <k-tab>, <k-card>, <k-input>, <k-select>
+ * Defines <k-button>, <k-tab>, <k-card>, <k-input>, <k-select>, <k-popover>, <k-kbd>
  */
 
 const KTHEME_STYLES = `
@@ -24,7 +24,7 @@ const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 /**
  * <k-button>
  */
-export class KButton extends BaseElement {
+class KButton extends BaseElement {
   static get observedAttributes() {
     return ['disabled', 'primary', 'active', 'on', 'title', 'type'];
   }
@@ -346,7 +346,7 @@ export class KInput extends BaseElement {
 /**
  * <k-tab>
  */
-export class KTab extends BaseElement {
+class KTab extends BaseElement {
   static get observedAttributes() {
     return ['active', 'selected', 'disabled', 'data-tab'];
   }
@@ -459,7 +459,7 @@ export class KTab extends BaseElement {
 /**
  * <k-card>
  */
-export class KCard extends BaseElement {
+class KCard extends BaseElement {
   static get observedAttributes() {
     return ['active', 'selected', 'primary', 'disabled'];
   }
@@ -893,12 +893,56 @@ export class KPopover extends BaseElement {
   }
 }
 
+/**
+ * <k-kbd>
+ */
+export class KKbd extends BaseElement {
+  constructor() {
+    super();
+    if (typeof this.attachShadow === 'function') {
+      this.attachShadow({ mode: 'open' });
+      this.shadowRoot.innerHTML = `
+      <style>
+        ${KTHEME_STYLES}
+        :host {
+          display: inline-block;
+          box-sizing: border-box;
+          vertical-align: baseline;
+        }
+        :host([hidden]) {
+          display: none !important;
+        }
+        kbd {
+          display: inline-block;
+          padding: 2px 6px;
+          font-family: var(--font-family-mono);
+          font-size: var(--font-size-xs, 11px);
+          line-height: 1.2;
+          color: var(--ktheme-text);
+          background-color: var(--ktheme-bg-elevated);
+          border: 1px solid var(--ktheme-border);
+          border-radius: var(--radius-xs, 4px);
+          box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+          box-sizing: border-box;
+        }
+      </style>
+      <kbd part="kbd"><slot></slot></kbd>
+    `;
+    }
+  }
+}
+
 // Register Custom Elements
-if (typeof customElements !== 'undefined') {
+if (
+  typeof customElements !== 'undefined' &&
+  typeof customElements.get === 'function' &&
+  typeof customElements.define === 'function'
+) {
   if (!customElements.get('k-button')) customElements.define('k-button', KButton);
   if (!customElements.get('k-input')) customElements.define('k-input', KInput);
   if (!customElements.get('k-select')) customElements.define('k-select', KSelect);
   if (!customElements.get('k-tab')) customElements.define('k-tab', KTab);
   if (!customElements.get('k-card')) customElements.define('k-card', KCard);
   if (!customElements.get('k-popover')) customElements.define('k-popover', KPopover);
+  if (!customElements.get('k-kbd')) customElements.define('k-kbd', KKbd);
 }
