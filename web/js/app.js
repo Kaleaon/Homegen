@@ -63,6 +63,7 @@ import {
   applyCladdingMaterial,
   resolveWindowStyle,
   resolveDoorStyle,
+  resolveWallAssembly,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
@@ -477,14 +478,48 @@ export function toast(msg, err = false, ms = 4500) {
   }
 }
 
+export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
+let zoomAnnounceTimeout = null;
+let a11yDebounceTimer = null;
 function announceToLiveRegion(msg) {
+  const live3dEl = $('#view3d-a11y-live');
+  if (live3dEl) live3dEl.textContent = msg;
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
   if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
   liveRegionTimeout = setTimeout(() => {
+    if (a11yDebounceTimer) {
+      clearTimeout(a11yDebounceTimer);
+      a11yDebounceTimer = null;
+    }
     liveEl.textContent = msg;
-  }, 100);
+  }, 220);
+}
+
+export function announceZoom(scale) {
+  if (zoomAnnounceTimeout) clearTimeout(zoomAnnounceTimeout);
+  if (a11yDebounceTimer) {
+    clearTimeout(a11yDebounceTimer);
+    a11yDebounceTimer = null;
+  }
+  if (liveRegionTimeout) {
+    clearTimeout(liveRegionTimeout);
+    liveRegionTimeout = null;
+  }
+  zoomAnnounceTimeout = setTimeout(() => {
+    zoomAnnounceTimeout = null;
+    const liveEl =
+      $('#plan-fallback-summary') ||
+      (typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('plan-fallback-summary')
+        : null);
+    if (!liveEl) return;
+    if (typeof liveEl.setAttribute === 'function' && !liveEl.getAttribute?.('role')) {
+      liveEl.setAttribute('role', 'status');
+    }
+    liveEl.textContent = `Zoom level: ${Math.round((scale / 1.6) * 100)}%`;
+  }, ZOOM_ANNOUNCE_DEBOUNCE_MS);
 }
 
 function persist() {
@@ -641,7 +676,8 @@ function renderSnapToggles() {
   bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
-export function renderBgToolbar(bg = doc.background) {
+export function renderBgToolbar() {
+  const bg = arguments.length > 0 ? arguments[0] : doc.background;
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
   if (bg && (bg.dataUrl || bg.presetKey)) {
@@ -757,8 +793,10 @@ function refresh() {
     redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   }
   renderHistoryTimeline();
-  $('#plan-name').value = doc.name;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const planNameInput = $('#plan-name');
+  if (planNameInput) planNameInput.value = doc.name;
+  const zoomLabelEl = $('#zoom-label');
+  if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
@@ -993,8 +1031,6 @@ export function badIds(rep) {
   return s;
 }
 
-let a11yDebounceTimer = null;
-
 export function updatePlanA11yTree(state, curLevel = 0) {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   if (a11yDebounceTimer) clearTimeout(a11yDebounceTimer);
@@ -1027,7 +1063,6 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  if (!ctx || !canvas) return;
   const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const state = preview ? preview.next : doc;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
@@ -1044,19 +1079,21 @@ function redraw() {
     preview,
     freshViolations: preview?.fresh || [],
   });
-  draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
-    dpr,
-    gridSettings: interaction.gridSettings,
-    complianceScene,
-    snappingBridge,
-    bad,
-    selection,
-    hover,
-    under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
-    autoFixDiffs: preview ? [] : autoFixDiffs,
-    hoveredDiffIndex,
-    overlay: (c) => drawOverlay(c, state),
-  });
+  if (ctx && canvas) {
+    draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
+      dpr,
+      gridSettings: interaction.gridSettings,
+      complianceScene,
+      snappingBridge,
+      bad,
+      selection,
+      hover,
+      under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
+      autoFixDiffs: preview ? [] : autoFixDiffs,
+      hoveredDiffIndex,
+      overlay: (c) => drawOverlay(c, state),
+    });
+  }
   updatePlanA11yTree(state, curLevel);
 }
 
@@ -1529,9 +1566,22 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     if (!window.__activeUVWall) window.__activeUVWall = 'N';
+    if (!window.__activeAssemblyScope) window.__activeAssemblyScope = 'single';
     const activeWall = window.__activeUVWall;
+    const activeAssemblyScope = window.__activeAssemblyScope;
     const uv = M.getWallUV(room, activeWall);
     const wallFinishId = room.walls?.[activeWall] || 'paint_white';
+    let activeExtFinId = room.cladding || room.exteriorCladding;
+    if (!activeExtFinId && WALL_BY_ID[wallFinishId]?.exterior) {
+      activeExtFinId = wallFinishId;
+    }
+    activeExtFinId = activeExtFinId || 'cladding_siding_white';
+    const assembly = resolveWallAssembly(
+      wallFinishId,
+      activeExtFinId,
+      room.wallAssemblyOverrides?.[activeWall]
+    );
+    const fmtInches = (v) => Number(Number(v).toFixed(3));
     const finishObj = WALL_BY_ID[wallFinishId];
     const finishLabel = finishObj
       ? finishObj.name
@@ -1649,6 +1699,49 @@ function renderInspector() {
             <option value="plan">Whole Plan</option>
           </select>
           <button id="i-uv-reset" style="font-size:0.8rem;padding:2px 6px">Reset UV</button>
+        </div>
+      </div>
+
+      <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Wall Assembly Layer Thicknesses</h4>
+      <div class="wall-assembly-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
+        ${formRow(
+          'i-wa-gypsum',
+          'Gypsum Board (in)',
+          `<input id="i-wa-gypsum" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.gypsumThickness)}" aria-label="Gypsum board thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-stud',
+          'Stud Depth (in)',
+          `<input id="i-wa-stud" type="number" step="0.25" min="1.5" max="24" value="${fmtInches(assembly.studDepth)}" aria-label="Stud framing depth in inches">`
+        )}
+        ${formRow(
+          'i-wa-sheathing',
+          'Sheathing (in)',
+          `<input id="i-wa-sheathing" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.sheathingThickness)}" aria-label="Sheathing thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-airgap',
+          'Air Gap (in)',
+          `<input id="i-wa-airgap" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.airGapThickness)}" aria-label="Air gap thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-cladding',
+          'Exterior Cladding (in)',
+          `<input id="i-wa-cladding" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.claddingThickness)}" aria-label="Exterior cladding thickness in inches">`
+        )}
+        <div class="row" style="margin:8px 0 6px;display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;padding-top:6px;border-top:1px dashed var(--border,#ddd)">
+          <span>Total Assembly Thickness (${esc(activeWall)})</span>
+          <strong id="i-wa-total" aria-live="polite">${fmtInches(assembly.totalThickness)}"</strong>
+        </div>
+        <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <select id="i-wa-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="Wall assembly override scope">
+            <option value="single" ${activeAssemblyScope === 'single' ? 'selected' : ''}>Active Wall Only</option>
+            <option value="room" ${activeAssemblyScope === 'room' ? 'selected' : ''}>Entire Room</option>
+            <option value="level" ${activeAssemblyScope === 'level' ? 'selected' : ''}>Level</option>
+            <option value="plan" ${activeAssemblyScope === 'plan' ? 'selected' : ''}>Whole Plan</option>
+          </select>
+          <button type="button" id="i-wa-reset" style="font-size:0.8rem;padding:2px 6px">Reset Assembly</button>
         </div>
       </div>
 
@@ -1859,6 +1952,110 @@ function renderInspector() {
       renderInspector();
       redraw();
       window.__scene3d?.render?.();
+    });
+
+    const readAssemblyInputs = () => {
+      const parseOr = (sel, fallback) => {
+        const val = parseFloat($(sel)?.value);
+        return Number.isFinite(val) ? val : fallback;
+      };
+      const rawOverrides = {
+        gypsumThickness: parseOr('#i-wa-gypsum', assembly.gypsumThickness),
+        studDepth: parseOr('#i-wa-stud', assembly.studDepth),
+        sheathingThickness: parseOr('#i-wa-sheathing', assembly.sheathingThickness),
+        airGapThickness: parseOr('#i-wa-airgap', assembly.airGapThickness),
+        claddingThickness: parseOr('#i-wa-cladding', assembly.claddingThickness),
+      };
+      const clamped = M.clampWallAssemblyOverrides(rawOverrides);
+      const scope = $('#i-wa-scope')?.value || 'single';
+      return { clamped, scope };
+    };
+
+    const previewAssemblyTotal = () => {
+      const { clamped } = readAssemblyInputs();
+      const resolved = resolveWallAssembly(wallFinishId, activeExtFinId, clamped);
+      const totalEl = $('#i-wa-total');
+      if (totalEl) {
+        totalEl.textContent = `${fmtInches(resolved.totalThickness)}"`;
+      }
+    };
+
+    const commitAssemblyUpdate = () => {
+      const { clamped, scope } = readAssemblyInputs();
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, clamped, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Update Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const updatedAssembly = resolveWallAssembly(
+        updatedFinish,
+        updatedExtFin,
+        updatedRoom.wallAssemblyOverrides?.[targetWall]
+      );
+      const totalInches = fmtInches(updatedAssembly.totalThickness);
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly updated to ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
+    };
+
+    ['#i-wa-gypsum', '#i-wa-stud', '#i-wa-sheathing', '#i-wa-airgap', '#i-wa-cladding'].forEach(
+      (sel) => {
+        const inputEl = $(sel);
+        if (!inputEl) return;
+        inputEl.addEventListener('input', previewAssemblyTotal);
+        inputEl.addEventListener('change', commitAssemblyUpdate);
+      }
+    );
+
+    $('#i-wa-scope')?.addEventListener('change', (e) => {
+      window.__activeAssemblyScope = e.target.value || 'single';
+    });
+
+    $('#i-wa-reset')?.addEventListener('click', () => {
+      const scope = $('#i-wa-scope')?.value || 'single';
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, null, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Reset Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const defaultAssembly = resolveWallAssembly(updatedFinish, updatedExtFin);
+      const totalInches = fmtInches(defaultAssembly.totalThickness);
+      renderInspector();
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly reset to default ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
     });
 
     const handleBuildingPresetApply = (scope) => {
@@ -2601,7 +2798,74 @@ function card(label, sub, on, attrs, swatch) {
   return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
-function renderPalette() {
+export function getCatalogFilters() {
+  return {
+    query: catalogSearchQuery,
+    maxW: catalogMaxWidth,
+    maxD: catalogMaxDepth,
+  };
+}
+
+export function setCatalogFilters({ query, maxW, maxD } = {}) {
+  if (query !== undefined) catalogSearchQuery = String(query);
+  if (maxW !== undefined) catalogMaxWidth = String(maxW);
+  if (maxD !== undefined) catalogMaxDepth = String(maxD);
+}
+
+export function resetCatalogFilters() {
+  catalogSearchQuery = '';
+  catalogMaxWidth = '';
+  catalogMaxDepth = '';
+}
+
+export function renderCatalogPanel(items = ITEMS) {
+  let h = `<div class="catalog-search-container">
+      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
+    </div>
+    <div class="catalog-filters">
+      <div class="catalog-dim-group">
+        <label for="catalog-max-w">Max W (in)</label>
+        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
+      </div>
+      <div class="catalog-dim-group">
+        <label for="catalog-max-d">Max D (in)</label>
+        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
+      </div>
+    </div>`;
+
+  const filtered = filterItems(items, {
+    query: catalogSearchQuery,
+    maxW: catalogMaxWidth,
+    maxD: catalogMaxDepth,
+  });
+
+  if (filtered.length === 0) {
+    h += `<div class="catalog-empty"><p>No matching items found</p><button id="catalog-reset-filters" class="btn secondary btn-sm catalog-reset-btn" type="button">Clear filters</button></div>`;
+  } else {
+    for (const [cat, label] of ITEM_CATEGORIES) {
+      const catItems = filtered.filter((i) => i.cat === cat);
+      if (catItems.length === 0) continue;
+      h +=
+        `<h4>${label}</h4><div class="grid">` +
+        catItems
+          .map((i) =>
+            card(
+              i.name,
+              i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
+              tool.kind === 'item' && tool.id === i.id,
+              `data-tool="item" data-id="${i.id}"`,
+              `background:${i.color}`
+            )
+          )
+          .join('') +
+        '</div>';
+    }
+  }
+
+  return h;
+}
+
+export function renderPalette() {
   const p = $('#palette');
   if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   if (!p) return;
@@ -2662,48 +2926,7 @@ function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    h += `<div class="catalog-search-container">
-      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
-    </div>
-    <div class="catalog-filters">
-      <div class="catalog-dim-group">
-        <label for="catalog-max-w">Max W (in)</label>
-        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
-      </div>
-      <div class="catalog-dim-group">
-        <label for="catalog-max-d">Max D (in)</label>
-        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
-      </div>
-    </div>`;
-
-    const filtered = filterItems(ITEMS, {
-      query: catalogSearchQuery,
-      maxW: catalogMaxWidth,
-      maxD: catalogMaxDepth,
-    });
-
-    if (filtered.length === 0) {
-      h += `<div class="catalog-empty">No matching items found</div>`;
-    } else {
-      for (const [cat, label] of ITEM_CATEGORIES) {
-        const catItems = filtered.filter((i) => i.cat === cat);
-        if (catItems.length === 0) continue;
-        h +=
-          `<h4>${label}</h4><div class="grid">` +
-          catItems
-            .map((i) =>
-              card(
-                i.name,
-                i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
-                tool.kind === 'item' && tool.id === i.id,
-                `data-tool="item" data-id="${i.id}"`,
-                `background:${i.color}`
-              )
-            )
-            .join('') +
-          '</div>';
-      }
-    }
+    h += renderCatalogPanel();
   } else if (tab === 'paint') {
     h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
@@ -2835,6 +3058,14 @@ function renderPalette() {
   });
   bindCatalogInput('catalog-max-d', (v) => {
     catalogMaxDepth = v;
+  });
+
+  $('#catalog-reset-filters')?.addEventListener('click', () => {
+    catalogSearchQuery = '';
+    catalogMaxWidth = '';
+    catalogMaxDepth = '';
+    renderPalette();
+    $('#catalog-search')?.focus?.();
   });
 
   if (activeId && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
@@ -3613,20 +3844,24 @@ canvas?.addEventListener(
   { passive: false }
 );
 
-function zoomAt(mx, my, f) {
+export function zoomAt(mx, my, f) {
   const ns = Math.max(0.4, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
   view.oy = my - ((my - view.oy) / view.scale) * ns;
   view.scale = ns;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const zoomLabel = $('#zoom-label');
+  if (zoomLabel) zoomLabel.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
+  announceZoom(view.scale);
 }
 
-function fit() {
-  const r = canvas.getBoundingClientRect();
+export function fit() {
+  const r = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
   if (!doc.rooms.length) {
     view = { scale: 1.6, ox: 40, oy: 40 };
-    return refresh();
+    refresh();
+    announceZoom(view.scale);
+    return;
   }
   const x0 = Math.min(...doc.rooms.map((q) => q.x));
   const y0 = Math.min(...doc.rooms.map((q) => q.y));
@@ -3639,6 +3874,7 @@ function fit() {
   view.ox = (r.width - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.oy = (r.height - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
   refresh();
+  announceZoom(view.scale);
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
@@ -4620,6 +4856,7 @@ $('#csv-generate')?.addEventListener('click', () => {
       includeOpenings: $('#csv-sec-openings')?.checked !== false,
       includeFinishes: $('#csv-sec-finishes')?.checked !== false,
       includeRooms: $('#csv-sec-rooms')?.checked !== false,
+      includePricing: $('#csv-inc-pricing')?.checked !== false,
     };
 
     if (
@@ -4900,17 +5137,22 @@ if (typeof document !== 'undefined') {
   });
 
   $('#gis-crs')?.addEventListener('change', (e) => {
-    if (doc.site && doc.site.features) {
-      loadGISSubsystem(
-        { type: 'FeatureCollection', features: doc.site.features },
-        { crs: e.target.value }
-      );
+    const crs = e.detail?.value ?? e.target?.value;
+    if (crs && doc.site && doc.site.features) {
+      loadGISSubsystem({ type: 'FeatureCollection', features: doc.site.features }, { crs });
     }
+  });
+
+  document.querySelector('label[for="gis-crs"]')?.addEventListener('click', () => {
+    $('#gis-crs')?.focus();
+  });
+  document.querySelector('label[for="gis-map-preset"]')?.addEventListener('click', () => {
+    $('#gis-map-preset')?.focus();
   });
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-const SAMPLE_MUNICIPAL_GIS = {
+export const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -4976,9 +5218,19 @@ function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-function openGISDialog() {
+export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  const gisCrsSelect = $('#gis-crs');
+  if (gisCrsSelect && doc.site?.crs) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
+      gisCrsSelect.value = doc.site.crs;
+    }
+  }
   const gisMapSelect = $('#gis-map-preset');
   if (gisMapSelect) gisMapSelect.value = doc.background?.presetKey || '';
   renderGISSegments();
@@ -5023,6 +5275,7 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+export { renderGISSegments };
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -5140,7 +5393,7 @@ if (typeof document !== 'undefined')
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
-function switchTab(targetBtn, shouldFocus = false) {
+export function switchTab(targetBtn, shouldFocus = false) {
   if (!targetBtn) return;
   tab = targetBtn.dataset.tab;
   const buttons = document.querySelectorAll('#tabs button, #tabs k-tab');
@@ -5203,6 +5456,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  initShortcutOverlayUI();
   setupAddRoomDimsModal();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
@@ -5309,8 +5563,8 @@ if (typeof window !== 'undefined') {
     } else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
     else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in').click();
-    else if (k === '-') $('#zoom-out').click();
+    else if (k === '+' || k === '=') $('#zoom-in')?.click();
+    else if (k === '-') $('#zoom-out')?.click();
   });
 
   window.addEventListener('resize', resize);
@@ -5581,7 +5835,8 @@ $('#bg-map-preset')?.addEventListener('change', (e) => {
   handleMapPresetSelect(e.target.value);
 });
 $('#gis-map-preset')?.addEventListener('change', (e) => {
-  handleMapPresetSelect(e.target.value);
+  const presetKey = e.detail?.value ?? e.target?.value ?? '';
+  handleMapPresetSelect(presetKey);
 });
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
@@ -6126,9 +6381,94 @@ function closeCommandPalette() {
   dlg.open = false;
 }
 
-function openShortcutOverlay() {
+function setShortcutElementHidden(el, isHidden) {
+  if (!el) return;
+  el.hidden = isHidden;
+  if (isHidden) {
+    if (typeof el.setAttribute === 'function') el.setAttribute('hidden', '');
+  } else if (typeof el.removeAttribute === 'function') {
+    el.removeAttribute('hidden');
+  }
+}
+
+function getShortcutRowSearchText(row) {
+  if (!row) return '';
+  if (row.children && row.children.length > 0) {
+    const parts = Array.from(row.children).map((child) => child.textContent || '');
+    return `${parts.join(' ')} ${row.textContent || ''}`.toLowerCase();
+  }
+  return (row.textContent || '').toLowerCase();
+}
+
+export function filterShortcuts(query = '') {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return 0;
+  const q = String(query ?? '')
+    .trim()
+    .toLowerCase();
+  const compactQuery = q.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+  const groups =
+    typeof dlg.querySelectorAll === 'function'
+      ? Array.from(dlg.querySelectorAll('.shortcut-group'))
+      : [];
+  let totalVisible = 0;
+
+  groups.forEach((group) => {
+    const rows =
+      typeof group.querySelectorAll === 'function'
+        ? Array.from(group.querySelectorAll('.shortcut-row'))
+        : [];
+    let groupVisibleCount = 0;
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) {
+        groupVisibleCount += 1;
+        totalVisible += 1;
+      }
+    });
+    setShortcutElementHidden(group, Boolean(q) && groupVisibleCount === 0);
+  });
+
+  if (groups.length === 0 && typeof dlg.querySelectorAll === 'function') {
+    const rows = Array.from(dlg.querySelectorAll('.shortcut-row'));
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) totalVisible += 1;
+    });
+  }
+
+  const gridEl =
+    typeof dlg.querySelector === 'function' ? dlg.querySelector('.shortcut-grid') : null;
+  if (gridEl) {
+    setShortcutElementHidden(gridEl, Boolean(q) && totalVisible === 0);
+  }
+
+  const noResultsEl =
+    $('#shortcut-no-results') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-no-results') : null);
+  if (noResultsEl) {
+    setShortcutElementHidden(noResultsEl, !(Boolean(q) && totalVisible === 0));
+  }
+
+  return totalVisible;
+}
+
+export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  const searchInput =
+    $('#shortcut-search') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.value = '';
+  }
+  filterShortcuts('');
   if (typeof dlg.showModal === 'function') {
     try {
       dlg.showModal();
@@ -6139,9 +6479,12 @@ function openShortcutOverlay() {
     dlg.setAttribute('open', '');
   }
   dlg.open = true;
+  if (searchInput && typeof searchInput.focus === 'function') {
+    searchInput.focus();
+  }
 }
 
-function closeShortcutOverlay() {
+export function closeShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
@@ -6283,10 +6626,30 @@ function initCommandPaletteUI() {
   }
 }
 
+function initShortcutOverlayUI() {
+  const dlg = $('#shortcut-overlay');
+  const searchInput =
+    $('#shortcut-search') ||
+    (dlg && typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      const val =
+        e && e.target && typeof e.target.value === 'string' ? e.target.value : searchInput.value;
+      filterShortcuts(val);
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
+    get view() {
+      return view;
+    },
+    announceZoom,
+    zoomAt,
+    fit,
     toast,
     dismissToast,
     setLevel,
@@ -6333,6 +6696,7 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    filterShortcuts,
     renderCommandList,
     trapFocus,
     toggleHistoryPopover,
@@ -6362,6 +6726,9 @@ if (typeof window !== 'undefined')
     initExportModalTierState,
     openPlanUpgradePrompt,
     bindUpgradeTriggerLinks,
+    renderCatalogPanel,
+    renderPalette,
+    getCatalogFilters,
+    setCatalogFilters,
+    resetCatalogFilters,
   };
-
-export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };

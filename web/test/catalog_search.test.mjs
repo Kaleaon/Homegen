@@ -179,3 +179,147 @@ test('filterItems combined criteria with tags and synonyms', () => {
   assert.ok(kitchenAppliances.some((item) => item.id === 'range_gas'));
   assert.ok(!kitchenAppliances.some((item) => item.id === 'washer'));
 });
+
+test('renderCatalogPanel renders Clear filters button in empty state and restores full catalog on reset', async () => {
+  const { renderCatalogPanel, getCatalogFilters, setCatalogFilters, resetCatalogFilters } =
+    await import('../js/app.js');
+
+  resetCatalogFilters();
+
+  // Populate query and dimension filters that match zero items
+  setCatalogFilters({ query: 'nonexistent-sofa-xyz', maxW: '12', maxD: '10' });
+  assert.deepEqual(getCatalogFilters(), {
+    query: 'nonexistent-sofa-xyz',
+    maxW: '12',
+    maxD: '10',
+  });
+  assert.equal(filterItems(ITEMS, getCatalogFilters()).length, 0);
+
+  const emptyHtml = renderCatalogPanel();
+  assert.ok(
+    emptyHtml.includes(
+      '<div class="catalog-empty"><p>No matching items found</p><button id="catalog-reset-filters" class="btn secondary btn-sm catalog-reset-btn" type="button">Clear filters</button></div>'
+    ),
+    'Empty state must render paragraph and Clear filters button'
+  );
+
+  // Resetting filter state restores full catalog item results
+  resetCatalogFilters();
+  assert.deepEqual(getCatalogFilters(), { query: '', maxW: '', maxD: '' });
+
+  const restoredItems = filterItems(ITEMS, getCatalogFilters());
+  assert.equal(restoredItems.length, ITEMS.length);
+
+  const restoredHtml = renderCatalogPanel();
+  assert.ok(!restoredHtml.includes('catalog-empty'), 'Empty state must disappear after reset');
+  assert.ok(!restoredHtml.includes('id="catalog-reset-filters"'));
+  for (const item of ITEMS) {
+    assert.ok(
+      restoredHtml.includes(`data-id="${item.id}"`),
+      `Restored catalog markup must include item ${item.id}`
+    );
+  }
+});
+
+test('renderPalette binds #catalog-reset-filters click to clear state, handle multiple clicks, and handle empty catalog', async () => {
+  const {
+    renderCatalogPanel,
+    renderPalette,
+    getCatalogFilters,
+    setCatalogFilters,
+    resetCatalogFilters,
+    switchTab,
+  } = await import('../js/app.js');
+
+  const listenersById = {};
+  let focusedId = null;
+
+  const makeEl = (id) => ({
+    id,
+    innerHTML: '',
+    dataset: id === 'tab-buy' ? { tab: 'buy' } : {},
+    classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
+    setAttribute: () => {},
+    removeAttribute: () => {},
+    addEventListener: (evt, fn) => {
+      if (!listenersById[id]) listenersById[id] = {};
+      listenersById[id][evt] = fn;
+    },
+    focus: () => {
+      focusedId = id;
+    },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  });
+
+  const elements = {
+    palette: makeEl('palette'),
+    'tab-buy': makeEl('tab-buy'),
+  };
+
+  const prevDocument = globalThis.document;
+  globalThis.document = {
+    activeElement: null,
+    getElementById: (id) => elements[id] || null,
+    querySelector: (sel) => {
+      const id = sel.replace(/^#/, '');
+      if (id === 'palette') return elements.palette;
+      if (id === 'tab-buy') return elements['tab-buy'];
+      if (elements.palette.innerHTML.includes(`id="${id}"`)) {
+        if (!elements[id]) elements[id] = makeEl(id);
+        return elements[id];
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+  };
+
+  try {
+    // Verify empty catalog edge case on renderCatalogPanel([])
+    resetCatalogFilters();
+    setCatalogFilters({ query: 'impossible-item', maxW: '5', maxD: '5' });
+    const emptyCatalogHtml = renderCatalogPanel([]);
+    assert.ok(emptyCatalogHtml.includes('id="catalog-reset-filters"'));
+
+    // Switch active tab to Buy (which invokes renderPalette) while restrictive filters are active
+    setCatalogFilters({ query: 'no-match-query', maxW: '8', maxD: '9' });
+    switchTab(elements['tab-buy']);
+
+    assert.ok(
+      elements.palette.innerHTML.includes('id="catalog-reset-filters"'),
+      'Buy palette should render #catalog-reset-filters when no items match'
+    );
+    assert.ok(
+      typeof listenersById['catalog-reset-filters']?.click === 'function',
+      'renderPalette must bind a click listener to #catalog-reset-filters'
+    );
+
+    // Click reset button (and simulate rapid multiple clicks)
+    const clickHandler = listenersById['catalog-reset-filters'].click;
+    clickHandler();
+    clickHandler();
+
+    assert.deepEqual(getCatalogFilters(), {
+      query: '',
+      maxW: '',
+      maxD: '',
+    });
+    assert.ok(
+      !elements.palette.innerHTML.includes('catalog-empty'),
+      'Palette should re-render full catalog and remove empty state after click'
+    );
+    assert.ok(
+      elements.palette.innerHTML.includes('value="" aria-label="Search furniture catalog"'),
+      'Search input value should be cleared after reset'
+    );
+    assert.equal(focusedId, 'catalog-search', 'Focus should move to #catalog-search after reset');
+
+    // Re-running renderPalette directly remains idempotent
+    renderPalette();
+    assert.ok(!elements.palette.innerHTML.includes('catalog-empty'));
+  } finally {
+    resetCatalogFilters();
+    globalThis.document = prevDocument;
+  }
+});
