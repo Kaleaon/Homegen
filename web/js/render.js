@@ -612,7 +612,7 @@ export function drawSpatialReferenceOverlay(ctx, state, view, opts = {}) {
   if (typeof ctx.restore === 'function') ctx.restore();
 }
 
-export function drawComplianceScene(ctx, complianceScene, view) {
+function drawComplianceScene(ctx, complianceScene, view) {
   if (!complianceScene) return;
   const nodes = complianceScene.getNodes();
 
@@ -1530,7 +1530,7 @@ export const handles = (r) => {
   return pts.map((p) => [p.x, p.y]);
 };
 
-export function findDiffTarget(state, id) {
+function findDiffTarget(state, id) {
   if (!id) return null;
   for (const room of state.rooms) {
     if (room.id === id) {
@@ -1590,7 +1590,7 @@ export function findDiffTarget(state, id) {
   return null;
 }
 
-export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
+function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   if (!diffs || !diffs.length) return;
 
   const placedBadges = [];
@@ -1738,7 +1738,7 @@ export function drawDiffHighlights(ctx, state, diffs, view, opts = {}) {
   }
 }
 
-export function drawSnapGuides(ctx, snapResult, view) {
+function drawSnapGuides(ctx, snapResult, view) {
   if (!snapResult) return;
   if (
     !snapResult.snap &&
