@@ -641,7 +641,7 @@ export const WALL_FINISHES = [
 ];
 export const WALL_BY_ID = Object.fromEntries(WALL_FINISHES.map((w) => [w.id, w]));
 
-export const WINDOW_FRAMES = [
+const WINDOW_FRAMES = [
   {
     id: 'frame_aluminum',
     name: 'Anodized aluminum',

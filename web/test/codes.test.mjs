@@ -666,3 +666,166 @@ test('IRC R303.1 daylight check flags rooms near 8% threshold when frame loss dr
   assert.ok(lightViolation, 'IRC R303.1 light violation must be reported');
   assert.equal(lightViolation.ref, 'IRC R303.1');
 });
+
+test('autoComply remediates non-compliant moisture finishes across all numeric segments of polygonal wet rooms', () => {
+  const s = m.newState();
+  const lShapePoints = [
+    { x: 0, y: 0 },
+    { x: 144, y: 0 },
+    { x: 144, y: 72 },
+    { x: 72, y: 72 },
+    { x: 72, y: 144 },
+    { x: 0, y: 144 },
+  ];
+  const bath = m.createRoom(s, 'bathroom', 0, 0, 144, 144, {
+    points: lShapePoints,
+    floor: 'floor_carpet_gray',
+    walls: {
+      0: 'wp_floral',
+      1: 'wp_floral',
+      2: 'wp_vinyl_leaf', // already moisture-rated
+      3: 'wp_floral',
+      4: 'wp_floral',
+      5: 'wp_floral',
+    },
+  });
+
+  const pentagonPoints = [
+    { x: 240, y: 0 },
+    { x: 360, y: 0 },
+    { x: 384, y: 72 },
+    { x: 300, y: 144 },
+    { x: 240, y: 96 },
+  ];
+  const laundry = m.createRoom(s, 'laundry', 240, 0, 144, 144, {
+    points: pentagonPoints,
+    walls: {
+      0: 'wp_floral',
+      1: 'wp_damask',
+      2: 'paint_sage', // already moisture-rated
+      3: 'wp_geo',
+      4: 'wp_dots',
+    },
+  });
+
+  const beforeRep = c.evaluate(s);
+  const bathWallViolations = beforeRep.violations.filter(
+    (v) => v.rule === 'wet-wall' && v.roomId === bath.id
+  );
+  assert.deepEqual(
+    bathWallViolations.map((v) => v.id),
+    [0, 1, 3, 4, 5].map((i) => `wet-wall:${bath.id}:${i}`)
+  );
+
+  const laundryWallViolations = beforeRep.violations.filter(
+    (v) => v.rule === 'wet-wall' && v.roomId === laundry.id
+  );
+  assert.deepEqual(
+    laundryWallViolations.map((v) => v.id),
+    [0, 1, 3, 4].map((i) => `wet-wall:${laundry.id}:${i}`)
+  );
+
+  const log = c.autoComply(s);
+
+  for (const idx of [0, 1, 3, 4, 5]) {
+    assert.equal(bath.walls[idx], 'wall_tile_white');
+    assert.ok(log.some((d) => d.id === `${bath.id}:${idx}` && d.type === 'wall'));
+  }
+  assert.equal(bath.walls[2], 'wp_vinyl_leaf');
+
+  for (const idx of [0, 1, 3, 4]) {
+    assert.equal(laundry.walls[idx], 'paint_white');
+    assert.ok(log.some((d) => d.id === `${laundry.id}:${idx}` && d.type === 'wall'));
+  }
+  assert.equal(laundry.walls[2], 'paint_sage');
+
+  const afterRep = c.evaluate(s);
+  assert.equal(
+    afterRep.violations.filter((v) => v.rule === 'wet-wall').length,
+    0,
+    'all polygonal wet-wall violations should be resolved'
+  );
+});
+
+test('polygonal wet rooms without explicit numeric wall keys receive moisture-resistant finishes and preserve cardinal rooms', () => {
+  const s = m.newState();
+  // Polygonal bathroom created without opts.walls leaves numeric keys 0..5 undefined
+  const polyBath = m.createRoom(s, 'bathroom', 0, 0, 144, 144, {
+    points: [
+      { x: 0, y: 0 },
+      { x: 144, y: 0 },
+      { x: 144, y: 72 },
+      { x: 72, y: 72 },
+      { x: 72, y: 144 },
+      { x: 0, y: 144 },
+    ],
+  });
+  // Standard 4-wall rectangular bathroom uses N, E, S, W keys
+  const rectBath = m.createRoom(s, 'bathroom', 200, 0, 96, 120, {
+    wallFinish: 'wp_floral',
+  });
+
+  const beforeRep = c.evaluate(s);
+  assert.equal(
+    beforeRep.violations.filter((v) => v.rule === 'wet-wall' && v.roomId === polyBath.id).length,
+    6
+  );
+  assert.deepEqual(
+    beforeRep.violations
+      .filter((v) => v.rule === 'wet-wall' && v.roomId === rectBath.id)
+      .map((v) => v.id),
+    ['N', 'E', 'S', 'W'].map((w) => `wet-wall:${rectBath.id}:${w}`)
+  );
+
+  c.autoComply(s);
+
+  for (let i = 0; i < 6; i++) {
+    assert.equal(polyBath.walls[i], 'wall_tile_white');
+  }
+  for (const w of ['N', 'E', 'S', 'W']) {
+    assert.equal(rectBath.walls[w], 'wall_tile_white');
+  }
+  assert.equal(polyBath.walls[6], undefined);
+  assert.equal(rectBath.walls[0], undefined);
+});
+
+test('targeted autoComply with dynamic wall segment IDs updates only the specified wall segment', () => {
+  const s = m.newState();
+  // 12-vertex polygon to also verify segment 1 does not collide with segment 10 or 11
+  const pts12 = Array.from({ length: 12 }, (_, i) => {
+    const angle = (i * 2 * Math.PI) / 12;
+    return {
+      x: Math.round(120 + 84 * Math.cos(angle)),
+      y: Math.round(120 + 84 * Math.sin(angle)),
+    };
+  });
+  const walls = {};
+  for (let i = 0; i < 12; i++) walls[i] = 'wp_floral';
+
+  const bath = m.createRoom(s, 'bathroom', 0, 0, 240, 240, {
+    points: pts12,
+    floor: 'floor_carpet_gray',
+    walls,
+  });
+
+  // Target r1:0 directly
+  const log0 = c.autoComply(s, { targetId: `${bath.id}:0` });
+  assert.equal(log0.length, 1);
+  assert.equal(log0[0].id, `${bath.id}:0`);
+  assert.equal(bath.walls[0], 'wall_tile_white');
+  assert.equal(bath.floor, 'floor_carpet_gray');
+  for (let i = 1; i < 12; i++) {
+    assert.equal(bath.walls[i], 'wp_floral');
+  }
+
+  // Target wet-wall:r1:1 via violation ID (must not touch segment 10 or 11)
+  const rep = c.evaluate(s);
+  const v1 = rep.violations.find((v) => v.id === `wet-wall:${bath.id}:1`);
+  assert.ok(v1);
+  const log1 = c.autoComply(s, { targetId: v1.id });
+  assert.equal(log1.length, 1);
+  assert.equal(log1[0].id, `${bath.id}:1`);
+  assert.equal(bath.walls[1], 'wall_tile_white');
+  assert.equal(bath.walls[10], 'wp_floral');
+  assert.equal(bath.walls[11], 'wp_floral');
+});
