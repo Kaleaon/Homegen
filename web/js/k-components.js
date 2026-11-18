@@ -154,6 +154,22 @@ class KButton extends BaseElement {
     if (this.disabled) return;
     if (this._btn) this._btn.click();
   }
+
+  focus(options) {
+    if (this._btn) {
+      this._btn.focus(options);
+    } else if (typeof super.focus === 'function') {
+      super.focus(options);
+    }
+  }
+
+  blur() {
+    if (this._btn) {
+      this._btn.blur();
+    } else if (typeof super.blur === 'function') {
+      super.blur();
+    }
+  }
 }
 
 /**
