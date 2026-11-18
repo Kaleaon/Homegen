@@ -106,15 +106,65 @@ function snapToPerpendicular(point, anchor, edges, threshold) {
   return best;
 }
 
-function snapToAngle(point, anchor, settings, edges = []) {
-  if (!anchor || (anchor.x === point.x && anchor.y === point.y)) return null;
+export function parseExplicitAngleDegrees(value) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    return Object.is(value, -0) ? 0 : value;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.trim().replace(/°$/, '').trim();
+    if (!cleaned || !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(cleaned)) {
+      return null;
+    }
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed)) return null;
+    return Object.is(parsed, -0) ? 0 : parsed;
+  }
+  return null;
+}
+
+export function snapToAngle(point, anchor, settings = DEFAULT_GRID_SETTINGS, edges = []) {
+  if (!point || !anchor) return null;
+
+  const explicitAngle = parseExplicitAngleDegrees(settings?.explicitAngleDegrees);
   const dx = point.x - anchor.x;
   const dy = point.y - anchor.y;
   const dist = Math.hypot(dx, dy);
-  if (dist === 0) return null;
+
+  if (explicitAngle !== null) {
+    const cleanDegrees = Number(explicitAngle.toFixed(6));
+    const normalizedDegrees = Object.is(cleanDegrees, -0) ? 0 : cleanDegrees;
+    if (!Number.isFinite(dist) || dist === 0) {
+      return {
+        point: { x: anchor.x, y: anchor.y },
+        distance: 0,
+        type: 'angle',
+        angleDegrees: normalizedDegrees,
+        explicit: true,
+      };
+    }
+
+    const targetRadians = (explicitAngle * Math.PI) / 180;
+    const alignedPoint = {
+      x: anchor.x + dist * Math.cos(targetRadians),
+      y: anchor.y + dist * Math.sin(targetRadians),
+    };
+    const snapDist = distance(point, alignedPoint);
+
+    return {
+      point: alignedPoint,
+      distance: snapDist,
+      type: 'angle',
+      angleDegrees: normalizedDegrees,
+      explicit: true,
+    };
+  }
+
+  if (anchor.x === point.x && anchor.y === point.y) return null;
+  if (!Number.isFinite(dist) || dist === 0) return null;
 
   const rawAngle = Math.atan2(dy, dx);
-  const threshold = settings.magneticThreshold;
+  const threshold = settings?.magneticThreshold;
 
   const refs = [{ refAngle: 0, edge: null }];
   if (Array.isArray(edges)) {
@@ -178,11 +228,16 @@ export function getSnappedPoint({
   settings,
   snapModes,
   scale = 1.0,
+  explicitAngleDegrees,
 }) {
   const safeScale =
     typeof scale === 'number' && Number.isFinite(scale) ? Math.max(scale, 0.0001) : 1.0;
 
   const baseSettings = settings || DEFAULT_GRID_SETTINGS;
+  const rawExplicit =
+    explicitAngleDegrees !== undefined ? explicitAngleDegrees : baseSettings.explicitAngleDegrees;
+  const explicitAngle = parseExplicitAngleDegrees(rawExplicit);
+
   const magneticThreshold =
     (baseSettings.magneticThreshold !== undefined
       ? baseSettings.magneticThreshold
@@ -206,11 +261,32 @@ export function getSnappedPoint({
     edgeThreshold,
     midpointThreshold,
     perpendicularThreshold,
+    explicitAngleDegrees: explicitAngle,
   };
+
+  if (explicitAngle !== null) {
+    if (!anchor) {
+      return { point: { x: point.x, y: point.y }, snap: null };
+    }
+    const explicitSnap = snapToAngle(point, anchor, normalizedSettings, edges);
+    if (
+      !explicitSnap ||
+      (explicitSnap.distance === 0 && anchor.x === point.x && anchor.y === point.y)
+    ) {
+      return {
+        point: { x: anchor.x, y: anchor.y },
+        snap: explicitSnap,
+      };
+    }
+    return {
+      point: explicitSnap.point,
+      snap: explicitSnap,
+    };
+  }
 
   const candidates = [];
 
-  if (snapModes.isEnabled(SNAP_MODES.GRID)) {
+  if (snapModes?.isEnabled(SNAP_MODES.GRID)) {
     const gridPoint = snapToGrid(point, normalizedSettings);
     candidates.push({
       type: 'grid',
@@ -219,21 +295,21 @@ export function getSnappedPoint({
     });
   }
 
-  if (snapModes.isEnabled(SNAP_MODES.EDGE)) {
+  if (snapModes?.isEnabled(SNAP_MODES.EDGE)) {
     candidates.push(snapToEdge(point, edges, normalizedSettings.edgeThreshold));
   }
 
-  if (snapModes.isEnabled(SNAP_MODES.MIDPOINT)) {
+  if (snapModes?.isEnabled(SNAP_MODES.MIDPOINT)) {
     candidates.push(snapToMidpoint(point, edges, normalizedSettings.midpointThreshold));
   }
 
-  if (snapModes.isEnabled(SNAP_MODES.PERPENDICULAR)) {
+  if (snapModes?.isEnabled(SNAP_MODES.PERPENDICULAR)) {
     candidates.push(
       snapToPerpendicular(point, anchor, edges, normalizedSettings.perpendicularThreshold)
     );
   }
 
-  if (snapModes.isEnabled(SNAP_MODES.ANGLE)) {
+  if (snapModes?.isEnabled(SNAP_MODES.ANGLE)) {
     candidates.push(snapToAngle(point, anchor, normalizedSettings, edges));
   }
 
@@ -246,7 +322,12 @@ export function getSnappedPoint({
 }
 
 export function snapAngle(angleRadians, settings, refAngle = 0) {
-  const step = (settings.angleSnapDegrees * Math.PI) / 180;
+  const explicitAngle = parseExplicitAngleDegrees(settings?.explicitAngleDegrees);
+  if (explicitAngle !== null) {
+    return (explicitAngle * Math.PI) / 180;
+  }
+  const angleSnapDeg = settings?.angleSnapDegrees ?? DEFAULT_GRID_SETTINGS.angleSnapDegrees;
+  const step = (angleSnapDeg * Math.PI) / 180;
   const delta = Math.atan2(Math.sin(angleRadians - refAngle), Math.cos(angleRadians - refAngle));
   return refAngle + quantize(delta, step);
 }

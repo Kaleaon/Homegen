@@ -5,6 +5,7 @@ import {
   stepResize,
   validateRoomDimensions,
   fmtDimensionText,
+  fmtAngleDegrees,
 } from '../constraintHandles.mjs';
 
 describe('Constraint Handles & Dynamic Dimension Resizing', () => {
@@ -168,5 +169,46 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(res.areaSqFt).toBe(132);
     expect(res.isValid).toBe(true);
     expect(res.dimensionText).toBe('12\' 0" × 11\' 0"');
+  });
+
+  test('fmtAngleDegrees formats numeric angles cleanly and handles non-finite inputs', () => {
+    expect(fmtAngleDegrees(90)).toBe('90°');
+    expect(fmtAngleDegrees(22.5)).toBe('22.5°');
+    expect(fmtAngleDegrees(-0)).toBe('0°');
+    expect(fmtAngleDegrees(33.336)).toBe('33.34°');
+    expect(fmtAngleDegrees(Number.NaN)).toBe('0°');
+  });
+
+  test('resizeRoomWithConstraints exposes wall angles in feedback and supports explicitAngleDegrees', () => {
+    const baseRes = resizeRoomWithConstraints(room, 'se', { x: 180, y: 144 });
+    expect(baseRes.angleDegrees).toBe(90);
+    expect(baseRes.angleText).toBe('90°');
+    expect(baseRes.feedback.angleDegrees).toBe(90);
+    expect(baseRes.feedback.angleText).toBe('90°');
+    expect(baseRes.feedback.wallAngles).toHaveLength(4);
+
+    // Explicit angle override on top-right ('ne') handle from top-left anchor (0, 0)
+    const angledRes = resizeRoomWithConstraints(
+      room,
+      'ne',
+      { x: 144, y: 0 },
+      { explicitAngleDegrees: 25 }
+    );
+    const rad = (25 * Math.PI) / 180;
+    expect(angledRes.angleDegrees).toBe(25);
+    expect(angledRes.feedback.angleText).toBe('25°');
+    expect(angledRes.points[1].x).toBeCloseTo(144 * Math.cos(rad), 5);
+    expect(angledRes.points[1].y).toBeCloseTo(144 * Math.sin(rad), 5);
+
+    // Zero-length vector returns unchanged anchor without NaN
+    const zeroLenRes = resizeRoomWithConstraints(
+      room,
+      'ne',
+      { x: 0, y: 0 },
+      { explicitAngleDegrees: 25 }
+    );
+    expect(Number.isNaN(zeroLenRes.points[1].x)).toBe(false);
+    expect(Number.isNaN(zeroLenRes.points[1].y)).toBe(false);
+    expect(zeroLenRes.points[1]).toEqual({ x: 0, y: 0 });
   });
 });

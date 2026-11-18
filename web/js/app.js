@@ -71,6 +71,8 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  parseExplicitAngleDegrees,
+  fmtAngleDegrees,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -114,12 +116,14 @@ const interaction = new InteractionLayer({
     edgeThreshold: 14,
     midpointThreshold: 14,
     perpendicularThreshold: 14,
+    explicitAngleDegrees: null,
   },
   snapModes: {
     grid: true,
     edge: true,
     midpoint: false,
     perpendicular: false,
+    angle: true,
   },
 });
 
@@ -167,6 +171,7 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+let activeHandleIndex = 0;
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
@@ -178,7 +183,8 @@ const snappingBridge = new SnappingBridge({
   toWorld: (e) => toWorld(e),
   view,
   getViewScale: () => view.scale,
-  onSnap: () => {
+  onSnap: (snapState) => {
+    updateWallAngleHudReadout(snapState);
     redraw();
   },
 });
@@ -390,6 +396,7 @@ function refresh() {
   renderInspector();
   renderBgToolbar();
   renderDiffDrawer();
+  updateWallAngleHud();
   window.__scene3d?.update();
   const undoBtn = $('#undo');
   if (undoBtn) {
@@ -770,7 +777,9 @@ function drawOverlay(c, _state) {
       c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
     }
     if (hover) {
-      c.lineTo(hover.x, hover.y);
+      const activeSnap = snappingBridge.getActiveSnap();
+      const previewTip = preview?.feedback?.point || activeSnap?.point || hover;
+      c.lineTo(previewTip.x, previewTip.y);
     }
     c.stroke();
     for (const pt of sequentialPts) {
@@ -1054,6 +1063,7 @@ function select(target, { toggle = false, append = false } = {}) {
         : new Set(selectionSet);
 
   renderInspector();
+  updateWallAngleHud();
   redraw();
 }
 
@@ -2526,6 +2536,7 @@ function setTool(t) {
   if ($('#tool-hint')) $('#tool-hint').textContent = HINTS[t.kind] || '';
   if (canvas) canvas.style.cursor = t.kind === 'select' ? 'default' : 'crosshair';
   renderPalette();
+  updateWallAngleHud();
   redraw();
 }
 
@@ -2533,6 +2544,25 @@ function setTool(t) {
 function updatePreview() {
   preview = null;
   if (!hover || drag?.kind === 'pan') return;
+  if (tool.kind === 'room') {
+    const seqPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+    if (seqPts.length > 0) {
+      const anchor = seqPts[seqPts.length - 1];
+      const snapRes = snappingBridge.computeSnap(hover, anchor);
+      const edges = extractRoomEdges(levelRooms());
+      const roomPv = interaction.previewRoom(hover, {
+        edges,
+        existingRooms: levelRooms().map(roomToPolygon),
+        scale: view.scale,
+        explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      });
+      if (roomPv) {
+        preview = { next: doc, ok: !roomPv.invalid, fresh: [], feedback: roomPv };
+      }
+      updateWallAngleHudReadout(snapRes);
+    }
+    return;
+  }
   if (tool.kind === 'item') {
     const pl = placeItem(tool.id, hover);
     if (pl) {
@@ -2644,6 +2674,10 @@ canvas?.addEventListener('pointerdown', (e) => {
         const hs = handles(r).findIndex(
           ([hx, hy]) => Math.hypot(hx - p.x, hy - p.y) < 8 / view.scale + 2
         );
+        if (hs >= 0) {
+          activeHandleIndex = hs;
+          updateWallAngleHud();
+        }
         drag =
           hs >= 0
             ? { kind: 'resize', id, corner: hs, moved: false }
@@ -2897,6 +2931,8 @@ canvas?.addEventListener('pointermove', (e) => {
       const otherRooms = levelRooms().filter((rm) => rm.id !== r.id);
 
       const snapRes = snappingBridge.computeSnap(p, anchor, otherRooms);
+      activeHandleIndex = cornerIdx;
+      updateWallAngleHudReadout(snapRes);
 
       const newPt = snapRes.point;
       const newPts = pts.map((pt, i) => (i === cornerIdx ? { x: newPt.x, y: newPt.y } : { ...pt }));
@@ -2995,7 +3031,9 @@ function handleCloseRoom() {
     toast('At least 3 corners are required to close a room.', true);
     return;
   }
-  const closeRes = interaction.closeRoom({ existingRooms: levelRooms() });
+  const closeRes = interaction.closeRoom({
+    existingRooms: levelRooms().map(roomToPolygon),
+  });
   if (closeRes.ok && closeRes.room?.corners) {
     const pts = closeRes.room.corners;
     const minX = Math.min(...pts.map((pt) => pt.x));
@@ -3006,10 +3044,14 @@ function handleCloseRoom() {
     const h = Math.max(24, maxY - minY);
     const x = minX;
     const y = minY;
-    const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
+    const roomType = tool.type || 'living';
+    const r = apply(
+      (n) => M.addRoom(n, x, y, w, h, roomType, { level: curLevel, points: pts }),
+      'Close Room'
+    );
     if (r.ok) {
       announceToLiveRegion(
-        `Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+        `${ROOM_TYPES[roomType]?.name || 'Living'} room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
       );
       interaction.resetRoomDrawing();
       const btnClose = $('#btn-close-room');
@@ -3025,6 +3067,251 @@ function handleCloseRoom() {
     );
     announceToLiveRegion('Invalid room placement.');
   }
+}
+
+function getSelectedSingleRoom() {
+  const selectedList = getSelectionList();
+  if (selectedList.length !== 1) return null;
+  const hit = M.findOwner(doc, selectedList[0]);
+  if (!hit || hit.kind !== 'room') return null;
+  return hit.room;
+}
+
+function getCornerIncomingAngleDegrees(pts, cornerIndex) {
+  if (!Array.isArray(pts) || pts.length < 2) return 0;
+  const idx = ((cornerIndex % pts.length) + pts.length) % pts.length;
+  const prevIdx = (idx - 1 + pts.length) % pts.length;
+  const dx = pts[idx].x - pts[prevIdx].x;
+  const dy = pts[idx].y - pts[prevIdx].y;
+  if (dx === 0 && dy === 0) return 0;
+  const deg = Number(((Math.atan2(dy, dx) * 180) / Math.PI).toFixed(2));
+  return Object.is(deg, -0) ? 0 : deg;
+}
+
+function updateWallAngleHudReadout(snapState = snappingBridge?.getActiveSnap()) {
+  const readout = $('#hud-wall-angle-readout');
+  if (!readout) return;
+  const explicitDeg = snappingBridge.getExplicitAngleDegrees();
+  if (explicitDeg !== null) {
+    readout.textContent = fmtAngleDegrees(explicitDeg);
+    return;
+  }
+  if (
+    snapState &&
+    typeof snapState.angleDegrees === 'number' &&
+    Number.isFinite(snapState.angleDegrees)
+  ) {
+    readout.textContent = fmtAngleDegrees(snapState.angleDegrees);
+    return;
+  }
+  readout.textContent = 'Auto';
+}
+
+function updateWallAngleHud() {
+  const hud = $('#wall-angle-hud');
+  if (!hud) return;
+
+  const view3dCanvas = $('#view3d');
+  const in3D = Boolean(view3dCanvas && !view3dCanvas.hidden);
+  const selectedRoom = getSelectedSingleRoom();
+  const isDrawingRoom = tool.kind === 'room';
+  const isEditingRoomHandles = Boolean(selectedRoom) || drag?.kind === 'resize';
+
+  if (in3D || (!isDrawingRoom && !isEditingRoomHandles)) {
+    hud.hidden = true;
+    return;
+  }
+
+  hud.hidden = false;
+
+  const angleInput = $('#hud-wall-angle');
+  const explicitDeg = snappingBridge.getExplicitAngleDegrees();
+  if (angleInput && document.activeElement !== angleInput) {
+    angleInput.value = explicitDeg !== null ? String(explicitDeg) : '';
+  }
+  updateWallAngleHudReadout();
+
+  const handleGroup = $('#hud-handle-group');
+  const handleSelect = $('#hud-handle-select');
+  const handleAngleInput = $('#hud-handle-angle');
+
+  if (!handleGroup) return;
+
+  const targetRoom = drag?.kind === 'resize' ? roomOf(doc, drag.id) : selectedRoom;
+
+  if (!targetRoom || isDrawingRoom) {
+    handleGroup.hidden = true;
+    return;
+  }
+
+  handleGroup.hidden = false;
+  const pts = getRoomPoints(targetRoom);
+  if (!pts.length) return;
+
+  if (activeHandleIndex < 0 || activeHandleIndex >= pts.length) {
+    activeHandleIndex = 0;
+  }
+
+  if (handleSelect) {
+    const cornerNames4 = ['1 (Top-Left)', '2 (Top-Right)', '3 (Bottom-Right)', '4 (Bottom-Left)'];
+    const optionsHtml = pts
+      .map((_, i) => {
+        const label = pts.length === 4 ? cornerNames4[i] : `Vertex ${i + 1}`;
+        return `<option value="${i}"${i === activeHandleIndex ? ' selected' : ''}>${label}</option>`;
+      })
+      .join('');
+    if (handleSelect.innerHTML !== optionsHtml) {
+      handleSelect.innerHTML = optionsHtml;
+    }
+    handleSelect.value = String(activeHandleIndex);
+  }
+
+  if (handleAngleInput && document.activeElement !== handleAngleInput) {
+    const currentDeg = getCornerIncomingAngleDegrees(pts, activeHandleIndex);
+    handleAngleInput.value = String(currentDeg);
+  }
+}
+
+function setExplicitWallAngleFromHud(rawValue) {
+  const parsed = snappingBridge.setExplicitAngleDegrees(rawValue);
+  interaction.setGridSettings({ explicitAngleDegrees: parsed });
+  if (hover) {
+    const seqPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+    const anchor = seqPts.length > 0 ? seqPts[seqPts.length - 1] : hover;
+    snappingBridge.computeSnap(hover, anchor);
+    updatePreview();
+  } else {
+    updateWallAngleHudReadout();
+  }
+  redraw();
+  return parsed;
+}
+
+function applyConstraintHandleAngleFromHud() {
+  const targetRoom = getSelectedSingleRoom();
+  if (!targetRoom) return false;
+
+  const rawValue = $('#hud-handle-angle')?.value ?? '';
+  const parsedAngle = parseExplicitAngleDegrees(rawValue);
+  if (parsedAngle === null) {
+    toast('Enter a valid numeric angle in degrees.', true);
+    updateWallAngleHud();
+    return false;
+  }
+
+  const pts = getRoomPoints(targetRoom);
+  if (pts.length < 3) return false;
+
+  const cornerIdx = ((activeHandleIndex % pts.length) + pts.length) % pts.length;
+  const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
+  const anchor = pts[prevIdx];
+  const currentCorner = pts[cornerIdx];
+  const wallLen = Math.hypot(currentCorner.x - anchor.x, currentCorner.y - anchor.y);
+
+  let projectedCorner;
+  if (!Number.isFinite(wallLen) || wallLen === 0) {
+    projectedCorner = { x: anchor.x, y: anchor.y };
+  } else {
+    const rad = (parsedAngle * Math.PI) / 180;
+    projectedCorner = {
+      x: anchor.x + wallLen * Math.cos(rad),
+      y: anchor.y + wallLen * Math.sin(rad),
+    };
+  }
+
+  const updatedPts = pts.map((pt, idx) =>
+    idx === cornerIdx ? projectedCorner : { x: pt.x, y: pt.y }
+  );
+
+  if (polygonArea(updatedPts) <= 10) {
+    toast('Resulting room polygon area is too small or degenerate.', true);
+    return false;
+  }
+
+  const res = apply(
+    (n) => {
+      const rm = roomOf(n, targetRoom.id);
+      M.updateRoomPoints(rm, updatedPts, n);
+      for (const it of rm.items || []) {
+        if (it.wall !== undefined && typeof it.offset === 'number') {
+          const wLen = wallLength(rm, it.wall);
+          if (wLen > 16) {
+            it.offset = Math.max(8, Math.min(it.offset, wLen - 8));
+          }
+        }
+      }
+    },
+    `Set Corner ${cornerIdx + 1} Angle to ${fmtAngleDegrees(parsedAngle)}`
+  );
+  if (res.ok) {
+    announceToLiveRegion(
+      `Updated corner ${cornerIdx + 1} wall angle to ${fmtAngleDegrees(parsedAngle)}.`
+    );
+    updateWallAngleHud();
+  }
+  return res.ok;
+}
+
+function setupWallAngleHud() {
+  const angleInput = $('#hud-wall-angle');
+  const clearBtn = $('#hud-wall-angle-clear');
+  const handleSelect = $('#hud-handle-select');
+  const handleAngleInput = $('#hud-handle-angle');
+  const handleApplyBtn = $('#hud-handle-angle-apply');
+
+  angleInput?.addEventListener('input', (e) => {
+    setExplicitWallAngleFromHud(e.target.value);
+  });
+
+  angleInput?.addEventListener('change', (e) => {
+    setExplicitWallAngleFromHud(e.target.value);
+  });
+
+  angleInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      angleInput.value = '';
+      setExplicitWallAngleFromHud(null);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      setExplicitWallAngleFromHud(angleInput.value);
+      canvas?.focus();
+    }
+  });
+
+  clearBtn?.addEventListener('click', () => {
+    if (angleInput) angleInput.value = '';
+    setExplicitWallAngleFromHud(null);
+  });
+
+  handleSelect?.addEventListener('change', (e) => {
+    activeHandleIndex = Number.parseInt(e.target.value, 10) || 0;
+    updateWallAngleHud();
+    redraw();
+  });
+
+  handleAngleInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyConstraintHandleAngleFromHud();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      updateWallAngleHud();
+      canvas?.focus();
+    }
+  });
+
+  handleApplyBtn?.addEventListener('click', () => {
+    applyConstraintHandleAngleFromHud();
+  });
+
+  document.querySelectorAll('#toolbar [data-view]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setTimeout(() => updateWallAngleHud(), 0);
+    });
+  });
+
+  updateWallAngleHud();
 }
 
 function openAddRoomDimsModal() {
@@ -3132,13 +3419,21 @@ canvas?.addEventListener('pointerup', () => {
       if (!r.ok) select(null);
     } else {
       const p = hover || { x: d.x0, y: d.y0 };
-      interaction.addRoomCorner(p, { existingRooms: levelRooms() });
+      const cornerRes = interaction.addRoomCorner(p, {
+        edges: extractRoomEdges(levelRooms()),
+        existingRooms: levelRooms().map(roomToPolygon),
+        scale: view.scale,
+        explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      });
+      const placedPt = cornerRes?.corner || p;
       const count = interaction.getCornerCount();
       const hint = $('#tool-hint');
       if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = !interaction.canCloseRoom();
-      announceToLiveRegion(`Placed corner ${count} at (${Math.round(p.x)}", ${Math.round(p.y)}").`);
+      announceToLiveRegion(
+        `Placed corner ${count} at (${Math.round(placedPt.x)}", ${Math.round(placedPt.y)}").`
+      );
       redraw();
     }
     refresh();
@@ -4559,6 +4854,7 @@ let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
   setupAddRoomDimsModal();
+  setupWallAngleHud();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
   window.addEventListener('keydown', (e) => {
@@ -5635,6 +5931,10 @@ if (typeof window !== 'undefined')
     moveSelectedSpatial,
     getSpatialElements,
     interaction,
+    snappingBridge,
+    setExplicitWallAngleFromHud,
+    applyConstraintHandleAngleFromHud,
+    updateWallAngleHud,
     generatePDF,
     applyCalibration,
     apply3PointCalibration,

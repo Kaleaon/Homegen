@@ -377,3 +377,49 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
   assert.equal(ctx.strokeStyle, getToken('--ktheme-warning', '#f59e0b'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-warning', '#f59e0b'));
 });
+
+test('SnappingBridge explicitAngleDegrees overrides step snapping and handles invalid/zero-length inputs', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      angleSnapDegrees: 15,
+      magneticThreshold: 14,
+      explicitAngleDegrees: null,
+    },
+    snapModes: { grid: true, edge: true, midpoint: false, perpendicular: false, angle: true },
+  });
+
+  const bridge = new SnappingBridge({ interaction, getRooms: () => [] });
+  const anchor = { x: 24, y: 36 };
+  const dist = 120;
+
+  // Set explicit numeric angle (string from HUD input)
+  assert.equal(bridge.setExplicitAngleDegrees('33.5'), 33.5);
+  assert.equal(bridge.getExplicitAngleDegrees(), 33.5);
+
+  const snapRes = bridge.computeSnap({ x: anchor.x + dist, y: anchor.y }, anchor);
+  const rad = (33.5 * Math.PI) / 180;
+  assert.equal(snapRes.snap?.type, 'angle');
+  assert.equal(snapRes.angleDegrees, 33.5);
+  assert.equal(snapRes.angleText, '33.5°');
+  assert.ok(Math.abs(snapRes.point.x - (anchor.x + dist * Math.cos(rad))) < 1e-4);
+  assert.ok(Math.abs(snapRes.point.y - (anchor.y + dist * Math.sin(rad))) < 1e-4);
+
+  // Zero-length wall vector returns unchanged anchor coordinates without NaN
+  const nonGridAnchor = { x: 17.3, y: 29.7 };
+  const zeroRes = bridge.computeSnap({ x: 17.3, y: 29.7 }, nonGridAnchor);
+  assert.equal(Number.isNaN(zeroRes.point.x), false);
+  assert.equal(Number.isNaN(zeroRes.point.y), false);
+  assert.deepEqual(zeroRes.point, nonGridAnchor);
+
+  // Invalid HUD text clears override and falls back to default 15-degree step snapping
+  assert.equal(bridge.setExplicitAngleDegrees('abc'), null);
+  assert.equal(bridge.getExplicitAngleDegrees(), null);
+  const near15Rad = (15.2 * Math.PI) / 180;
+  const fallbackRes = bridge.computeSnap(
+    { x: anchor.x + dist * Math.cos(near15Rad), y: anchor.y + dist * Math.sin(near15Rad) },
+    anchor
+  );
+  assert.equal(fallbackRes.snap?.type, 'angle');
+  assert.equal(fallbackRes.snap?.angleDegrees, 15);
+});

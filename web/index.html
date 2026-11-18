@@ -101,6 +101,56 @@
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
       <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
+    <div id="wall-angle-hud" class="wall-angle-hud k-overlay-hud" role="region" aria-label="Wall angle controls" hidden>
+      <div class="wall-angle-hud-group" id="hud-draw-angle-group">
+        <label for="hud-wall-angle" class="wall-angle-hud-label">Wall Angle (°)</label>
+        <input
+          id="hud-wall-angle"
+          class="wall-angle-hud-input k-target-min-size"
+          type="number"
+          step="any"
+          min="-360"
+          max="360"
+          placeholder="Auto (15°)"
+          aria-label="Explicit wall angle in degrees"
+        >
+        <span id="hud-wall-angle-readout" class="wall-angle-hud-readout" aria-live="polite">Auto</span>
+        <button
+          id="hud-wall-angle-clear"
+          class="wall-angle-hud-btn k-target-min-size"
+          type="button"
+          title="Reset wall angle to automatic 15-degree step snapping"
+          aria-label="Reset wall angle override"
+        >Auto</button>
+      </div>
+      <div class="wall-angle-hud-group" id="hud-handle-group" hidden>
+        <span class="wall-angle-hud-sep" aria-hidden="true">|</span>
+        <label for="hud-handle-select" class="wall-angle-hud-label">Corner</label>
+        <select
+          id="hud-handle-select"
+          class="wall-angle-hud-select k-target-min-size"
+          aria-label="Constraint handle corner"
+        ></select>
+        <label for="hud-handle-angle" class="wall-angle-hud-label">Handle (°)</label>
+        <input
+          id="hud-handle-angle"
+          class="wall-angle-hud-input k-target-min-size"
+          type="number"
+          step="any"
+          min="-360"
+          max="360"
+          placeholder="Angle °"
+          aria-label="Constraint handle wall angle in degrees"
+        >
+        <button
+          id="hud-handle-angle-apply"
+          class="wall-angle-hud-btn primary k-target-min-size"
+          type="button"
+          title="Apply exact wall angle to selected constraint handle"
+          aria-label="Apply constraint handle wall angle"
+        >Apply</button>
+      </div>
+    </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="dialog" aria-modal="true" aria-labelledby="diff-drawer-title" hidden>
       <div class="diff-header">

@@ -5,7 +5,7 @@ import { TransformGizmo } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback } from './collision.mjs';
 import { buildToggleViewModel, SNAP_TOGGLE_DEFINITIONS } from './uiSnapToggles.mjs';
-import { getSnappedPoint, snapAngle } from './snapping.mjs';
+import { getSnappedPoint, snapAngle, snapToAngle, parseExplicitAngleDegrees } from './snapping.mjs';
 import {
   getSnappedPoint3D,
   distance3D,
@@ -25,6 +25,7 @@ import {
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
+  fmtAngleDegrees,
 } from './constraintHandles.mjs';
 
 export {
@@ -42,6 +43,8 @@ export {
   SNAP_TOGGLE_DEFINITIONS,
   getSnappedPoint,
   snapAngle,
+  snapToAngle,
+  parseExplicitAngleDegrees,
   getSnappedPoint3D,
   distance3D,
   closestPointOnSegment3D,
@@ -58,4 +61,5 @@ export {
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
+  fmtAngleDegrees,
 };

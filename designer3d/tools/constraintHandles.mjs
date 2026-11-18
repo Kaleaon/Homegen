@@ -1,4 +1,5 @@
 import { validatePlacement } from './collision.mjs';
+import { parseExplicitAngleDegrees } from './snapping.mjs';
 import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
 
 /**
@@ -15,6 +16,53 @@ export function fmtLenInches(inches) {
  */
 export function fmtDimensionText(w, h) {
   return `${fmtLenInches(w)} × ${fmtLenInches(h)}`;
+}
+
+/**
+ * Format an angle in degrees to a display string (e.g. 90 -> "90°", 22.5 -> "22.5°").
+ */
+export function fmtAngleDegrees(degrees) {
+  if (typeof degrees !== 'number' || !Number.isFinite(degrees)) {
+    return '0°';
+  }
+  const rounded = Number(degrees.toFixed(2));
+  const normalized = Object.is(rounded, -0) ? 0 : rounded;
+  return `${normalized}°`;
+}
+
+function computePolygonWallAngles(points) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const angles = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const start = points[i];
+    const end = points[(i + 1) % points.length];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    let deg = 0;
+    if (dx !== 0 || dy !== 0) {
+      const rawDeg = Number(((Math.atan2(dy, dx) * 180) / Math.PI).toFixed(2));
+      deg = Object.is(rawDeg, -0) ? 0 : rawDeg;
+    }
+    angles.push({
+      edgeIndex: i,
+      start: { x: start.x, y: start.y },
+      end: { x: end.x, y: end.y },
+      angleDegrees: deg,
+      angleText: fmtAngleDegrees(deg),
+    });
+  }
+  return angles;
+}
+
+function computePolygonAreaAbs(points) {
+  if (!Array.isArray(points) || points.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    sum += p1.x * p2.y - p2.x * p1.y;
+  }
+  return Math.abs(sum) / 2;
 }
 
 /**
@@ -113,53 +161,144 @@ export function validateRoomDimensions(roomType, w, h, options = {}) {
 export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options = {}) {
   const snapStep = options.snapStep || 6; // default 6 inch snapping
   const snap = (v) => Math.round(v / snapStep) * snapStep;
-
-  const sx = options.snap !== false ? snap(pointerPoint.x) : pointerPoint.x;
-  const sy = options.snap !== false ? snap(pointerPoint.y) : pointerPoint.y;
+  const explicitAngle = parseExplicitAngleDegrees(options.explicitAngleDegrees);
 
   const handleIndex =
     typeof handleIndexOrId === 'number'
       ? handleIndexOrId
-      : ['nw', 'ne', 'sw', 'se'].indexOf(handleIndexOrId);
+      : typeof handleIndexOrId === 'string' && handleIndexOrId.startsWith('v_')
+        ? Number.parseInt(handleIndexOrId.slice(2), 10)
+        : ['nw', 'ne', 'sw', 'se'].indexOf(handleIndexOrId);
 
-  const right = handleIndex % 2 === 1;
-  const bottom = handleIndex >= 2;
+  const rawPoly = room?.points || room?.corners || room?.vertices;
+  const hasCustomPoly = Array.isArray(rawPoly) && rawPoly.length >= 3;
 
-  const minSize = options.minSize || 36;
-  const x0 = right ? room.x : Math.min(sx, room.x + room.w - minSize);
-  const y0 = bottom ? room.y : Math.min(sy, room.y + room.h - minSize);
-  const x1 = right ? Math.max(sx, room.x + minSize) : room.x + room.w;
-  const y1 = bottom ? Math.max(sy, room.y + minSize) : room.y + room.h;
+  const basePoints = hasCustomPoly
+    ? rawPoly.map((p) => ({ x: p.x, y: p.y }))
+    : [
+        { x: room.x || 0, y: room.y || 0 },
+        { x: (room.x || 0) + (room.w || 0), y: room.y || 0 },
+        { x: (room.x || 0) + (room.w || 0), y: (room.y || 0) + (room.h || 0) },
+        { x: room.x || 0, y: (room.y || 0) + (room.h || 0) },
+      ];
 
-  const newW = x1 - x0;
-  const newH = y1 - y0;
-  const rect = { x: x0, y: y0, w: newW, h: newH };
+  let vertexIndex = handleIndex;
+  if (basePoints.length === 4 && (handleIndex === 2 || handleIndex === 3)) {
+    // Handle index 2 is 'sw' (vertex 3) and handle index 3 is 'se' (vertex 2)
+    vertexIndex = handleIndex === 2 ? 3 : 2;
+  }
+  if (vertexIndex < 0 || vertexIndex >= basePoints.length || Number.isNaN(vertexIndex)) {
+    vertexIndex = 0;
+  }
 
-  const dimValidation = validateRoomDimensions(room.type, newW, newH);
+  let rect;
+  let newW;
+  let newH;
+  let areaSqFt;
+  let updatedPoints;
+  let dimValidation;
 
-  // Also check polygon collision if existingRooms provided
-  let collisionValid = true;
-  if (options.existingRooms && options.existingRooms.length) {
-    const candidatePoly = [
+  if (explicitAngle !== null || (hasCustomPoly && basePoints.length !== 4)) {
+    updatedPoints = basePoints.map((p) => ({ x: p.x, y: p.y }));
+    const prevIndex = (vertexIndex - 1 + updatedPoints.length) % updatedPoints.length;
+    const anchor = options.anchor || updatedPoints[prevIndex];
+
+    let targetPoint;
+    if (explicitAngle !== null) {
+      const dist = Math.hypot(pointerPoint.x - anchor.x, pointerPoint.y - anchor.y);
+      if (!Number.isFinite(dist) || dist === 0) {
+        targetPoint = { x: anchor.x, y: anchor.y };
+      } else {
+        const rad = (explicitAngle * Math.PI) / 180;
+        targetPoint = {
+          x: anchor.x + dist * Math.cos(rad),
+          y: anchor.y + dist * Math.sin(rad),
+        };
+      }
+    } else {
+      targetPoint = {
+        x: options.snap !== false ? snap(pointerPoint.x) : pointerPoint.x,
+        y: options.snap !== false ? snap(pointerPoint.y) : pointerPoint.y,
+      };
+    }
+
+    updatedPoints[vertexIndex] = targetPoint;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of updatedPoints) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    newW = Math.max(0, maxX - minX);
+    newH = Math.max(0, maxY - minY);
+    rect = { x: minX, y: minY, w: newW, h: newH };
+    areaSqFt = computePolygonAreaAbs(updatedPoints) / 144;
+    dimValidation = validateRoomDimensions(room.type, newW, newH, { areaSqFt });
+  } else {
+    const sx = options.snap !== false ? snap(pointerPoint.x) : pointerPoint.x;
+    const sy = options.snap !== false ? snap(pointerPoint.y) : pointerPoint.y;
+
+    const right = handleIndex % 2 === 1;
+    const bottom = handleIndex >= 2;
+
+    const minSize = options.minSize || 36;
+    const x0 = right ? room.x : Math.min(sx, room.x + room.w - minSize);
+    const y0 = bottom ? room.y : Math.min(sy, room.y + room.h - minSize);
+    const x1 = right ? Math.max(sx, room.x + minSize) : room.x + room.w;
+    const y1 = bottom ? Math.max(sy, room.y + minSize) : room.y + room.h;
+
+    newW = x1 - x0;
+    newH = y1 - y0;
+    rect = { x: x0, y: y0, w: newW, h: newH };
+    updatedPoints = [
       { x: x0, y: y0 },
       { x: x1, y: y0 },
       { x: x1, y: y1 },
       { x: x0, y: y1 },
     ];
+    areaSqFt = (newW * newH) / 144;
+    dimValidation = validateRoomDimensions(room.type, newW, newH);
+  }
+
+  // Also check polygon collision if existingRooms provided
+  let collisionValid = true;
+  if (options.existingRooms && options.existingRooms.length) {
     const existingPolys = options.existingRooms
       .filter((r) => r.id !== room.id)
-      .map((r) => [
-        { x: r.x, y: r.y },
-        { x: r.x + r.w, y: r.y },
-        { x: r.x + r.w, y: r.y + r.h },
-        { x: r.x, y: r.y + r.h },
-      ]);
-    const colRes = validatePlacement(candidatePoly, existingPolys);
+      .map((r) => {
+        const rPts = r.points || r.corners || r.vertices;
+        if (Array.isArray(rPts) && rPts.length >= 3) {
+          return rPts;
+        }
+        return [
+          { x: r.x, y: r.y },
+          { x: r.x + r.w, y: r.y },
+          { x: r.x + r.w, y: r.y + r.h },
+          { x: r.x, y: r.y + r.h },
+        ];
+      });
+    const colRes = validatePlacement(updatedPoints, existingPolys);
     if (!colRes.valid) {
       collisionValid = false;
       dimValidation.violations.push('Room overlaps an existing room.');
     }
   }
+
+  const wallAngles = computePolygonWallAngles(updatedPoints);
+  const incomingEdgeIndex = (vertexIndex - 1 + updatedPoints.length) % updatedPoints.length;
+  const activeWall = wallAngles[incomingEdgeIndex] || { angleDegrees: 0, angleText: '0°' };
+  const activeAngleDegrees =
+    explicitAngle !== null
+      ? Object.is(Number(explicitAngle.toFixed(2)), -0)
+        ? 0
+        : Number(explicitAngle.toFixed(2))
+      : activeWall.angleDegrees;
+  const activeAngleText = fmtAngleDegrees(activeAngleDegrees);
 
   const isValid = dimValidation.isValid && collisionValid;
   const dimensionText = fmtDimensionText(newW, newH);
@@ -186,15 +325,29 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
 
   return {
     rect,
+    points: updatedPoints,
     dimensionText,
-    areaSqFt: (newW * newH) / 144,
+    angleDegrees: activeAngleDegrees,
+    angleText: activeAngleText,
+    wallAngles,
+    areaSqFt,
     isValid,
     violations: dimValidation.violations,
     handleIndex,
+    vertexIndex,
     feedback: {
       color,
       handleColor,
       dimensionText,
+      angleDegrees: activeAngleDegrees,
+      angleText: activeAngleText,
+      wallAngles,
+      angleInput: {
+        handleIndex,
+        vertexIndex,
+        angleDegrees: activeAngleDegrees,
+        explicitAngleDegrees: explicitAngle,
+      },
     },
   };
 }

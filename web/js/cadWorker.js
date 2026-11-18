@@ -241,6 +241,10 @@ export function handleCadWorkerMessage(e) {
         settings,
         snapModes: normalizedSnapModes,
         scale,
+        explicitAngleDegrees:
+          payload.explicitAngleDegrees !== undefined
+            ? payload.explicitAngleDegrees
+            : settings?.explicitAngleDegrees,
       });
 
       const guideLines = [];
@@ -261,6 +265,26 @@ export function handleCadWorkerMessage(e) {
             end: res.point,
             type: 'perpendicular',
           });
+        } else if (res.snap.type === 'angle') {
+          if (anchor.x !== res.point.x || anchor.y !== res.point.y) {
+            guideLines.push({
+              start: anchor,
+              end: res.point,
+              type: 'angle',
+            });
+          }
+          if (res.snap.edgeIndex !== undefined) {
+            const edge =
+              edges.find((eItem) => eItem.index === res.snap.edgeIndex) ||
+              edges[res.snap.edgeIndex];
+            if (edge) {
+              guideLines.push({
+                start: edge.start,
+                end: edge.end,
+                type: 'angle_reference',
+              });
+            }
+          }
         }
       }
 

@@ -47,13 +47,22 @@ export class RoomDrawingTool {
    * Add a corner, snapped against reference edges.
    */
   addCorner(rawPoint, context = {}) {
-    const anchor = this.points[this.points.length - 1] || rawPoint;
+    const hasPreviousCorner = this.points.length > 0;
+    const anchor = hasPreviousCorner ? this.points[this.points.length - 1] : rawPoint;
+    const explicitAngleDegrees = hasPreviousCorner
+      ? context.explicitAngleDegrees !== undefined
+        ? context.explicitAngleDegrees
+        : this.settings?.explicitAngleDegrees
+      : null;
+
     const { point, snap } = getSnappedPoint({
       point: rawPoint,
       anchor,
       edges: context.edges || [],
       settings: this.settings,
       snapModes: this.snapModes,
+      scale: context.scale,
+      explicitAngleDegrees,
     });
 
     this.points.push(point);
@@ -75,12 +84,19 @@ export class RoomDrawingTool {
     }
 
     const anchor = this.points[this.points.length - 1];
-    const { point } = getSnappedPoint({
+    const explicitAngleDegrees =
+      context.explicitAngleDegrees !== undefined
+        ? context.explicitAngleDegrees
+        : this.settings?.explicitAngleDegrees;
+
+    const { point, snap } = getSnappedPoint({
       point: rawPoint,
       anchor,
       edges: context.edges || [],
       settings: this.settings,
       snapModes: this.snapModes,
+      scale: context.scale,
+      explicitAngleDegrees,
     });
 
     const candidate = [...this.points, point];
@@ -89,6 +105,8 @@ export class RoomDrawingTool {
 
     return {
       ...feedback,
+      point,
+      snap,
       bulges: [...this.bulges, context.bulge || 0],
     };
   }
