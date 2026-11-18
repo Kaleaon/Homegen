@@ -174,6 +174,13 @@ function tokenTransformerPlugin() {
 }
 tokenTransformerPlugin.postcss = true;
 
+function writeFileAtomicSync(targetPath, content) {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpPath, content, 'utf8');
+  fs.renameSync(tmpPath, targetPath);
+}
+
 async function build() {
   console.log('🔨 Compiling Ktheme tokens and application stylesheets...');
 
@@ -205,9 +212,8 @@ async function build() {
   const distCssPath = path.resolve(webRoot, 'dist/css/style.css');
   const appCssPath = path.resolve(webRoot, 'css/style.css');
 
-  fs.mkdirSync(path.dirname(distCssPath), { recursive: true });
-  fs.writeFileSync(distCssPath, compiledOutput, 'utf8');
-  fs.writeFileSync(appCssPath, compiledOutput, 'utf8');
+  writeFileAtomicSync(distCssPath, compiledOutput);
+  writeFileAtomicSync(appCssPath, compiledOutput);
 
   console.log(`✅ CSS compiled successfully!`);
   console.log(`  - Output: ${distCssPath}`);
