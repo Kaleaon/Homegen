@@ -1,14 +1,8 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '#three';
 
-import {
-  saveTextureBlob,
-  getTextureBlob,
-  listTextures,
-  deleteTextureBlob,
-  clearTextures,
-} from '../js/textureStore.js';
+import { saveTextureBlob, getTextureUrl, getAllTextureBlobs } from '../js/textureStore.js';
 
 import {
   newState,
@@ -24,37 +18,27 @@ import {
 import { exportProjectZip, importProjectZip } from '../js/archive.js';
 
 describe('IndexedDB Blob Texture Store', () => {
-  beforeEach(async () => {
-    await clearTextures();
-  });
-
-  it('saves and retrieves texture blobs', async () => {
+  it('saves and retrieves texture blobs via public entry points', async () => {
     const blobData = new Blob(['fake image data'], { type: 'image/png' });
     const id = 'tex_test_123';
 
     const savedId = await saveTextureBlob(id, blobData, { name: 'My Brick' });
     assert.equal(savedId, id);
 
-    const retrievedBlob = await getTextureBlob(id);
-    assert.ok(retrievedBlob);
-    assert.equal(retrievedBlob.type, 'image/png');
+    const textureUrl = await getTextureUrl(id);
+    assert.ok(textureUrl);
+    assert.match(textureUrl, /^blob:/);
+    URL.revokeObjectURL(textureUrl);
 
-    const textures = await listTextures();
-    assert.equal(textures.length, 1);
-    assert.equal(textures[0].id, id);
-    assert.equal(textures[0].name, 'My Brick');
-  });
+    assert.equal(await getTextureUrl('nonexistent_tex_id'), null);
+    assert.equal(await getTextureUrl(null), null);
 
-  it('deletes stored texture blobs', async () => {
-    const blobData = new Blob(['image data'], { type: 'image/png' });
-    await saveTextureBlob('tex_del_1', blobData);
-
-    let list = await listTextures();
-    assert.equal(list.length, 1);
-
-    await deleteTextureBlob('tex_del_1');
-    list = await listTextures();
-    assert.equal(list.length, 0);
+    const textures = await getAllTextureBlobs();
+    const stored = textures.find((t) => t.id === id);
+    assert.ok(stored);
+    assert.equal(stored.name, 'My Brick');
+    assert.equal(stored.mimeType, 'image/png');
+    assert.equal(stored.blob.type, 'image/png');
   });
 });
 
@@ -164,10 +148,6 @@ describe('3D Shader UV Matrix Transforms', () => {
 });
 
 describe('Composite ZIP Export & Import Archiving', () => {
-  beforeEach(async () => {
-    await clearTextures();
-  });
-
   it('packages plan JSON and IndexedDB texture assets into a ZIP file and imports them back', async () => {
     const state = newState();
     const room = createRoom(state, 'office', 0, 0, 144, 144);
@@ -184,21 +164,26 @@ describe('Composite ZIP Export & Import Archiving', () => {
     assert.ok(zipBlob);
     assert.ok(zipBlob.size > 0);
 
-    // Clear texture store to simulate new device/browser
-    await clearTextures();
-    assert.equal((await listTextures()).length, 0);
+    // Overwrite texture entry before import to verify ZIP extraction restores original asset
+    await saveTextureBlob(texId, new Blob(['placeholder'], { type: 'image/png' }), {
+      name: 'Placeholder',
+    });
 
     // Import back from ZIP
     const importedState = await importProjectZip(zipBlob);
     assert.ok(importedState);
     assert.equal(importedState.rooms[0].walls.N, texId);
 
-    const importedTextures = await listTextures();
-    assert.equal(importedTextures.length, 1);
-    assert.equal(importedTextures[0].id, texId);
+    const importedTextures = await getAllTextureBlobs();
+    const restoredRecord = importedTextures.find((t) => t.id === texId);
+    assert.ok(restoredRecord);
+    assert.equal(restoredRecord.name, 'Herringbone Brick.jpg');
+    assert.equal(restoredRecord.mimeType, 'image/jpeg');
+    assert.equal(restoredRecord.blob.type, 'image/jpeg');
+    assert.equal(await restoredRecord.blob.text(), 'fake binary image stream');
 
-    const restoredBlob = await getTextureBlob(texId);
-    assert.ok(restoredBlob);
-    assert.equal(restoredBlob.type, 'image/jpeg');
+    const restoredUrl = await getTextureUrl(texId);
+    assert.ok(restoredUrl);
+    URL.revokeObjectURL(restoredUrl);
   });
 });
