@@ -5280,7 +5280,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-const SAMPLE_MUNICIPAL_GIS = {
+export const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -5346,7 +5346,7 @@ function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-function openGISDialog() {
+export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisCrsSelect = $('#gis-crs');
@@ -5372,6 +5372,8 @@ function closeGISDialog() {
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
 }
+
+export { renderGISSegments };
 
 function renderGISSegments() {
   const container = $('#gis-segment-list');
@@ -6858,5 +6860,3 @@ if (typeof window !== 'undefined')
     setCatalogFilters,
     resetCatalogFilters,
   };
-
-export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
