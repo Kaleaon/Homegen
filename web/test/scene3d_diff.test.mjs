@@ -233,11 +233,11 @@ test('customTexture caches dataUrl textures, preserves async render callback, an
     const api = createScene3D(
       canvas,
       () => state,
-      () => 0
+      () => {
+        renderCalls += 1;
+        return 0;
+      }
     );
-    api.scene.onBeforeRender = () => {
-      renderCalls += 1;
-    };
     api.show();
 
     assert.strictEqual(
