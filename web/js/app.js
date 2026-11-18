@@ -64,7 +64,13 @@ import {
   resolveWindowStyle,
   resolveDoorStyle,
 } from './presetRegistry.js';
-import { initView3D } from './ui3d.js';
+import {
+  initView3D,
+  RANGE_VALUE_FORMATTERS,
+  formatRangeValueText,
+  updateRangeAriaValueText,
+} from './ui3d.js';
+export { RANGE_VALUE_FORMATTERS, formatRangeValueText, updateRangeAriaValueText };
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
@@ -318,7 +324,10 @@ function renderBgToolbar() {
     const vis = $('#bg-visible');
     if (vis) vis.checked = bg.visible !== false;
     const op = $('#bg-opacity');
-    if (op) op.value = bg.opacity ?? 0.5;
+    if (op) {
+      op.value = bg.opacity ?? 0.5;
+      updateRangeAriaValueText(op, 'percent');
+    }
     const mapSelect = $('#bg-map-preset');
     if (mapSelect) mapSelect.value = bg.presetKey || '';
     const gisMapSelect = $('#gis-map-preset');
@@ -1254,35 +1263,35 @@ function renderInspector() {
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-scale-u-range" style="font-size:0.8rem;font-weight:600">Scale U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range">
+            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range" aria-valuetext="${formatRangeValueText(uv.scaleU, 'multiplier')}">
             <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem" aria-label="Scale U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-scale-v-range" style="font-size:0.8rem;font-weight:600">Scale V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range">
+            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range" aria-valuetext="${formatRangeValueText(uv.scaleV, 'multiplier')}">
             <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem" aria-label="Scale V numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-rot-range" style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range">
+            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range" aria-valuetext="${formatRangeValueText(uv.rotation, 'degrees')}">
             <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem" aria-label="Rotation numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-off-u-range" style="font-size:0.8rem;font-weight:600">Offset U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range">
+            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range" aria-valuetext="${formatRangeValueText(uv.offsetU, 'offset')}">
             <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem" aria-label="Offset U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-off-v-range" style="font-size:0.8rem;font-weight:600">Offset V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range">
+            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range" aria-valuetext="${formatRangeValueText(uv.offsetV, 'offset')}">
             <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem" aria-label="Offset V numeric">
           </div>
         </div>
@@ -1470,25 +1479,36 @@ function renderInspector() {
       window.__scene3d?.render?.();
     };
 
-    const bindPair = (rangeId, numId) => {
+    const bindPair = (rangeId, numId, formatType) => {
       const rangeEl = $(rangeId);
       const numEl = $(numId);
       if (!rangeEl || !numEl) return;
-      rangeEl.addEventListener('input', (e) => {
+      updateRangeAriaValueText(rangeEl, formatType);
+      const syncFromRange = (e) => {
         numEl.value = e.target.value;
+        updateRangeAriaValueText(rangeEl, formatType);
         updateUV();
+      };
+      rangeEl.addEventListener('input', syncFromRange);
+      rangeEl.addEventListener('change', syncFromRange);
+      numEl.addEventListener('input', (e) => {
+        if (e.target.value !== '' && !Number.isNaN(Number(e.target.value))) {
+          rangeEl.value = e.target.value;
+          updateRangeAriaValueText(rangeEl, formatType);
+        }
       });
       numEl.addEventListener('change', (e) => {
         rangeEl.value = e.target.value;
+        updateRangeAriaValueText(rangeEl, formatType);
         updateUV();
       });
     };
 
-    bindPair('#i-uv-scale-u-range', '#i-uv-scale-u-num');
-    bindPair('#i-uv-scale-v-range', '#i-uv-scale-v-num');
-    bindPair('#i-uv-rot-range', '#i-uv-rot-num');
-    bindPair('#i-uv-off-u-range', '#i-uv-off-u-num');
-    bindPair('#i-uv-off-v-range', '#i-uv-off-v-num');
+    bindPair('#i-uv-scale-u-range', '#i-uv-scale-u-num', 'multiplier');
+    bindPair('#i-uv-scale-v-range', '#i-uv-scale-v-num', 'multiplier');
+    bindPair('#i-uv-rot-range', '#i-uv-rot-num', 'degrees');
+    bindPair('#i-uv-off-u-range', '#i-uv-off-u-num', 'offset');
+    bindPair('#i-uv-off-v-range', '#i-uv-off-v-num', 'offset');
 
     $('#i-uv-reset')?.addEventListener('click', () => {
       const scope = $('#i-uv-scope')?.value || 'single';
@@ -4096,13 +4116,19 @@ function openBrandingDialog() {
   if ($('#stamp-border-style')) $('#stamp-border-style').value = st.borderStyle || 'solid';
   if ($('#stamp-border-color')) $('#stamp-border-color').value = st.borderColor || '#d32f2f';
   if ($('#stamp-text-color')) $('#stamp-text-color').value = st.textColor || '#d32f2f';
-  if ($('#stamp-opacity')) $('#stamp-opacity').value = st.opacity ?? 0.9;
+  if ($('#stamp-opacity')) {
+    $('#stamp-opacity').value = st.opacity ?? 0.9;
+    updateRangeAriaValueText($('#stamp-opacity'), 'percent');
+  }
 
   const wm = workingBranding.watermark || {};
   if ($('#wm-enabled')) $('#wm-enabled').checked = wm.enabled !== false;
   if ($('#wm-text')) $('#wm-text').value = wm.text ?? '';
   if ($('#wm-color')) $('#wm-color').value = wm.color || '#9e9e9e';
-  if ($('#wm-opacity')) $('#wm-opacity').value = wm.opacity ?? 0.2;
+  if ($('#wm-opacity')) {
+    $('#wm-opacity').value = wm.opacity ?? 0.2;
+    updateRangeAriaValueText($('#wm-opacity'), 'percent');
+  }
 
   updateLogoPreviewUI();
   updateStampPreview();
@@ -4127,6 +4153,7 @@ function syncWorkingStampFromInputs() {
     textColor: $('#stamp-text-color')?.value || '#d32f2f',
     opacity: parseFloat($('#stamp-opacity')?.value ?? '0.9'),
   };
+  updateRangeAriaValueText($('#stamp-opacity'), 'percent');
   updateStampPreview();
 }
 
@@ -4139,6 +4166,7 @@ function syncWorkingWatermarkFromInputs() {
     fontSize: 24,
     angle: -45,
   };
+  updateRangeAriaValueText($('#wm-opacity'), 'percent');
 }
 
 if (typeof document !== 'undefined') {
@@ -4178,6 +4206,8 @@ if (typeof document !== 'undefined') {
     $(selector)?.addEventListener('input', syncWorkingWatermarkFromInputs);
     $(selector)?.addEventListener('change', syncWorkingWatermarkFromInputs);
   });
+  updateRangeAriaValueText($('#stamp-opacity'), 'percent');
+  updateRangeAriaValueText($('#wm-opacity'), 'percent');
 
   $('#logo-file')?.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -4924,13 +4954,18 @@ $('#bg-visible')?.addEventListener('change', (e) => {
     redraw();
   }
 });
+updateRangeAriaValueText($('#bg-opacity'), 'percent');
 $('#bg-opacity')?.addEventListener('input', (e) => {
+  updateRangeAriaValueText(e.target, 'percent');
   if (doc.background) {
     doc.background.opacity = parseFloat(e.target.value);
     hist.push(doc, 'Change Blueprint Opacity');
     persist();
     redraw();
   }
+});
+$('#bg-opacity')?.addEventListener('change', (e) => {
+  updateRangeAriaValueText(e.target, 'percent');
 });
 $('#bg-lock-btn')?.addEventListener('click', () => {
   if (doc.background) {

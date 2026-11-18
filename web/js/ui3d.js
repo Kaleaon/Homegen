@@ -11,8 +11,60 @@ import {
 } from './photoreal.js';
 import { getSnappedPoint3D } from '../../designer3d/tools/index.mjs';
 
-const $ = (s) => document.querySelector(s);
+const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const KEY = 'homegen.horde.key';
+
+export const RANGE_VALUE_FORMATTERS = {
+  percent(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '0%';
+    return `${Math.round(num * 100)}%`;
+  },
+  degrees(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '0°';
+    const rounded = Math.round(num * 10) / 10;
+    return `${rounded}°`;
+  },
+  multiplier(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '1x';
+    const rounded = Number(num.toFixed(2));
+    return `${rounded}x`;
+  },
+  offset(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '0 tiles';
+    const rounded = Number(num.toFixed(2));
+    if (rounded === 0) return '0 tiles';
+    const sign = rounded > 0 ? '+' : '';
+    const unit = Math.abs(rounded) === 1 ? 'tile' : 'tiles';
+    return `${sign}${rounded} ${unit}`;
+  },
+};
+
+export function formatRangeValueText(value, formatter = 'percent') {
+  if (typeof formatter === 'function') {
+    return String(formatter(Number(value)));
+  }
+  const fn = RANGE_VALUE_FORMATTERS[formatter] || RANGE_VALUE_FORMATTERS.percent;
+  return fn(value);
+}
+
+export function updateRangeAriaValueText(el, formatter = 'percent', explicitValue = undefined) {
+  if (!el) return '';
+  const rawValue = explicitValue !== undefined ? explicitValue : el.value;
+  const formatted = formatRangeValueText(rawValue, formatter);
+  if (typeof el.setAttribute === 'function') {
+    el.setAttribute('aria-valuetext', formatted);
+  } else {
+    el['aria-valuetext'] = formatted;
+  }
+  if ('ariaValueText' in el || typeof el.setAttribute !== 'function') {
+    el.ariaValueText = formatted;
+  }
+  return formatted;
+}
 
 export function initView3D({
   getDoc,
@@ -107,7 +159,16 @@ export function initView3D({
     if (e.target.checked) toast('Streaming free CC0 textures from Poly Haven…', false, 2500);
   });
   $('#o-env').addEventListener('change', (e) => api.setEnv(e.target.value));
-  $('#o-sun').addEventListener('input', (e) => api.setOption('sun', Number(e.target.value)));
+  const oSun = $('#o-sun');
+  if (oSun) {
+    updateRangeAriaValueText(oSun, 'percent');
+    const handleSunChange = (e) => {
+      updateRangeAriaValueText(e.target, 'percent');
+      api?.setOption('sun', Number(e.target.value));
+    };
+    oSun.addEventListener('input', handleSunChange);
+    oSun.addEventListener('change', handleSunChange);
+  }
   $('#o-reset').addEventListener('click', () => {
     api?.resetCamera();
     toast('Reset 3D camera view', false, 2000);

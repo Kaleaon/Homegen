@@ -18,7 +18,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -63,6 +62,14 @@ export function announce3DStateChange(message) {
   }
 }
 
+const escHtml = (s) =>
+  String(s ?? '').replace(
+    /[&<>"]/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
+  );
+
+const cachedView3dHtmlByContainer = new WeakMap();
+
 export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   const container = document.getElementById('view3d-fallback-summary');
@@ -72,11 +79,68 @@ export function updateView3dA11yTree(state, curLevel = 0, cameraMode = 'orbit') 
     cameraMode === 'walkthrough' || cameraMode === 'walk'
       ? 'First-Person Walkthrough'
       : 'Orbit View';
-  const roomCount = ((state && state.rooms) || []).filter(
-    (r) => (r.level || 0) === curLevel
-  ).length;
+  const roomsOnLevel = ((state && state.rooms) || []).filter((r) => (r.level || 0) === curLevel);
 
-  container.textContent = `3D Viewport in ${modeLabel} mode. Rendering Level ${curLevel + 1} with ${roomCount} room(s) and standard scene lighting.`;
+  let html = `<p>3D Viewport in ${modeLabel} mode. Rendering Level ${curLevel + 1} with ${roomsOnLevel.length} room(s) and standard scene lighting.</p>`;
+
+  if (roomsOnLevel.length === 0) {
+    html += `<p>Level ${curLevel + 1} is empty. Switch to 2D plan view to add rooms or furniture.</p>`;
+  } else {
+    html += '<ul>';
+    for (const r of roomsOnLevel) {
+      let wIn = typeof r.w === 'number' ? r.w : 0;
+      let hIn = typeof r.h === 'number' ? r.h : 0;
+      if ((wIn <= 0 || hIn <= 0) && Array.isArray(r.points) && r.points.length >= 3) {
+        const bbox = getRoomBoundingBox(getRoomPoints(r));
+        wIn = bbox.w;
+        hIn = bbox.h;
+      }
+      const wFeet = Math.round((wIn / 12) * 10) / 10;
+      const hFeet = Math.round((hIn / 12) * 10) / 10;
+      const ceilIn = typeof r.ceiling === 'number' ? r.ceiling : 96;
+      const ceilFeet = Math.round((ceilIn / 12) * 10) / 10;
+      const dimsText =
+        wIn > 0 && hIn > 0
+          ? `${wFeet} ft by ${hFeet} ft (${ceilFeet} ft ceiling)`
+          : `${ceilFeet} ft ceiling`;
+
+      const floorId = r.floor || 'floor_oak';
+      const floorName = FLOOR_BY_ID[floorId]?.name || floorId;
+
+      const wallIds =
+        r.walls && typeof r.walls === 'object' && Object.keys(r.walls).length > 0
+          ? Object.values(r.walls)
+          : ['paint_white'];
+      const wallNames = Array.from(
+        new Set(
+          wallIds.map((id) =>
+            WALL_BY_ID[id]?.name
+              ? WALL_BY_ID[id].name
+              : String(id).startsWith('tex_')
+                ? 'Custom texture'
+                : String(id)
+          )
+        )
+      );
+
+      const openingList = (r.openings || [])
+        .map((o) => OPENING_BY_ID[o.type]?.name || o.type)
+        .join(', ');
+      const itemList = (r.items || []).map((it) => ITEM_BY_ID[it.type]?.name || it.type).join(', ');
+
+      html += `<li><strong>${escHtml(r.name || 'Unnamed Room')}</strong>: ${escHtml(dimsText)}. `;
+      html += `Finishes: ${escHtml(floorName)} floor, ${escHtml(wallNames.join(', '))} walls. `;
+      html += `Openings: ${escHtml(openingList || 'None')}. `;
+      html += `Items: ${escHtml(itemList || 'None')}.</li>`;
+    }
+    html += '</ul>';
+  }
+
+  if (cachedView3dHtmlByContainer.get(container) === html && container.innerHTML !== '') {
+    return;
+  }
+  cachedView3dHtmlByContainer.set(container, html);
+  container.innerHTML = html;
 }
 
 export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
