@@ -327,3 +327,8 @@
   min-height: 24px;
   min-width: 24px;
 }
+
+.k-overlay-dialog .row k-select {
+  flex: 1;
+  min-width: 0;
+}
