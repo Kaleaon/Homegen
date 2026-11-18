@@ -72,6 +72,10 @@ class KButton extends BaseElement {
           color: var(--ktheme-accent-ink, var(--accent-ink, #ffffff));
           border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
         }
+        :host([disabled]) {
+          pointer-events: none;
+          cursor: default;
+        }
         :host([disabled]) button,
         button:disabled {
           opacity: 0.4;
@@ -153,6 +157,22 @@ class KButton extends BaseElement {
   click() {
     if (this.disabled) return;
     if (this._btn) this._btn.click();
+  }
+
+  focus(options) {
+    if (this._btn) {
+      this._btn.focus(options);
+    } else if (typeof super.focus === 'function') {
+      super.focus(options);
+    }
+  }
+
+  blur() {
+    if (this._btn) {
+      this._btn.blur();
+    } else if (typeof super.blur === 'function') {
+      super.blur();
+    }
   }
 }
 
@@ -840,6 +860,18 @@ export class KPopover extends BaseElement {
   _onTriggerClick(e) {
     if (typeof e.stopPropagation === 'function') {
       e.stopPropagation();
+    }
+    const trigger = this._getTriggerElement();
+    if (
+      (typeof this.hasAttribute === 'function' && this.hasAttribute('disabled')) ||
+      (trigger &&
+        (trigger.disabled ||
+          (typeof trigger.hasAttribute === 'function' && trigger.hasAttribute('disabled'))))
+    ) {
+      if (typeof e.preventDefault === 'function') {
+        e.preventDefault();
+      }
+      return;
     }
     this.open = !this.open;
   }

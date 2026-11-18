@@ -327,12 +327,41 @@ export function registerAllEPSG(p = proj4) {
 }
 
 /**
- * Normalizes an EPSG code string (e.g. "3435" -> "EPSG:3435").
+ * Normalizes an EPSG or OGC URN CRS code string (e.g. "3435" -> "EPSG:3435",
+ * "urn:ogc:def:crs:EPSG::2227" -> "EPSG:2227", "urn:ogc:def:crs:OGC:1.3:CRS84" -> "EPSG:4326").
  */
 export function normalizeCode(code) {
-  if (!code || typeof code !== 'string') return '';
-  const trimmed = code.trim().toUpperCase();
+  if (code == null) return '';
+  if (typeof code === 'number') {
+    return Number.isInteger(code) && code > 0 ? `EPSG:${code}` : '';
+  }
+  if (typeof code !== 'string') return '';
+  const raw = code.trim();
+  if (!raw) return '';
+
+  // Preserve case-sensitive proj4 (+proj=...) and WKT (PROJCS[...], GEOGCS[...]) strings
+  if (raw.startsWith('+') || raw.includes('[')) return raw;
+
+  const trimmed = raw.toUpperCase();
   if (/^\d+$/.test(trimmed)) return `EPSG:${trimmed}`;
+
+  // OGC CRS84 and URN variants map to WGS84 (EPSG:4326)
+  if (/^(?:URN:(?:X-)?OGC:DEF:CRS:)?(?:OGC:(?:[^:]*:+)?|)CRS84$/.test(trimmed)) {
+    return 'EPSG:4326';
+  }
+
+  // OGC URN EPSG formats (single colon, double colons, or explicit version e.g. urn:ogc:def:crs:EPSG:7.9:2227)
+  const urnEpsgMatch = trimmed.match(/^URN:(?:X-)?OGC:DEF:CRS:EPSG:(?:[^:]*:+)?(\d+)$/);
+  if (urnEpsgMatch) {
+    return `EPSG:${urnEpsgMatch[1]}`;
+  }
+
+  // Direct EPSG prefix (including EPSG:2227 or EPSG::2227)
+  const epsgMatch = trimmed.match(/^EPSG:+(\d+)$/);
+  if (epsgMatch) {
+    return `EPSG:${epsgMatch[1]}`;
+  }
+
   if (trimmed.startsWith('EPSG:')) return trimmed;
   return trimmed;
 }

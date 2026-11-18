@@ -3,27 +3,6 @@ package com.ktheme.models
 import kotlinx.serialization.Serializable
 
 /**
- * RGB Color representation
- */
-@Serializable
-data class RGBColor(
-    val r: Int, // 0-255
-    val g: Int, // 0-255
-    val b: Int, // 0-255
-)
-
-/**
- * RGBA Color with alpha channel
- */
-@Serializable
-data class RGBAColor(
-    val r: Int,
-    val g: Int,
-    val b: Int,
-    val a: Float, // 0-1
-)
-
-/**
  * Metallic gradient definition
  */
 @Serializable
@@ -33,22 +12,6 @@ data class MetallicGradient(
     val shadow: String,
     val shimmer: String,
 )
-
-/**
- * Metallic theme variants
- */
-enum class MetallicVariant {
-    SILVER,
-    GOLD,
-    GOLD_ROYAL_BLUE,
-    BRONZE,
-    COPPER,
-    PLATINUM,
-    ROSE_GOLD,
-    TITANIUM,
-    CHROME,
-    COBALT,
-}
 
 /**
  * Complete color scheme for a theme
