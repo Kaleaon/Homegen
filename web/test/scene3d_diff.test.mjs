@@ -207,14 +207,6 @@ test('customTexture caches dataUrl textures, preserves async render callback, an
   const loadCalls = [];
   let renderCalls = 0;
 
-  doc.getElementById = (id) => {
-    if (id === 'view3d-fallback-summary') {
-      renderCalls += 1;
-      return { textContent: '', isConnected: false };
-    }
-    return null;
-  };
-
   THREE.TextureLoader.prototype.load = function mockLoad(url, onLoad) {
     const tex = new THREE.Texture();
     loadCalls.push({ url, onLoad, tex });
@@ -241,7 +233,10 @@ test('customTexture caches dataUrl textures, preserves async render callback, an
     const api = createScene3D(
       canvas,
       () => state,
-      () => 0
+      () => {
+        renderCalls += 1;
+        return 0;
+      }
     );
     api.show();
 
@@ -303,6 +298,5 @@ test('customTexture caches dataUrl textures, preserves async render callback, an
     api.destroy();
   } finally {
     THREE.TextureLoader.prototype.load = origLoad;
-    delete doc.getElementById;
   }
 });
