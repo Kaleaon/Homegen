@@ -223,7 +223,10 @@ function toast(msg, err = false, ms = 4500) {
   }, ms);
 }
 
+export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
+let zoomAnnounceTimeout = null;
+let a11yDebounceTimer = null;
 function announceToLiveRegion(msg) {
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
@@ -231,6 +234,31 @@ function announceToLiveRegion(msg) {
   liveRegionTimeout = setTimeout(() => {
     liveEl.textContent = msg;
   }, 100);
+}
+
+export function announceZoom(scale) {
+  if (zoomAnnounceTimeout) clearTimeout(zoomAnnounceTimeout);
+  if (a11yDebounceTimer) {
+    clearTimeout(a11yDebounceTimer);
+    a11yDebounceTimer = null;
+  }
+  if (liveRegionTimeout) {
+    clearTimeout(liveRegionTimeout);
+    liveRegionTimeout = null;
+  }
+  zoomAnnounceTimeout = setTimeout(() => {
+    zoomAnnounceTimeout = null;
+    const liveEl =
+      $('#plan-fallback-summary') ||
+      (typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('plan-fallback-summary')
+        : null);
+    if (!liveEl) return;
+    if (typeof liveEl.setAttribute === 'function' && !liveEl.getAttribute?.('role')) {
+      liveEl.setAttribute('role', 'status');
+    }
+    liveEl.textContent = `Zoom level: ${Math.round((scale / 1.6) * 100)}%`;
+  }, ZOOM_ANNOUNCE_DEBOUNCE_MS);
 }
 
 function persist() {
@@ -404,8 +432,10 @@ function refresh() {
     redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   }
   renderHistoryTimeline();
-  $('#plan-name').value = doc.name;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const planNameInput = $('#plan-name');
+  if (planNameInput) planNameInput.value = doc.name;
+  const zoomLabelEl = $('#zoom-label');
+  if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
@@ -640,8 +670,6 @@ export function badIds(rep) {
   return s;
 }
 
-let a11yDebounceTimer = null;
-
 export function updatePlanA11yTree(state, curLevel = 0) {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   if (a11yDebounceTimer) clearTimeout(a11yDebounceTimer);
@@ -674,7 +702,7 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const state = preview ? preview.next : doc;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
   const bad = new Set([
@@ -690,18 +718,20 @@ function redraw() {
     preview,
     freshViolations: preview?.fresh || [],
   });
-  draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
-    dpr,
-    gridSettings: interaction.gridSettings,
-    complianceScene,
-    snappingBridge,
-    bad,
-    selection,
-    under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
-    autoFixDiffs: preview ? [] : autoFixDiffs,
-    hoveredDiffIndex,
-    overlay: (c) => drawOverlay(c, state),
-  });
+  if (ctx) {
+    draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
+      dpr,
+      gridSettings: interaction.gridSettings,
+      complianceScene,
+      snappingBridge,
+      bad,
+      selection,
+      under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
+      autoFixDiffs: preview ? [] : autoFixDiffs,
+      hoveredDiffIndex,
+      overlay: (c) => drawOverlay(c, state),
+    });
+  }
   updatePlanA11yTree(state, curLevel);
 }
 
@@ -3253,20 +3283,24 @@ canvas?.addEventListener(
   { passive: false }
 );
 
-function zoomAt(mx, my, f) {
+export function zoomAt(mx, my, f) {
   const ns = Math.max(0.4, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
   view.oy = my - ((my - view.oy) / view.scale) * ns;
   view.scale = ns;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const zoomLabel = $('#zoom-label');
+  if (zoomLabel) zoomLabel.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
+  announceZoom(view.scale);
 }
 
-function fit() {
-  const r = canvas.getBoundingClientRect();
+export function fit() {
+  const r = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
   if (!doc.rooms.length) {
     view = { scale: 1.6, ox: 40, oy: 40 };
-    return refresh();
+    refresh();
+    announceZoom(view.scale);
+    return;
   }
   const x0 = Math.min(...doc.rooms.map((q) => q.x));
   const y0 = Math.min(...doc.rooms.map((q) => q.y));
@@ -3279,6 +3313,7 @@ function fit() {
   view.ox = (r.width - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.oy = (r.height - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
   refresh();
+  announceZoom(view.scale);
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
@@ -4652,8 +4687,8 @@ if (typeof window !== 'undefined') {
     } else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
     else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in').click();
-    else if (k === '-') $('#zoom-out').click();
+    else if (k === '+' || k === '=') $('#zoom-in')?.click();
+    else if (k === '-') $('#zoom-out')?.click();
   });
 
   window.addEventListener('resize', resize);
@@ -5614,6 +5649,12 @@ function initCommandPaletteUI() {
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
+    get view() {
+      return view;
+    },
+    announceZoom,
+    zoomAt,
+    fit,
     setLevel,
     formRow,
     get doc() {
