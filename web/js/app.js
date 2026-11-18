@@ -63,6 +63,7 @@ import {
   applyCladdingMaterial,
   resolveWindowStyle,
   resolveDoorStyle,
+  resolveWallAssembly,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
 import { exportSVG } from './svg.js';
@@ -225,12 +226,18 @@ function toast(msg, err = false, ms = 4500) {
 
 let liveRegionTimeout = null;
 function announceToLiveRegion(msg) {
+  const live3dEl = $('#view3d-a11y-live');
+  if (live3dEl) live3dEl.textContent = msg;
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
   if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
   liveRegionTimeout = setTimeout(() => {
+    if (a11yDebounceTimer) {
+      clearTimeout(a11yDebounceTimer);
+      a11yDebounceTimer = null;
+    }
     liveEl.textContent = msg;
-  }, 100);
+  }, 220);
 }
 
 function persist() {
@@ -1174,9 +1181,22 @@ function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     if (!window.__activeUVWall) window.__activeUVWall = 'N';
+    if (!window.__activeAssemblyScope) window.__activeAssemblyScope = 'single';
     const activeWall = window.__activeUVWall;
+    const activeAssemblyScope = window.__activeAssemblyScope;
     const uv = M.getWallUV(room, activeWall);
     const wallFinishId = room.walls?.[activeWall] || 'paint_white';
+    let activeExtFinId = room.cladding || room.exteriorCladding;
+    if (!activeExtFinId && WALL_BY_ID[wallFinishId]?.exterior) {
+      activeExtFinId = wallFinishId;
+    }
+    activeExtFinId = activeExtFinId || 'cladding_siding_white';
+    const assembly = resolveWallAssembly(
+      wallFinishId,
+      activeExtFinId,
+      room.wallAssemblyOverrides?.[activeWall]
+    );
+    const fmtInches = (v) => Number(Number(v).toFixed(3));
     const finishObj = WALL_BY_ID[wallFinishId];
     const finishLabel = finishObj
       ? finishObj.name
@@ -1294,6 +1314,49 @@ function renderInspector() {
             <option value="plan">Whole Plan</option>
           </select>
           <button id="i-uv-reset" style="font-size:0.8rem;padding:2px 6px">Reset UV</button>
+        </div>
+      </div>
+
+      <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Wall Assembly Layer Thicknesses</h4>
+      <div class="wall-assembly-controls-group" style="margin-top:8px;background:rgba(0,0,0,0.03);padding:8px;border-radius:6px;border:1px solid var(--border,#ddd)">
+        ${formRow(
+          'i-wa-gypsum',
+          'Gypsum Board (in)',
+          `<input id="i-wa-gypsum" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.gypsumThickness)}" aria-label="Gypsum board thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-stud',
+          'Stud Depth (in)',
+          `<input id="i-wa-stud" type="number" step="0.25" min="1.5" max="24" value="${fmtInches(assembly.studDepth)}" aria-label="Stud framing depth in inches">`
+        )}
+        ${formRow(
+          'i-wa-sheathing',
+          'Sheathing (in)',
+          `<input id="i-wa-sheathing" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.sheathingThickness)}" aria-label="Sheathing thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-airgap',
+          'Air Gap (in)',
+          `<input id="i-wa-airgap" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.airGapThickness)}" aria-label="Air gap thickness in inches">`
+        )}
+        ${formRow(
+          'i-wa-cladding',
+          'Exterior Cladding (in)',
+          `<input id="i-wa-cladding" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.claddingThickness)}" aria-label="Exterior cladding thickness in inches">`
+        )}
+        <div class="row" style="margin:8px 0 6px;display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;padding-top:6px;border-top:1px dashed var(--border,#ddd)">
+          <span>Total Assembly Thickness (${esc(activeWall)})</span>
+          <strong id="i-wa-total" aria-live="polite">${fmtInches(assembly.totalThickness)}"</strong>
+        </div>
+        <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <select id="i-wa-scope" style="font-size:0.8rem;padding:2px 4px" aria-label="Wall assembly override scope">
+            <option value="single" ${activeAssemblyScope === 'single' ? 'selected' : ''}>Active Wall Only</option>
+            <option value="room" ${activeAssemblyScope === 'room' ? 'selected' : ''}>Entire Room</option>
+            <option value="level" ${activeAssemblyScope === 'level' ? 'selected' : ''}>Level</option>
+            <option value="plan" ${activeAssemblyScope === 'plan' ? 'selected' : ''}>Whole Plan</option>
+          </select>
+          <button type="button" id="i-wa-reset" style="font-size:0.8rem;padding:2px 6px">Reset Assembly</button>
         </div>
       </div>
 
@@ -1504,6 +1567,110 @@ function renderInspector() {
       renderInspector();
       redraw();
       window.__scene3d?.render?.();
+    });
+
+    const readAssemblyInputs = () => {
+      const parseOr = (sel, fallback) => {
+        const val = parseFloat($(sel)?.value);
+        return Number.isFinite(val) ? val : fallback;
+      };
+      const rawOverrides = {
+        gypsumThickness: parseOr('#i-wa-gypsum', assembly.gypsumThickness),
+        studDepth: parseOr('#i-wa-stud', assembly.studDepth),
+        sheathingThickness: parseOr('#i-wa-sheathing', assembly.sheathingThickness),
+        airGapThickness: parseOr('#i-wa-airgap', assembly.airGapThickness),
+        claddingThickness: parseOr('#i-wa-cladding', assembly.claddingThickness),
+      };
+      const clamped = M.clampWallAssemblyOverrides(rawOverrides);
+      const scope = $('#i-wa-scope')?.value || 'single';
+      return { clamped, scope };
+    };
+
+    const previewAssemblyTotal = () => {
+      const { clamped } = readAssemblyInputs();
+      const resolved = resolveWallAssembly(wallFinishId, activeExtFinId, clamped);
+      const totalEl = $('#i-wa-total');
+      if (totalEl) {
+        totalEl.textContent = `${fmtInches(resolved.totalThickness)}"`;
+      }
+    };
+
+    const commitAssemblyUpdate = () => {
+      const { clamped, scope } = readAssemblyInputs();
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, clamped, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Update Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const updatedAssembly = resolveWallAssembly(
+        updatedFinish,
+        updatedExtFin,
+        updatedRoom.wallAssemblyOverrides?.[targetWall]
+      );
+      const totalInches = fmtInches(updatedAssembly.totalThickness);
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly updated to ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
+    };
+
+    ['#i-wa-gypsum', '#i-wa-stud', '#i-wa-sheathing', '#i-wa-airgap', '#i-wa-cladding'].forEach(
+      (sel) => {
+        const inputEl = $(sel);
+        if (!inputEl) return;
+        inputEl.addEventListener('input', previewAssemblyTotal);
+        inputEl.addEventListener('change', commitAssemblyUpdate);
+      }
+    );
+
+    $('#i-wa-scope')?.addEventListener('change', (e) => {
+      window.__activeAssemblyScope = e.target.value || 'single';
+    });
+
+    $('#i-wa-reset')?.addEventListener('click', () => {
+      const scope = $('#i-wa-scope')?.value || 'single';
+      window.__activeAssemblyScope = scope;
+      const targetWall = window.__activeUVWall || 'N';
+      apply((n) => {
+        const r = roomOf(n, room.id);
+        M.applyWallAssemblyOverrides(n, null, {
+          scope,
+          room: r,
+          wall: targetWall,
+          level: r?.level || 0,
+        });
+      }, 'Reset Wall Assembly Thickness');
+      const updatedRoom = roomOf(doc, room.id) || room;
+      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
+      if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
+        updatedExtFin = updatedFinish;
+      }
+      updatedExtFin = updatedExtFin || 'cladding_siding_white';
+      const defaultAssembly = resolveWallAssembly(updatedFinish, updatedExtFin);
+      const totalInches = fmtInches(defaultAssembly.totalThickness);
+      renderInspector();
+      redraw();
+      window.__scene3d?.update?.();
+      window.__scene3d?.render?.();
+      const msg = `${updatedRoom.name} ${targetWall} wall assembly reset to default ${totalInches} inches total thickness.`;
+      announceToLiveRegion(msg);
+      window.__scene3d?.announce3DStateChange?.(msg);
     });
 
     const handleBuildingPresetApply = (scope) => {
