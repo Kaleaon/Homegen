@@ -217,7 +217,7 @@ export function outletSegments(state, room, wallIntervals = null) {
 }
 
 /** Stairs rooms on the adjacent levels whose footprint overlaps this one by >= 60%. */
-export function stairPartners(state, room) {
+function stairPartners(state, room) {
   if (room.type !== 'stairs') return [];
   return state.rooms.filter(
     (o) =>
