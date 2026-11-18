@@ -5127,12 +5127,17 @@ if (typeof document !== 'undefined') {
   });
 
   $('#gis-crs')?.addEventListener('change', (e) => {
-    if (doc.site && doc.site.features) {
-      loadGISSubsystem(
-        { type: 'FeatureCollection', features: doc.site.features },
-        { crs: e.target.value }
-      );
+    const crs = e.detail?.value ?? e.target?.value;
+    if (crs && doc.site && doc.site.features) {
+      loadGISSubsystem({ type: 'FeatureCollection', features: doc.site.features }, { crs });
     }
+  });
+
+  document.querySelector('label[for="gis-crs"]')?.addEventListener('click', () => {
+    $('#gis-crs')?.focus();
+  });
+  document.querySelector('label[for="gis-map-preset"]')?.addEventListener('click', () => {
+    $('#gis-map-preset')?.focus();
   });
 }
 
@@ -5206,6 +5211,16 @@ function setGISSegmentSetback(segmentId, setbackDistance) {
 export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  const gisCrsSelect = $('#gis-crs');
+  if (gisCrsSelect && doc.site?.crs) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
+      gisCrsSelect.value = doc.site.crs;
+    }
+  }
   const gisMapSelect = $('#gis-map-preset');
   if (gisMapSelect) gisMapSelect.value = doc.background?.presetKey || '';
   renderGISSegments();
@@ -5810,7 +5825,8 @@ $('#bg-map-preset')?.addEventListener('change', (e) => {
   handleMapPresetSelect(e.target.value);
 });
 $('#gis-map-preset')?.addEventListener('change', (e) => {
-  handleMapPresetSelect(e.target.value);
+  const presetKey = e.detail?.value ?? e.target?.value ?? '';
+  handleMapPresetSelect(presetKey);
 });
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
