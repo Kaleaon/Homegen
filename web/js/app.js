@@ -4777,6 +4777,7 @@ $('#csv-generate')?.addEventListener('click', () => {
       includeOpenings: $('#csv-sec-openings')?.checked !== false,
       includeFinishes: $('#csv-sec-finishes')?.checked !== false,
       includeRooms: $('#csv-sec-rooms')?.checked !== false,
+      includePricing: $('#csv-inc-pricing')?.checked !== false,
     };
 
     if (
