@@ -18,49 +18,107 @@ import { computeMarchingSquares } from './elevationEngine.js';
  */
 function stitchSegmentsToPolylines(lines) {
   if (!lines || lines.length === 0) return [];
-  const remaining = lines.map((l) => ({ ...l }));
-  const polylines = [];
+  const n = lines.length;
+  const used = new Uint8Array(n);
+  const INV_EPS = 1e4;
 
-  while (remaining.length > 0) {
-    const first = remaining.pop();
-    const pts = [
+  const grid = new Map();
+  const addEndpoint = (x, y, idx) => {
+    const gx = Math.floor(x * INV_EPS);
+    const gy = Math.floor(y * INV_EPS);
+    let col = grid.get(gx);
+    if (!col) {
+      col = new Map();
+      grid.set(gx, col);
+    }
+    let bucket = col.get(gy);
+    if (!bucket) {
+      bucket = [];
+      col.set(gy, bucket);
+    }
+    if (bucket[bucket.length - 1] !== idx) {
+      bucket.push(idx);
+    }
+  };
+
+  for (let i = 0; i < n; i++) {
+    const l = lines[i];
+    addEndpoint(l.x1, l.y1, i);
+    addEndpoint(l.x2, l.y2, i);
+  }
+
+  const findLowestMatch = (px, py) => {
+    const gx = Math.floor(px * INV_EPS);
+    const gy = Math.floor(py * INV_EPS);
+    let bestIdx = -1;
+    for (let dx = -1; dx <= 1; dx++) {
+      const col = grid.get(gx + dx);
+      if (!col) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = col.get(gy + dy);
+        if (!bucket) continue;
+        for (let b = 0; b < bucket.length; b++) {
+          const idx = bucket[b];
+          if (used[idx]) continue;
+          if (bestIdx !== -1 && idx >= bestIdx) break;
+          const seg = lines[idx];
+          if (
+            Math.hypot(px - seg.x1, py - seg.y1) < 1e-4 ||
+            Math.hypot(px - seg.x2, py - seg.y2) < 1e-4
+          ) {
+            bestIdx = idx;
+            break;
+          }
+        }
+      }
+    }
+    return bestIdx;
+  };
+
+  const polylines = [];
+  for (let seedIdx = n - 1; seedIdx >= 0; seedIdx--) {
+    if (used[seedIdx]) continue;
+    used[seedIdx] = 1;
+    const first = lines[seedIdx];
+    const headPts = [];
+    const tailPts = [
       { x: first.x1, y: first.y1 },
       { x: first.x2, y: first.y2 },
     ];
 
-    let extended = true;
-    while (extended) {
-      extended = false;
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
+    for (;;) {
+      const head = headPts.length > 0 ? headPts[headPts.length - 1] : tailPts[0];
+      const tail = tailPts[tailPts.length - 1];
 
-      for (let i = 0; i < remaining.length; i++) {
-        const seg = remaining[i];
+      const tailIdx = findLowestMatch(tail.x, tail.y);
+      const headIdx = findLowestMatch(head.x, head.y);
+      if (tailIdx === -1 && headIdx === -1) break;
+
+      if (tailIdx !== -1 && (headIdx === -1 || tailIdx <= headIdx)) {
+        const seg = lines[tailIdx];
+        used[tailIdx] = 1;
         if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
-          pts.push({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
+          tailPts.push({ x: seg.x2, y: seg.y2 });
+        } else {
+          tailPts.push({ x: seg.x1, y: seg.y1 });
         }
-        if (Math.hypot(tail.x - seg.x2, tail.y - seg.y2) < 1e-4) {
-          pts.push({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
+      } else {
+        const seg = lines[headIdx];
+        used[headIdx] = 1;
         if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
-          pts.unshift({ x: seg.x1, y: seg.y1 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
-        }
-        if (Math.hypot(head.x - seg.x1, head.y - seg.y1) < 1e-4) {
-          pts.unshift({ x: seg.x2, y: seg.y2 });
-          remaining.splice(i, 1);
-          extended = true;
-          break;
+          headPts.push({ x: seg.x1, y: seg.y1 });
+        } else {
+          headPts.push({ x: seg.x2, y: seg.y2 });
         }
       }
+    }
+
+    let pts;
+    if (headPts.length > 0) {
+      headPts.reverse();
+      pts = headPts.concat(tailPts);
+    } else {
+      pts = tailPts;
     }
 
     let isClosed = false;
