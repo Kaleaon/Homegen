@@ -338,7 +338,9 @@ aside {
   left: 12px;
   bottom: 12px;
   max-width: min(560px, calc(100% - 24px));
-  display: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: var(--ink);
@@ -346,9 +348,41 @@ aside {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
   white-space: pre-line;
 }
+#toast:empty {
+  display: none;
+}
 #toast.err {
   background: var(--err);
   color: var(--ktheme-on-primary);
+}
+.toast-action-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 10px;
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold, 600);
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.toast-action-btn:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.toast-action-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--bg);
+  outline-offset: var(--focus-ring-offset);
 }
 #inspector,
 #compliance {

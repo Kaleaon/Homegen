@@ -212,16 +212,58 @@ const roomAt = (p) =>
     .filter((r) => inRect(r, p, WT / 2))
     .sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
 
-function toast(msg, err = false, ms = 4500) {
+export function toast(msg, err = false, ms = 4500, action = null) {
   const t = $('#toast');
-  t.textContent = msg;
+  if (!t) return;
+  if (typeof t.replaceChildren === 'function') {
+    t.replaceChildren();
+  } else {
+    while (t.firstChild && typeof t.removeChild === 'function') {
+      t.removeChild(t.firstChild);
+    }
+    t.textContent = '';
+  }
+
+  if (
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function' &&
+    typeof t.appendChild === 'function'
+  ) {
+    const textSpan = document.createElement('span');
+    textSpan.textContent = msg;
+    t.appendChild(textSpan);
+
+    if (action && action.label && typeof action.onClick === 'function') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action-btn';
+      btn.textContent = action.label;
+      let clicked = false;
+      btn.addEventListener('click', () => {
+        if (clicked) return;
+        clicked = true;
+        clearTimeout(toast.t);
+        t.style.display = 'none';
+        action.onClick();
+      });
+      t.appendChild(btn);
+    }
+  } else {
+    t.textContent = msg;
+  }
+
   t.className = err ? 'err' : '';
-  t.style.display = 'block';
+  t.style.display = 'flex';
   clearTimeout(toast.t);
   toast.t = setTimeout(() => {
     t.style.display = 'none';
   }, ms);
 }
+
+const UNDO_TOAST_ACTION = {
+  label: 'Undo',
+  onClick: () => $('#undo')?.click(),
+};
 
 let liveRegionTimeout = null;
 function announceToLiveRegion(msg) {
@@ -1158,8 +1200,12 @@ function renderInspector() {
     );
 
     $('#i-del-all')?.addEventListener('click', () => {
-      apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
-      select(null);
+      const count = selectedList.length;
+      const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${count} selected elements`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
     return;
   }
@@ -1367,8 +1413,12 @@ function renderInspector() {
       }, 'Change Ceiling Height')
     );
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, room.id), 'Delete Room');
-      select(null);
+      const label = getSelectionLabel(room.id) || room.name;
+      const r = apply((n) => M.removeById(n, room.id), 'Delete Room');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
 
     el.querySelectorAll('.i-nudge-btn').forEach((btn) => {
@@ -1789,8 +1839,12 @@ function renderInspector() {
       $('#i-door-casing-d')?.addEventListener('change', updateDoorCasing);
     }
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, obj.id), 'Delete Element');
-      select(null);
+      const label = getSelectionLabel(obj.id) || def.name;
+      const r = apply((n) => M.removeById(n, obj.id), 'Delete Element');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
 
     el.querySelectorAll('.i-item-nudge-btn').forEach((btn) => {
@@ -1806,6 +1860,9 @@ function renderInspector() {
 
 function getSelectionLabel(id = selection) {
   if (!id) return '';
+  if (id instanceof Set) {
+    return id.size === 1 ? getSelectionLabel(Array.from(id)[0]) : `${id.size} selected elements`;
+  }
   const hit = M.findOwner(doc, id);
   if (!hit) return '';
   const { room, kind, obj } = hit;
@@ -2670,8 +2727,15 @@ canvas?.addEventListener('pointerdown', (e) => {
     case 'erase': {
       const id = pickAt(p);
       if (id) {
-        apply((n) => M.removeById(n, id), 'Erase Element');
-        if (selection === id) select(null);
+        const label = getSelectionLabel(id);
+        const r = apply((n) => M.removeById(n, id), 'Erase Element');
+        if (r.ok) {
+          if (isSelected(id)) {
+            selectionSet.delete(id);
+            select(selectionSet.size > 0 ? Array.from(selectionSet) : null);
+          }
+          toast(`Deleted ${label || 'element'}`, false, 4500, UNDO_TOAST_ACTION);
+        }
       }
       break;
     }
@@ -3553,8 +3617,14 @@ $('#undo')?.addEventListener('click', () => {
     doc = s;
     persist();
     selection = null;
+    selectionSet.clear();
     autoFixDiffs = [];
     hoveredDiffIndex = null;
+    const t = $('#toast');
+    if (t && typeof t.querySelector === 'function' && t.querySelector('.toast-action-btn')) {
+      clearTimeout(toast.t);
+      t.style.display = 'none';
+    }
     refresh();
   }
 });
@@ -4645,9 +4715,14 @@ if (typeof window !== 'undefined') {
       const selectedList = getSelectionList();
       if (selectedList.length > 0) {
         const label = getSelectionLabel();
-        apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
-        select(null);
-        toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
+        const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
+        if (r.ok) {
+          select(null);
+          toast(`Deleted ${label || 'selected element(s)'}`, false, 4500, {
+            label: 'Undo',
+            onClick: () => $('#undo')?.click(),
+          });
+        }
       }
     } else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
@@ -5622,6 +5697,7 @@ if (typeof window !== 'undefined')
     get report() {
       return report;
     },
+    toast,
     apply,
     sampleHome,
     openTemplatePicker,
