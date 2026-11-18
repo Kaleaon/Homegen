@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, createRoom, addItem, addOpening } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
-import { ComplianceOverlayScene, SpatialOverlayNode } from '../js/complianceOverlay.js';
+import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
 import { getToken, invalidateCache, DEFAULT_TOKENS } from '../js/kthemeTokens.js';
-import { drawComplianceScene } from '../js/render.js';
+import { draw } from '../js/render.js';
 
 test('ComplianceOverlayScene compiles spatial nodes for active compliance violations', () => {
   const state = newState();
@@ -503,6 +503,8 @@ test('drawComplianceScene resolves fallback stroke and fill styles from Ktheme t
   const recordedFillStyles = [];
   const recordedStrokeStyles = [];
   const mockCtx = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
     save() {},
     restore() {},
     beginPath() {},
@@ -545,28 +547,31 @@ test('drawComplianceScene resolves fallback stroke and fill styles from Ktheme t
 
   const manualScene = {
     getNodes: () => [
-      new SpatialOverlayNode(
-        'c1',
-        'fixtureClearance',
-        { x: 0, y: 0, w: 30, h: 30 },
-        { isColliding: true }
-      ),
-      new SpatialOverlayNode(
-        'e1',
-        'egressReach',
-        { x: 10, y: 10, w: 60, h: 20, anchorX: 40, anchorY: 0 },
-        { isEgressCompliant: true, badgeText: 'Egress OK' }
-      ),
-      new SpatialOverlayNode(
-        'r1',
-        'activeDragRejection',
-        { x: 20, y: 20, w: 40, h: 40 },
-        { message: 'Blocked' }
-      ),
+      {
+        id: 'c1',
+        type: 'fixtureClearance',
+        bounds: { x: 0, y: 0, w: 30, h: 30 },
+        data: { isColliding: true },
+        visible: true,
+      },
+      {
+        id: 'e1',
+        type: 'egressReach',
+        bounds: { x: 10, y: 10, w: 60, h: 20, anchorX: 40, anchorY: 0 },
+        data: { isEgressCompliant: true, badgeText: 'Egress OK' },
+        visible: true,
+      },
+      {
+        id: 'r1',
+        type: 'activeDragRejection',
+        bounds: { x: 20, y: 20, w: 40, h: 40 },
+        data: { message: 'Blocked' },
+        visible: true,
+      },
     ],
   };
 
-  drawComplianceScene(mockCtx, manualScene, { scale: 1 });
+  draw(mockCtx, { rooms: [] }, { scale: 1, ox: 0, oy: 0 }, { complianceScene: manualScene });
 
   assert.ok(
     recordedFillStyles.includes(DEFAULT_TOKENS['--ktheme-critical-muted']),
