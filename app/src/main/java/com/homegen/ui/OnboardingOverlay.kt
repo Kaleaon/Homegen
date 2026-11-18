@@ -5,8 +5,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +27,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.ktheme.android.KthemeComposeTheme
 import com.ktheme.android.LocalKthemeSemanticColors
@@ -106,9 +107,15 @@ fun OnboardingOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .background(LocalKthemeSemanticColors.current.scrim)
-                .clickable {
-                    // Taps outside the dialog card dismiss the onboarding cleanly
-                    dismissOnboarding()
+                .testTag("onboarding_backdrop")
+                .pointerInput(Unit) {
+                    // Absorb backdrop pointer events so underlying controls are shielded without dismissing onboarding
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -116,11 +123,7 @@ fun OnboardingOverlay(
                 modifier = Modifier
                     .padding(24.dp)
                     .fillMaxWidth(0.9f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}, // Intercept clicks inside card so backdrop isn't triggered
-                    ),
+                    .testTag("onboarding_card"),
                 shape = MaterialTheme.shapes.large,
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             ) {

@@ -251,7 +251,7 @@ export function validatePlacement(candidatePolygon, existingPolygons = [], optio
 }
 
 export function createPlacementFeedback(candidatePolygon, validation, options = {}) {
-  const resolveToken = typeof options.getToken === 'function' ? options.getToken : defaultGetToken;
+  const resolveToken = typeof options?.getToken === 'function' ? options.getToken : defaultGetToken;
   const safeGetToken = (name, fallback) => {
     if (typeof resolveToken === 'function') {
       try {
@@ -264,12 +264,12 @@ export function createPlacementFeedback(candidatePolygon, validation, options = 
   };
 
   const color = validation.valid
-    ? safeGetToken('--ktheme-success', '#4ade80')
-    : safeGetToken('--ktheme-critical', '#f87171');
+    ? safeGetToken('--ktheme-success', '#2f8f5b')
+    : safeGetToken('--ktheme-critical', '#e84040');
 
   const outline = validation.valid
-    ? safeGetToken('--ktheme-success', '#22c55e')
-    : safeGetToken('--ktheme-critical', '#ef4444');
+    ? safeGetToken('--ktheme-success', '#2f8f5b')
+    : safeGetToken('--ktheme-critical', '#e84040');
 
   const alpha = validation.valid ? 0.3 : 0.35;
 

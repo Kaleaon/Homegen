@@ -508,6 +508,9 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
       ...(opts.walls || {}),
     },
     wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
+    ...(opts.wallAssemblyOverrides
+      ? { wallAssemblyOverrides: JSON.parse(JSON.stringify(opts.wallAssemblyOverrides)) }
+      : {}),
     floorMesh:
       opts.floorMesh ||
       createMeshGraphFromPolygon(points, 0, opts.floorZOffsets || opts.VertexZArray),
@@ -758,6 +761,97 @@ export function applyWallFinish(state, finishId, { scope = 'single', room, wall,
   }
 }
 
+const WALL_ASSEMBLY_LAYER_BOUNDS = {
+  gypsumThickness: { min: 0, max: 48 },
+  studDepth: { min: 1.5, max: 48 },
+  sheathingThickness: { min: 0, max: 48 },
+  airGapThickness: { min: 0, max: 48 },
+  claddingThickness: { min: 0, max: 48 },
+};
+
+export function clampWallAssemblyOverrides(overrides) {
+  if (!overrides || typeof overrides !== 'object') return {};
+  const normalized = { ...overrides };
+  if (normalized.gypsumThickness === undefined && normalized.layerThickness !== undefined) {
+    normalized.gypsumThickness = normalized.layerThickness;
+  }
+  if (normalized.airGapThickness === undefined && normalized.claddingOffset !== undefined) {
+    normalized.airGapThickness = normalized.claddingOffset;
+  }
+  const clamped = {};
+  for (const [key, bounds] of Object.entries(WALL_ASSEMBLY_LAYER_BOUNDS)) {
+    const raw = normalized[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const num = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(num)) continue;
+    clamped[key] = Math.min(bounds.max, Math.max(bounds.min, num));
+  }
+  return clamped;
+}
+
+export function getWallAssemblyOverrides(room, wall) {
+  if (!room || wall == null || wall === '') return {};
+  const existing = room.wallAssemblyOverrides?.[wall];
+  if (!existing || typeof existing !== 'object') return {};
+  return clampWallAssemblyOverrides(existing);
+}
+
+export function setWallAssemblyOverrides(room, wall, overrides) {
+  if (!room || wall == null || wall === '') return;
+  const isReset =
+    overrides == null ||
+    overrides.reset === true ||
+    (typeof overrides === 'object' && Object.keys(overrides).length === 0);
+  if (isReset) {
+    if (room.wallAssemblyOverrides && typeof room.wallAssemblyOverrides === 'object') {
+      delete room.wallAssemblyOverrides[wall];
+    }
+    return;
+  }
+  const sanitized = clampWallAssemblyOverrides(overrides);
+  if (Object.keys(sanitized).length === 0) return;
+  room.wallAssemblyOverrides ||= {};
+  const current = getWallAssemblyOverrides(room, wall);
+  room.wallAssemblyOverrides[wall] = {
+    ...current,
+    ...sanitized,
+  };
+}
+
+export function applyWallAssemblyOverrides(
+  state,
+  overrides,
+  { scope = 'single', room, wall, level = 0 } = {}
+) {
+  const getWallKeysForRoom = (r) => {
+    const pts = getRoomPoints(r);
+    return pts.length === 4 ? WALLS : [...WALLS, ...pts.map((_, i) => i)];
+  };
+  if (scope === 'plan') {
+    if (!state || !Array.isArray(state.rooms)) return;
+    for (const r of state.rooms) {
+      const target = ensureRoomCopy(state, r);
+      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+    }
+  } else if (scope === 'level') {
+    if (!state || !Array.isArray(state.rooms)) return;
+    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) {
+      const target = ensureRoomCopy(state, r);
+      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+    }
+  } else if (scope === 'room') {
+    const target = ensureRoomCopy(state, room);
+    if (target) {
+      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+    }
+  } else {
+    const target = ensureRoomCopy(state, room);
+    if (target && wall != null && wall !== '') {
+      setWallAssemblyOverrides(target, wall, overrides);
+    }
+  }
+}
+
 export function applyFloorFinish(state, finishId, { scope = 'single', room, level = 0 } = {}) {
   if (scope === 'plan') {
     for (const r of state.rooms) r.floor = finishId;
@@ -911,6 +1005,16 @@ export function deserialize(text) {
     r.h = bbox.h;
     for (const w of WALLS) {
       r.wallUV[w] = getWallUV(r, w);
+    }
+    if (r.wallAssemblyOverrides && typeof r.wallAssemblyOverrides === 'object') {
+      const sanitizedOverrides = {};
+      for (const [wKey, wOverrides] of Object.entries(r.wallAssemblyOverrides)) {
+        const cleaned = clampWallAssemblyOverrides(wOverrides);
+        if (Object.keys(cleaned).length > 0) {
+          sanitizedOverrides[wKey] = cleaned;
+        }
+      }
+      r.wallAssemblyOverrides = sanitizedOverrides;
     }
   }
   const maxRoomLevel = s.rooms.length
@@ -1326,46 +1430,100 @@ export function alignItems(state, ids, alignment) {
   return true;
 }
 
-export function distributeItems(state, ids, direction) {
+export function distributeItems(state, ids, direction, spacing = null, spacingType = 'center') {
+  if (spacing !== null && typeof spacing === 'object') {
+    const opts = spacing;
+    spacingType = opts.spacingType ?? opts.type ?? opts.mode ?? 'center';
+    spacing = opts.spacing ?? opts.distance ?? null;
+  }
+
+  let resolvedSpacing = null;
+  if (typeof spacing === 'number') {
+    resolvedSpacing = Number.isFinite(spacing) && spacing > 0 ? spacing : null;
+  } else if (typeof spacing === 'string') {
+    const parsed = parseDistanceInInches(spacing);
+    resolvedSpacing =
+      typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
   const idArray = Array.from(ids || []);
   const boundsList = idArray.map((id) => getBounds(state, id)).filter((b) => b !== null);
 
-  if (boundsList.length < 3) return false;
+  const minCount = resolvedSpacing !== null ? 2 : 3;
+  if (boundsList.length < minCount) return false;
+
+  const isGap = spacingType === 'gap' || spacingType === 'edge' || spacingType === 'edge-to-edge';
 
   if (direction === 'horizontal') {
-    boundsList.sort((a, b) => a.x - b.x || a.w - b.w);
-    const first = boundsList[0];
-    const last = boundsList[boundsList.length - 1];
-    const outerSpan = last.x + last.w - first.x;
-    const totalWidth = boundsList.reduce((sum, b) => sum + b.w, 0);
-    const gap = (outerSpan - totalWidth) / (boundsList.length - 1);
-
-    let currentX = first.x + first.w + gap;
-    for (let i = 1; i < boundsList.length - 1; i++) {
-      const b = boundsList[i];
-      const hit = findOwner(state, b.id);
-      if (hit) {
-        setItemPosition(state, hit, currentX + b.w / 2, b.cy);
+    if (resolvedSpacing !== null) {
+      boundsList.sort((a, b) => (isGap ? a.x - b.x || a.w - b.w : a.cx - b.cx));
+      const first = boundsList[0];
+      let prevRight = first.x + first.w;
+      for (let i = 1; i < boundsList.length; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        const targetCX = isGap
+          ? prevRight + resolvedSpacing + b.w / 2
+          : first.cx + i * resolvedSpacing;
+        if (hit) {
+          setItemPosition(state, hit, targetCX, b.cy);
+        }
+        prevRight = isGap ? prevRight + resolvedSpacing + b.w : targetCX + b.w / 2;
       }
-      currentX += b.w + gap;
+    } else {
+      boundsList.sort((a, b) => a.x - b.x || a.w - b.w);
+      const first = boundsList[0];
+      const last = boundsList[boundsList.length - 1];
+      const outerSpan = last.x + last.w - first.x;
+      const totalWidth = boundsList.reduce((sum, b) => sum + b.w, 0);
+      const gap = (outerSpan - totalWidth) / (boundsList.length - 1);
+
+      let currentX = first.x + first.w + gap;
+      for (let i = 1; i < boundsList.length - 1; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        if (hit) {
+          setItemPosition(state, hit, currentX + b.w / 2, b.cy);
+        }
+        currentX += b.w + gap;
+      }
     }
   } else if (direction === 'vertical') {
-    boundsList.sort((a, b) => a.y - b.y || a.h - b.h);
-    const first = boundsList[0];
-    const last = boundsList[boundsList.length - 1];
-    const outerSpan = last.y + last.h - first.y;
-    const totalHeight = boundsList.reduce((sum, b) => sum + b.h, 0);
-    const gap = (outerSpan - totalHeight) / (boundsList.length - 1);
-
-    let currentY = first.y + first.h + gap;
-    for (let i = 1; i < boundsList.length - 1; i++) {
-      const b = boundsList[i];
-      const hit = findOwner(state, b.id);
-      if (hit) {
-        setItemPosition(state, hit, b.cx, currentY + b.h / 2);
+    if (resolvedSpacing !== null) {
+      boundsList.sort((a, b) => (isGap ? a.y - b.y || a.h - b.h : a.cy - b.cy));
+      const first = boundsList[0];
+      let prevBottom = first.y + first.h;
+      for (let i = 1; i < boundsList.length; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        const targetCY = isGap
+          ? prevBottom + resolvedSpacing + b.h / 2
+          : first.cy + i * resolvedSpacing;
+        if (hit) {
+          setItemPosition(state, hit, b.cx, targetCY);
+        }
+        prevBottom = isGap ? prevBottom + resolvedSpacing + b.h : targetCY + b.h / 2;
       }
-      currentY += b.h + gap;
+    } else {
+      boundsList.sort((a, b) => a.y - b.y || a.h - b.h);
+      const first = boundsList[0];
+      const last = boundsList[boundsList.length - 1];
+      const outerSpan = last.y + last.h - first.y;
+      const totalHeight = boundsList.reduce((sum, b) => sum + b.h, 0);
+      const gap = (outerSpan - totalHeight) / (boundsList.length - 1);
+
+      let currentY = first.y + first.h + gap;
+      for (let i = 1; i < boundsList.length - 1; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        if (hit) {
+          setItemPosition(state, hit, b.cx, currentY + b.h / 2);
+        }
+        currentY += b.h + gap;
+      }
     }
+  } else {
+    return false;
   }
 
   return true;
