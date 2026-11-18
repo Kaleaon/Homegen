@@ -15,11 +15,15 @@ import {
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
 import { getToken } from './kthemeTokens.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
-const fmt = (inches) =>
-  `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ' 0"'}`;
+const fmt = (inches) => formatFractionalInches(inches, { includeZeroInches: true });
 
 const SPATIAL_GRID_CELL_SIZE = 64;
+
+export function getSpatialCellKey(col, row) {
+  return ((col + 0x8000) << 16) | ((row + 0x8000) & 0xffff);
+}
 
 function fnv1aHash(str) {
   let hash = 2166136261;
@@ -52,7 +56,7 @@ function computeStateHash(state) {
   return fnv1aHash(str);
 }
 
-export class SpatialOverlayNode {
+class SpatialOverlayNode {
   constructor(id, type, bounds, data = {}) {
     this.id = id;
     this.type = type; // 'violation' | 'fixtureClearance' | 'egressReach' | 'constraintHandle' | 'dimensionLabel' | 'activeDragRejection'
@@ -70,7 +74,11 @@ export class ComplianceOverlayScene {
     this.itemIndex = new Map();
     this.openingIndex = new Map();
     this.spatialGrid = new Map();
+    this._seenItemIds = new Set();
     this.lastState = null;
+    this.lastStateNextId = null;
+    this.lastRooms = null;
+    this.lastExplicitStateHash = null;
     this.lastStateHash = null;
     this.options = options;
   }
@@ -123,7 +131,7 @@ export class ComplianceOverlayScene {
 
             for (let col = minCol; col <= maxCol; col++) {
               for (let row = minRow; row <= maxRow; row++) {
-                const cellKey = `${col},${row}`;
+                const cellKey = getSpatialCellKey(col, row);
                 let bin = this.spatialGrid.get(cellKey);
                 if (!bin) {
                   bin = [];
@@ -172,12 +180,13 @@ export class ComplianceOverlayScene {
     const minRow = Math.floor(zone.y / SPATIAL_GRID_CELL_SIZE);
     const maxRow = Math.floor((zone.y + zone.h) / SPATIAL_GRID_CELL_SIZE);
 
-    const seenItemIds = new Set();
+    const seenItemIds = this._seenItemIds;
+    seenItemIds.clear();
     const candidates = [];
 
     for (let col = minCol; col <= maxCol; col++) {
       for (let row = minRow; row <= maxRow; row++) {
-        const bin = this.spatialGrid.get(`${col},${row}`);
+        const bin = this.spatialGrid.get(getSpatialCellKey(col, row));
         if (bin) {
           for (const itemEntry of bin) {
             if (itemEntry.room.id === roomId && !seenItemIds.has(itemEntry.item.id)) {
@@ -189,6 +198,7 @@ export class ComplianceOverlayScene {
       }
     }
 
+    seenItemIds.clear();
     return candidates;
   }
 
@@ -204,12 +214,23 @@ export class ComplianceOverlayScene {
     const view = options.view || { scale: 1, ox: 0, oy: 0 };
     const scale = Math.max(0.01, view.scale || 1);
 
-    const stateHash = options.stateHash ?? computeStateHash(state);
+    const explicitStateHash = state._hash ?? state.hash ?? null;
+    const canReuseStateHash =
+      state === this.lastState &&
+      this.lastStateHash !== null &&
+      state.nextId === this.lastStateNextId &&
+      state.rooms === this.lastRooms &&
+      explicitStateHash === this.lastExplicitStateHash;
+    const stateHash =
+      options.stateHash ?? (canReuseStateHash ? this.lastStateHash : computeStateHash(state));
     if (state !== this.lastState || stateHash !== this.lastStateHash) {
       this.rebuildIndexes(state);
       this.lastState = state;
       this.lastStateHash = stateHash;
     }
+    this.lastStateNextId = state.nextId;
+    this.lastRooms = state.rooms;
+    this.lastExplicitStateHash = explicitStateHash;
 
     // Filter rooms for current level
     const levelRooms = (state.rooms || []).filter((r) => (r.level || 0) === curLevel);
@@ -721,11 +742,15 @@ export class ComplianceOverlayScene {
    */
   invalidateCache() {
     this.lastState = null;
+    this.lastStateNextId = null;
+    this.lastRooms = null;
+    this.lastExplicitStateHash = null;
     this.lastStateHash = null;
     this.roomIndex.clear();
     this.itemIndex.clear();
     this.openingIndex.clear();
     this.spatialGrid.clear();
+    this._seenItemIds.clear();
   }
 
   /**

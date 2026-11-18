@@ -526,14 +526,31 @@ export class SnappingBridge {
           if (asyncRes && asyncRes.point) {
             const asyncHasMagnetic = Boolean(asyncRes.snap && asyncRes.snap.type !== 'grid');
             const asyncPoint = asyncHasMagnetic ? asyncRes.point : gridPoint;
-            const asyncSnap = asyncHasMagnetic ? asyncRes.snap : { type: 'grid', point: gridPoint };
+            const asyncSnap = asyncHasMagnetic
+              ? { ...asyncRes.snap }
+              : { type: 'grid', point: gridPoint };
+            if (
+              asyncHasMagnetic &&
+              asyncSnap.type === 'angle' &&
+              asyncSnap.angleDegrees === undefined &&
+              finalSnap?.type === 'angle' &&
+              finalSnap.angleDegrees !== undefined
+            ) {
+              asyncSnap.angleDegrees = finalSnap.angleDegrees;
+            }
             const asyncIndicator = asyncHasMagnetic ? asyncRes.point : gridPoint;
+            const asyncGuides =
+              Array.isArray(asyncRes.guideLines) && asyncRes.guideLines.length > 0
+                ? asyncRes.guideLines
+                : asyncHasMagnetic && finalSnap?.type === asyncSnap.type
+                  ? guideLines
+                  : asyncRes.guideLines || [];
             this.activeSnap = {
               point: asyncPoint,
               rawPoint: asyncRes.rawPoint || point,
               anchor,
               snap: asyncSnap,
-              guideLines: asyncRes.guideLines || guideLines,
+              guideLines: asyncGuides,
               indicator: asyncIndicator,
             };
             if (typeof this.onSnap === 'function') {
