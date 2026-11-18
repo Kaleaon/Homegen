@@ -52,10 +52,25 @@ test('HTML dialogs and diff-drawer have accessible ARIA names and roles in index
     htmlContent,
     /<button id="diff-close" class="diff-close-btn" title="Dismiss highlights" aria-label="Dismiss highlights">✕<\/button>/
   );
+
+  // history-popover
+  assert.match(
+    htmlContent,
+    /<div id="history-popover" class="history-popover k-overlay-drawer" role="dialog" aria-modal="true" aria-labelledby="history-popover-title" hidden>/
+  );
+  assert.match(htmlContent, /<h2 id="history-popover-title">📜 Version History<\/h2>/);
+  assert.match(
+    htmlContent,
+    /<button id="history-close" class="history-close-btn" title="Close history timeline" aria-label="Close history timeline">✕<\/button>/
+  );
 });
 
 test('app.js exports trapFocus and binds focus trapping to overlays', () => {
   assert.ok(appJsContent.includes('function trapFocus('), 'app.js must define trapFocus');
   assert.ok(appJsContent.includes('trapFocus(dlg,'), 'app.js must trap focus in dialogs');
   assert.ok(appJsContent.includes('trapFocus(drawer,'), 'app.js must trap focus in diff-drawer');
+  assert.ok(
+    appJsContent.includes('trapFocus(popover, btn)'),
+    'app.js must trap focus in history-popover'
+  );
 });
