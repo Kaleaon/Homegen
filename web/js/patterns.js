@@ -207,13 +207,7 @@ export function tileCanvasFor(finish) {
 
 /** CanvasPattern for a finish, scaled so one tile = 24 world inches. */
 export function patternFor(ctx, finish) {
-  let tile = cache.get(finish.id);
-  if (!tile) {
-    tile = document.createElement('canvas');
-    tile.width = tile.height = N;
-    draw(tile.getContext('2d'), finish);
-    cache.set(finish.id, tile);
-  }
+  const tile = tileCanvasFor(finish);
   const p = ctx.createPattern(tile, 'repeat');
   if (p.setTransform) p.setTransform(new DOMMatrix().scale(24 / N));
   return p;
