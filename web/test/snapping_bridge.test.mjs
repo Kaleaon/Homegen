@@ -377,3 +377,194 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
   assert.equal(ctx.strokeStyle, getToken('--ktheme-warning', '#f59e0b'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-warning', '#f59e0b'));
 });
+
+test('SnappingBridge caches room edges across pointer moves and syncs worker only when invalidated', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+      perpendicularThreshold: 14,
+    },
+    snapModes: { grid: false, edge: true, midpoint: true, perpendicular: false },
+  });
+
+  const room1 = { id: 'r1', x: 0, y: 0, w: 120, h: 120, level: 0 };
+  let rooms = [room1];
+
+  const syncedDiffs = [];
+  const asyncPayloads = [];
+  const mockWorkerClient = {
+    syncSceneDiff(diff) {
+      syncedDiffs.push(diff);
+    },
+    computeSnapAsync(_point, _anchor, payload) {
+      asyncPayloads.push(payload);
+      return Promise.resolve(null);
+    },
+  };
+
+  // Return a filtered copy on each call (matching app.js levelRooms() pattern)
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => rooms.filter((r) => r.level === 0),
+    workerClient: mockWorkerClient,
+  });
+
+  const snap1 = bridge.computeSnap({ x: 122, y: 40 });
+  assert.equal(snap1.snap.type, 'edge');
+  assert.equal(snap1.point.x, 120);
+  assert.equal(syncedDiffs.length, 1);
+  const firstEdgesRef = syncedDiffs[0].edges;
+  assert.equal(firstEdgesRef.length, 4);
+
+  // Subsequent pointer moves with unchanged rooms reuse cached edges and do not re-sync scene diff
+  const snap2 = bridge.computeSnap({ x: 121, y: 80 });
+  const snap3 = bridge.computeSnap({ x: 60, y: 2 });
+  assert.equal(snap2.point.x, 120);
+  assert.ok(['edge', 'midpoint'].includes(snap3.snap.type));
+  assert.deepEqual(snap3.point, { x: 60, y: 0 });
+  assert.equal(syncedDiffs.length, 1);
+  assert.equal(asyncPayloads[1].edges, firstEdgesRef);
+  assert.equal(asyncPayloads[2].edges, firstEdgesRef);
+
+  // Replacing rooms array with a new room invalidates cache and syncs updated edges to worker
+  const room2 = { id: 'r2', x: 300, y: 0, w: 120, h: 120, level: 0 };
+  rooms = [room1, room2];
+
+  const snap4 = bridge.computeSnap({ x: 302, y: 50 });
+  assert.equal(snap4.snap.type, 'edge');
+  assert.equal(snap4.point.x, 300);
+  assert.equal(syncedDiffs.length, 2);
+  assert.notEqual(syncedDiffs[1].edges, firstEdgesRef);
+  assert.equal(syncedDiffs[1].edges.length, 8);
+});
+
+test('SnappingBridge invalidates cached edges on in-place room, vertex, and bulge mutations without array replacement', () => {
+  const interaction = new InteractionLayer({
+    gridSettings: {
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+    },
+    snapModes: { grid: false, edge: true, midpoint: false, perpendicular: false },
+  });
+
+  const rectRoom = { id: 'r_rect', x: 0, y: 0, w: 120, h: 120, level: 0 };
+  const polyRoom = {
+    id: 'r_poly',
+    level: 0,
+    points: [
+      { x: 300, y: 0 },
+      { x: 420, y: 0 },
+      { x: 420, y: 120 },
+      { x: 300, y: 120 },
+    ],
+    bulges: [0, 0, 0, 0],
+  };
+  const rooms = [rectRoom, polyRoom];
+
+  const syncedDiffs = [];
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => rooms,
+    workerClient: {
+      syncSceneDiff(diff) {
+        syncedDiffs.push(diff);
+      },
+      computeSnapAsync() {
+        return Promise.resolve(null);
+      },
+    },
+  });
+
+  // Initial snap on rectRoom right edge (x = 120)
+  assert.equal(bridge.computeSnap({ x: 123, y: 50 }).point.x, 120);
+  assert.equal(syncedDiffs.length, 1);
+
+  // 1. Mutate rectRoom.w in place without replacing rooms array or rectRoom object
+  rectRoom.w = 180;
+  const afterRectMutate = bridge.computeSnap({ x: 183, y: 50 });
+  assert.equal(afterRectMutate.snap.type, 'edge');
+  assert.equal(afterRectMutate.point.x, 180);
+  assert.equal(syncedDiffs.length, 2);
+
+  // 2. Mutate polygon vertex coordinate in place without replacing polyRoom.points
+  polyRoom.points[1].x = 480;
+  polyRoom.points[2].x = 480;
+  const afterVertexMutate = bridge.computeSnap({ x: 483, y: 60 });
+  assert.equal(afterVertexMutate.snap.type, 'edge');
+  assert.equal(afterVertexMutate.point.x, 480);
+  assert.equal(syncedDiffs.length, 3);
+
+  // 3. Mutate bulge in place without replacing polyRoom.bulges
+  polyRoom.bulges[0] = 1; // Semicircle arc along top edge (300,0)->(480,0), apex at (390, 90) or (390, -90)
+  const afterBulgeMutate = bridge.computeSnap({ x: 390, y: 92 });
+  assert.equal(syncedDiffs.length, 4);
+  assert.equal(syncedDiffs[3].edges[4].bulge, 1);
+  assert.ok(afterBulgeMutate);
+});
+
+test('SnappingBridge handles empty room lists and room deletion during dragging', async () => {
+  const { CadWorkerClient } = await import('../js/cadWorkerClient.js');
+  const workerClient = new CadWorkerClient({ useWorker: false });
+  const syncedEdgesHistory = [];
+  const origSync = workerClient.syncSceneDiff.bind(workerClient);
+  workerClient.syncSceneDiff = (diff) => {
+    syncedEdgesHistory.push(diff.edges);
+    return origSync(diff);
+  };
+
+  const interaction = new InteractionLayer({
+    gridSettings: { unitSize: 6, magneticThreshold: 14, edgeThreshold: 14 },
+    snapModes: { grid: false, edge: true, midpoint: false, perpendicular: false },
+  });
+
+  const rooms = [];
+  const bridge = new SnappingBridge({
+    interaction,
+    getRooms: () => rooms,
+    workerClient,
+  });
+
+  // 1. Empty room list falls back to grid cleanly and caches empty edges across moves
+  const emptySnap1 = bridge.computeSnap({ x: 121, y: 50 });
+  const emptySnap2 = bridge.computeSnap({ x: 122, y: 50 });
+  assert.equal(emptySnap1.snap.type, 'grid');
+  assert.equal(emptySnap1.point.x, 120);
+  assert.equal(emptySnap2.point.x, 120);
+  assert.equal(syncedEdgesHistory.length, 1);
+  assert.deepEqual(syncedEdgesHistory[0], []);
+
+  // 2. Add two rooms in place and drag with roomsOverride
+  const r1 = { id: 'r1', x: 0, y: 0, w: 125, h: 120, level: 0 };
+  const r2 = { id: 'r2', x: 250, y: 0, w: 125, h: 120, level: 0 };
+  rooms.push(r1, r2);
+
+  const snapBeforeDelete = bridge.computeSnap({ x: 127, y: 50 });
+  assert.equal(snapBeforeDelete.snap.type, 'edge');
+  assert.equal(snapBeforeDelete.point.x, 125);
+  assert.equal(syncedEdgesHistory.length, 2);
+  assert.equal(syncedEdgesHistory[1].length, 8);
+
+  // Override drag cache does not thrash primary cache
+  const overrideSnap = bridge.computeSnap({ x: 252, y: 50 }, { x: 252, y: 50 }, [r2]);
+  assert.equal(overrideSnap.snap.type, 'edge');
+  assert.equal(overrideSnap.point.x, 250);
+
+  // 3. Delete r1 in place during dragging (rooms shrinks to [r2], then to [])
+  rooms.shift();
+  const snapAfterDeleteR1 = bridge.computeSnap({ x: 127, y: 50 });
+  // x=127 no longer snaps to deleted r1 edge at 125; falls back to grid (126)
+  assert.equal(snapAfterDeleteR1.snap.type, 'grid');
+  assert.equal(snapAfterDeleteR1.point.x, 126);
+
+  rooms.length = 0;
+  const snapAfterDeleteAll = bridge.computeSnap({ x: 252, y: 50 });
+  // x=252 no longer snaps to deleted r2 edge at 250; falls back to grid (252)
+  assert.equal(snapAfterDeleteAll.snap.type, 'grid');
+  assert.equal(snapAfterDeleteAll.point.x, 252);
+  assert.deepEqual(syncedEdgesHistory[syncedEdgesHistory.length - 1], []);
+});
