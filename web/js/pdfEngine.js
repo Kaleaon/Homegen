@@ -12,7 +12,7 @@ import {
 } from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
-import { formatDistanceInInches } from './model.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
 /**
  * Draws a closed vector polygon path from array of PDF points [{x, y}, ...].
@@ -29,7 +29,7 @@ function drawPolygonPDF(pdf, points, style = 'FD') {
 }
 
 // Standard sheet sizes in points (1 in = 72 pt)
-export const SHEET_SIZES = {
+const SHEET_SIZES = {
   Letter: { name: 'ANSI A / Letter (8.5" x 11")', w: 612, h: 792 },
   Tabloid: { name: 'ANSI B / Tabloid (11" x 17")', w: 792, h: 1224 },
   ARCH_C: { name: 'ARCH C (18" x 24")', w: 1296, h: 1728 },
@@ -69,7 +69,7 @@ export const SCALE_OPTIONS = {
   fit: { label: 'Fit to Page', fit: true, ratioStr: 'Fit to Page' },
 };
 
-export const fmtLen = (inches) => formatDistanceInInches(inches);
+export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
 
 export function resolvePDFAttributionAndLicensing(docState, options = {}) {
   const attributions = [];

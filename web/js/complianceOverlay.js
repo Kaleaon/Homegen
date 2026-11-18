@@ -15,9 +15,9 @@ import {
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID, openingMetrics } from './catalog.js';
 import { openingInfo } from './codes.js';
 import { getToken } from './kthemeTokens.js';
-import { formatDistanceInInches } from './model.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
-const fmt = (inches) => formatDistanceInInches(inches, { zeroInchesSuffix: true });
+const fmt = (inches) => formatFractionalInches(inches, { includeZeroInches: true });
 
 const SPATIAL_GRID_CELL_SIZE = 64;
 
@@ -52,7 +52,7 @@ function computeStateHash(state) {
   return fnv1aHash(str);
 }
 
-export class SpatialOverlayNode {
+class SpatialOverlayNode {
   constructor(id, type, bounds, data = {}) {
     this.id = id;
     this.type = type; // 'violation' | 'fixtureClearance' | 'egressReach' | 'constraintHandle' | 'dimensionLabel' | 'activeDragRejection'

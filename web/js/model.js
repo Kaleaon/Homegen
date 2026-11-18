@@ -19,6 +19,7 @@ import { isRegisteredEPSG } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
 export function defaultBranding() {
   return {
@@ -1071,39 +1072,22 @@ export function parseDistanceInInches(str, options = {}) {
 }
 
 export function formatDistanceInInches(inches, options = {}) {
-  const { zeroInchesSuffix = false, emptyOnInvalid = false } = options;
-  if (inches === null || inches === undefined || typeof inches !== 'number' || isNaN(inches)) {
-    return emptyOnInvalid ? '' : zeroInchesSuffix ? '0\' 0"' : '0"';
+  const {
+    zeroInchesSuffix = false,
+    includeZeroInches = false,
+    emptyOnInvalid = false,
+  } = options && typeof options === 'object' ? options : {};
+  if (
+    inches === null ||
+    inches === undefined ||
+    typeof inches !== 'number' ||
+    !Number.isFinite(inches)
+  ) {
+    return emptyOnInvalid ? '' : zeroInchesSuffix || includeZeroInches ? '0\' 0"' : '0"';
   }
-  const roundedSixteenths = Math.round(Math.abs(inches) * 16);
-  if (roundedSixteenths === 0) {
-    return zeroInchesSuffix ? '0\' 0"' : '0"';
-  }
-  const sign = inches < 0 ? '-' : '';
-  const ft = Math.floor(roundedSixteenths / 192);
-  const remSixteenths = roundedSixteenths % 192;
-  const wholeInches = Math.floor(remSixteenths / 16);
-  let num = remSixteenths % 16;
-  let den = 16;
-  while (num > 0 && num % 2 === 0) {
-    num /= 2;
-    den /= 2;
-  }
-
-  let inchStr = '';
-  if (remSixteenths > 0) {
-    if (num === 0) {
-      inchStr = `${wholeInches}"`;
-    } else if (wholeInches === 0) {
-      inchStr = `${num}/${den}"`;
-    } else {
-      inchStr = `${wholeInches} ${num}/${den}"`;
-    }
-  }
-
-  if (ft === 0) return `${sign}${inchStr}`;
-  if (remSixteenths === 0) return zeroInchesSuffix ? `${sign}${ft}' 0"` : `${sign}${ft}'`;
-  return `${sign}${ft}' ${inchStr}`;
+  return formatFractionalInches(inches, {
+    includeZeroInches: Boolean(zeroInchesSuffix || includeZeroInches),
+  });
 }
 
 export function parseElevationInInches(str) {
@@ -1380,32 +1364,38 @@ export function distributeItems(state, ids, direction) {
   if (boundsList.length < 3) return false;
 
   if (direction === 'horizontal') {
-    boundsList.sort((a, b) => a.cx - b.cx);
+    boundsList.sort((a, b) => a.x - b.x || a.w - b.w);
     const first = boundsList[0];
     const last = boundsList[boundsList.length - 1];
-    const span = last.cx - first.cx;
-    const step = span / (boundsList.length - 1);
+    const outerSpan = last.x + last.w - first.x;
+    const totalWidth = boundsList.reduce((sum, b) => sum + b.w, 0);
+    const gap = (outerSpan - totalWidth) / (boundsList.length - 1);
 
+    let currentX = first.x + first.w + gap;
     for (let i = 1; i < boundsList.length - 1; i++) {
       const b = boundsList[i];
       const hit = findOwner(state, b.id);
       if (hit) {
-        setItemPosition(state, hit, first.cx + i * step, b.cy);
+        setItemPosition(state, hit, currentX + b.w / 2, b.cy);
       }
+      currentX += b.w + gap;
     }
   } else if (direction === 'vertical') {
-    boundsList.sort((a, b) => a.cy - b.cy);
+    boundsList.sort((a, b) => a.y - b.y || a.h - b.h);
     const first = boundsList[0];
     const last = boundsList[boundsList.length - 1];
-    const span = last.cy - first.cy;
-    const step = span / (boundsList.length - 1);
+    const outerSpan = last.y + last.h - first.y;
+    const totalHeight = boundsList.reduce((sum, b) => sum + b.h, 0);
+    const gap = (outerSpan - totalHeight) / (boundsList.length - 1);
 
+    let currentY = first.y + first.h + gap;
     for (let i = 1; i < boundsList.length - 1; i++) {
       const b = boundsList[i];
       const hit = findOwner(state, b.id);
       if (hit) {
-        setItemPosition(state, hit, b.cx, first.cy + i * step);
+        setItemPosition(state, hit, b.cx, currentY + b.h / 2);
       }
+      currentY += b.h + gap;
     }
   }
 
