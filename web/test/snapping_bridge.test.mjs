@@ -387,6 +387,9 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
   const textCalls = [];
   const roundRectCalls = [];
   const ctx = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
+    fillRect() {},
     save() {
       calls.push('save');
     },
@@ -437,7 +440,8 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
     textBaseline: '',
   };
 
-  const view = { scale: 2 };
+  const state = { rooms: [] };
+  const view = { scale: 2, ox: 0, oy: 0 };
 
   // 1. Active angle snap with angleDegrees = 45 renders rounded badge and "45°" text
   const angleSnap45 = {
@@ -445,7 +449,7 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
     indicator: { x: 100, y: 120 },
     guideLines: [{ start: { x: 50, y: 70 }, end: { x: 100, y: 120 }, type: 'angle' }],
   };
-  drawSnapGuides(ctx, angleSnap45, view);
+  draw(ctx, state, view, { snapResult: angleSnap45, showRulers: false });
   assert.equal(roundRectCalls.length, 1);
   assert.ok(roundRectCalls[0].x > 100);
   assert.ok(roundRectCalls[0].y < 120);
@@ -458,14 +462,18 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
   calls.length = 0;
   textCalls.length = 0;
   roundRectCalls.length = 0;
-  drawSnapGuides(
+  draw(
     ctx,
+    state,
+    { scale: 1, ox: 0, oy: 0 },
     {
-      snap: { type: 'angle', angleDegrees: -0, point: { x: 80, y: 40 } },
-      indicator: { x: 80, y: 40 },
-      guideLines: [],
-    },
-    { scale: 1 }
+      snapResult: {
+        snap: { type: 'angle', angleDegrees: -0, point: { x: 80, y: 40 } },
+        indicator: { x: 80, y: 40 },
+        guideLines: [],
+      },
+      showRulers: false,
+    }
   );
   assert.equal(roundRectCalls.length, 1);
   assert.equal(textCalls.length, 1);
@@ -475,14 +483,18 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
   calls.length = 0;
   textCalls.length = 0;
   roundRectCalls.length = 0;
-  drawSnapGuides(
+  draw(
     ctx,
+    state,
+    { scale: 1, ox: 0, oy: 0 },
     {
-      snap: { type: 'angle', point: { x: 80, y: 40 } },
-      indicator: { x: 80, y: 40 },
-      guideLines: [],
-    },
-    { scale: 1 }
+      snapResult: {
+        snap: { type: 'angle', point: { x: 80, y: 40 } },
+        indicator: { x: 80, y: 40 },
+        guideLines: [],
+      },
+      showRulers: false,
+    }
   );
   assert.equal(roundRectCalls.length, 0);
   assert.equal(textCalls.length, 0);
@@ -492,14 +504,18 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
     calls.length = 0;
     textCalls.length = 0;
     roundRectCalls.length = 0;
-    drawSnapGuides(
+    draw(
       ctx,
+      state,
+      { scale: 1, ox: 0, oy: 0 },
       {
-        snap: { type, point: { x: 40, y: 40 } },
-        indicator: { x: 40, y: 40 },
-        guideLines: [],
-      },
-      { scale: 1 }
+        snapResult: {
+          snap: { type, point: { x: 40, y: 40 } },
+          indicator: { x: 40, y: 40 },
+          guideLines: [],
+        },
+        showRulers: false,
+      }
     );
     assert.equal(roundRectCalls.length, 0, `Expected no roundRect for ${type}`);
     assert.equal(textCalls.length, 0, `Expected no fillText for ${type}`);
@@ -507,9 +523,13 @@ test('drawSnapGuides renders angle degree status badge with roundRect and skips 
 });
 
 test('drawSnapGuides falls back to standard rectangle drawing when ctx.roundRect is unavailable', () => {
+  const state = { rooms: [] };
   const rectCalls = [];
   const textCalls = [];
   const ctxWithRect = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
+    fillRect() {},
     save() {},
     restore() {},
     beginPath() {},
@@ -528,14 +548,18 @@ test('drawSnapGuides falls back to standard rectangle drawing when ctx.roundRect
     },
   };
 
-  drawSnapGuides(
+  draw(
     ctxWithRect,
+    state,
+    { scale: 1, ox: 0, oy: 0 },
     {
-      snap: { type: 'angle', angleDegrees: -90, point: { x: 50, y: 50 } },
-      indicator: { x: 50, y: 50 },
-      guideLines: [],
-    },
-    { scale: 1 }
+      snapResult: {
+        snap: { type: 'angle', angleDegrees: -90, point: { x: 50, y: 50 } },
+        indicator: { x: 50, y: 50 },
+        guideLines: [],
+      },
+      showRulers: false,
+    }
   );
   assert.equal(rectCalls.length, 1);
   assert.equal(textCalls.length, 1);
@@ -545,15 +569,19 @@ test('drawSnapGuides falls back to standard rectangle drawing when ctx.roundRect
   const fillRectCalls = [];
   const strokeRectCalls = [];
   const ctxWithFillRect = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
     save() {},
     restore() {},
     beginPath() {},
+    moveTo() {},
+    lineTo() {},
     arc() {},
     stroke() {},
     fill() {},
     setLineDash() {},
     fillRect(x, y, w, h) {
-      fillRectCalls.push({ x, y, w, h });
+      if (w > 0 && h > 0) fillRectCalls.push({ x, y, w, h });
     },
     strokeRect(x, y, w, h) {
       strokeRectCalls.push({ x, y, w, h });
@@ -564,14 +592,18 @@ test('drawSnapGuides falls back to standard rectangle drawing when ctx.roundRect
   };
 
   textCalls.length = 0;
-  drawSnapGuides(
+  draw(
     ctxWithFillRect,
+    state,
+    { scale: 1, ox: 0, oy: 0 },
     {
-      snap: { type: 'angle', angleDegrees: 30, point: { x: 20, y: 30 } },
-      indicator: { x: 20, y: 30 },
-      guideLines: [],
-    },
-    { scale: 1 }
+      snapResult: {
+        snap: { type: 'angle', angleDegrees: 30, point: { x: 20, y: 30 } },
+        indicator: { x: 20, y: 30 },
+        guideLines: [],
+      },
+      showRulers: false,
+    }
   );
   assert.equal(fillRectCalls.length, 1);
   assert.equal(strokeRectCalls.length, 1);
