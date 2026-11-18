@@ -63,6 +63,11 @@ test('index.html dynamic status updates and error containers declare ARIA live r
   assert.match(htmlContent, /id="diff-drawer" [^>]*role="dialog"[^>]*aria-modal="true"/);
   assert.match(htmlContent, /id="p-status" [^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(htmlContent, /id="p-error" [^>]*role="alert"[^>]*aria-live="assertive"/);
+  assert.match(htmlContent, /id="toast" [^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(
+    htmlContent,
+    /<button type="button" class="toast-dismiss" aria-label="Dismiss notification"><span aria-hidden="true">✕<\/span><\/button>/
+  );
 });
 
 test('index.html contains skip-to-content link before header and tabindex="-1" on stage section', () => {

@@ -21,7 +21,10 @@ createServer(async (req, res) => {
     ''
   );
   const file =
-    path.startsWith('/designer3d/') || path.startsWith('\\designer3d\\')
+    path.startsWith('/designer3d/') ||
+    path.startsWith('\\designer3d\\') ||
+    path.startsWith('/web/') ||
+    path.startsWith('\\web\\')
       ? join(root, '..', path)
       : join(root, path === '/' || path === '\\' ? 'index.html' : path);
   try {

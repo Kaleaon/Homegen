@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { exportDXF } from '../js/dxfExporter.js';
-import { buildMultiLevel, buildStudio } from '../js/templates.js';
+import { buildMultiLevel, TEMPLATE_BY_ID } from '../js/templates.js';
 import { newState, createRoom, addOpening, addItem } from '../js/model.js';
 import { ElevationGrid } from '../js/elevationEngine.js';
 
 test('exportDXF generates valid AC1015 ASCII DXF header, tables, and entities', () => {
-  const state = buildStudio();
+  const state = TEMPLATE_BY_ID('studio').createState();
   const dxf = exportDXF(state, { units: 'inches' });
 
   assert.ok(typeof dxf === 'string', 'exportDXF must return a string');
@@ -37,7 +37,7 @@ test('exportDXF generates valid AC1015 ASCII DXF header, tables, and entities', 
 });
 
 test('exportDXF defines all 7 standard CAD layers in TABLES section', () => {
-  const state = buildStudio();
+  const state = TEMPLATE_BY_ID('studio').createState();
   const dxf = exportDXF(state);
 
   const requiredLayers = [
