@@ -766,7 +766,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
     const extrudeSettings = { depth: height, bevelEnabled: false };
     const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geom.rotateX(Math.PI / 2);
+    geom.rotateX(-Math.PI / 2);
     const visMat = Array.isArray(material)
       ? material[0]
       : material.vis || material.base || material;
