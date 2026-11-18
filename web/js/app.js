@@ -5283,6 +5283,8 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+
+export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
