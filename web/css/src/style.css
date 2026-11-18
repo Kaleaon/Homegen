@@ -1095,3 +1095,32 @@ k-button.on .snap-badge {
   font-weight: 600;
   margin-left: 8px;
 }
+
+.snap-increment-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snap-increment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snap-increment-label {
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.snap-increment-input {
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.snap-increment-input[aria-invalid='true'] {
+  --ktheme-border: var(--ktheme-critical);
+}

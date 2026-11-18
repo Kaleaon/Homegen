@@ -71,6 +71,7 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  buildGridSettingsViewModel,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -245,13 +246,22 @@ function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
   const viewModels = buildToggleViewModel(interaction);
+  const gridVm = buildGridSettingsViewModel(interaction);
   const activeCount = viewModels.filter((vm) => vm.enabled).length;
 
   const basicItems = viewModels.filter((vm) => (vm.category || 'basic') === 'basic');
   const advancedItems = viewModels.filter((vm) => vm.category === 'advanced');
 
-  const existingPopover = container.querySelector('k-popover');
+  const existingPopover =
+    typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
   const wasOpen = existingPopover ? existingPopover.open : false;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const isContained =
+    activeEl &&
+    (typeof container.contains === 'function'
+      ? container.contains(activeEl)
+      : activeEl.id === 'snap-unit-size' || activeEl.id === 'snap-angle-degrees');
+  const focusedInputId = isContained && activeEl.id ? activeEl.id : null;
 
   const renderGroup = (items) =>
     items
@@ -286,13 +296,34 @@ function renderSnapToggles() {
             ${renderGroup(advancedItems)}
           </div>
         </div>
+        <div class="snap-category snap-increments-panel">
+          <div class="snap-category-title">Grid &amp; Angle Increments</div>
+          <div class="snap-increment-fields">
+            <div class="snap-increment-row">
+              <label for="snap-unit-size" class="snap-increment-label">Grid Spacing (in)</label>
+              <k-input id="snap-unit-size" class="snap-increment-input" type="number" min="0.25" step="0.25" data-grid-setting="unitSize" aria-label="Grid Spacing (in)" value="${esc(gridVm.unitSize)}"></k-input>
+            </div>
+            <div class="snap-increment-row">
+              <label for="snap-angle-degrees" class="snap-increment-label">Angle Snap (°)</label>
+              <k-input id="snap-angle-degrees" class="snap-increment-input" type="number" min="1" max="360" step="1" data-grid-setting="angleSnapDegrees" aria-label="Angle Snap (degrees)" value="${esc(gridVm.angleSnapDegrees)}"></k-input>
+            </div>
+          </div>
+        </div>
       </div>
     </k-popover>
   `;
 
-  const newPopover = container.querySelector('k-popover');
+  const newPopover =
+    typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
   if (newPopover && wasOpen) {
     newPopover.open = true;
+  }
+
+  if (focusedInputId && typeof container.querySelector === 'function') {
+    const restoredInput = container.querySelector(`#${focusedInputId}`);
+    if (restoredInput && typeof restoredInput.focus === 'function') {
+      restoredInput.focus();
+    }
   }
 
   container.querySelectorAll('[data-snap-id]').forEach((btn) => {
@@ -307,6 +338,54 @@ function renderSnapToggles() {
       }
     });
   });
+
+  const bindIncrementInput = (selector, settingKey, applyFn) => {
+    const inputEl =
+      typeof container.querySelector === 'function' ? container.querySelector(selector) : null;
+    if (!inputEl) return;
+
+    const labelEl =
+      inputEl.id && typeof container.querySelector === 'function'
+        ? container.querySelector(`label[for="${inputEl.id}"]`)
+        : null;
+    if (labelEl && typeof labelEl.addEventListener === 'function') {
+      labelEl.addEventListener('click', (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof inputEl.focus === 'function') inputEl.focus();
+      });
+    }
+
+    const readRawValue = (e) =>
+      e && e.detail && e.detail.value !== undefined ? e.detail.value : inputEl.value;
+
+    inputEl.addEventListener('click', (e) => {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    });
+
+    inputEl.addEventListener('input', (e) => {
+      const updated = applyFn(readRawValue(e));
+      if (updated) {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        redraw();
+      } else if (typeof inputEl.setAttribute === 'function') {
+        inputEl.setAttribute('aria-invalid', 'true');
+      }
+    });
+
+    inputEl.addEventListener('change', (e) => {
+      const updated = applyFn(readRawValue(e));
+      if (updated) {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        redraw();
+      } else {
+        if (typeof inputEl.removeAttribute === 'function') inputEl.removeAttribute('aria-invalid');
+        inputEl.value = String(interaction.gridSettings[settingKey]);
+      }
+    });
+  };
+
+  bindIncrementInput('#snap-unit-size', 'unitSize', gridVm.onUnitSizeChange);
+  bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
 function renderBgToolbar() {
@@ -5635,6 +5714,7 @@ if (typeof window !== 'undefined')
     moveSelectedSpatial,
     getSpatialElements,
     interaction,
+    renderSnapToggles,
     generatePDF,
     applyCalibration,
     apply3PointCalibration,
