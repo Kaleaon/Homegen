@@ -2,6 +2,7 @@ package com.homegen.designer3d.rendering
 
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
+import com.google.android.filament.MaterialInstance
 import com.google.android.filament.Scene
 import com.google.android.filament.TransformManager
 import com.homegen.designer3d.math.Vector3
@@ -19,8 +20,13 @@ class RenderableRegistry(
     private val engine: Engine,
     private val scene: Scene,
     private val materialFactory: MaterialFactory,
+    private val meshBuilder: ((HomeObject, MaterialInstance) -> Int)? = null,
+    private val entityDestroyer: (Int) -> Unit = { EntityManager.get().destroy(it) },
 ) {
     private val entityMap = mutableMapOf<String, Int>()
+    private val objectTypes = mutableMapOf<String, String>()
+    private val defaultMaterialRefs = mutableMapOf<String, String>()
+    private val customMaterialOverrides = mutableMapOf<String, String>()
     private val transformManager: TransformManager = engine.transformManager
 
     /** Optional OBJ loader for Sweet Home 3D / Wavefront models. */
@@ -30,9 +36,19 @@ class RenderableRegistry(
     var modelLoader: ModelLoader? = null
 
     fun createRenderable(obj: HomeObject): Int {
-        val materialInstance = materialFactory.colorForType(obj.type)
+        objectTypes[obj.id] = obj.type
+        val usesDefaultMaterial = MaterialFactory.isDefaultMaterialRef(obj.materialRef)
+        val materialInstance = if (usesDefaultMaterial) {
+            defaultMaterialRefs[obj.id] = obj.materialRef
+            customMaterialOverrides.remove(obj.id)
+            materialFactory.colorForType(obj.type)
+        } else {
+            defaultMaterialRefs[obj.id] = "default"
+            customMaterialOverrides[obj.id] = obj.materialRef
+            materialFactory.createCustomMaterialInstance(obj.materialRef)
+        }
 
-        val entity = when (obj) {
+        val entity = meshBuilder?.invoke(obj, materialInstance) ?: when (obj) {
             is Wall -> MeshFactory.createBox(
                 engine,
                 Vector3(obj.lengthMeters / 2f, obj.heightMeters / 2f, obj.thicknessMeters / 2f),
@@ -81,24 +97,51 @@ class RenderableRegistry(
 
     fun removeRenderable(objectId: String) {
         val entity = entityMap.remove(objectId) ?: return
-        scene.removeEntity(entity)
-        engine.destroyEntity(entity)
-        EntityManager.get().destroy(entity)
+        objectTypes.remove(objectId)
+        defaultMaterialRefs.remove(objectId)
+        customMaterialOverrides.remove(objectId)
+        if (engine.isValid) {
+            scene.removeEntity(entity)
+            engine.destroyEntity(entity)
+        }
+        entityDestroyer(entity)
     }
 
     fun getEntity(objectId: String): Int? = entityMap[objectId]
 
+    fun hasCustomMaterialOverride(objectId: String): Boolean = objectId in customMaterialOverrides
+
     /**
      * Applies a material by ref to a renderable's first primitive.
+     * User-applied catalog materials preserve custom parameters across theme updates
+     * until explicitly reset to a default material.
      */
     fun applyMaterial(objectId: String, materialRef: String) {
+        if (!engine.isValid) return
         val entity = entityMap[objectId] ?: return
         val rm = engine.renderableManager
         val ri = rm.getInstance(entity)
         if (ri == 0) return
-        // Use the materialRef prefix to determine color; fall back to type-based color
-        val instance = materialFactory.colorForType(materialRef.substringBefore("/"))
+
+        val isResetToDefault = MaterialFactory.isDefaultMaterialRef(materialRef) ||
+            materialRef == defaultMaterialRefs[objectId]
+
+        val instance = if (isResetToDefault) {
+            customMaterialOverrides.remove(objectId)
+            val objectType = objectTypes[objectId] ?: materialRef.substringBefore("/")
+            materialFactory.colorForType(objectType)
+        } else {
+            customMaterialOverrides[objectId] = materialRef
+            materialFactory.createCustomMaterialInstance(materialRef)
+        }
         rm.setMaterialInstanceAt(ri, 0, instance)
+    }
+
+    /**
+     * Resets an entity's material override back to its theme-managed default surface role.
+     */
+    fun resetMaterial(objectId: String) {
+        applyMaterial(objectId, "default")
     }
 
     fun syncAll(objects: List<HomeObject>) {
@@ -175,10 +218,15 @@ class RenderableRegistry(
 
     fun destroy() {
         entityMap.values.forEach { entity ->
-            scene.removeEntity(entity)
-            engine.destroyEntity(entity)
-            EntityManager.get().destroy(entity)
+            if (engine.isValid) {
+                scene.removeEntity(entity)
+                engine.destroyEntity(entity)
+            }
+            entityDestroyer(entity)
         }
         entityMap.clear()
+        objectTypes.clear()
+        defaultMaterialRefs.clear()
+        customMaterialOverrides.clear()
     }
 }
