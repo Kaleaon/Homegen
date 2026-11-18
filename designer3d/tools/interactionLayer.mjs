@@ -91,7 +91,7 @@ export class InteractionLayer {
         existingBoundingBoxes: context.existingBoundingBoxes,
         dynamicPolygons: context.dynamicPolygons,
       });
-      result.placementFeedback = createPlacementFeedback(movedPolygon, validation);
+      result.placementFeedback = createPlacementFeedback(movedPolygon, validation, context);
     }
 
     return result;
@@ -131,7 +131,7 @@ export class InteractionLayer {
         existingBoundingBoxes: context.existingBoundingBoxes,
         dynamicPolygons: context.dynamicPolygons,
       });
-      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation);
+      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation, context);
     }
 
     return result;

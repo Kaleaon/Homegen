@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../js/model.js';
+import { normalizeCode } from '../js/epsgRegistry.js';
 import { reproject, reprojectionCache } from '../js/geometry.js';
 import { exportGeoJSON, importGeoJSON } from '../js/app.js';
 
@@ -193,6 +194,103 @@ test('Offline EPSG Registry and Validation Boundary Guardrails', () => {
       warnings.some((w) => w.includes('EPSG:99999')),
       'Advisory warning must be logged for unsupported EPSG code'
     );
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+test('OGC URN CRS Normalization, CRS84 Mapping, and Millimeter-Accurate Plan Reprojection', () => {
+  reprojectionCache.clear();
+
+  // Test 1: normalizeCode parses double-colon, single-colon, versioned OGC URNs, and CRS84
+  assert.equal(normalizeCode('urn:ogc:def:crs:EPSG::2227'), 'EPSG:2227');
+  assert.equal(normalizeCode('urn:ogc:def:crs:epsg::3435'), 'EPSG:3435');
+  assert.equal(normalizeCode('urn:ogc:def:crs:EPSG:2227'), 'EPSG:2227');
+  assert.equal(normalizeCode('urn:ogc:def:crs:EPSG:7.9:2227'), 'EPSG:2227');
+  assert.equal(normalizeCode('urn:x-ogc:def:crs:EPSG:6.18.3:2227'), 'EPSG:2227');
+  assert.equal(normalizeCode('urn:ogc:def:crs:OGC:1.3:CRS84'), 'EPSG:4326');
+  assert.equal(normalizeCode('urn:ogc:def:crs:OGC::CRS84'), 'EPSG:4326');
+  assert.equal(normalizeCode('CRS84'), 'EPSG:4326');
+  assert.equal(normalizeCode('3435'), 'EPSG:3435');
+  assert.equal(normalizeCode('EPSG:3435'), 'EPSG:3435');
+
+  // Test 2: Model validation and normalization helpers accept OGC URN and CRS84 formats
+  assert.ok(M.isValidEPSGCode('urn:ogc:def:crs:EPSG::2227'));
+  assert.ok(M.isValidEPSGCode('urn:ogc:def:crs:EPSG:2227'));
+  assert.ok(M.isValidEPSGCode('urn:ogc:def:crs:EPSG:7.9:2227'));
+  assert.ok(M.isValidEPSGCode('urn:ogc:def:crs:OGC:1.3:CRS84'));
+  assert.ok(M.isValidEPSGCode('CRS84'));
+  assert.equal(M.normalizeEPSGCode('urn:ogc:def:crs:EPSG::2227'), 'EPSG:2227');
+  assert.equal(M.normalizeEPSGCode('urn:ogc:def:crs:EPSG:7.9:2227'), 'EPSG:2227');
+  assert.equal(M.normalizeEPSGCode('urn:ogc:def:crs:OGC:1.3:CRS84'), 'EPSG:4326');
+  assert.equal(M.normalizeEPSGCode('CRS84'), 'EPSG:4326');
+
+  // State deserialization accepts OGC URN strings and normalizes to canonical EPSG
+  const urnState = M.deserialize(
+    JSON.stringify({
+      version: 2,
+      rooms: [],
+      crs: { epsg: 'urn:ogc:def:crs:EPSG::2227', units: 'us-ft' },
+    })
+  );
+  assert.equal(urnState.crs.epsg, 'EPSG:2227');
+  assert.ok(urnState.crs.proj4.includes('+proj=lcc'), 'Deserialized URN state resolves proj4');
+
+  // Test 3: Coordinate reprojection from urn:ogc:def:crs:EPSG::2227 to PLAN produces millimeter accuracy
+  const expectedPlanInches = [240, 180]; // 20ft East, 15ft South in local plan inches
+  const statePlane2227 = reproject(expectedPlanInches, 'PLAN', 'EPSG:2227');
+  assert.ok(
+    statePlane2227[0] > 5000000 && statePlane2227[1] > 1500000,
+    'California Zone 3 coordinates are in millions of US Survey Feet'
+  );
+
+  const planFromDoubleColonUrn = reproject(statePlane2227, 'urn:ogc:def:crs:EPSG::2227', 'PLAN');
+  const planFromSingleColonUrn = reproject(statePlane2227, 'urn:ogc:def:crs:EPSG:2227', 'PLAN');
+  const planFromVersionedUrn = reproject(statePlane2227, 'urn:ogc:def:crs:EPSG:7.9:2227', 'PLAN');
+  const ONE_MM_IN_INCHES = 1 / 25.4; // ~0.03937 inches
+
+  for (const actual of [planFromDoubleColonUrn, planFromSingleColonUrn, planFromVersionedUrn]) {
+    assert.ok(
+      Math.abs(actual[0] - expectedPlanInches[0]) < ONE_MM_IN_INCHES &&
+        Math.abs(actual[1] - expectedPlanInches[1]) < ONE_MM_IN_INCHES,
+      `Expected millimeter accuracy (<${ONE_MM_IN_INCHES.toFixed(4)} in), got [${actual[0]}, ${actual[1]}]`
+    );
+  }
+
+  // CRS84 URN reprojection matches EPSG:4326
+  const sfLonLat = [-122.4194, 37.7749];
+  const planFromCrs84Urn = reproject(sfLonLat, 'urn:ogc:def:crs:OGC:1.3:CRS84', 'PLAN');
+  const planFromCrs84 = reproject(sfLonLat, 'CRS84', 'PLAN');
+  assert.ok(Math.abs(planFromCrs84Urn[0]) < 1e-4 && Math.abs(planFromCrs84Urn[1]) < 1e-4);
+  assert.deepEqual(planFromCrs84Urn, planFromCrs84);
+
+  // Test 4: Unrecognized authorities and invalid numeric codes in URNs safely fall back to raw coordinates
+  assert.equal(M.isValidEPSGCode('urn:ogc:def:crs:ESRI::102643'), false);
+  assert.equal(M.isValidEPSGCode('urn:ogc:def:crs:EPSG::99999'), false);
+  assert.equal(M.isValidEPSGCode('urn:ogc:def:crs:EPSG::abc'), false);
+  assert.equal(M.normalizeEPSGCode('urn:ogc:def:crs:ESRI::102643'), 'EPSG:4326');
+
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    const rawCoords = [6006964.5, 2110218.25];
+    assert.deepEqual(
+      reproject(rawCoords, 'urn:ogc:def:crs:ESRI::102643', 'PLAN'),
+      rawCoords,
+      'Unrecognized authority URN must safely fall back to raw coordinates'
+    );
+    assert.deepEqual(
+      reproject(rawCoords, 'urn:ogc:def:crs:EPSG::99999', 'PLAN'),
+      rawCoords,
+      'Invalid numeric EPSG URN must safely fall back to raw coordinates'
+    );
+    assert.deepEqual(
+      reproject(rawCoords, 'urn:ogc:def:crs:EPSG::invalid', 'EPSG:4326'),
+      rawCoords,
+      'Non-numeric EPSG URN must safely fall back to raw coordinates'
+    );
+    assert.ok(warnings.length >= 3, 'Fallback warnings must be emitted for invalid URN codes');
   } finally {
     console.warn = origWarn;
   }

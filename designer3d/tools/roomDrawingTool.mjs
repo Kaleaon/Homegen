@@ -305,10 +305,14 @@ export class RoomDrawingTool {
       this.settings,
       context
     );
-    const feedback = createPlacementFeedback(check.candidate, {
-      valid: check.valid,
-      reasons: check.reasons,
-    });
+    const feedback = createPlacementFeedback(
+      check.candidate,
+      {
+        valid: check.valid,
+        reasons: check.reasons,
+      },
+      context
+    );
 
     if (!check.valid) {
       return {
@@ -390,7 +394,7 @@ export class RoomDrawingTool {
     }
 
     const candidate = [...this.points, resolved.targetPoint];
-    const feedback = createPlacementFeedback(candidate, validation);
+    const feedback = createPlacementFeedback(candidate, validation, context);
 
     return {
       ...feedback,
@@ -423,7 +427,7 @@ export class RoomDrawingTool {
     if (!validation.valid) {
       return {
         ok: false,
-        feedback: createPlacementFeedback(closedPoints, validation),
+        feedback: createPlacementFeedback(closedPoints, validation, context),
       };
     }
 
