@@ -65,6 +65,10 @@ import {
   resolveDoorStyle,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
+import {
+  isSingleKeyShortcutDisabled as readSingleKeyShortcutDisabled,
+  writeSingleKeyShortcutDisabled,
+} from './shortcutPrefs.js';
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
@@ -101,10 +105,49 @@ import {
 
 const onboardingTour = new OnboardingTour();
 
-const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
+const $ = (s) =>
+  typeof document !== 'undefined' && typeof document.querySelector === 'function'
+    ? document.querySelector(s)
+    : null;
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
 const ctx = canvas ? canvas.getContext('2d') : null;
 const STORE = 'homegen.plan.v1';
+
+export const SINGLE_KEY_SHORTCUTS_KEY = 'homegen_disable_single_key_shortcuts';
+
+export function isSingleKeyShortcutDisabled() {
+  return readSingleKeyShortcutDisabled();
+}
+
+function syncShortcutToggleUI(disabled) {
+  const toggleEl = $('#disable-single-key-shortcuts');
+  if (toggleEl) {
+    toggleEl.checked = disabled;
+    toggleEl.setAttribute?.('aria-checked', String(disabled));
+  }
+}
+
+export function setSingleKeyShortcutDisabled(disabled) {
+  const next = writeSingleKeyShortcutDisabled(disabled);
+  if (next && typeof window !== 'undefined' && window.__scene3d?.walkKeys) {
+    window.__scene3d.walkKeys.forward = false;
+    window.__scene3d.walkKeys.backward = false;
+    window.__scene3d.walkKeys.left = false;
+    window.__scene3d.walkKeys.right = false;
+  }
+  syncShortcutToggleUI(next);
+  return next;
+}
+
+function initShortcutOverlayUI() {
+  const toggleEl = $('#disable-single-key-shortcuts');
+  if (!toggleEl) return;
+  syncShortcutToggleUI(isSingleKeyShortcutDisabled());
+  toggleEl.addEventListener?.('change', (e) => {
+    const next = Boolean(e?.target ? e.target.checked : toggleEl.checked);
+    setSingleKeyShortcutDisabled(next);
+  });
+}
 
 const interaction = new InteractionLayer({
   gridSettings: {
@@ -183,7 +226,7 @@ const snappingBridge = new SnappingBridge({
   },
 });
 
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
   document.querySelectorAll('[data-view]').forEach((b) => {
     b.addEventListener('click', () => {
       if (b.dataset.view === '3d') {
@@ -4556,8 +4599,9 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 }
 
 let view3d = null;
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   initCommandPaletteUI();
+  initShortcutOverlayUI();
   setupAddRoomDimsModal();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
@@ -4591,13 +4635,18 @@ if (typeof window !== 'undefined') {
     )
       return;
 
-    if (k === '?') {
-      e.preventDefault();
-      const shortcutDlg = $('#shortcut-overlay');
-      if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
-        closeShortcutOverlay();
-      } else {
-        openShortcutOverlay();
+    const singleKeyDisabled = isSingleKeyShortcutDisabled();
+    const hasCmdModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
+
+    if (k === '?' && !hasCmdModifier) {
+      if (!singleKeyDisabled) {
+        e.preventDefault();
+        const shortcutDlg = $('#shortcut-overlay');
+        if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
+          closeShortcutOverlay();
+        } else {
+          openShortcutOverlay();
+        }
       }
       return;
     }
@@ -4626,8 +4675,7 @@ if (typeof window !== 'undefined') {
     } else if ((e.ctrlKey || e.metaKey) && lk === 'y') {
       e.preventDefault();
       $('#redo').click();
-    } else if (lk === 'r') rotateSelected();
-    else if (lk === 'escape') {
+    } else if (lk === 'escape') {
       if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
@@ -4649,11 +4697,14 @@ if (typeof window !== 'undefined') {
         select(null);
         toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
       }
-    } else if (lk === 'v') setTool({ kind: 'select' });
-    else if (lk === 'x') setTool({ kind: 'erase' });
-    else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in').click();
-    else if (k === '-') $('#zoom-out').click();
+    } else if (!singleKeyDisabled && !hasCmdModifier) {
+      if (lk === 'r') rotateSelected();
+      else if (lk === 'v') setTool({ kind: 'select' });
+      else if (lk === 'x') setTool({ kind: 'erase' });
+      else if (lk === 'i') setTool({ kind: 'eyedropper' });
+      else if (k === '+' || k === '=') $('#zoom-in').click();
+      else if (k === '-') $('#zoom-out').click();
+    }
   });
 
   window.addEventListener('resize', resize);
@@ -5456,6 +5507,7 @@ function closeCommandPalette() {
 function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  syncShortcutToggleUI(isSingleKeyShortcutDisabled());
   if (typeof dlg.showModal === 'function') {
     try {
       dlg.showModal();
@@ -5619,6 +5671,12 @@ if (typeof window !== 'undefined')
     get doc() {
       return doc;
     },
+    get tool() {
+      return tool;
+    },
+    get view() {
+      return view;
+    },
     get report() {
       return report;
     },
@@ -5655,6 +5713,9 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    SINGLE_KEY_SHORTCUTS_KEY,
+    isSingleKeyShortcutDisabled,
+    setSingleKeyShortcutDisabled,
     renderCommandList,
     trapFocus,
     parseElevationRaster,
