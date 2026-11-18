@@ -435,6 +435,8 @@
     <div class="row"><label class="toggle" for="csv-sec-openings"><input type="checkbox" id="csv-sec-openings" checked> Doors &amp; Windows <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
     <div class="row"><label class="toggle" for="csv-sec-finishes"><input type="checkbox" id="csv-sec-finishes" checked> Finishes (Floors &amp; Walls) <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label></div>
     <div class="row"><label class="toggle" for="csv-sec-rooms"><input type="checkbox" id="csv-sec-rooms" checked> Room Area Summary <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
+    <h3>Pricing &amp; Cost Options</h3>
+    <div class="row"><label class="toggle" for="csv-inc-pricing"><input type="checkbox" id="csv-inc-pricing" checked> Include Item Pricing &amp; Cost Summary</label></div>
     <div class="btns">
       <button id="csv-cancel" type="button">Cancel</button>
       <button id="csv-generate" class="primary" type="button">Generate CSV</button>
@@ -764,6 +766,12 @@
       <label class="toggle shortcut-preference-toggle" for="disable-single-key-shortcuts"><input type="checkbox" id="disable-single-key-shortcuts" role="switch" aria-checked="false"> Disable single-character shortcuts</label>
       <p class="shortcut-settings-note">Modifier shortcuts (Ctrl/Cmd) and arrow keys remain active.</p>
     </div>
+    <input id="shortcut-search"
+           type="search"
+           placeholder="Search shortcuts or keys..."
+           aria-label="Search keyboard shortcuts"
+           autocomplete="off">
+    <div id="shortcut-no-results" class="shortcut-no-results" role="status" aria-live="polite" hidden>No matching shortcuts found</div>
     <div class="shortcut-grid">
       <div class="shortcut-group">
         <h3>General &amp; Search</h3>
