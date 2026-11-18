@@ -27,28 +27,11 @@ export class SpatialRTree {
       leaf: true,
     };
     this.items = [];
-    this._setbackItems = [];
-    this._lotItems = [];
   }
 
   insert(item, bounds) {
     const nodeItem = { item, bounds };
     this.items.push(nodeItem);
-    if (item && typeof item === 'object') {
-      if (
-        item.type === 'setbackBuffer' ||
-        item.type === 'gisSetbackBuffer' ||
-        item.layerType === 'gisSetbackBuffer'
-      ) {
-        this._setbackItems.push(item);
-      } else if (
-        item.type === 'lotLine' ||
-        item.type === 'gisLotLine' ||
-        item.layerType === 'gisLotLine'
-      ) {
-        this._lotItems.push(item);
-      }
-    }
     this._insertNode(this.root, nodeItem);
   }
 
@@ -170,6 +153,16 @@ export class SpatialRTree {
 
     const roomBounds = getBounds(pts);
     const searchCandidates = this.search(roomBounds);
+    if (searchCandidates.length === 0) {
+      const duration =
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime;
+      if (duration > 5) {
+        console.warn(
+          `[GISBridge] Spatial query execution exceeded target time: ${duration.toFixed(2)}ms`
+        );
+      }
+      return [];
+    }
     const violations = [];
 
     const isSetbackItem = (cand) =>
@@ -181,29 +174,27 @@ export class SpatialRTree {
       cand &&
       (cand.type === 'lotLine' || cand.type === 'gisLotLine' || cand.layerType === 'gisLotLine');
 
-    let setbackCandidates = searchCandidates.filter(isSetbackItem);
-    if (setbackCandidates.length === 0 && this._setbackItems.length > 0) {
-      setbackCandidates = [this._setbackItems[0]];
-    }
-
-    let lotCandidates = searchCandidates.filter(isLotItem);
-    if (lotCandidates.length === 0 && this._lotItems.length > 0) {
-      lotCandidates = [this._lotItems[0]];
-    }
+    const setbackCandidates = searchCandidates.filter(isSetbackItem);
+    const lotCandidates = searchCandidates.filter(isLotItem);
 
     const buildableRings = [];
+    const seenBuildable = new Set();
     for (const cand of setbackCandidates) {
       if (Array.isArray(cand.rings) && cand.rings.length > 0) {
         for (const ring of cand.rings) {
           const ringInner = ring.innerPoints || ring.innerPolygon;
-          if (ringInner && ringInner.length >= 3) {
+          if (ringInner && ringInner.length >= 3 && !seenBuildable.has(ringInner)) {
+            seenBuildable.add(ringInner);
             buildableRings.push({ id: ring.id || cand.id, innerPoly: ringInner });
           }
         }
       } else {
         const innerPoly = cand.innerPoints || cand.innerPolygon;
         if (innerPoly && innerPoly.length >= 3) {
-          buildableRings.push({ id: cand.id, innerPoly });
+          if (!seenBuildable.has(innerPoly)) {
+            seenBuildable.add(innerPoly);
+            buildableRings.push({ id: cand.id, innerPoly });
+          }
         } else if (cand.polygon && cand.polygon.length >= 3) {
           for (const pt of pts) {
             if (pointInPolygon(pt, cand.polygon)) {
@@ -233,10 +224,22 @@ export class SpatialRTree {
     }
 
     const validLotRings = [];
+    const seenLot = new Set();
     for (const cand of lotCandidates) {
-      const lotPoly = cand.points || cand.polygon;
-      if (lotPoly && lotPoly.length >= 3) {
-        validLotRings.push({ id: cand.id, lotPoly });
+      if (Array.isArray(cand.rings) && cand.rings.length > 0) {
+        for (const ring of cand.rings) {
+          const ringPoly = ring.points || ring.polygon;
+          if (ringPoly && ringPoly.length >= 3 && !seenLot.has(ringPoly)) {
+            seenLot.add(ringPoly);
+            validLotRings.push({ id: ring.id || cand.id, lotPoly: ringPoly });
+          }
+        }
+      } else {
+        const lotPoly = cand.points || cand.polygon;
+        if (lotPoly && lotPoly.length >= 3 && !seenLot.has(lotPoly)) {
+          seenLot.add(lotPoly);
+          validLotRings.push({ id: cand.id, lotPoly });
+        }
       }
     }
 
@@ -738,9 +741,56 @@ export function buildSpatialIndex(siteOrFeatures) {
     layers = siteOrFeatures;
   }
 
+  const lotGroups = new Map();
+  const setbackByRingId = new Map();
+
   for (const layer of layers) {
     const bounds = layer.bounds || getBounds(layer.points || layer.innerPoints || []);
     tree.insert(layer, bounds);
+
+    if (layer && layer.type === 'gisLotLine' && layer.parentId) {
+      if (!lotGroups.has(layer.parentId)) lotGroups.set(layer.parentId, []);
+      lotGroups.get(layer.parentId).push({ layer, bounds });
+    } else if (layer && layer.type === 'gisSetbackBuffer' && layer.ringId) {
+      setbackByRingId.set(layer.ringId, { layer, bounds });
+    }
+  }
+
+  for (const [parentId, entries] of lotGroups.entries()) {
+    if (entries.length > 1) {
+      const unionLotBounds = {
+        minX: Math.min(...entries.map((e) => e.bounds.minX)),
+        minY: Math.min(...entries.map((e) => e.bounds.minY)),
+        maxX: Math.max(...entries.map((e) => e.bounds.maxX)),
+        maxY: Math.max(...entries.map((e) => e.bounds.maxY)),
+      };
+      tree.insert(
+        {
+          id: parentId,
+          type: 'gisLotLine',
+          rings: entries.map((e) => e.layer),
+        },
+        unionLotBounds
+      );
+
+      const setbackEntries = entries.map((e) => setbackByRingId.get(e.layer.id)).filter(Boolean);
+      if (setbackEntries.length > 0) {
+        const unionSetbackBounds = {
+          minX: Math.min(...setbackEntries.map((e) => e.bounds.minX)),
+          minY: Math.min(...setbackEntries.map((e) => e.bounds.minY)),
+          maxX: Math.max(...setbackEntries.map((e) => e.bounds.maxX)),
+          maxY: Math.max(...setbackEntries.map((e) => e.bounds.maxY)),
+        };
+        tree.insert(
+          {
+            id: `${parentId}-setback-buffer`,
+            type: 'gisSetbackBuffer',
+            rings: setbackEntries.map((e) => e.layer),
+          },
+          unionSetbackBounds
+        );
+      }
+    }
   }
 
   return tree;
