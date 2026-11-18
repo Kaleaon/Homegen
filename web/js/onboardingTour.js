@@ -29,7 +29,7 @@ export function resetOnboardingStatus() {
   }
 }
 
-export const TOUR_STEPS = [
+const TOUR_STEPS = [
   {
     id: 'build-palette',
     target: '#tabs',
