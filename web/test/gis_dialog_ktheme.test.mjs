@@ -290,7 +290,7 @@ test('app.js synchronizes #gis-map-preset and #gis-crs <k-select> values and han
   );
 
   // Verify renderBgToolbar syncs #gis-map-preset value setter
-  const bgFnMatch = appJs.match(/function renderBgToolbar\(\)\s*\{([\s\S]*?)\n\}/);
+  const bgFnMatch = appJs.match(/function renderBgToolbar\([^)]*\)\s*\{([\s\S]*?)\n\}/);
   assert.ok(bgFnMatch, 'renderBgToolbar found in app.js');
   assert.match(
     bgFnMatch[1],
