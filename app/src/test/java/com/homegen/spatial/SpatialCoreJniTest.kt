@@ -2,6 +2,9 @@ package com.homegen.spatial
 
 import org.junit.Test
 import java.nio.ByteBuffer
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -208,6 +211,228 @@ class SpatialCoreJniTest {
             assertTrue(lotViolations.any { it.type == "lot-boundary-exceeded" })
         } finally {
             jni.close()
+        }
+    }
+
+    @Test
+    fun `close destroys native handle once and resets handle on repeated calls`() {
+        val destroyedHandles = CopyOnWriteArrayList<Long>()
+        var jni: SpatialCoreJni? = SpatialCoreJni(
+            createHandle = { 424242L },
+            destroyHandle = { handle -> destroyedHandles.add(handle) },
+        )
+
+        assertEquals(424242L, jni!!.handle)
+
+        jni.close()
+        assertEquals(0L, jni.handle)
+        assertEquals(listOf(424242L), destroyedHandles.toList())
+
+        // Repeated close calls must be idempotent no-ops
+        jni.close()
+        jni.close()
+        assertEquals(0L, jni.handle)
+        assertEquals(listOf(424242L), destroyedHandles.toList())
+
+        // Dropping reference after close must not trigger a second destroy via Cleaner
+        jni = null
+        System.gc()
+        System.runFinalization()
+        Thread.sleep(50)
+        assertEquals(listOf(424242L), destroyedHandles.toList())
+    }
+
+    @Test
+    fun `cleaner automatically destroys native handle when unclosed instance is garbage collected`() {
+        val latch = CountDownLatch(1)
+        val destroyedHandles = CopyOnWriteArrayList<Long>()
+
+        allocateUnclosedInstance(987654321L) { handle ->
+            destroyedHandles.add(handle)
+            latch.countDown()
+        }
+
+        var cleaned = false
+        for (attempt in 1..25) {
+            System.gc()
+            System.runFinalization()
+            if (latch.await(100, TimeUnit.MILLISECONDS)) {
+                cleaned = true
+                break
+            }
+            val transientAllocation = ByteArray(64 * 1024)
+            assertEquals(64 * 1024, transientAllocation.size)
+        }
+
+        assertTrue(cleaned, "Expected Cleaner safety net to destroy native handle after GC")
+        assertEquals(listOf(987654321L), destroyedHandles.toList())
+    }
+
+    private fun allocateUnclosedInstance(
+        handleValue: Long,
+        onDestroy: (Long) -> Unit,
+    ) {
+        val unclosed = SpatialCoreJni(
+            createHandle = { handleValue },
+            destroyHandle = onDestroy,
+        )
+        assertEquals(handleValue, unclosed.handle)
+    }
+
+    @Test
+    fun `parses formatted multi-line and nested spatial JSON with 2D coordinate arrays`() {
+        val formattedNestedJson = """
+            {
+                "schemaVersion": 2,
+                "scene": {
+                    "note": "Decoy text mentioning epsg:9999 and lotBoundary [1, 2, 3]"
+                },
+                "spatial": {
+                    "crs": {
+                        "type": "EPSG",
+                        "properties": {
+                            "description": "California Zone III in US Survey Feet",
+                            "code": 2227
+                        }
+                    },
+                    "lotBoundary": [
+                        [ 0.0 , 0.0 ],
+                        [ 200.0 , 0.0 ],
+                        [ 200.0 , 200.0 ],
+                        [ 0.0 , 200.0 ]
+                    ],
+                    "innerPoints": [
+                        [ 25.0, 25.0 ],
+                        [ 175.0, 25.0 ],
+                        [ 175.0, 175.0 ],
+                        [ 25.0, 175.0 ]
+                    ]
+                }
+            }
+        """.trimIndent()
+
+        SpatialCoreJni().use { jni ->
+            assertTrue(jni.loadJsonString(formattedNestedJson))
+            assertEquals("EPSG:2227", jni.crs)
+
+            val validRoom = doubleArrayOf(40.0, 40.0, 150.0, 40.0, 150.0, 150.0, 40.0, 150.0)
+            assertTrue(jni.querySetbackViolations(validRoom).isEmpty())
+
+            val setbackViolationRoom = doubleArrayOf(10.0, 10.0, 100.0, 10.0, 100.0, 100.0, 10.0, 100.0)
+            val setbackViolations = jni.querySetbackViolations(setbackViolationRoom)
+            assertEquals(1, setbackViolations.size)
+            assertEquals("setback-clearance", setbackViolations[0].type)
+
+            val outsideLotRoom = doubleArrayOf(-5.0, -5.0, 100.0, -5.0, 100.0, 100.0, -5.0, 100.0)
+            val lotViolations = jni.querySetbackViolations(outsideLotRoom)
+            assertTrue(lotViolations.any { it.type == "lot-boundary-exceeded" })
+        }
+    }
+
+    @Test
+    fun `parses nested GeoJSON FeatureCollection with closed rings and 3D coordinates`() {
+        val nestedGeoJson = """
+            {
+                "type": "FeatureCollection",
+                "crs": {
+                    "type": "name",
+                    "properties": {
+                        "name": "urn:ogc:def:crs:EPSG:8.9:26910"
+                    }
+                },
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": "parcel-1",
+                        "properties": {
+                            "layer": "lot",
+                            "name": "Primary Parcel"
+                        },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [
+                                    [0.0, 0.0, 12.5],
+                                    [300.0, 0.0, 12.5],
+                                    [300.0, 300.0, 12.5],
+                                    [0.0, 300.0, 12.5],
+                                    [0.0, 0.0, 12.5]
+                                ],
+                                [
+                                    [120.0, 120.0, 12.5],
+                                    [140.0, 120.0, 12.5],
+                                    [140.0, 140.0, 12.5],
+                                    [120.0, 140.0, 12.5],
+                                    [120.0, 120.0, 12.5]
+                                ]
+                            ]
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "id": "setback-1",
+                        "properties": {
+                            "layer": "setback-buffer"
+                        },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [
+                                    [30.0, 30.0],
+                                    [270.0, 30.0],
+                                    [270.0, 270.0],
+                                    [30.0, 270.0],
+                                    [30.0, 30.0]
+                                ]
+                            ]
+                        }
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        SpatialCoreJni().use { jni ->
+            assertTrue(jni.loadJsonString(nestedGeoJson))
+            assertEquals("EPSG:26910", jni.crs)
+
+            // Valid room inside (30,30)-(270,270)
+            val validRoom = doubleArrayOf(50.0, 50.0, 200.0, 50.0, 200.0, 200.0, 50.0, 200.0)
+            assertTrue(jni.querySetbackViolations(validRoom).isEmpty())
+
+            // Room encroaching into setback buffer (15,15)
+            val setbackRoom = doubleArrayOf(15.0, 15.0, 200.0, 15.0, 200.0, 200.0, 15.0, 200.0)
+            val setbackViolations = jni.querySetbackViolations(setbackRoom)
+            assertTrue(setbackViolations.any { it.type == "setback-clearance" })
+
+            // Room outside parcel (-20,-20)
+            val outsideRoom = doubleArrayOf(-20.0, -20.0, 200.0, -20.0, 200.0, 200.0, -20.0, 200.0)
+            val outsideViolations = jni.querySetbackViolations(outsideRoom)
+            assertTrue(outsideViolations.any { it.type == "lot-boundary-exceeded" })
+        }
+    }
+
+    @Test
+    fun `handles malformed JSON syntax gracefully with default CRS and empty point lists`() {
+        val malformedInputs = listOf(
+            "{ invalid json",
+            "",
+            "   ",
+            "[\"unterminated",
+            "not-json-at-all",
+            """{"crs": null, "lotBoundary": "not-an-array", "innerPoints": {}}""",
+        )
+
+        for (badInput in malformedInputs) {
+            assertEquals("EPSG:4326", SpatialCoreJni.extractCrsFallback(badInput))
+            assertTrue(SpatialCoreJni.extractNumbersFallback(badInput, "lotBoundary").isEmpty())
+            assertTrue(SpatialCoreJni.extractNumbersFallback(badInput, "innerPoints").isEmpty())
+
+            SpatialCoreJni().use { jni ->
+                jni.loadJsonString(badInput)
+                assertEquals("EPSG:4326", jni.crs)
+                val room = doubleArrayOf(10.0, 10.0, 50.0, 10.0, 50.0, 50.0, 10.0, 50.0)
+                assertTrue(jni.querySetbackViolations(room).isEmpty())
+            }
         }
     }
 }

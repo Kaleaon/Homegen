@@ -117,11 +117,35 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   focusOverlay.visible = false;
   scene.add(focusOverlay);
 
+  const MIN_WALK_HEIGHT = 12;
+  const MAX_WALK_HEIGHT = 180;
+  const DEFAULT_WALK_HEIGHT = 64;
+
   let cameraMode = 'orbit'; // 'orbit' | 'walk'
+  let walkHeight = DEFAULT_WALK_HEIGHT;
   let yaw = 0;
   let pitch = 0;
   const walkKeys = { forward: false, backward: false, left: false, right: false, sprint: false };
   let lastLoopTime = performance.now();
+
+  function getWalkHeight() {
+    return walkHeight;
+  }
+
+  function setWalkHeight(heightInInches) {
+    const num = Number(heightInInches);
+    if (!Number.isFinite(num)) return walkHeight;
+    walkHeight = Math.max(MIN_WALK_HEIGHT, Math.min(MAX_WALK_HEIGHT, num));
+    if (cameraMode === 'walk') {
+      const E = getActiveFloorElevation();
+      camera.position.y = (E + walkHeight) * S;
+      updateCameraRotation();
+      render();
+    }
+    const notifyHeight = callbacks.onWalkHeightChange || api?.onWalkHeightChange;
+    notifyHeight?.(walkHeight);
+    return walkHeight;
+  }
 
   function initWalkAnglesFromCamera() {
     const dir = new THREE.Vector3();
@@ -224,9 +248,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       clampWalkPosition(camera.position);
     }
 
-    // Height lock at (E + 64) * S relative to active floor
+    // Height lock at (E + walkHeight) * S relative to active floor
     const E = getActiveFloorElevation();
-    camera.position.y = (E + 64) * S;
+    camera.position.y = (E + walkHeight) * S;
 
     updateCameraRotation();
   }
@@ -251,17 +275,18 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       camera.updateProjectionMatrix();
 
       const E = getActiveFloorElevation();
-      const eyeHeight = (E + 64) * S;
+      const walkY = (E + walkHeight) * S;
 
       if (options.roomId) {
         api.eyeLevel(options.roomId);
+        return;
       } else if (options.initPos) {
         camera.position.copy(options.initPos);
-        camera.position.y = eyeHeight;
+        camera.position.y = walkY;
         initWalkAnglesFromCamera();
         updateCameraRotation();
       } else {
-        camera.position.y = eyeHeight;
+        camera.position.y = walkY;
         initWalkAnglesFromCamera();
         updateCameraRotation();
       }
@@ -741,7 +766,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
     const extrudeSettings = { depth: height, bevelEnabled: false };
     const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geom.rotateX(Math.PI / 2);
+    geom.rotateX(-Math.PI / 2);
     const visMat = Array.isArray(material)
       ? material[0]
       : material.vis || material.base || material;
@@ -1565,7 +1590,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       frame();
       framed = true;
     }
+    if (cameraMode === 'walk') {
+      camera.position.y = (getActiveFloorElevation() + walkHeight) * S;
+      updateCameraRotation();
+    }
     updateFocusOverlay(selectedEntity);
+    const notifyScene = callbacks.onSceneUpdate || api?.onSceneUpdate;
+    notifyScene?.();
     render();
   }
 
@@ -2474,8 +2505,6 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (!hudBadge && canvas?.parentElement) {
         hudBadge = document.createElement('div');
         hudBadge.className = 'scene3d-hud-attribution';
-        hudBadge.style.cssText =
-          'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
         try {
           if (getComputedStyle(canvas.parentElement).position === 'static') {
             canvas.parentElement.style.position = 'relative';
@@ -2546,12 +2575,16 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     getCameraMode: () => cameraMode,
     setCameraMode,
     toggleCameraMode,
+    getWalkHeight,
+    setWalkHeight,
     lookWalkBy,
     updateWalkMovement,
     onError: callbacks.onError,
     onEnvChange: callbacks.onEnvChange,
     onHDChange: callbacks.onHDChange,
     onCameraModeChange: callbacks.onCameraModeChange,
+    onWalkHeightChange: callbacks.onWalkHeightChange,
+    onSceneUpdate: callbacks.onSceneUpdate,
     show() {
       active = true;
       resize();
@@ -2628,10 +2661,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const pz = long ? cy : ir.y + 14;
 
       cameraMode = 'walk';
+      walkHeight = DEFAULT_WALK_HEIGHT;
       controls.enabled = false;
       camera.fov = 70;
       camera.updateProjectionMatrix();
-      camera.position.set(px * S, (e + 64) * S, pz * S);
+      camera.position.set(px * S, (e + walkHeight) * S, pz * S);
 
       const targetX = (long ? cx + 40 : cx) * S;
       const targetZ = (long ? cy : cy + 40) * S;
@@ -2642,6 +2676,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       pitch = 0;
       updateCameraRotation();
 
+      const notifyHeight = callbacks.onWalkHeightChange || api?.onWalkHeightChange;
+      notifyHeight?.(walkHeight);
       const notifyMode = callbacks.onCameraModeChange || api?.onCameraModeChange;
       notifyMode?.(cameraMode);
 

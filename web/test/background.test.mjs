@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as m from '../js/model.js';
+import * as c from '../js/codes.js';
+import { parseRoomDimensionsInput } from '../js/app.js';
 
 test('newState initializes background as null', () => {
   const s = m.newState();
@@ -44,6 +46,88 @@ test('parseDistanceInInches parses various measurement formats correctly', () =>
   assert.equal(m.parseDistanceInInches('10\' 6 1/2"'), 126.5);
   assert.equal(m.parseDistanceInInches('6 1/4"'), 6.25);
   assert.equal(m.parseDistanceInInches('1/16"'), 0.0625);
+});
+
+test('parseDistanceInInches handles large spans, sub-30 inch values, quote marks, mixed units, and fractions', () => {
+  // Large spans (>= 30 ft and > 50 ft)
+  assert.equal(m.parseDistanceInInches('32 ft'), 384);
+  assert.equal(m.parseDistanceInInches("32'"), 384);
+  assert.equal(m.parseDistanceInInches('60 ft'), 720);
+  assert.equal(m.parseDistanceInInches('32', { defaultUnit: 'ft' }), 384);
+  assert.equal(m.parseDistanceInInches('60', { defaultUnit: 'ft' }), 720);
+
+  // Sub-30 inch explicit values (must NOT multiply by 12)
+  assert.equal(m.parseDistanceInInches('24 in'), 24);
+  assert.equal(m.parseDistanceInInches('24"'), 24);
+  assert.equal(m.parseDistanceInInches('18 inches'), 18);
+  assert.equal(m.parseDistanceInInches('1 inch'), 1);
+  assert.equal(m.parseDistanceInInches('24 in', { defaultUnit: 'ft' }), 24);
+  assert.equal(m.parseDistanceInInches('24"', { defaultUnit: 'ft' }), 24);
+
+  // Typographic curly quotes, primes, and double-apostrophes
+  assert.equal(m.parseDistanceInInches('10’ 6”'), 126);
+  assert.equal(m.parseDistanceInInches('10′ 6″'), 126);
+  assert.equal(m.parseDistanceInInches("24''"), 24);
+  assert.equal(m.parseDistanceInInches('1 foot 6 inches'), 18);
+
+  // Architectural hyphenation and mixed units
+  assert.equal(m.parseDistanceInInches('10\'-6"'), 126);
+  assert.equal(m.parseDistanceInInches('10\' - 6"'), 126);
+  assert.equal(m.parseDistanceInInches('10ft6in'), 126);
+  assert.equal(m.parseDistanceInInches("10'-6"), 126);
+
+  // Fractional and mixed-fraction inputs
+  assert.equal(m.parseDistanceInInches('1/2 ft'), 6);
+  assert.equal(m.parseDistanceInInches("1/2'"), 6);
+  assert.equal(m.parseDistanceInInches('3/4 in'), 0.75);
+  assert.equal(m.parseDistanceInInches('3/4"'), 0.75);
+  assert.equal(m.parseDistanceInInches('10 1/2 ft'), 126);
+  assert.equal(m.parseDistanceInInches("10-1/2'"), 126);
+  assert.equal(m.parseDistanceInInches('24 1/2 in'), 24.5);
+  assert.equal(m.parseDistanceInInches('24-3/4"'), 24.75);
+  assert.equal(m.parseDistanceInInches('10\' 6 1/2"'), 126.5);
+  assert.equal(m.parseDistanceInInches('10\'-6 1/2"'), 126.5);
+  assert.equal(m.parseDistanceInInches('10\' 1/2"'), 120.5);
+  assert.equal(m.parseDistanceInInches('10½ ft'), 126);
+  assert.equal(m.parseDistanceInInches('10’ 6½”'), 126.5);
+
+  // Invalid / non-positive inputs
+  assert.equal(m.parseDistanceInInches('1/0 in'), null);
+  assert.equal(m.parseDistanceInInches('-24 in'), null);
+  assert.equal(m.parseDistanceInInches('room'), null);
+});
+
+test('parseRoomDimensionsInput parses single and dual room dimension constraints accurately', () => {
+  // Unitless defaults to feet, including large spans >= 30 ft and > 50 ft
+  assert.deepEqual(parseRoomDimensionsInput('12 × 10'), [144, 120]);
+  assert.deepEqual(parseRoomDimensionsInput('32 × 20'), [384, 240]);
+  assert.deepEqual(parseRoomDimensionsInput('60 x 40'), [720, 480]);
+  assert.deepEqual(parseRoomDimensionsInput('35, 25'), [420, 300]);
+  assert.deepEqual(parseRoomDimensionsInput('32'), [384]);
+  assert.deepEqual(parseRoomDimensionsInput('10 1/2 × 8 1/4'), [126, 99]);
+
+  // Explicit unit tags override default feet (including sub-30 inch and >= 30 inch values)
+  assert.deepEqual(parseRoomDimensionsInput('32 ft'), [384]);
+  assert.deepEqual(parseRoomDimensionsInput('24 in'), [24]);
+  assert.deepEqual(parseRoomDimensionsInput('24" × 36"'), [24, 36]);
+  assert.deepEqual(parseRoomDimensionsInput('144 in'), [144]);
+  assert.deepEqual(parseRoomDimensionsInput('32 ft × 20 ft'), [384, 240]);
+  assert.deepEqual(parseRoomDimensionsInput('10\' 6" × 12\' 6 1/2"'), [126, 150.5]);
+
+  // Integration with room clamping preserves exact valid spans and enforces minimums only when undersized
+  const living = { type: 'living', w: 144, h: 120 };
+  const [largeW, largeH] = parseRoomDimensionsInput('32 × 20');
+  assert.deepEqual(c.clampRoomDimensions(living, largeW, largeH), { w: 384, h: 240 });
+
+  const closet = { type: 'closet', w: 48, h: 48 };
+  const [sub30InW] = parseRoomDimensionsInput('24 in');
+  assert.equal(sub30InW, 24);
+  assert.equal(c.clampRoomWidth(closet, sub30InW, closet.h), 36);
+
+  // Rejects empty or invalid entries
+  assert.deepEqual(parseRoomDimensionsInput(''), []);
+  assert.deepEqual(parseRoomDimensionsInput('invalid'), []);
+  assert.deepEqual(parseRoomDimensionsInput('-10 × -20'), []);
 });
 
 test('2-point scale calibration recalculates scale and anchor position', () => {
