@@ -5386,6 +5386,8 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
+export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
+
 function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
@@ -6872,5 +6874,3 @@ if (typeof window !== 'undefined')
     setCatalogFilters,
     resetCatalogFilters,
   };
-
-export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
