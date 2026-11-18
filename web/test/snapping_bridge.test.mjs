@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InteractionLayer, SNAP_MODES } from '../../designer3d/tools/index.mjs';
 import { SnappingBridge } from '../js/snapping-bridge.js';
-import { drawSnapGuides } from '../js/render.js';
+import { draw } from '../js/render.js';
 import { getToken } from '../js/kthemeTokens.js';
 
 test('SnappingBridge computes snap points and guide lines during pointer move', () => {
@@ -288,6 +288,9 @@ test('SnappingBridge computeMultiSnap calculates group anchor snapping during mu
 test('drawSnapGuides does not abort when snapResult.snap is null and renders semantic tokens', () => {
   const calls = [];
   const ctx = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
+    fillRect() {},
     save() {
       calls.push('save');
     },
@@ -320,7 +323,8 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     lineWidth: 0,
   };
 
-  const view = { scale: 1 };
+  const state = { rooms: [] };
+  const view = { scale: 1, ox: 0, oy: 0 };
 
   // 1. Null snap with indicator
   const nullSnapWithIndicator = {
@@ -328,7 +332,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 50, y: 60 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, nullSnapWithIndicator, view);
+  draw(ctx, state, view, { snapResult: nullSnapWithIndicator });
   assert.ok(calls.includes('beginPath'));
   assert.ok(calls.includes('arc(50,60,8)'));
   assert.ok(calls.includes('arc(50,60,3.5)'));
@@ -340,7 +344,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: null,
     guideLines: [{ start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, type: 'angle' }],
   };
-  drawSnapGuides(ctx, nullSnapWithGuides, view);
+  draw(ctx, state, view, { snapResult: nullSnapWithGuides });
   assert.ok(calls.includes('moveTo(0,0)'));
   assert.ok(calls.includes('lineTo(100,0)'));
 
@@ -351,7 +355,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 24, y: 48 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, gridSnap, view);
+  draw(ctx, state, view, { snapResult: gridSnap });
   assert.equal(ctx.strokeStyle, getToken('--ktheme-success', '#10b981'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-success', '#10b981'));
 
@@ -362,7 +366,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 60, y: 0 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, midpointSnap, view);
+  draw(ctx, state, view, { snapResult: midpointSnap });
   assert.equal(ctx.strokeStyle, getToken('--ktheme-info', '#a855f7'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-info', '#a855f7'));
 
@@ -373,7 +377,7 @@ test('drawSnapGuides does not abort when snapResult.snap is null and renders sem
     indicator: { x: 50, y: 50 },
     guideLines: [],
   };
-  drawSnapGuides(ctx, perpSnap, view);
+  draw(ctx, state, view, { snapResult: perpSnap });
   assert.equal(ctx.strokeStyle, getToken('--ktheme-warning', '#f59e0b'));
   assert.equal(ctx.fillStyle, getToken('--ktheme-warning', '#f59e0b'));
 });

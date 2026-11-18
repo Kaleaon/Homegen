@@ -361,10 +361,20 @@
 <div id="print-sheet" class="print-only"></div>
 <dialog id="pdf-export" aria-labelledby="pdf-export-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
-    <h2 id="pdf-export-title">Export Scaled Vector PDF</h2>
+    <div class="dlg-head-title">
+      <h2 id="pdf-export-title">Export Scaled Vector PDF</h2>
+      <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span>
+    </div>
     <button value="close" aria-label="Close PDF export modal"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
+    <div class="upgrade-trigger-banner" role="region" aria-label="PDF export plan tier notice" data-required-tier="pro">
+      <div class="upgrade-trigger-copy">
+        <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span>
+        <span>Multi-page vector PDF sheets, custom branding logos, and approval stamps unlock with Plus &amp; Pro plans.</span>
+      </div>
+      <a href="#upgrade-plan" class="upgrade-trigger-link" data-upgrade-tier="pro" data-export-type="pdf">Upgrade to Pro</a>
+    </div>
     <div class="row">
       <label for="pdf-size">Sheet size</label>
       <select id="pdf-size">
@@ -409,9 +419,9 @@
     <div class="row"><label for="pdf-subtitle">Sheet title</label><input id="pdf-subtitle" value="FLOOR PLAN"></div>
     <div class="row"><label for="pdf-notes">Notes / Remarks</label><textarea id="pdf-notes" rows="2" placeholder="Project notes or submission comments…"></textarea></div>
     <h3>Sheet contents</h3>
-    <div class="row"><label class="toggle" for="pdf-tb"><input type="checkbox" id="pdf-tb" checked> Architectural title block</label></div>
+    <div class="row"><label class="toggle" for="pdf-tb"><input type="checkbox" id="pdf-tb" checked> Architectural title block <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
     <div class="row"><label class="toggle" for="pdf-scalebar"><input type="checkbox" id="pdf-scalebar" checked> Graphic scale bar</label></div>
-    <div class="row"><label class="toggle" for="pdf-schedule"><input type="checkbox" id="pdf-schedule" checked> Room schedule &amp; area metrics table</label></div>
+    <div class="row"><label class="toggle" for="pdf-schedule"><input type="checkbox" id="pdf-schedule" checked> Room schedule &amp; area metrics table <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
     <h3>Branding &amp; Approval Stamps</h3>
     <div class="row">
       <label for="pdf-branding-mode">Branding Source</label>
@@ -425,9 +435,9 @@
       <div class="row"><label for="pdf-session-stamp-title">Session Stamp Title</label><input id="pdf-session-stamp-title" value="APPROVED"></div>
       <div class="row"><label for="pdf-session-watermark">Session Watermark</label><input id="pdf-session-watermark" placeholder="e.g. DRAFT"></div>
     </div>
-    <div class="row"><label class="toggle" for="pdf-inc-logo"><input type="checkbox" id="pdf-inc-logo" checked> Include Branding Logo</label></div>
-    <div class="row"><label class="toggle" for="pdf-inc-stamp"><input type="checkbox" id="pdf-inc-stamp" checked> Include Approval Stamp</label></div>
-    <div class="row"><label class="toggle" for="pdf-inc-watermark"><input type="checkbox" id="pdf-inc-watermark" checked> Include Diagonal Watermark</label></div>
+    <div class="row"><label class="toggle" for="pdf-inc-logo"><input type="checkbox" id="pdf-inc-logo" checked> Include Branding Logo <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label></div>
+    <div class="row"><label class="toggle" for="pdf-inc-stamp"><input type="checkbox" id="pdf-inc-stamp" checked> Include Approval Stamp <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label></div>
+    <div class="row"><label class="toggle" for="pdf-inc-watermark"><input type="checkbox" id="pdf-inc-watermark" checked> Include Diagonal Watermark <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
     <div class="btns">
       <button id="pdf-cancel" type="button">Cancel</button>
       <button id="pdf-generate" class="primary" type="button">Download PDF</button>
@@ -436,16 +446,26 @@
 </dialog>
 <dialog id="csv-export" aria-labelledby="csv-export-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
-    <h2 id="csv-export-title">Export Bill of Materials (CSV)</h2>
+    <div class="dlg-head-title">
+      <h2 id="csv-export-title">Export Bill of Materials (CSV)</h2>
+      <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span>
+    </div>
     <button value="close" aria-label="Close CSV export modal"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
+    <div class="upgrade-trigger-banner" role="region" aria-label="CSV export plan tier notice" data-required-tier="plus">
+      <div class="upgrade-trigger-copy">
+        <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span>
+        <span>Full Bill of Materials schedules, finish takeoffs, and room area metrics unlock with Plus &amp; Pro plans.</span>
+      </div>
+      <a href="#upgrade-plan" class="upgrade-trigger-link" data-upgrade-tier="plus" data-export-type="csv">Upgrade to Plus</a>
+    </div>
     <p>Select schedule sections to include in the exported CSV spreadsheet:</p>
     <div class="row"><label class="toggle" for="csv-sec-meta"><input type="checkbox" id="csv-sec-meta" checked> Project Metadata</label></div>
     <div class="row"><label class="toggle" for="csv-sec-furniture"><input type="checkbox" id="csv-sec-furniture" checked> Furniture &amp; Fixtures</label></div>
-    <div class="row"><label class="toggle" for="csv-sec-openings"><input type="checkbox" id="csv-sec-openings" checked> Doors &amp; Windows</label></div>
-    <div class="row"><label class="toggle" for="csv-sec-finishes"><input type="checkbox" id="csv-sec-finishes" checked> Finishes (Floors &amp; Walls)</label></div>
-    <div class="row"><label class="toggle" for="csv-sec-rooms"><input type="checkbox" id="csv-sec-rooms" checked> Room Area Summary</label></div>
+    <div class="row"><label class="toggle" for="csv-sec-openings"><input type="checkbox" id="csv-sec-openings" checked> Doors &amp; Windows <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
+    <div class="row"><label class="toggle" for="csv-sec-finishes"><input type="checkbox" id="csv-sec-finishes" checked> Finishes (Floors &amp; Walls) <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label></div>
+    <div class="row"><label class="toggle" for="csv-sec-rooms"><input type="checkbox" id="csv-sec-rooms" checked> Room Area Summary <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
     <div class="btns">
       <button id="csv-cancel" type="button">Cancel</button>
       <button id="csv-generate" class="primary" type="button">Generate CSV</button>
@@ -454,24 +474,77 @@
 </dialog>
 <dialog id="dxf-export" aria-labelledby="dxf-export-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
-    <h2 id="dxf-export-title">Export DXF CAD Exchange Format</h2>
+    <div class="dlg-head-title">
+      <h2 id="dxf-export-title">Export DXF CAD Exchange Format</h2>
+      <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span>
+    </div>
     <button value="close" aria-label="Close DXF export modal"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
+    <div class="upgrade-trigger-banner" role="region" aria-label="DXF export plan tier notice" data-required-tier="pro">
+      <div class="upgrade-trigger-copy">
+        <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span>
+        <span>Layered AutoCAD DXF geometry, metric SI scaling, and multi-story CAD exchange unlock with Pro plans.</span>
+      </div>
+      <a href="#upgrade-plan" class="upgrade-trigger-link" data-upgrade-tier="pro" data-export-type="dxf">Upgrade to Pro</a>
+    </div>
     <div class="row">
-      <label for="dxf-units">CAD Units</label>
+      <label for="dxf-units" class="export-field-label">CAD Units <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label>
       <select id="dxf-units">
         <option value="inches" selected>Inches (Standard 1:1 Scale)</option>
         <option value="meters">Meters (SI Metric Scale)</option>
       </select>
     </div>
     <div class="row">
-      <label for="dxf-level">Floor Level</label>
+      <label for="dxf-level" class="export-field-label">Floor Level <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label>
       <select id="dxf-level"></select>
     </div>
     <div class="btns">
       <button id="dxf-cancel" type="button">Cancel</button>
       <button id="dxf-generate" class="primary" type="button">Download DXF</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dlg-plan-upgrade" aria-labelledby="dlg-plan-upgrade-title" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <div class="dlg-head-title">
+      <h2 id="dlg-plan-upgrade-title">Upgrade Your Homegen Plan</h2>
+      <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span>
+    </div>
+    <button value="close" aria-label="Close plan upgrade modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p id="upgrade-prompt-context" class="upgrade-prompt-lead">Compare Plus and Pro export capabilities for architectural deliverables, schedules, and CAD exchange.</p>
+    <div class="upgrade-tier-grid">
+      <div class="upgrade-tier-card" data-tier="plus">
+        <div class="upgrade-tier-head">
+          <h3>Homegen Plus</h3>
+          <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span>
+        </div>
+        <p class="upgrade-tier-price">$9 / month</p>
+        <ul class="upgrade-tier-features">
+          <li>Architectural title blocks &amp; room area schedules</li>
+          <li>CSV Bill of Materials door, window &amp; room exports</li>
+          <li>Diagonal watermarks &amp; SI metric CAD unit conversion</li>
+        </ul>
+        <button id="btn-upgrade-plus" class="secondary" type="button" data-select-tier="plus">Choose Plus</button>
+      </div>
+      <div class="upgrade-tier-card" data-tier="pro">
+        <div class="upgrade-tier-head">
+          <h3>Homegen Pro</h3>
+          <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span>
+        </div>
+        <p class="upgrade-tier-price">$24 / month</p>
+        <ul class="upgrade-tier-features">
+          <li>Everything in Plus, plus multi-page scaled Vector PDFs</li>
+          <li>Custom embedded branding logos &amp; approval stamps</li>
+          <li>Full multi-level DXF CAD exchange &amp; finish takeoffs</li>
+        </ul>
+        <button id="btn-upgrade-pro" class="primary" type="button" data-select-tier="pro">Choose Pro</button>
+      </div>
+    </div>
+    <div class="btns">
+      <button id="btn-upgrade-close" type="button">Maybe Later</button>
     </div>
   </div>
 </dialog>

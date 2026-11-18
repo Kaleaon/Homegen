@@ -28,7 +28,7 @@ function drawPolygonPDF(pdf, points, style = 'FD') {
 }
 
 // Standard sheet sizes in points (1 in = 72 pt)
-export const SHEET_SIZES = {
+const SHEET_SIZES = {
   Letter: { name: 'ANSI A / Letter (8.5" x 11")', w: 612, h: 792 },
   Tabloid: { name: 'ANSI B / Tabloid (11" x 17")', w: 792, h: 1224 },
   ARCH_C: { name: 'ARCH C (18" x 24")', w: 1296, h: 1728 },
