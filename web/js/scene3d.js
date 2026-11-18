@@ -11,6 +11,7 @@ import {
   wallNeighbors,
   subtractInterval,
   interior,
+  footprint,
   csgExteriorCladdingIntervals,
   lv,
   getRoomPoints,
@@ -18,7 +19,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -40,16 +40,19 @@ import {
 import { buildWindow3DMesh } from './windowBuilder.js';
 import { buildDoor3DMesh } from './doorBuilder.js';
 import { getTextureUrl } from './textureStore.js';
-import { getWallUV } from './model.js';
+import { getWallUV, moveRoom } from './model.js';
 import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
 import {
   TransformGizmo,
   getConstraintHandles,
+  resizeRoomWithConstraints,
   stepResize,
   fmtDimensionText,
   fmtLenInches,
   createGridSettings,
+  parseCoordinateInput,
+  normalizeRotationDegrees,
 } from '../../designer3d/tools/index.mjs';
 
 const S = 1 / 12;
@@ -1262,7 +1265,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const box = new THREE.Box3();
 
     for (const room of rooms) {
-      const e = elev[lv(room)];
+      const e = (elev[lv(room)] ?? 0) + (Number.isFinite(room.z) ? room.z : 0);
       const L = lv(room);
       const showWalls = opts.walls !== 'hidden';
       const wallH = opts.walls === 'cut' && L === cur ? Math.min(room.ceiling, 42) : room.ceiling;
@@ -1440,7 +1443,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           if (def && def.mount === 'wall') {
             const s = wallSeg(room, it.wall);
             const t = it.offset;
-            const y = def.shape === 'switch' ? 48 : 16;
+            const defaultWallZ = def.shape === 'switch' ? 48 : 16;
+            const y = Number.isFinite(it.z) ? it.z : defaultWallZ;
             const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
             const extFinId = room.cladding || room.exteriorCladding;
             const wAssembly = resolveWallAssembly(
@@ -1455,9 +1459,12 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
               (s.ay + s.dy * t + s.ny * itemDepthOff) * S
             );
           } else if (def && def.mount === 'ceiling') {
-            itemNode.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
+            const ceilZ = Number.isFinite(it.z) ? it.z : room.ceiling - 0.75;
+            itemNode.position.set(it.x * S, (e + ceilZ) * S, it.y * S);
+            itemNode.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
           } else if (itemNode) {
-            itemNode.position.set(it.x * S, e * S, it.y * S);
+            const floorZ = Number.isFinite(it.z) ? it.z : 0;
+            itemNode.position.set(it.x * S, (e + floorZ) * S, it.y * S);
             itemNode.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
           }
         }
@@ -1594,12 +1601,28 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     } else if (entity.type === 'handle') {
       const state = getState();
       const elev = levelElevations(state);
-      const e = elev[lv(entity.room)] || 0;
+      const e = (elev[lv(entity.room)] || 0) + (Number.isFinite(entity.room.z) ? entity.room.z : 0);
       const handles = getConstraintHandles(entity.room);
       const h = handles.find((handle) => handle.id === entity.handleId);
       if (h) {
         focusOverlay.position.set(h.x * S, (e + 12) * S, h.y * S);
         focusOverlay.scale.set(1.5, 1.5, 1.5);
+        focusOverlay.visible = true;
+      } else {
+        focusOverlay.visible = false;
+      }
+    } else if (entity.type === 'room') {
+      const node = entityMap.get(`${entity.room.id}:slab`) || entityMap.get(entity.room.id);
+      if (node) {
+        const box3 = new THREE.Box3().setFromObject(node);
+        const size = box3.getSize(new THREE.Vector3());
+        const center = box3.getCenter(new THREE.Vector3());
+        focusOverlay.position.copy(center);
+        focusOverlay.scale.set(
+          Math.max(0.5, size.x + 0.2),
+          Math.max(0.5, size.y + 0.2),
+          Math.max(0.5, size.z + 0.2)
+        );
         focusOverlay.visible = true;
       } else {
         focusOverlay.visible = false;
@@ -1640,6 +1663,156 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return entities;
   }
 
+  function resolveLiveSelection() {
+    if (!selectedEntity) return null;
+    const state = getState();
+    const rooms = (state && state.rooms) || [];
+    if (selectedEntity.type === 'item') {
+      for (const room of rooms) {
+        const item = (room.items || []).find((it) => it.id === selectedEntity.id);
+        if (item) {
+          selectedEntity.room = room;
+          selectedEntity.item = item;
+          return selectedEntity;
+        }
+      }
+      selectedEntity = null;
+      return null;
+    }
+    if (selectedEntity.type === 'handle' || selectedEntity.type === 'room') {
+      const roomId = selectedEntity.room?.id || selectedEntity.id;
+      const room = rooms.find((r) => r.id === roomId);
+      if (room) {
+        selectedEntity.room = room;
+        return selectedEntity;
+      }
+      selectedEntity = null;
+      return null;
+    }
+    return selectedEntity;
+  }
+
+  function computeItemRoomBounds(room, item, rotOverride = undefined) {
+    const def = ITEM_BY_ID[item.type];
+    const ir = interior(room);
+    if (def?.mount === 'ceiling') {
+      const minX = ir.x + 6;
+      const maxX = Math.max(minX, ir.x + ir.w - 6);
+      const minY = ir.y + 6;
+      const maxY = Math.max(minY, ir.y + ir.h - 6);
+      return {
+        minX,
+        maxX,
+        minY,
+        maxY,
+        minZ: 0,
+        maxZ: Math.max(0, room.ceiling || 96),
+      };
+    }
+    const rot = rotOverride !== undefined ? rotOverride : item.rot || 0;
+    const fp = footprint({ x: 0, y: 0, rot }, def || { w: 0, d: 0 });
+    const minX = ir.x + fp.w / 2;
+    const maxX = Math.max(minX, ir.x + ir.w - fp.w / 2);
+    const minY = ir.y + fp.h / 2;
+    const maxY = Math.max(minY, ir.y + ir.h - fp.h / 2);
+    const maxZ = Math.max(0, (room.ceiling || 96) - (def?.h || 0));
+    return { minX, maxX, minY, maxY, minZ: 0, maxZ };
+  }
+
+  function getSelectedTransform() {
+    const live = resolveLiveSelection();
+    if (!live) return null;
+    if (live.type === 'item') {
+      const { item, room } = live;
+      const def = ITEM_BY_ID[item.type];
+      if (def?.mount === 'wall') {
+        const s = wallSeg(room, item.wall);
+        const wx = Math.round((s.ax + s.dx * item.offset) * 100) / 100;
+        const wy = Math.round((s.ay + s.dy * item.offset) * 100) / 100;
+        const defaultZ = def.shape === 'switch' ? 48 : 16;
+        return {
+          id: item.id,
+          type: 'item',
+          mount: 'wall',
+          label: live.label,
+          x: wx,
+          y: wy,
+          z: Number.isFinite(item.z) ? item.z : defaultZ,
+          rot: normalizeRotationDegrees(item.rot ?? 0, 0),
+        };
+      }
+      const defaultZ = def?.mount === 'ceiling' ? (room.ceiling || 96) - 0.75 : 0;
+      return {
+        id: item.id,
+        type: 'item',
+        mount: def?.mount || 'floor',
+        label: live.label,
+        x: Math.round((item.x ?? 0) * 100) / 100,
+        y: Math.round((item.y ?? 0) * 100) / 100,
+        z: Math.round((Number.isFinite(item.z) ? item.z : defaultZ) * 100) / 100,
+        rot: normalizeRotationDegrees(item.rot ?? 0, 0),
+      };
+    }
+    if (live.type === 'handle') {
+      const handles = getConstraintHandles(live.room);
+      const h = handles.find((hd) => hd.id === live.handleId) || handles[0];
+      return {
+        id: live.id,
+        type: 'handle',
+        label: live.label,
+        x: Math.round((h ? h.x : live.room.x) * 100) / 100,
+        y: Math.round((h ? h.y : live.room.y) * 100) / 100,
+        z: Math.round((Number.isFinite(live.room.z) ? live.room.z : 0) * 100) / 100,
+        rot: normalizeRotationDegrees(live.room.rot ?? 0, 0),
+      };
+    }
+    if (live.type === 'room') {
+      return {
+        id: live.room.id,
+        type: 'room',
+        label: live.label || live.room.name || 'Room',
+        x: Math.round((live.room.x ?? 0) * 100) / 100,
+        y: Math.round((live.room.y ?? 0) * 100) / 100,
+        z: Math.round((Number.isFinite(live.room.z) ? live.room.z : 0) * 100) / 100,
+        rot: normalizeRotationDegrees(live.room.rot ?? 0, 0),
+      };
+    }
+    return null;
+  }
+
+  function select3DEntity(targetIdOrEntity, options = {}) {
+    if (!targetIdOrEntity) {
+      clear3DSelection(options);
+      return null;
+    }
+    const targetId = typeof targetIdOrEntity === 'string' ? targetIdOrEntity : targetIdOrEntity.id;
+    const entities = getSelectableEntities();
+    let match = entities.find((e) => e.id === targetId);
+    if (!match) {
+      const state = getState();
+      const cur = getLevel();
+      const room = ((state && state.rooms) || []).find((r) => r.id === targetId && lv(r) === cur);
+      if (room) {
+        match = {
+          type: 'room',
+          id: room.id,
+          room,
+          label: room.name || 'Room',
+        };
+      }
+    }
+    if (!match) return null;
+
+    selectedEntity = match;
+    transformMode = selectedEntity.type === 'item' ? 'move' : 'resize';
+    updateFocusOverlay(selectedEntity);
+    render();
+    if (!options.silent) {
+      callbacks.onSelectionChange?.(selectedEntity);
+    }
+    return selectedEntity;
+  }
+
   function cycle3DSelection(dir = 1) {
     const entities = getSelectableEntities();
     if (!entities.length) {
@@ -1672,6 +1845,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const sizeText = fmtDimensionText(selectedEntity.room.w, selectedEntity.room.h);
       announce3DStateChange(`Selected ${selectedEntity.label}, Size ${sizeText}`);
     }
+    callbacks.onSelectionChange?.(selectedEntity);
     render();
     return selectedEntity;
   }
@@ -1685,64 +1859,235 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
   }
 
-  function stepTransformSelected(dx = 0, dy = 0, options = {}) {
-    if (!selectedEntity) return false;
+  function setSelectedPosition(coords = {}, options = {}) {
+    const live = resolveLiveSelection();
+    if (!live) return null;
 
-    if (selectedEntity.type === 'item') {
-      const item = selectedEntity.item;
+    if (live.type === 'item') {
+      const { item, room } = live;
+      const def = ITEM_BY_ID[item.type];
+
+      if (def?.mount === 'wall') {
+        const s = wallSeg(room, item.wall);
+        const curX = s.ax + s.dx * item.offset;
+        const curY = s.ay + s.dy * item.offset;
+        const defaultZ = def.shape === 'switch' ? 48 : 16;
+        const curZ = Number.isFinite(item.z) ? item.z : defaultZ;
+
+        const nx = parseCoordinateInput(coords?.x, curX);
+        const ny = parseCoordinateInput(coords?.y, curY);
+        const nz = parseCoordinateInput(
+          coords?.z !== undefined ? coords.z : coords?.elevation,
+          curZ
+        );
+
+        const rawT = (nx - s.ax) * s.dx + (ny - s.ay) * s.dy;
+        const maxOff = Math.max(8, s.len - 8);
+        item.offset = Math.round(Math.max(8, Math.min(maxOff, rawT)) * 100) / 100;
+        item.z = Math.round(Math.max(0, Math.min(room.ceiling || 96, nz)) * 100) / 100;
+      } else {
+        const defaultZ = def?.mount === 'ceiling' ? (room.ceiling || 96) - 0.75 : 0;
+        const curZ = Number.isFinite(item.z) ? item.z : defaultZ;
+        const bounds =
+          options.bounds !== undefined ? options.bounds : computeItemRoomBounds(room, item);
+        const updated = transformGizmo.setPosition({ ...item, z: curZ }, coords, { bounds });
+        item.x = Math.round(updated.position.x * 100) / 100;
+        item.y = Math.round(updated.position.y * 100) / 100;
+        if (coords?.z !== undefined || coords?.elevation !== undefined || Number.isFinite(item.z)) {
+          item.z = Math.round(updated.position.z * 100) / 100;
+        }
+      }
+
+      reconcile();
+      updateFocusOverlay(live);
+      const stateSnapshot = getSelectedTransform();
+      const posX = fmtLenInches(stateSnapshot.x);
+      const posZ = fmtLenInches(stateSnapshot.y);
+      announce3DStateChange(
+        `Positioned ${live.label} at X ${posX}, Z ${posZ}, Elevation ${stateSnapshot.z}"`
+      );
+      if (!options.silent) {
+        callbacks.onTransformChange?.(live, 'position');
+      }
+      return stateSnapshot;
+    }
+
+    if (live.type === 'handle') {
+      const room = live.room;
+      const handles = getConstraintHandles(room);
+      const h = handles.find((hd) => hd.id === live.handleId) || handles[0];
+      const targetX = parseCoordinateInput(coords?.x, h ? h.x : room.x);
+      const targetY = parseCoordinateInput(coords?.y, h ? h.y : room.y);
+      const curZ = Number.isFinite(room.z) ? room.z : 0;
+      const targetZ = parseCoordinateInput(
+        coords?.z !== undefined ? coords.z : coords?.elevation,
+        curZ
+      );
+
+      const res = resizeRoomWithConstraints(
+        room,
+        live.handleId,
+        { x: targetX, y: targetY },
+        { snap: false, ...options }
+      );
+      room.x = res.rect.x;
+      room.y = res.rect.y;
+      room.w = res.rect.w;
+      room.h = res.rect.h;
+      if (coords?.z !== undefined || coords?.elevation !== undefined || Number.isFinite(room.z)) {
+        room.z = Math.round(targetZ * 100) / 100;
+      }
+      reconcile();
+      updateFocusOverlay(live);
+      const statusText = res.isValid ? 'Valid' : 'Invalid';
+      announce3DStateChange(
+        `${room.name} resized to ${res.dimensionText} (${Math.round(res.areaSqFt)} sq ft, ${statusText})`
+      );
+      if (!options.silent) {
+        callbacks.onTransformChange?.(live, 'position');
+      }
+      return getSelectedTransform();
+    }
+
+    if (live.type === 'room') {
+      const room = live.room;
+      const targetX = parseCoordinateInput(coords?.x, room.x ?? 0);
+      const targetY = parseCoordinateInput(coords?.y, room.y ?? 0);
+      const curZ = Number.isFinite(room.z) ? room.z : 0;
+      const targetZ = parseCoordinateInput(
+        coords?.z !== undefined ? coords.z : coords?.elevation,
+        curZ
+      );
+      moveRoom(room, targetX, targetY);
+      if (coords?.z !== undefined || coords?.elevation !== undefined || Number.isFinite(room.z)) {
+        room.z = Math.round(targetZ * 100) / 100;
+      }
+      reconcile();
+      updateFocusOverlay(live);
+      announce3DStateChange(
+        `Moved ${room.name} to X ${fmtLenInches(room.x)}, Z ${fmtLenInches(room.y)}`
+      );
+      if (!options.silent) {
+        callbacks.onTransformChange?.(live, 'position');
+      }
+      return getSelectedTransform();
+    }
+
+    return null;
+  }
+
+  function setSelectedRotation(angleDegrees, options = {}) {
+    const live = resolveLiveSelection();
+    if (!live) return null;
+
+    if (live.type === 'item') {
+      const { item, room } = live;
+      const def = ITEM_BY_ID[item.type];
+      const rotated = transformGizmo.setRotation(item, angleDegrees);
+      item.rot = rotated.rot;
+
+      if (def?.mount !== 'wall') {
+        const bounds =
+          options.bounds !== undefined
+            ? options.bounds
+            : computeItemRoomBounds(room, item, item.rot);
+        const clamped = transformGizmo.setPosition(
+          item,
+          { x: item.x, y: item.y, z: item.z ?? 0 },
+          { bounds }
+        );
+        item.x = Math.round(clamped.position.x * 100) / 100;
+        item.y = Math.round(clamped.position.y * 100) / 100;
+      }
+
+      reconcile();
+      updateFocusOverlay(live);
+      announce3DStateChange(`Rotated ${live.label} to ${item.rot}°`);
+      if (!options.silent) {
+        callbacks.onTransformChange?.(live, 'rotation');
+      }
+      return getSelectedTransform();
+    }
+
+    if (live.type === 'room' || live.type === 'handle') {
+      const room = live.room;
+      room.rot = normalizeRotationDegrees(angleDegrees, room.rot ?? 0);
+      reconcile();
+      updateFocusOverlay(live);
+      announce3DStateChange(`Rotated ${room.name} to ${room.rot}°`);
+      if (!options.silent) {
+        callbacks.onTransformChange?.(live, 'rotation');
+      }
+      return getSelectedTransform();
+    }
+
+    return null;
+  }
+
+  function stepTransformSelected(dx = 0, dy = 0, options = {}) {
+    const live = resolveLiveSelection();
+    if (!live) return false;
+
+    if (live.type === 'item') {
+      const item = live.item;
       if (transformMode === 'rotate') {
         const deltaDeg = dx !== 0 ? (dx > 0 ? 15 : -15) : dy !== 0 ? (dy > 0 ? 15 : -15) : 15;
         const result = transformGizmo.stepRotate(item, deltaDeg);
         const newRot = Math.round(((result.rotation * 180) / Math.PI) % 360);
         item.rot = newRot < 0 ? newRot + 360 : newRot;
         reconcile();
-        updateFocusOverlay(selectedEntity);
-        announce3DStateChange(`Rotated ${selectedEntity.label} to ${item.rot}°`);
+        updateFocusOverlay(live);
+        announce3DStateChange(`Rotated ${live.label} to ${item.rot}°`);
       } else if (transformMode === 'scale') {
         const factor = dy < 0 || dx > 0 ? 1.1 : 0.9;
         const result = transformGizmo.stepScale(item, factor);
         item.scale = result.scale.x;
         reconcile();
-        updateFocusOverlay(selectedEntity);
-        announce3DStateChange(`Scaled ${selectedEntity.label}`);
+        updateFocusOverlay(live);
+        announce3DStateChange(`Scaled ${live.label}`);
       } else {
         // Move mode
         const result = transformGizmo.stepMove(item, dx, dy);
         item.x = Math.round(result.position.x);
         item.y = Math.round(result.position.y);
         reconcile();
-        updateFocusOverlay(selectedEntity);
+        updateFocusOverlay(live);
 
         const dirName = dx > 0 ? 'right' : dx < 0 ? 'left' : dy > 0 ? 'down' : 'up';
         const posX = fmtLenInches(item.x);
         const posZ = fmtLenInches(item.y);
-        announce3DStateChange(`Moved ${selectedEntity.label} ${dirName} to X ${posX}, Z ${posZ}`);
+        announce3DStateChange(`Moved ${live.label} ${dirName} to X ${posX}, Z ${posZ}`);
       }
+      callbacks.onTransformChange?.(live, transformMode);
       return true;
-    } else if (selectedEntity.type === 'handle') {
-      const room = selectedEntity.room;
-      const res = stepResize(room, selectedEntity.handleId, dx, dy, options);
+    } else if (live.type === 'handle') {
+      const room = live.room;
+      const res = stepResize(room, live.handleId, dx, dy, options);
       room.x = res.rect.x;
       room.y = res.rect.y;
       room.w = res.rect.w;
       room.h = res.rect.h;
       reconcile();
-      updateFocusOverlay(selectedEntity);
+      updateFocusOverlay(live);
       const statusText = res.isValid ? 'Valid' : 'Invalid';
       announce3DStateChange(
         `${room.name} resized to ${res.dimensionText} (${Math.round(res.areaSqFt)} sq ft, ${statusText})`
       );
+      callbacks.onTransformChange?.(live, 'resize');
       return true;
     }
     return false;
   }
 
-  function clear3DSelection() {
+  function clear3DSelection(options = {}) {
     if (!selectedEntity) return;
     selectedEntity = null;
     transformMode = 'none';
     updateFocusOverlay(null);
     announce3DStateChange('Deselected 3D object.');
+    if (!options.silent) {
+      callbacks.onSelectionChange?.(null);
+    }
     render();
   }
 
@@ -2116,7 +2461,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     if (def.mount === 'wall') {
       const s = wallSeg(room, it.wall);
       const t = it.offset;
-      const y = def.shape === 'switch' ? 48 : 16;
+      const defaultWallZ = def.shape === 'switch' ? 48 : 16;
+      const y = Number.isFinite(it.z) ? it.z : defaultWallZ;
       const m = wallAlignedBox(room, it.wall, 2.8, 4.5, 0.6, plain('#f5f3ee', 0.5));
       m.position.set(
         (s.ax + s.dx * t + s.nx * (WT / 2 + 0.3)) * S,
@@ -2136,7 +2482,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
           roughness: 0.5,
         })
       );
-      m.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
+      const ceilZ = Number.isFinite(it.z) ? it.z : room.ceiling - 0.75;
+      m.position.set(it.x * S, (e + ceilZ) * S, it.y * S);
+      m.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
       return m;
     }
     const w = def.w;
@@ -2248,7 +2596,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       default:
         add(w, h, d, c, 0, 0, 0, 0.55);
     }
-    g.position.set(it.x * S, e * S, it.y * S);
+    const floorZ = Number.isFinite(it.z) ? it.z : 0;
+    g.position.set(it.x * S, (e + floorZ) * S, it.y * S);
     g.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
     return g;
   }
@@ -2286,13 +2635,18 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
       : new THREE.Vector3(0, 1, 0);
 
+    let entityNode = hit.object;
+    while (entityNode && !entityNode.userData?.entityType) {
+      entityNode = entityNode.parent;
+    }
+
     return {
       point3D: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
       pointInches: { x: hit.point.x * 12, y: hit.point.y * 12, z: hit.point.z * 12 },
       normal: { x: faceNormal.x, y: faceNormal.y, z: faceNormal.z },
       distance: hit.distance,
       object: hit.object,
-      userData: hit.object.userData || hit.object.parent?.userData || {},
+      userData: entityNode?.userData || hit.object.userData || {},
     };
   }
 
@@ -2305,7 +2659,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const edges = [];
 
     for (const room of rooms) {
-      const e = elev[lv(room)];
+      const e = (elev[lv(room)] ?? 0) + (Number.isFinite(room.z) ? room.z : 0);
       const pts = getRoomPoints(room);
       for (let i = 0; i < pts.length; i++) {
         const p1 = pts[i];
@@ -2332,7 +2686,8 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       }
 
       for (const it of room.items || []) {
-        vertices.push({ x: it.x, y: e, z: it.y, id: it.id, label: it.type });
+        const itemZ = Number.isFinite(it.z) ? it.z : 0;
+        vertices.push({ x: it.x, y: e + itemZ, z: it.y, id: it.id, label: it.type });
       }
     }
 
@@ -2524,9 +2879,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     preloader,
     announce3DStateChange,
     cycle3DSelection,
-    getSelected3DEntity: () => selectedEntity,
+    select3DEntity,
+    getSelected3DEntity: () => resolveLiveSelection(),
+    getSelectedTransform,
     getTransformMode: () => transformMode,
     set3DTransformMode,
+    setSelectedPosition,
+    setSelectedRotation,
     stepTransformSelected,
     clear3DSelection,
     updateFocusOverlay,

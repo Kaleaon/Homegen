@@ -119,6 +119,16 @@ export class InteractionLayer {
     return this.transformGizmo.scale3D(entity, pointerPoint3D, context);
   }
 
+  setEntityPosition(entity, coords, options = {}) {
+    if (!entity) throw new Error('setEntityPosition: entity is required');
+    return this.transformGizmo.setPosition(entity, coords, options);
+  }
+
+  setEntityRotation(entity, angleDegrees, options = {}) {
+    if (!entity) throw new Error('setEntityRotation: entity is required');
+    return this.transformGizmo.setRotation(entity, angleDegrees, options);
+  }
+
   addRoomCorner(rawPoint, context = {}) {
     if (!rawPoint) throw new Error('addRoomCorner: rawPoint is required');
     if (!context) throw new Error('addRoomCorner: context is required');

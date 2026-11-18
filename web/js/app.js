@@ -71,6 +71,8 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  parseCoordinateInput,
+  normalizeRotationDegrees,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -391,6 +393,7 @@ function refresh() {
   renderBgToolbar();
   renderDiffDrawer();
   window.__scene3d?.update();
+  view3d?.syncOverlay?.();
   const undoBtn = $('#undo');
   if (undoBtn) {
     undoBtn.disabled = !hist.canUndo();
@@ -1055,7 +1058,11 @@ function select(target, { toggle = false, append = false } = {}) {
 
   renderInspector();
   redraw();
+  view3d?.syncSelection?.(typeof selection === 'string' ? selection : null);
 }
+
+const isInvalidNumericInput = (raw) =>
+  raw === null || raw === undefined || String(raw).trim() === '' || !Number.isFinite(Number(raw));
 
 function renderInspector() {
   const el = $('#inspector');
@@ -1199,6 +1206,13 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      <div class="inspector-coords-group" style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">3D Coordinates &amp; Rotation</h4>
+        ${formRow('i-pos-x', 'Position X (in)', `<input id="i-pos-x" type="number" step="1" value="${Math.round(room.x * 100) / 100}">`)}
+        ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="1" value="${Math.round(room.y * 100) / 100}">`)}
+        ${formRow('i-pos-z', 'Elevation Z (in)', `<input id="i-pos-z" type="number" step="1" value="${Math.round((Number.isFinite(room.z) ? room.z : 0) * 100) / 100}">`)}
+        ${formRow('i-rot-deg', 'Rotation (°)', `<input id="i-rot-deg" type="number" step="15" min="0" max="360" value="${normalizeRotationDegrees(room.rot ?? 0, 0)}">`)}
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
@@ -1366,6 +1380,58 @@ function renderInspector() {
         roomOf(n, room.id).ceiling = Number(e.target.value);
       }, 'Change Ceiling Height')
     );
+    $('#i-pos-x')?.addEventListener('change', (e) => {
+      const curVal = Math.round(room.x * 100) / 100;
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = String(curVal);
+        return;
+      }
+      const nextX = Math.round(parseCoordinateInput(e.target.value, room.x) * 100) / 100;
+      const res = apply(
+        (n) => M.moveRoom(roomOf(n, room.id), nextX, room.y),
+        'Set Room Position X'
+      );
+      if (!res.ok) e.target.value = String(curVal);
+    });
+    $('#i-pos-y')?.addEventListener('change', (e) => {
+      const curVal = Math.round(room.y * 100) / 100;
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = String(curVal);
+        return;
+      }
+      const nextY = Math.round(parseCoordinateInput(e.target.value, room.y) * 100) / 100;
+      const res = apply(
+        (n) => M.moveRoom(roomOf(n, room.id), room.x, nextY),
+        'Set Room Position Y'
+      );
+      if (!res.ok) e.target.value = String(curVal);
+    });
+    $('#i-pos-z')?.addEventListener('change', (e) => {
+      const curZ = Math.round((Number.isFinite(room.z) ? room.z : 0) * 100) / 100;
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = String(curZ);
+        return;
+      }
+      const nextZ = Math.round(parseCoordinateInput(e.target.value, curZ) * 100) / 100;
+      const res = apply((n) => {
+        const r = roomOf(n, room.id);
+        if (r) r.z = nextZ;
+      }, 'Set Room Elevation Z');
+      if (!res.ok) e.target.value = String(curZ);
+    });
+    $('#i-rot-deg')?.addEventListener('change', (e) => {
+      const curRot = normalizeRotationDegrees(room.rot ?? 0, 0);
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = String(curRot);
+        return;
+      }
+      const nextRot = normalizeRotationDegrees(e.target.value, curRot);
+      const res = apply((n) => {
+        const r = roomOf(n, room.id);
+        if (r) r.rot = nextRot;
+      }, 'Set Room Rotation');
+      if (!res.ok) e.target.value = String(curRot);
+    });
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, room.id), 'Delete Room');
       select(null);
@@ -1535,11 +1601,46 @@ function renderInspector() {
     const doorStyle = kind === 'opening' && def.kind === 'door' ? resolveDoorStyle(obj) : null;
     const winPresets = getWindowPresets();
     const doorPresets = getDoorPresets();
+    let curX = 0;
+    let curY = 0;
+    let curZ = 0;
+    const curRot = normalizeRotationDegrees(obj.rot ?? 0, 0);
+    if (kind === 'item') {
+      if (def.mount === 'wall') {
+        const pt = wallPoint(room, obj.wall, obj.offset, 0);
+        curX = Math.round(pt.x * 100) / 100;
+        curY = Math.round(pt.y * 100) / 100;
+        const defaultWallZ = def.shape === 'switch' ? 48 : 16;
+        curZ = Math.round((Number.isFinite(obj.z) ? obj.z : defaultWallZ) * 100) / 100;
+      } else {
+        curX = Math.round((obj.x ?? 0) * 100) / 100;
+        curY = Math.round((obj.y ?? 0) * 100) / 100;
+        const defaultZ = def.mount === 'ceiling' ? (room.ceiling || 96) - 0.75 : 0;
+        curZ = Math.round((Number.isFinite(obj.z) ? obj.z : defaultZ) * 100) / 100;
+      }
+    } else {
+      const pt = wallPoint(room, obj.wall, obj.offset + obj.width / 2, 0);
+      curX = Math.round(pt.x * 100) / 100;
+      curY = Math.round(pt.y * 100) / 100;
+      const defaultSill = def.sill || 0;
+      curZ =
+        Math.round(
+          (Number.isFinite(obj.sill) ? obj.sill : Number.isFinite(obj.z) ? obj.z : defaultSill) *
+            100
+        ) / 100;
+    }
 
     el.innerHTML = `<h3>${esc(def.name)}</h3><p class="note" style="margin:0 0 6px">in ${esc(room.name)}</p><div class="btns">
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
       <button id="i-del">Delete</button></div>
+      <div class="inspector-coords-group" style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">3D Coordinates &amp; Rotation</h4>
+        ${formRow('i-item-x', 'Position X (in)', `<input id="i-item-x" type="number" step="1" value="${curX}">`)}
+        ${formRow('i-item-y', 'Position Y (in)', `<input id="i-item-y" type="number" step="1" value="${curY}">`)}
+        ${formRow('i-item-z', 'Elevation Z (in)', `<input id="i-item-z" type="number" step="1" min="0" max="${room.ceiling || 96}" value="${curZ}">`)}
+        ${formRow('i-item-rot', 'Rotation (°)', `<input id="i-item-rot" type="number" step="15" min="0" max="360" value="${curRot}" ${kind === 'opening' ? 'disabled' : ''}>`)}
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X</div>
@@ -1792,6 +1893,97 @@ function renderInspector() {
       apply((n) => M.removeById(n, obj.id), 'Delete Element');
       select(null);
     });
+
+    const clampItemToRoom = (r, targetX, targetY, targetZ, targetRot) => {
+      const ir = interior(r);
+      if (def.mount === 'ceiling') {
+        const minX = ir.x + 6;
+        const maxX = Math.max(minX, ir.x + ir.w - 6);
+        const minY = ir.y + 6;
+        const maxY = Math.max(minY, ir.y + ir.h - 6);
+        const maxZ = Math.max(0, r.ceiling || 96);
+        return {
+          x: Math.round(Math.max(minX, Math.min(maxX, targetX)) * 100) / 100,
+          y: Math.round(Math.max(minY, Math.min(maxY, targetY)) * 100) / 100,
+          z: Math.round(Math.max(0, Math.min(maxZ, targetZ)) * 100) / 100,
+          rot: targetRot,
+        };
+      }
+      const fp = footprint({ x: 0, y: 0, rot: targetRot }, def);
+      const minX = ir.x + fp.w / 2;
+      const maxX = Math.max(minX, ir.x + ir.w - fp.w / 2);
+      const minY = ir.y + fp.h / 2;
+      const maxY = Math.max(minY, ir.y + ir.h - fp.h / 2);
+      const maxZ = Math.max(0, (r.ceiling || 96) - (def.h || 0));
+      return {
+        x: Math.round(Math.max(minX, Math.min(maxX, targetX)) * 100) / 100,
+        y: Math.round(Math.max(minY, Math.min(maxY, targetY)) * 100) / 100,
+        z: Math.round(Math.max(0, Math.min(maxZ, targetZ)) * 100) / 100,
+        rot: targetRot,
+      };
+    };
+
+    const commitItemCoordinates = (changedField, e) => {
+      const fallbackMap = { x: curX, y: curY, z: curZ, rot: curRot };
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = String(fallbackMap[changedField]);
+        return;
+      }
+      const rawX = $('#i-item-x')?.value;
+      const rawY = $('#i-item-y')?.value;
+      const rawZ = $('#i-item-z')?.value;
+      const rawRot = $('#i-item-rot')?.value;
+
+      const nextX = parseCoordinateInput(rawX, curX);
+      const nextY = parseCoordinateInput(rawY, curY);
+      const nextZ = parseCoordinateInput(rawZ, curZ);
+      const nextRot = normalizeRotationDegrees(rawRot, curRot);
+
+      if (kind === 'item') {
+        if (def.mount === 'wall') {
+          const res = apply((n) => {
+            const found = M.findOwner(n, obj.id);
+            if (!found) return;
+            const s = wallSeg(found.room, found.obj.wall);
+            const rawT = (nextX - s.ax) * s.dx + (nextY - s.ay) * s.dy;
+            const maxOff = Math.max(8, s.len - 8);
+            found.obj.offset = Math.round(Math.max(8, Math.min(maxOff, rawT)) * 100) / 100;
+            found.obj.z =
+              Math.round(Math.max(0, Math.min(found.room.ceiling || 96, nextZ)) * 100) / 100;
+            found.obj.rot = nextRot;
+          }, 'Update Item Coordinates');
+          if (!res.ok) e.target.value = String(fallbackMap[changedField]);
+        } else {
+          const res = apply((n) => {
+            const found = M.findOwner(n, obj.id);
+            if (!found) return;
+            const clamped = clampItemToRoom(found.room, nextX, nextY, nextZ, nextRot);
+            found.obj.x = clamped.x;
+            found.obj.y = clamped.y;
+            found.obj.z = clamped.z;
+            found.obj.rot = clamped.rot;
+          }, 'Update Item Coordinates');
+          if (!res.ok) e.target.value = String(fallbackMap[changedField]);
+        }
+      } else {
+        const res = apply((n) => {
+          const found = M.findOwner(n, obj.id);
+          if (!found) return;
+          const s = wallSeg(found.room, found.obj.wall);
+          const rawT = (nextX - s.ax) * s.dx + (nextY - s.ay) * s.dy - found.obj.width / 2;
+          const maxOff = Math.max(6, s.len - found.obj.width - 6);
+          found.obj.offset = Math.round(Math.max(6, Math.min(maxOff, rawT)) * 100) / 100;
+          const maxSill = Math.max(0, (found.room.ceiling || 96) - (def.h || 0));
+          found.obj.sill = Math.round(Math.max(0, Math.min(maxSill, nextZ)) * 100) / 100;
+        }, 'Update Opening Coordinates');
+        if (!res.ok) e.target.value = String(fallbackMap[changedField]);
+      }
+    };
+
+    $('#i-item-x')?.addEventListener('change', (e) => commitItemCoordinates('x', e));
+    $('#i-item-y')?.addEventListener('change', (e) => commitItemCoordinates('y', e));
+    $('#i-item-z')?.addEventListener('change', (e) => commitItemCoordinates('z', e));
+    $('#i-item-rot')?.addEventListener('change', (e) => commitItemCoordinates('rot', e));
 
     el.querySelectorAll('.i-item-nudge-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -4664,6 +4856,20 @@ if (typeof window !== 'undefined') {
     getSelectedRoomId: () => {
       const h = selection && M.findOwner(doc, selection);
       return h ? h.room.id : null;
+    },
+    getSelectionId: () => (typeof selection === 'string' ? selection : null),
+    onSelectEntity: (id) => {
+      select(id);
+    },
+    onTransformCommit: () => {
+      report = evaluate(doc);
+      complianceManager.syncState(doc);
+      hist.push(doc, 'Transform 3D Element');
+      persist();
+      renderCompliance();
+      renderInspector();
+      renderHistoryTimeline();
+      redraw();
     },
     toast,
     setLevel,

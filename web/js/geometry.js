@@ -1062,11 +1062,20 @@ export function intersectInterval(intervals, [s0, s1]) {
   return out;
 }
 
-/** Footprint rect of a floor item (rotations are multiples of 90). */
+/** Footprint rect of a floor item (exact for 90° multiples and axis-aligned bounding box for arbitrary CAD angles). */
 export function footprint(item, def) {
-  const swap = item.rot % 180 !== 0;
-  const w = swap ? def.d : def.w;
-  const d = swap ? def.w : def.d;
+  const rot = item.rot || 0;
+  if (rot % 90 === 0) {
+    const swap = rot % 180 !== 0;
+    const w = swap ? def.d : def.w;
+    const d = swap ? def.w : def.d;
+    return { x: item.x - w / 2, y: item.y - d / 2, w, h: d };
+  }
+  const rad = (rot * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const w = def.w * c + def.d * s;
+  const d = def.w * s + def.d * c;
   return { x: item.x - w / 2, y: item.y - d / 2, w, h: d };
 }
 

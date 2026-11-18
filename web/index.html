@@ -101,6 +101,26 @@
       <span class="hud-keys"><b>WASD</b> / <b>Arrows</b> Walk &bull; <b>Shift</b> Sprint &bull; <b>Drag Mouse</b> Look &bull; <b>Esc</b> / <b>R</b> Orbit mode</span>
       <button id="walk-exit-btn" title="Exit Walkthrough back to Orbit mode"><span aria-hidden="true">🌐</span> Exit Walkthrough</button>
     </div>
+    <div id="coord3d-overlay" class="coord3d-overlay k-overlay-hud" role="region" aria-label="3D Coordinate Controls" hidden>
+      <span id="coord3d-target" class="coord3d-target">Cursor</span>
+      <span id="coord3d-snap" class="coord3d-snap" hidden></span>
+      <div class="coord3d-field">
+        <label for="coord3d-x">X (in)</label>
+        <input id="coord3d-x" class="coord3d-input" type="number" step="1" value="0">
+      </div>
+      <div class="coord3d-field">
+        <label for="coord3d-y">Y (in)</label>
+        <input id="coord3d-y" class="coord3d-input" type="number" step="1" value="0">
+      </div>
+      <div class="coord3d-field">
+        <label for="coord3d-z">Z (in)</label>
+        <input id="coord3d-z" class="coord3d-input" type="number" step="1" value="0">
+      </div>
+      <div class="coord3d-field">
+        <label for="coord3d-rot">Rot (°)</label>
+        <input id="coord3d-rot" class="coord3d-input" type="number" step="15" min="0" max="360" value="0">
+      </div>
+    </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="diff-drawer" class="diff-drawer k-overlay-drawer" role="dialog" aria-modal="true" aria-labelledby="diff-drawer-title" hidden>
       <div class="diff-header">
