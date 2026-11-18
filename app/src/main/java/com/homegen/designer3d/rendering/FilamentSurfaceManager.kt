@@ -11,7 +11,6 @@ import com.google.android.filament.SwapChain
 import com.google.android.filament.Texture
 import com.google.android.filament.View
 import com.google.android.filament.Viewport
-import com.google.android.filament.android.DisplayHelper
 import com.google.android.filament.android.UiHelper
 import com.homegen.designer3d.SceneController
 import java.nio.ByteBuffer
@@ -31,7 +30,6 @@ class FilamentSurfaceManager(context: Context) {
     val sceneController = SceneController(engine, filamentView, filamentScene)
 
     private val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK)
-    private val displayHelper = DisplayHelper(context)
     private var swapChain: SwapChain? = null
 
     private var camera: Camera? = null
