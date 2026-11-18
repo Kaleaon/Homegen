@@ -4,84 +4,16 @@
  * variable segment setbacks, and site layer scene graph geometries.
  */
 
-import { reproject } from './geometry.js';
+import {
+  reproject,
+  getBounds,
+  boundsOverlap,
+  pointInPolygon,
+  lineIntersection,
+  polygonArea,
+} from './geometry.js';
 
-/**
- * 2D Minimum Bounding Rectangle helper.
- */
-export function getBounds(pts) {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  if (Array.isArray(pts)) {
-    for (const p of pts) {
-      const x = p.x !== undefined ? p.x : p[0];
-      const y = p.y !== undefined ? p.y : p[1];
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  } else if (pts && typeof pts === 'object') {
-    minX = pts.x ?? pts.minX ?? 0;
-    minY = pts.y ?? pts.minY ?? 0;
-    maxX = pts.w !== undefined ? minX + pts.w : (pts.maxX ?? minX);
-    maxY = pts.h !== undefined ? minY + pts.h : (pts.maxY ?? minY);
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-export function boundsOverlap(a, b, eps = 0.001) {
-  return (
-    a.minX < b.maxX + eps && a.maxX > b.minX - eps && a.minY < b.maxY + eps && a.maxY > b.minY - eps
-  );
-}
-
-export function pointInPolygon(p, poly) {
-  let inside = false;
-  const px = p.x ?? p[0];
-  const py = p.y ?? p[1];
-  const n = poly.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = poly[i].x ?? poly[i][0];
-    const yi = poly[i].y ?? poly[i][1];
-    const xj = poly[j].x ?? poly[j][0];
-    const yj = poly[j].y ?? poly[j][1];
-
-    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-export function lineIntersection(a1, a2, b1, b2) {
-  const dx1 = a2.x - a1.x;
-  const dy1 = a2.y - a1.y;
-  const dx2 = b2.x - b1.x;
-  const dy2 = b2.y - b1.y;
-
-  const denom = dx1 * dy2 - dy1 * dx2;
-  if (Math.abs(denom) < 1e-9) return null;
-
-  const t1 = ((b1.x - a1.x) * dy2 - (b1.y - a1.y) * dx2) / denom;
-  return {
-    x: a1.x + t1 * dx1,
-    y: a1.y + t1 * dy1,
-  };
-}
-
-export function polygonArea(poly) {
-  let area = 0;
-  const n = poly.length;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const pi = poly[i];
-    const pj = poly[j];
-    area += pi.x * pj.y - pj.x * pi.y;
-  }
-  return area / 2;
-}
+export { getBounds, boundsOverlap, pointInPolygon, lineIntersection, polygonArea };
 
 /**
  * 2D R-tree spatial index implementation.
@@ -221,29 +153,47 @@ export class SpatialRTree {
 
     const roomBounds = getBounds(pts);
     const searchCandidates = this.search(roomBounds);
-    const candidates =
-      searchCandidates.length > 0 ? searchCandidates : this.items.map((i) => i.item);
+    if (searchCandidates.length === 0) {
+      const duration =
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime;
+      if (duration > 5) {
+        console.warn(
+          `[GISBridge] Spatial query execution exceeded target time: ${duration.toFixed(2)}ms`
+        );
+      }
+      return [];
+    }
     const violations = [];
 
-    for (const cand of candidates) {
-      if (
-        cand.type === 'setbackBuffer' ||
+    const isSetbackItem = (cand) =>
+      cand &&
+      (cand.type === 'setbackBuffer' ||
         cand.type === 'gisSetbackBuffer' ||
-        cand.layerType === 'gisSetbackBuffer'
-      ) {
-        const innerPoly = cand.innerPoints || cand.innerPolygon;
+        cand.layerType === 'gisSetbackBuffer');
+    const isLotItem = (cand) =>
+      cand &&
+      (cand.type === 'lotLine' || cand.type === 'gisLotLine' || cand.layerType === 'gisLotLine');
 
-        // Check if any room vertex lies outside inner buildable polygon or inside setback buffer
+    const setbackCandidates = searchCandidates.filter(isSetbackItem);
+    const lotCandidates = searchCandidates.filter(isLotItem);
+
+    const buildableRings = [];
+    const seenBuildable = new Set();
+    for (const cand of setbackCandidates) {
+      if (Array.isArray(cand.rings) && cand.rings.length > 0) {
+        for (const ring of cand.rings) {
+          const ringInner = ring.innerPoints || ring.innerPolygon;
+          if (ringInner && ringInner.length >= 3 && !seenBuildable.has(ringInner)) {
+            seenBuildable.add(ringInner);
+            buildableRings.push({ id: ring.id || cand.id, innerPoly: ringInner });
+          }
+        }
+      } else {
+        const innerPoly = cand.innerPoints || cand.innerPolygon;
         if (innerPoly && innerPoly.length >= 3) {
-          for (const pt of pts) {
-            if (!pointInPolygon(pt, innerPoly)) {
-              violations.push({
-                type: 'setback-clearance',
-                featureId: cand.id,
-                msg: 'Room vertex extends into setback buffer zone.',
-              });
-              break;
-            }
+          if (!seenBuildable.has(innerPoly)) {
+            seenBuildable.add(innerPoly);
+            buildableRings.push({ id: cand.id, innerPoly });
           }
         } else if (cand.polygon && cand.polygon.length >= 3) {
           for (const pt of pts) {
@@ -257,24 +207,52 @@ export class SpatialRTree {
             }
           }
         }
-      } else if (
-        cand.type === 'lotLine' ||
-        cand.type === 'gisLotLine' ||
-        cand.layerType === 'gisLotLine'
-      ) {
-        const lotPoly = cand.points || cand.polygon;
-        if (lotPoly && lotPoly.length >= 3) {
-          for (const pt of pts) {
-            if (!pointInPolygon(pt, lotPoly)) {
-              violations.push({
-                type: 'lot-boundary-exceeded',
-                featureId: cand.id,
-                msg: 'Room extends outside property lot boundary.',
-              });
-              break;
-            }
+      }
+    }
+
+    if (buildableRings.length > 0) {
+      const insideAnyBuildable = buildableRings.some(({ innerPoly }) =>
+        pts.every((pt) => pointInPolygon(pt, innerPoly))
+      );
+      if (!insideAnyBuildable) {
+        violations.push({
+          type: 'setback-clearance',
+          featureId: buildableRings[0].id,
+          msg: 'Room vertex extends into setback buffer zone.',
+        });
+      }
+    }
+
+    const validLotRings = [];
+    const seenLot = new Set();
+    for (const cand of lotCandidates) {
+      if (Array.isArray(cand.rings) && cand.rings.length > 0) {
+        for (const ring of cand.rings) {
+          const ringPoly = ring.points || ring.polygon;
+          if (ringPoly && ringPoly.length >= 3 && !seenLot.has(ringPoly)) {
+            seenLot.add(ringPoly);
+            validLotRings.push({ id: ring.id || cand.id, lotPoly: ringPoly });
           }
         }
+      } else {
+        const lotPoly = cand.points || cand.polygon;
+        if (lotPoly && lotPoly.length >= 3 && !seenLot.has(lotPoly)) {
+          seenLot.add(lotPoly);
+          validLotRings.push({ id: cand.id, lotPoly });
+        }
+      }
+    }
+
+    if (validLotRings.length > 0) {
+      const insideAnyLot = validLotRings.some(({ lotPoly }) =>
+        pts.every((pt) => pointInPolygon(pt, lotPoly))
+      );
+      if (!insideAnyLot) {
+        violations.push({
+          type: 'lot-boundary-exceeded',
+          featureId: validLotRings[0].id,
+          msg: 'Room extends outside property lot boundary.',
+        });
       }
     }
 
@@ -310,21 +288,72 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     rawFeatures = [{ type: 'Feature', geometry: geojson, properties: {} }];
   }
 
+  const hasValidRawPolygonRing = (rawRing) => {
+    if (!Array.isArray(rawRing) || rawRing.length < 3) return false;
+    const validCoords = rawRing.filter(
+      (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+    );
+    if (validCoords.length < 3) return false;
+    const first = validCoords[0];
+    const last = validCoords[validCoords.length - 1];
+    const isClosed = first[0] === last[0] && first[1] === last[1];
+    const distinctCount = isClosed ? validCoords.length - 1 : validCoords.length;
+    return distinctCount >= 3;
+  };
+
+  const isValidProjectedRing = (ring) => {
+    if (!Array.isArray(ring) || ring.length < 3) return false;
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    const isClosed = first.x === last.x && first.y === last.y;
+    const distinctCount = isClosed ? ring.length - 1 : ring.length;
+    return distinctCount >= 3;
+  };
+
   // Helper to extract raw coordinates
   const extractCoords = (geom) => {
     const coords = [];
+    if (!geom || !Array.isArray(geom.coordinates)) return coords;
     if (geom.type === 'Point') {
-      coords.push(geom.coordinates);
+      if (geom.coordinates.length >= 2) coords.push(geom.coordinates);
     } else if (geom.type === 'LineString' || geom.type === 'MultiPoint') {
-      coords.push(...geom.coordinates);
-    } else if (geom.type === 'Polygon' || geom.type === 'MultiLineString') {
-      for (const ring of geom.coordinates) {
-        coords.push(...ring);
+      coords.push(
+        ...geom.coordinates.filter(
+          (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+        )
+      );
+    } else if (geom.type === 'MultiLineString') {
+      for (const line of geom.coordinates) {
+        if (Array.isArray(line)) {
+          coords.push(
+            ...line.filter(
+              (c) =>
+                Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+            )
+          );
+        }
+      }
+    } else if (geom.type === 'Polygon') {
+      const outerRing = geom.coordinates[0];
+      if (hasValidRawPolygonRing(outerRing)) {
+        coords.push(
+          ...outerRing.filter(
+            (c) =>
+              Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+          )
+        );
       }
     } else if (geom.type === 'MultiPolygon') {
       for (const poly of geom.coordinates) {
-        for (const ring of poly) {
-          coords.push(...ring);
+        if (!Array.isArray(poly) || poly.length === 0) continue;
+        const outerRing = poly[0];
+        if (hasValidRawPolygonRing(outerRing)) {
+          coords.push(
+            ...outerRing.filter(
+              (c) =>
+                Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+            )
+          );
         }
       }
     }
@@ -397,76 +426,116 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
   };
 
-  const transformRings = (rings) => rings.map((ring) => ring.map(transformCoord));
+  const transformRings = (rings) =>
+    rings.map((ring) =>
+      Array.isArray(ring)
+        ? ring
+            .filter(
+              (c) =>
+                Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+            )
+            .map(transformCoord)
+        : []
+    );
 
   const transformedFeatures = [];
   const segments = [];
   const layers = [];
   let nextSegId = 1;
+  let nextFeatId = 1;
 
   for (const feat of rawFeatures) {
-    const geom = feat.geometry;
-    if (!geom) continue;
+    const geom = feat?.geometry;
+    if (!geom || !Array.isArray(geom.coordinates)) continue;
 
+    const baseId = feat.id || `feat-${nextFeatId++}`;
     const layerKind =
       feat.properties?.layer ||
       feat.properties?.type ||
       (geom.type.includes('Polygon') ? 'lot' : 'easement');
-    let points = [];
+    const componentRings = [];
 
     if (geom.type === 'Polygon') {
       const rings = transformRings(geom.coordinates);
-      points = rings[0] || [];
+      if (isValidProjectedRing(rings[0])) {
+        componentRings.push(rings[0]);
+      }
     } else if (geom.type === 'MultiPolygon') {
       for (const polyCoords of geom.coordinates) {
+        if (!Array.isArray(polyCoords) || polyCoords.length === 0) continue;
         const rings = transformRings(polyCoords);
-        if (rings[0]) points.push(...rings[0]);
+        if (isValidProjectedRing(rings[0])) {
+          componentRings.push(rings[0]);
+        }
       }
     } else if (geom.type === 'LineString') {
-      points = geom.coordinates.map(transformCoord);
+      const linePoints = geom.coordinates
+        .filter(
+          (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+        )
+        .map(transformCoord);
+      if (linePoints.length >= 2) {
+        componentRings.push(linePoints);
+      }
     }
 
-    if (points.length > 0) {
+    for (let idx = 0; idx < componentRings.length; idx++) {
+      const ring = componentRings[idx];
+      const componentId = geom.type === 'MultiPolygon' ? `${baseId}-${idx}` : baseId;
+
       transformedFeatures.push({
-        id: feat.id || `feat-${transformedFeatures.length + 1}`,
+        id: componentId,
+        parentId: baseId,
+        componentIndex: idx,
         properties: feat.properties || {},
         layerKind,
-        points,
+        points: ring,
       });
 
-      if (layerKind === 'lot' && points.length >= 3) {
-        // Extract segments for variable setback computation
-        const n = points.length;
-        const isClosed = points[0].x === points[n - 1].x && points[0].y === points[n - 1].y;
+      if (layerKind === 'lot' && geom.type !== 'LineString' && isValidProjectedRing(ring)) {
+        // Extract segments independently for each closed component ring
+        const n = ring.length;
+        const isClosed = ring[0].x === ring[n - 1].x && ring[0].y === ring[n - 1].y;
         const segCount = isClosed ? n - 1 : n;
+        const ringSegments = [];
 
         for (let i = 0; i < segCount; i++) {
-          const p1 = points[i];
-          const p2 = points[(i + 1) % n];
+          const p1 = ring[i];
+          const p2 = ring[(i + 1) % segCount];
+          if (p1.x === p2.x && p1.y === p2.y) continue;
+          ringSegments.push({ p1, p2, edgeIndex: i });
+        }
+
+        if (ringSegments.length >= 3) {
           const defaultSetback = feat.properties?.setback ?? options.defaultSetback ?? 36;
-          segments.push({
-            id: `seg-${nextSegId++}`,
-            p1,
-            p2,
-            setback: defaultSetback,
-            label: feat.properties?.name || `Lot Edge ${i + 1}`,
-          });
+          for (const { p1, p2, edgeIndex } of ringSegments) {
+            segments.push({
+              id: `seg-${nextSegId++}`,
+              ringId: componentId,
+              p1,
+              p2,
+              setback: defaultSetback,
+              label: feat.properties?.name || `Lot Edge ${edgeIndex + 1}`,
+            });
+          }
         }
       }
     }
   }
 
   // Compute initial variable setback buffers if lot segments exist
-  let setbackBufferLayer = null;
+  let setbackBufferResult = null;
   if (segments.length >= 3) {
-    setbackBufferLayer = computeVariableBuffers(segments);
+    setbackBufferResult = computeVariableBuffers(segments);
   }
 
-  // Register layers for compliance overlay
+  // Register layers for compliance overlay (one independent layer per component polygon ring)
   for (const feat of transformedFeatures) {
     const type = feat.layerKind === 'easement' ? 'gisEasement' : 'gisLotLine';
     layers.push({
       id: feat.id,
+      parentId: feat.parentId,
+      componentIndex: feat.componentIndex,
       type,
       name: feat.properties.name || (type === 'gisLotLine' ? 'Lot Boundary' : 'Easement'),
       points: feat.points,
@@ -474,8 +543,8 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     });
   }
 
-  if (setbackBufferLayer) {
-    layers.push(setbackBufferLayer);
+  if (setbackBufferResult && setbackBufferResult.rings.length > 0) {
+    layers.push(...setbackBufferResult.rings);
   }
 
   return {
@@ -487,26 +556,74 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
 }
 
 /**
- * Computes variable setback buffers based on edge-specific segment setback distances.
+ * Groups lot line segments into closed component ring loops.
  */
-export function computeVariableBuffers(segments) {
-  if (!segments || segments.length < 3) {
-    return {
-      id: 'setback-buffer',
-      type: 'gisSetbackBuffer',
-      name: 'Setback Buffer',
-      points: [],
-      innerPoints: [],
-      bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
-    };
+function groupSegmentsByRingLoop(segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return [];
+
+  const hasExplicitRingIds = segments.some((s) => s && s.ringId !== undefined && s.ringId !== null);
+  if (hasExplicitRingIds) {
+    const byRing = new Map();
+    const ungrouped = [];
+    for (const seg of segments) {
+      if (!seg || !seg.p1 || !seg.p2) continue;
+      if (seg.ringId !== undefined && seg.ringId !== null) {
+        if (!byRing.has(seg.ringId)) byRing.set(seg.ringId, []);
+        byRing.get(seg.ringId).push(seg);
+      } else {
+        ungrouped.push(seg);
+      }
+    }
+    const groups = Array.from(byRing.entries()).map(([ringId, ringSegs]) => ({
+      ringId,
+      segments: ringSegs,
+    }));
+    if (ungrouped.length > 0) {
+      groups.push(...groupSegmentsByRingLoop(ungrouped));
+    }
+    return groups;
   }
 
-  // Construct outer polygon from segments
-  const outerPoints = segments.map((s) => s.p1);
-  const isCCW = polygonArea(outerPoints) > 0;
+  const ptsEqual = (a, b, eps = 1e-4) => Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps;
 
-  // Compute offset lines for each segment
-  const offsetLines = segments.map((s) => {
+  const loops = [];
+  let current = [];
+
+  for (const seg of segments) {
+    if (!seg || !seg.p1 || !seg.p2) continue;
+    if (current.length === 0) {
+      current.push(seg);
+      continue;
+    }
+
+    const prev = current[current.length - 1];
+    if (ptsEqual(prev.p2, seg.p1)) {
+      current.push(seg);
+      if (current.length >= 3 && ptsEqual(seg.p2, current[0].p1)) {
+        loops.push({ ringId: null, segments: current });
+        current = [];
+      }
+    } else {
+      loops.push({ ringId: null, segments: current });
+      current = [seg];
+    }
+  }
+
+  if (current.length > 0) {
+    loops.push({ ringId: null, segments: current });
+  }
+
+  return loops;
+}
+
+/**
+ * Computes inner buildable setback polygon for a single closed ring loop of segments.
+ */
+function computeSingleRingBuffer(ringSegments, layerId, ringId = null) {
+  const outerPoints = ringSegments.map((s) => s.p1);
+  const isCCW = polygonArea(outerPoints, true) > 0;
+
+  const offsetLines = ringSegments.map((s) => {
     const p1 = s.p1;
     const p2 = s.p2;
     const setback = s.setback ?? 36;
@@ -515,7 +632,7 @@ export function computeVariableBuffers(segments) {
     const dy = p2.y - p1.y;
     const len = Math.hypot(dx, dy) || 1;
 
-    // Normal vector pointing inward
+    // Normal vector pointing inward:
     // For CCW polygon, inward normal is (-dy/len, dx/len)
     // For CW polygon, inward normal is (dy/len, -dx/len)
     const nx = isCCW ? -dy / len : dy / len;
@@ -527,7 +644,6 @@ export function computeVariableBuffers(segments) {
     return { offP1, offP2, segment: s };
   });
 
-  // Calculate inner vertices by intersecting adjacent offset lines
   const innerPoints = [];
   const n = offsetLines.length;
   for (let i = 0; i < n; i++) {
@@ -538,17 +654,77 @@ export function computeVariableBuffers(segments) {
     if (inter) {
       innerPoints.push({ x: Math.round(inter.x * 100) / 100, y: Math.round(inter.y * 100) / 100 });
     } else {
-      innerPoints.push(curr.offP1);
+      innerPoints.push({
+        x: Math.round(curr.offP1.x * 100) / 100,
+        y: Math.round(curr.offP1.y * 100) / 100,
+      });
     }
   }
 
-  return {
-    id: 'setback-buffer',
+  const layer = {
+    id: layerId,
     type: 'gisSetbackBuffer',
     name: 'Setback Buffer',
     points: outerPoints,
     innerPoints,
     bounds: getBounds([...outerPoints, ...innerPoints]),
+  };
+  if (ringId !== null && ringId !== undefined) {
+    layer.ringId = ringId;
+  }
+  return layer;
+}
+
+/**
+ * Computes variable setback buffers based on edge-specific segment setback distances,
+ * grouping segments by closed ring loop so MultiPolygon lots produce clean per-ring buffers.
+ */
+export function computeVariableBuffers(segments) {
+  const emptyResult = {
+    id: 'setback-buffer',
+    type: 'gisSetbackBuffer',
+    name: 'Setback Buffer',
+    points: [],
+    innerPoints: [],
+    rings: [],
+    bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+  };
+
+  if (!segments || segments.length < 3) {
+    return emptyResult;
+  }
+
+  const validLoops = groupSegmentsByRingLoop(segments).filter(
+    (loop) => loop.segments && loop.segments.length >= 3
+  );
+  if (validLoops.length === 0) {
+    return emptyResult;
+  }
+
+  const ringBuffers = validLoops.map((loop, idx) => {
+    const layerId = validLoops.length === 1 ? 'setback-buffer' : `setback-buffer-${idx}`;
+    return computeSingleRingBuffer(loop.segments, layerId, loop.ringId);
+  });
+
+  if (ringBuffers.length === 1) {
+    return {
+      ...ringBuffers[0],
+      id: 'setback-buffer',
+      rings: ringBuffers,
+    };
+  }
+
+  const allOuterPoints = ringBuffers.flatMap((r) => r.points);
+  const allInnerPoints = ringBuffers.flatMap((r) => r.innerPoints);
+
+  return {
+    id: 'setback-buffer',
+    type: 'gisSetbackBuffer',
+    name: 'Setback Buffer',
+    points: allOuterPoints,
+    innerPoints: allInnerPoints,
+    rings: ringBuffers,
+    bounds: getBounds([...allOuterPoints, ...allInnerPoints]),
   };
 }
 
@@ -565,9 +741,56 @@ export function buildSpatialIndex(siteOrFeatures) {
     layers = siteOrFeatures;
   }
 
+  const lotGroups = new Map();
+  const setbackByRingId = new Map();
+
   for (const layer of layers) {
     const bounds = layer.bounds || getBounds(layer.points || layer.innerPoints || []);
     tree.insert(layer, bounds);
+
+    if (layer && layer.type === 'gisLotLine' && layer.parentId) {
+      if (!lotGroups.has(layer.parentId)) lotGroups.set(layer.parentId, []);
+      lotGroups.get(layer.parentId).push({ layer, bounds });
+    } else if (layer && layer.type === 'gisSetbackBuffer' && layer.ringId) {
+      setbackByRingId.set(layer.ringId, { layer, bounds });
+    }
+  }
+
+  for (const [parentId, entries] of lotGroups.entries()) {
+    if (entries.length > 1) {
+      const unionLotBounds = {
+        minX: Math.min(...entries.map((e) => e.bounds.minX)),
+        minY: Math.min(...entries.map((e) => e.bounds.minY)),
+        maxX: Math.max(...entries.map((e) => e.bounds.maxX)),
+        maxY: Math.max(...entries.map((e) => e.bounds.maxY)),
+      };
+      tree.insert(
+        {
+          id: parentId,
+          type: 'gisLotLine',
+          rings: entries.map((e) => e.layer),
+        },
+        unionLotBounds
+      );
+
+      const setbackEntries = entries.map((e) => setbackByRingId.get(e.layer.id)).filter(Boolean);
+      if (setbackEntries.length > 0) {
+        const unionSetbackBounds = {
+          minX: Math.min(...setbackEntries.map((e) => e.bounds.minX)),
+          minY: Math.min(...setbackEntries.map((e) => e.bounds.minY)),
+          maxX: Math.max(...setbackEntries.map((e) => e.bounds.maxX)),
+          maxY: Math.max(...setbackEntries.map((e) => e.bounds.maxY)),
+        };
+        tree.insert(
+          {
+            id: `${parentId}-setback-buffer`,
+            type: 'gisSetbackBuffer',
+            rings: setbackEntries.map((e) => e.layer),
+          },
+          unionSetbackBounds
+        );
+      }
+    }
   }
 
   return tree;
@@ -916,13 +1139,13 @@ export class GISBridge {
     if (seg) {
       seg.setback = Math.max(0, Number(setbackDistance) || 0);
 
-      // Recompute setback buffer layer
-      const setbackLayer = computeVariableBuffers(this.site.segments);
-      const existingIdx = this.site.layers.findIndex((l) => l.type === 'gisSetbackBuffer');
-      if (existingIdx >= 0) {
-        this.site.layers[existingIdx] = setbackLayer;
+      // Recompute setback buffer layer(s) per ring loop
+      const setbackResult = computeVariableBuffers(this.site.segments);
+      this.site.layers = this.site.layers.filter((l) => l.type !== 'gisSetbackBuffer');
+      if (setbackResult.rings && setbackResult.rings.length > 0) {
+        this.site.layers.push(...setbackResult.rings);
       } else {
-        this.site.layers.push(setbackLayer);
+        this.site.layers.push(setbackResult);
       }
 
       this.rebuildIndex();

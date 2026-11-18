@@ -149,4 +149,38 @@ class CatalogPanelTest {
 
         composeTestRule.onNodeWithText("Nordic Chair").assertIsDisplayed()
     }
+
+    @Test
+    fun `filters items by active style tag case-insensitively and combines with search`() {
+        val industrialTable = PlaceableAsset(
+            id = "table_iron",
+            name = "Iron Table",
+            category = "furniture/tables",
+            tags = listOf("industrial", "metal"),
+            modelPath = "models/table.obj",
+            thumbnailPath = "textures/table.png",
+            footprintMeters = Dimensions3(1.2f, 0.8f, 0.75f),
+        )
+        val multiCatalog = sampleCatalog.copy(
+            placeableObjects = sampleCatalog.placeableObjects + industrialTable,
+        )
+
+        composeTestRule.setContent {
+            KthemeComposeTheme {
+                CatalogPanel(
+                    catalog = multiCatalog,
+                    repository = repository,
+                    activeStyleTag = "SCANDINAVIAN",
+                    onMaterialPicked = {},
+                    onPlaceablePicked = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Nordic Chair").assertIsDisplayed()
+        composeTestRule.onNodeWithText("1 items").assertIsDisplayed()
+
+        composeTestRule.onNodeWithText("Search catalog").performTextInput("Nordic")
+        composeTestRule.onNodeWithText("Nordic Chair").assertIsDisplayed()
+    }
 }

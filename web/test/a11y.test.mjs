@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { renderBgToolbar } from '../js/app.js';
 
 const htmlPath = resolve('index.html');
 const appJsPath = resolve('js/app.js');
@@ -46,6 +47,66 @@ test('index.html buttons have accessible names and aria-label / aria-hidden wher
     htmlContent,
     /<button id="o-photo" [^>]*><span aria-hidden="true">📷<\/span> Photoreal…<\/button>/
   );
+  assert.match(
+    htmlContent,
+    /<button id="bg-lock-btn" [^>]*aria-pressed="false"[^>]*><span aria-hidden="true">🔓<\/span> Unlocked<\/button>/
+  );
+  assert.match(
+    htmlContent,
+    /<button id="bg-calibrate-btn" [^>]*><span aria-hidden="true">📏<\/span> Calibrate<\/button>/
+  );
+  assert.match(
+    htmlContent,
+    /<button id="bg-remove-btn" [^>]*aria-label="Remove blueprint image"[^>]*><span aria-hidden="true">✕<\/span><\/button>/
+  );
+});
+
+test('renderBgToolbar updates #bg-lock-btn aria-pressed and decorative glyph wrapper dynamically', () => {
+  const prevDocument = globalThis.document;
+  const attrs = new Map();
+  const bgBar = { hidden: true };
+  const lockBtn = {
+    innerHTML: '',
+    setAttribute(name, value) {
+      attrs.set(name, String(value));
+    },
+    getAttribute(name) {
+      return attrs.get(name);
+    },
+  };
+  const elements = {
+    '#bg-toolbar': bgBar,
+    '#bg-lock-btn': lockBtn,
+  };
+
+  globalThis.document = {
+    querySelector(sel) {
+      return elements[sel] || null;
+    },
+  };
+
+  try {
+    renderBgToolbar({ dataUrl: 'data:image/png;base64,abc', locked: false });
+    assert.equal(bgBar.hidden, false);
+    assert.equal(lockBtn.innerHTML, '<span aria-hidden="true">🔓</span> Unlocked');
+    assert.equal(lockBtn.getAttribute('aria-pressed'), 'false');
+
+    renderBgToolbar({ dataUrl: 'data:image/png;base64,abc', locked: true });
+    assert.equal(bgBar.hidden, false);
+    assert.equal(lockBtn.innerHTML, '<span aria-hidden="true">🔒</span> Locked');
+    assert.equal(lockBtn.getAttribute('aria-pressed'), 'true');
+
+    renderBgToolbar(null);
+    assert.equal(bgBar.hidden, true);
+    assert.equal(lockBtn.innerHTML, '<span aria-hidden="true">🔓</span> Unlocked');
+    assert.equal(lockBtn.getAttribute('aria-pressed'), 'false');
+  } finally {
+    if (prevDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = prevDocument;
+    }
+  }
 });
 
 test('renderLevels in app.js includes aria-label and aria-hidden for add-floor and del-floor', () => {
@@ -63,6 +124,11 @@ test('index.html dynamic status updates and error containers declare ARIA live r
   assert.match(htmlContent, /id="diff-drawer" [^>]*role="dialog"[^>]*aria-modal="true"/);
   assert.match(htmlContent, /id="p-status" [^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(htmlContent, /id="p-error" [^>]*role="alert"[^>]*aria-live="assertive"/);
+  assert.match(htmlContent, /id="toast" [^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(
+    htmlContent,
+    /<button type="button" class="toast-dismiss" aria-label="Dismiss notification"><span aria-hidden="true">✕<\/span><\/button>/
+  );
 });
 
 test('index.html contains skip-to-content link before header and tabindex="-1" on stage section', () => {
