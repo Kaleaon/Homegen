@@ -152,8 +152,6 @@ object DesignStyleRepository {
         "retro_futurist" to ColorPalette("pal_retro_futurist", "Retro Futurism", listOf("#1A1A2E", "#16213E", "#0F3460", "#E94560", "#FFFFFF"), accent = "#E94560"),
     )
 
-    private val allPalettes: List<ColorPalette> = palettes.values.toList()
-
     // ── Styles ──────────────────────────────────────────────────────────────
 
     private val allStyles: List<DesignStyle> = listOf(

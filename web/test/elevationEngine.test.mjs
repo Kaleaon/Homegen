@@ -48,6 +48,72 @@ test('parseElevationRaster converts Google Elevation API responses into Elevatio
   assert.equal(grid.maxElevation, 25.0);
   assert.equal(grid.data[0], 10.0);
   assert.equal(grid.data[3], 25.0);
+  assert.deepEqual(grid.bounds, {
+    minX: -122.4,
+    maxX: -122.3,
+    minY: 37.6,
+    maxY: 37.7,
+  });
+});
+
+test('parseElevationRaster supports longitude/latitude and x/y sample coordinates, identical points, missing locations, and options.bounds overrides', async () => {
+  const altKeysGrid = await parseElevationRaster({
+    status: 'OK',
+    results: [
+      { elevation: 5, location: { latitude: 0, longitude: 0 } },
+      { elevation: 8, latitude: 10.5, longitude: 20.25 },
+      { elevation: 12, location: { x: -5.5, y: -2.25 } },
+      { elevation: 16, location: { lat: null, lng: -122.0 } },
+    ],
+  });
+  assert.deepEqual(altKeysGrid.bounds, {
+    minX: -5.5,
+    maxX: 20.25,
+    minY: -2.25,
+    maxY: 10.5,
+  });
+
+  const noCoordsGrid = await parseElevationRaster({
+    status: 'OK',
+    results: [{ elevation: 10 }, { elevation: 20 }, { elevation: 30 }, { elevation: 40 }],
+  });
+  assert.deepEqual(noCoordsGrid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
+
+  const numericResultsGrid = await parseElevationRaster({
+    status: 'OK',
+    results: [10, 20, 30, 40],
+  });
+  assert.deepEqual(numericResultsGrid.bounds, { minX: -600, maxX: 600, minY: -600, maxY: 600 });
+
+  const identicalCoordsGrid = await parseElevationRaster({
+    status: 'OK',
+    results: [
+      { elevation: 10, location: { lat: 37.75, lng: -122.45 } },
+      { elevation: 15, location: { lat: 37.75, lng: -122.45 } },
+      { elevation: 20, location: { lat: 37.75, lng: -122.45 } },
+      { elevation: 25, location: { lat: 37.75, lng: -122.45 } },
+    ],
+  });
+  assert.deepEqual(identicalCoordsGrid.bounds, {
+    minX: -122.45,
+    maxX: -122.45,
+    minY: 37.75,
+    maxY: 37.75,
+  });
+  assert.ok(Object.values(identicalCoordsGrid.bounds).every((v) => Number.isFinite(v)));
+
+  const overrideBounds = { minX: -250, maxX: 250, minY: -150, maxY: 150 };
+  const overriddenGrid = await parseElevationRaster(
+    {
+      status: 'OK',
+      results: [
+        { elevation: 10, location: { lat: 37.7, lng: -122.4 } },
+        { elevation: 25, location: { lat: 37.6, lng: -122.3 } },
+      ],
+    },
+    { bounds: overrideBounds }
+  );
+  assert.deepEqual(overriddenGrid.bounds, overrideBounds);
 });
 
 test('parseElevationRaster throws descriptive error on bad status or empty results', async () => {
