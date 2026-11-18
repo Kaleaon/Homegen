@@ -147,12 +147,23 @@ class SpatialCache {
 
 export const reprojectionCache = new SpatialCache();
 
+const crsDefCache = new Map();
+
 function resolveCRSDef(crs) {
   if (!crs) return 'EPSG:4326';
   if (typeof crs === 'string') {
+    const hit = crsDefCache.get(crs);
+    if (hit !== undefined) return hit;
     const upper = crs.trim().toUpperCase();
-    if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') return 'PLAN';
-    return normalizeCode(crs) || 'EPSG:4326';
+    const resolved =
+      upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES'
+        ? 'PLAN'
+        : normalizeCode(crs) || 'EPSG:4326';
+    if (crsDefCache.size >= 256) {
+      crsDefCache.delete(crsDefCache.keys().next().value);
+    }
+    crsDefCache.set(crs, resolved);
+    return resolved;
   }
   if (typeof crs === 'object') {
     if (crs.proj4) return crs.proj4;

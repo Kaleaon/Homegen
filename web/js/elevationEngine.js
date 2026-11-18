@@ -628,10 +628,19 @@ function parseGeoTIFFSync(arrayBuffer, options) {
       ? (bytesPerSample === 8 ? 1e-9 : 1e-6) * Math.max(1, Math.abs(effectiveNoData))
       : 0;
 
+    const byteStrip =
+      bytesPerSample === 1
+        ? isSignedSample
+          ? new Int8Array(arrayBuffer, stripOffset, total)
+          : new Uint8Array(arrayBuffer, stripOffset, total)
+        : null;
+
     let voidMask = null;
     for (let k = 0; k < total; k++) {
       let rawVal;
-      if (bytesPerSample === 8) {
+      if (byteStrip !== null) {
+        rawVal = byteStrip[k];
+      } else if (bytesPerSample === 8) {
         rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
       } else if (bytesPerSample === 4) {
         if (isFloatSample) {
@@ -641,12 +650,10 @@ function parseGeoTIFFSync(arrayBuffer, options) {
         } else {
           rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
         }
-      } else if (bytesPerSample === 2) {
+      } else {
         rawVal = isSignedSample
           ? view.getInt16(stripOffset + k * 2, littleEndian)
           : view.getUint16(stripOffset + k * 2, littleEndian);
-      } else {
-        rawVal = isSignedSample ? view.getInt8(stripOffset + k) : view.getUint8(stripOffset + k);
       }
 
       let isVoid = !Number.isFinite(rawVal);
