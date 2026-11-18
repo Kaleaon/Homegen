@@ -5,20 +5,166 @@ import com.google.android.filament.Material
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.Texture
 import com.google.android.filament.TextureSampler
+import com.ktheme.android.KthemeDefaultTheme
+import com.ktheme.android.KthemeSemanticColors
+import com.ktheme.utils.ColorUtils
+import kotlin.math.abs
+import androidx.compose.material3.ColorScheme as ComposeColorScheme
+import androidx.compose.ui.graphics.Color as ComposeColor
+import com.ktheme.models.ColorScheme as KthemeColorScheme
 
 /**
- * Manages Filament materials and material instances for scene objects.
+ * Normalized RGBA color vector with float components in [0f, 1f].
  */
-class MaterialFactory(private val engine: Engine) {
+data class RgbaColor(
+    val r: Float,
+    val g: Float,
+    val b: Float,
+    val a: Float = 1.0f,
+)
 
+/**
+ * Semantic 3D surface color palette derived from Ktheme tokens.
+ */
+data class SurfaceThemePalette(
+    val terrain: RgbaColor,
+    val grid: RgbaColor,
+    val wall: RgbaColor,
+    val floor: RgbaColor,
+    val room: RgbaColor,
+    val furniture: RgbaColor,
+    val door: RgbaColor,
+    val window: RgbaColor,
+    val staircase: RgbaColor,
+    val defaultSurface: RgbaColor,
+) {
+    companion object {
+        fun fromKthemeColorScheme(scheme: KthemeColorScheme): SurfaceThemePalette {
+            val windowBase = MaterialFactory.hexToRgba(scheme.primaryContainer)
+            return SurfaceThemePalette(
+                terrain = MaterialFactory.hexToRgba(scheme.background),
+                grid = MaterialFactory.hexToRgba(scheme.outlineVariant),
+                wall = MaterialFactory.hexToRgba(scheme.surfaceVariant),
+                floor = MaterialFactory.hexToRgba(scheme.surface),
+                room = MaterialFactory.hexToRgba(scheme.tertiaryContainer),
+                furniture = MaterialFactory.hexToRgba(scheme.secondaryContainer),
+                door = MaterialFactory.hexToRgba(scheme.primary),
+                window = windowBase.copy(
+                    a = if (windowBase.a < 1.0f) windowBase.a else MaterialFactory.WINDOW_DEFAULT_ALPHA,
+                ),
+                staircase = MaterialFactory.hexToRgba(scheme.tertiary),
+                defaultSurface = MaterialFactory.hexToRgba(scheme.outline),
+            )
+        }
+
+        fun fromComposeColorScheme(scheme: ComposeColorScheme): SurfaceThemePalette {
+            val windowBase = scheme.primaryContainer.toRgbaColor()
+            return SurfaceThemePalette(
+                terrain = scheme.background.toRgbaColor(),
+                grid = scheme.outlineVariant.toRgbaColor(),
+                wall = scheme.surfaceVariant.toRgbaColor(),
+                floor = scheme.surface.toRgbaColor(),
+                room = scheme.tertiaryContainer.toRgbaColor(),
+                furniture = scheme.secondaryContainer.toRgbaColor(),
+                door = scheme.primary.toRgbaColor(),
+                window = windowBase.copy(
+                    a = if (windowBase.a < 1.0f) windowBase.a else MaterialFactory.WINDOW_DEFAULT_ALPHA,
+                ),
+                staircase = scheme.tertiary.toRgbaColor(),
+                defaultSurface = scheme.outline.toRgbaColor(),
+            )
+        }
+
+        fun fromSemanticColors(colors: KthemeSemanticColors): SurfaceThemePalette {
+            val windowBase = colors.accent.toRgbaColor()
+            return SurfaceThemePalette(
+                terrain = colors.appBackground.toRgbaColor(),
+                grid = colors.borderSubtle.toRgbaColor(),
+                wall = colors.cardBackgroundAlt.toRgbaColor(),
+                floor = colors.cardBackground.toRgbaColor(),
+                room = colors.inverseSurface.toRgbaColor(),
+                furniture = colors.accent.toRgbaColor(),
+                door = colors.brand.toRgbaColor(),
+                window = windowBase.copy(
+                    a = if (windowBase.a < 1.0f) windowBase.a else MaterialFactory.WINDOW_DEFAULT_ALPHA,
+                ),
+                staircase = colors.highlight.toRgbaColor(),
+                defaultSurface = colors.border.toRgbaColor(),
+            )
+        }
+
+        private fun ComposeColor.toRgbaColor(): RgbaColor = RgbaColor(
+            r = red.coerceIn(0f, 1f),
+            g = green.coerceIn(0f, 1f),
+            b = blue.coerceIn(0f, 1f),
+            a = alpha.coerceIn(0f, 1f),
+        )
+    }
+}
+
+/**
+ * Manages Filament materials and material instances for scene objects,
+ * binding default 3D surface PBR parameters to active Ktheme color tokens.
+ */
+class MaterialFactory(
+    private val engine: Engine,
+    colorScheme: KthemeColorScheme = KthemeDefaultTheme.colorScheme,
+    private val materialBuilder: (Engine) -> Material = { Material.Builder().build(it) },
+) {
+    constructor(
+        engine: Engine,
+        colorScheme: ComposeColorScheme,
+        materialBuilder: (Engine) -> Material = { Material.Builder().build(it) },
+    ) : this(engine, KthemeDefaultTheme.colorScheme, materialBuilder) {
+        activePalette = SurfaceThemePalette.fromComposeColorScheme(colorScheme)
+    }
+
+    constructor(
+        engine: Engine,
+        semanticColors: KthemeSemanticColors,
+        materialBuilder: (Engine) -> Material = { Material.Builder().build(it) },
+    ) : this(engine, KthemeDefaultTheme.colorScheme, materialBuilder) {
+        activePalette = SurfaceThemePalette.fromSemanticColors(semanticColors)
+    }
+
+    private data class DoorMaterialEntry(
+        val instance: MaterialInstance,
+        val hasCustomPanelColor: Boolean,
+        val hasCustomFrameColor: Boolean,
+    )
+
+    private var activePalette: SurfaceThemePalette = SurfaceThemePalette.fromKthemeColorScheme(colorScheme)
     private var defaultMaterial: Material? = null
-    private val instanceCache = mutableMapOf<String, MaterialInstance>()
+    private val roleInstanceCache = mutableMapOf<String, MaterialInstance>()
+    private val terrainInstances = mutableSetOf<MaterialInstance>()
+    private val doorInstanceCache = mutableMapOf<String, DoorMaterialEntry>()
+    private val customInstanceCache = mutableMapOf<String, MaterialInstance>()
+
+    var isDestroyed: Boolean = false
+        private set
 
     var isVertexTextureFetchSupported: Boolean = true
 
     /**
+     * Returns the current normalized RGBA color mapped to a 3D surface role.
+     */
+    fun resolveColorForRole(type: String): RgbaColor = when (normalizeRole(type)) {
+        ROLE_TERRAIN -> activePalette.terrain
+        ROLE_GRID -> activePalette.grid
+        ROLE_WALL -> activePalette.wall
+        ROLE_FLOOR -> activePalette.floor
+        ROLE_ROOM -> activePalette.room
+        ROLE_FURNITURE -> activePalette.furniture
+        ROLE_DOOR -> activePalette.door
+        ROLE_WINDOW -> activePalette.window
+        ROLE_STAIRCASE -> activePalette.staircase
+        else -> activePalette.defaultSurface
+    }
+
+    /**
      * Creates a terrain material instance for GPU vertex heightmap displacement.
-     * Falls back to flat ground rendering if vertex texture fetch is unsupported on legacy GPU.
+     * Falls back to flat ground rendering bound to the Ktheme `background` token if vertex
+     * texture fetch is unsupported on legacy GPU.
      */
     fun createTerrainInstance(
         texture: Texture? = null,
@@ -28,32 +174,49 @@ class MaterialFactory(private val engine: Engine) {
         forceFlatFallback: Boolean = false,
     ): MaterialInstance {
         if (forceFlatFallback || !isVertexTextureFetchSupported) {
-            // Fallback to flat ground rendering
-            return createColorInstance(0.48f, 0.58f, 0.38f) // Terrain green
+            return getOrCreateRoleInstance(ROLE_TERRAIN, roughness = 0.8f)
         }
 
+        val terrainColor = activePalette.terrain
         val instance = getDefaultMaterial().createInstance()
-        instance.setParameter("baseColor", 0.48f, 0.58f, 0.38f, 1.0f)
+        instance.setParameter("baseColor", terrainColor.r, terrainColor.g, terrainColor.b, terrainColor.a)
         instance.setParameter("roughness", 0.8f)
         instance.setParameter("metallic", 0.0f)
 
         if (texture != null) {
-            val sampler = TextureSampler(
-                TextureSampler.MinFilter.LINEAR,
-                TextureSampler.MagFilter.LINEAR,
-                TextureSampler.WrapMode.CLAMP_TO_EDGE,
-            )
             try {
+                val sampler = TextureSampler(
+                    TextureSampler.MinFilter.LINEAR,
+                    TextureSampler.MagFilter.LINEAR,
+                    TextureSampler.WrapMode.CLAMP_TO_EDGE,
+                )
                 instance.setParameter("elevationTexture", texture, sampler)
                 instance.setParameter("verticalScale", verticalScale)
                 instance.setParameter("minElevation", minElevation)
                 instance.setParameter("maxElevation", maxElevation)
-            } catch (e: Exception) {
-                // Ignore parameter missing errors on default material
+            } catch (_: Throwable) {
+                // Ignore parameter missing or headless sampler errors on default material
             }
         }
 
+        terrainInstances += instance
         return instance
+    }
+
+    /**
+     * Releases a heightmap terrain material instance created by [createTerrainInstance]
+     * without destroying shared role fallback instances.
+     */
+    fun releaseTerrainInstance(instance: MaterialInstance?) {
+        if (instance == null) return
+        if (terrainInstances.remove(instance)) {
+            if (!isDestroyed && engine.isValid && isInstanceValid(instance)) {
+                try {
+                    engine.destroyMaterialInstance(instance)
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     /**
@@ -62,47 +225,58 @@ class MaterialFactory(private val engine: Engine) {
     fun getDefaultMaterial(): Material {
         defaultMaterial?.let { return it }
 
-        // Use Filament's default material (plain lit surface)
-        val material = Material.Builder()
-            .build(engine)
+        val material = materialBuilder(engine)
         defaultMaterial = material
         return material
     }
 
     /**
-     * Creates a colored material instance.
+     * Creates an explicit custom-colored material instance.
+     * Custom color instances preserve their explicit RGBA parameters across [updateTheme].
      */
     fun createColorInstance(r: Float, g: Float, b: Float, a: Float = 1f): MaterialInstance {
         val key = "color_${r}_${g}_${b}_$a"
-        instanceCache[key]?.let { return it }
+        customInstanceCache[key]?.let { return it }
 
         val instance = getDefaultMaterial().createInstance()
         instance.setParameter("baseColor", r, g, b, a)
         instance.setParameter("roughness", 0.6f)
         instance.setParameter("metallic", 0.0f)
-        instanceCache[key] = instance
+        customInstanceCache[key] = instance
         return instance
     }
 
     /**
-     * Creates a grid material instance (light gray for the ground grid).
+     * Creates a custom catalog/painted material instance that preserves its custom parameters
+     * and ignores automatic theme updates until the entity is reset to a default material.
      */
-    fun createGridInstance(): MaterialInstance {
-        return createColorInstance(0.75f, 0.78f, 0.80f)
+    fun createCustomMaterialInstance(materialRef: String): MaterialInstance {
+        val key = "custom_$materialRef"
+        customInstanceCache[key]?.let { return it }
+
+        val color = parseHexRgbaOrNull(materialRef) ?: deriveCatalogColor(materialRef)
+        val instance = getDefaultMaterial().createInstance()
+        instance.setParameter("baseColor", color.r, color.g, color.b, color.a)
+        instance.setParameter("roughness", 0.6f)
+        instance.setParameter("metallic", 0.0f)
+        customInstanceCache[key] = instance
+        return instance
     }
 
     /**
-     * Gets a color for a given object type.
+     * Creates a grid material instance bound to the Ktheme `outlineVariant` token.
      */
-    fun colorForType(type: String): MaterialInstance = when (type) {
-        "wall" -> createColorInstance(0.85f, 0.83f, 0.78f) // warm beige
-        "floor" -> createColorInstance(0.72f, 0.58f, 0.42f) // wood brown
-        "room" -> createColorInstance(0.90f, 0.90f, 0.85f) // off-white
-        "furniture" -> createColorInstance(0.55f, 0.55f, 0.65f) // blue-gray
-        "door" -> createColorInstance(0.60f, 0.45f, 0.30f) // dark wood
-        "window" -> createColorInstance(0.75f, 0.85f, 0.95f, 0.6f) // translucent blue
-        "staircase" -> createColorInstance(0.65f, 0.55f, 0.40f) // medium wood
-        else -> createColorInstance(0.7f, 0.7f, 0.7f) // neutral gray
+    fun createGridInstance(): MaterialInstance {
+        return getOrCreateRoleInstance(ROLE_GRID, roughness = 0.6f)
+    }
+
+    /**
+     * Gets a theme-bound material instance for a given 3D object surface role.
+     */
+    fun colorForType(type: String): MaterialInstance {
+        val role = normalizeRole(type)
+        val roughness = if (role == ROLE_TERRAIN) 0.8f else 0.6f
+        return getOrCreateRoleInstance(role, roughness = roughness)
     }
 
     /**
@@ -123,42 +297,275 @@ class MaterialFactory(private val engine: Engine) {
         roughness: Float = 0.5f,
     ): MaterialInstance {
         val key = "door_${panelColorHex}_${frameColorHex}_${metallic}_$roughness"
-        instanceCache[key]?.let { return it }
+        doorInstanceCache[key]?.let { return it.instance }
 
         val instance = getDefaultMaterial().createInstance()
-        val (pr, pg, pb) = parseHexColor(panelColorHex) ?: Triple(0.60f, 0.45f, 0.30f)
-        val (fr, fg, fb) = parseHexColor(frameColorHex) ?: Triple(pr, pg, pb)
+        val parsedPanel = parseHexRgbaOrNull(panelColorHex)
+        val parsedFrame = parseHexRgbaOrNull(frameColorHex)
+        val panelColor = parsedPanel ?: activePalette.door
+        val frameColor = parsedFrame ?: panelColor
 
         try {
-            instance.setParameter("baseColor", pr, pg, pb, 1.0f)
-            instance.setParameter("frameColorOverride", fr, fg, fb, 1.0f)
+            instance.setParameter("baseColor", panelColor.r, panelColor.g, panelColor.b, panelColor.a)
+            instance.setParameter("frameColorOverride", frameColor.r, frameColor.g, frameColor.b, frameColor.a)
             instance.setParameter("metallic", metallic)
             instance.setParameter("roughness", roughness)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Ignore missing parameter errors on default materials
         }
 
-        instanceCache[key] = instance
+        doorInstanceCache[key] = DoorMaterialEntry(
+            instance = instance,
+            hasCustomPanelColor = parsedPanel != null,
+            hasCustomFrameColor = parsedFrame != null,
+        )
         return instance
     }
 
-    private fun parseHexColor(hex: String?): Triple<Float, Float, Float>? {
-        if (hex.isNullOrBlank() || !hex.startsWith("#")) return null
-        val clean = hex.removePrefix("#")
-        if (clean.length != 6 && clean.length != 8) return null
+    /**
+     * Updates cached theme-bound [MaterialInstance] `baseColor` parameters in place from a
+     * Compose Material 3 [ComposeColorScheme] without re-allocating mesh geometry.
+     */
+    fun updateTheme(colorScheme: ComposeColorScheme) {
+        applyPaletteUpdate(SurfaceThemePalette.fromComposeColorScheme(colorScheme))
+    }
+
+    /**
+     * Updates cached theme-bound [MaterialInstance] `baseColor` parameters in place from a
+     * Ktheme [KthemeColorScheme] without re-allocating mesh geometry.
+     */
+    fun updateTheme(colorScheme: KthemeColorScheme) {
+        applyPaletteUpdate(SurfaceThemePalette.fromKthemeColorScheme(colorScheme))
+    }
+
+    /**
+     * Updates cached theme-bound [MaterialInstance] `baseColor` parameters in place from
+     * [KthemeSemanticColors] without re-allocating mesh geometry.
+     */
+    fun updateTheme(semanticColors: KthemeSemanticColors) {
+        applyPaletteUpdate(SurfaceThemePalette.fromSemanticColors(semanticColors))
+    }
+
+    private fun applyPaletteUpdate(newPalette: SurfaceThemePalette) {
+        if (isDestroyed || !engine.isValid) return
+        activePalette = newPalette
+
+        val invalidRoles = mutableListOf<String>()
+        for ((role, instance) in roleInstanceCache) {
+            if (!isInstanceValid(instance)) {
+                invalidRoles += role
+                continue
+            }
+            safeSetBaseColor(instance, resolveColorForRole(role))
+        }
+        invalidRoles.forEach { roleInstanceCache.remove(it) }
+
+        val invalidTerrains = mutableListOf<MaterialInstance>()
+        val terrainColor = activePalette.terrain
+        for (instance in terrainInstances) {
+            if (!isInstanceValid(instance)) {
+                invalidTerrains += instance
+                continue
+            }
+            safeSetBaseColor(instance, terrainColor)
+        }
+        terrainInstances.removeAll(invalidTerrains.toSet())
+
+        val invalidDoors = mutableListOf<String>()
+        val doorColor = activePalette.door
+        for ((key, entry) in doorInstanceCache) {
+            if (!isInstanceValid(entry.instance)) {
+                invalidDoors += key
+                continue
+            }
+            if (!entry.hasCustomPanelColor) {
+                safeSetBaseColor(entry.instance, doorColor)
+                if (!entry.hasCustomFrameColor) {
+                    try {
+                        entry.instance.setParameter(
+                            "frameColorOverride",
+                            doorColor.r,
+                            doorColor.g,
+                            doorColor.b,
+                            doorColor.a,
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+        invalidDoors.forEach { doorInstanceCache.remove(it) }
+    }
+
+    private fun getOrCreateRoleInstance(role: String, roughness: Float): MaterialInstance {
+        roleInstanceCache[role]?.let { cached ->
+            if (isInstanceValid(cached)) {
+                return cached
+            }
+            roleInstanceCache.remove(role)
+        }
+
+        val color = resolveColorForRole(role)
+        val instance = getDefaultMaterial().createInstance()
+        instance.setParameter("baseColor", color.r, color.g, color.b, color.a)
+        instance.setParameter("roughness", roughness)
+        instance.setParameter("metallic", 0.0f)
+        roleInstanceCache[role] = instance
+        return instance
+    }
+
+    private fun isInstanceValid(instance: MaterialInstance): Boolean {
         return try {
-            val r = clean.substring(0, 2).toInt(16) / 255.0f
-            val g = clean.substring(2, 4).toInt(16) / 255.0f
-            val b = clean.substring(4, 6).toInt(16) / 255.0f
-            Triple(r, g, b)
-        } catch (e: Exception) {
-            null
+            instance.nativeObject
+            true
+        } catch (_: IllegalStateException) {
+            false
+        }
+    }
+
+    private fun safeSetBaseColor(instance: MaterialInstance, color: RgbaColor) {
+        try {
+            instance.setParameter("baseColor", color.r, color.g, color.b, color.a)
+        } catch (_: IllegalStateException) {
+            // Guard against destroyed MaterialInstance native pointer races
         }
     }
 
     fun destroy() {
-        instanceCache.values.forEach { engine.destroyMaterialInstance(it) }
-        instanceCache.clear()
-        defaultMaterial?.let { engine.destroyMaterial(it) }
+        if (isDestroyed) return
+        isDestroyed = true
+
+        val allInstances = LinkedHashSet<MaterialInstance>().apply {
+            addAll(roleInstanceCache.values)
+            addAll(terrainInstances)
+            addAll(doorInstanceCache.values.map { it.instance })
+            addAll(customInstanceCache.values)
+        }
+
+        if (engine.isValid) {
+            for (instance in allInstances) {
+                if (isInstanceValid(instance)) {
+                    try {
+                        engine.destroyMaterialInstance(instance)
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+            defaultMaterial?.let { mat ->
+                try {
+                    engine.destroyMaterial(mat)
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        roleInstanceCache.clear()
+        terrainInstances.clear()
+        doorInstanceCache.clear()
+        customInstanceCache.clear()
+        defaultMaterial = null
+    }
+
+    companion object {
+        const val WINDOW_DEFAULT_ALPHA = 0.6f
+
+        private const val ROLE_TERRAIN = "terrain"
+        private const val ROLE_GRID = "grid"
+        private const val ROLE_WALL = "wall"
+        private const val ROLE_FLOOR = "floor"
+        private const val ROLE_ROOM = "room"
+        private const val ROLE_FURNITURE = "furniture"
+        private const val ROLE_DOOR = "door"
+        private const val ROLE_WINDOW = "window"
+        private const val ROLE_STAIRCASE = "staircase"
+        private const val ROLE_DEFAULT = "default"
+
+        val FALLBACK_NEUTRAL = RgbaColor(0.7f, 0.7f, 0.7f, 1.0f)
+
+        private val DEFAULT_MATERIAL_REFS = setOf(
+            "",
+            "default",
+            "paint/white",
+            "floor/wood-oak",
+            "room/default",
+            "fabric/gray",
+            "wood/oak",
+            "glass/clear",
+            ROLE_WALL,
+            ROLE_FLOOR,
+            ROLE_ROOM,
+            ROLE_FURNITURE,
+            ROLE_DOOR,
+            ROLE_WINDOW,
+            ROLE_STAIRCASE,
+        )
+
+        /**
+         * Returns true when [materialRef] refers to a built-in default surface role rather than
+         * a user-applied catalog override.
+         */
+        fun isDefaultMaterialRef(materialRef: String?): Boolean {
+            if (materialRef == null) return true
+            return materialRef.trim().lowercase() in DEFAULT_MATERIAL_REFS
+        }
+
+        /**
+         * Converts a hex string (`#RRGGBB`, `RRGGBB`, `#AARRGGBB`, `AARRGGBB`, `#RGB`) into
+         * normalized float `(r, g, b, a)` components, falling back to [fallback] if malformed.
+         */
+        fun hexToRgba(hex: String?, fallback: RgbaColor = FALLBACK_NEUTRAL): RgbaColor {
+            return parseHexRgbaOrNull(hex) ?: fallback
+        }
+
+        /**
+         * Parses a hex color string into normalized float `(r, g, b, a)` or null if invalid.
+         */
+        fun parseHexRgbaOrNull(hex: String?): RgbaColor? {
+            if (hex.isNullOrBlank()) return null
+            val trimmed = hex.trim()
+            val clean = trimmed.removePrefix("#")
+            val normalized = when (clean.length) {
+                3 -> buildString(7) {
+                    append('#')
+                    for (ch in clean) {
+                        append(ch)
+                        append(ch)
+                    }
+                }
+                6, 8 -> "#$clean"
+                else -> return null
+            }
+            return try {
+                val colorInt = ColorUtils.hexToColorInt(normalized)
+                val a = ((colorInt ushr 24) and 0xFF) / 255.0f
+                val r = ((colorInt ushr 16) and 0xFF) / 255.0f
+                val g = ((colorInt ushr 8) and 0xFF) / 255.0f
+                val b = (colorInt and 0xFF) / 255.0f
+                RgbaColor(r = r, g = g, b = b, a = a)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun normalizeRole(type: String): String = when (type.trim().lowercase()) {
+            "terrain" -> ROLE_TERRAIN
+            "grid" -> ROLE_GRID
+            "wall", "walls" -> ROLE_WALL
+            "floor", "floors" -> ROLE_FLOOR
+            "room" -> ROLE_ROOM
+            "furniture" -> ROLE_FURNITURE
+            "door", "doors" -> ROLE_DOOR
+            "window", "windows" -> ROLE_WINDOW
+            "staircase", "stairs" -> ROLE_STAIRCASE
+            else -> ROLE_DEFAULT
+        }
+
+        private fun deriveCatalogColor(materialRef: String): RgbaColor {
+            val hash = abs(materialRef.hashCode())
+            val r = (0x40 + (hash and 0x7F)) / 255.0f
+            val g = (0x40 + ((hash shr 7) and 0x7F)) / 255.0f
+            val b = (0x40 + ((hash shr 14) and 0x7F)) / 255.0f
+            return RgbaColor(r = r, g = g, b = b, a = 1.0f)
+        }
     }
 }
