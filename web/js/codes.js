@@ -172,7 +172,7 @@ export function daylight(state, room) {
 }
 
 /** NEC 210.52(A)-style wall coverage: every wall space >= 24" needs an outlet within 72" of every point. */
-export function outletSegments(state, room) {
+function outletSegments(state, room) {
   const segs = [];
   const walls = getRoomWallKeys(room);
   for (const wall of walls) {
@@ -205,7 +205,7 @@ export function outletSegments(state, room) {
 }
 
 /** Stairs rooms on the adjacent levels whose footprint overlaps this one by >= 60%. */
-export function stairPartners(state, room) {
+function stairPartners(state, room) {
   if (room.type !== 'stairs') return [];
   return state.rooms.filter(
     (o) =>
