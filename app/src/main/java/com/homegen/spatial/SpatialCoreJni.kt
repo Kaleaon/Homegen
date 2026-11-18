@@ -1,6 +1,12 @@
 package com.homegen.spatial
 
+import android.annotation.SuppressLint
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
+import java.lang.ref.Cleaner
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -16,26 +22,67 @@ data class ViolationResult(
 
 data class Point2D(val x: Double, val y: Double)
 
-class SpatialCoreJni : AutoCloseable {
+@SuppressLint("NewApi")
+class SpatialCoreJni internal constructor(
+    createHandle: () -> Long,
+    destroyHandle: (Long) -> Unit,
+) : AutoCloseable {
 
-    private var nativeHandle: Long = 0L
+    constructor() : this(
+        createHandle = defaultCreateHandle,
+        destroyHandle = defaultDestroyHandle,
+    )
+
+    private class NativeCleanupState(
+        initialHandle: Long,
+        private val destroyFn: (Long) -> Unit,
+    ) : Runnable {
+        private val handleRef = AtomicLong(initialHandle)
+
+        var nativeHandle: Long
+            get() = handleRef.get()
+            set(value) {
+                handleRef.set(value)
+            }
+
+        override fun run() {
+            val handleToDestroy = handleRef.getAndSet(0L)
+            if (handleToDestroy != 0L) {
+                destroyFn(handleToDestroy)
+            }
+        }
+    }
+
+    private val cleanupState: NativeCleanupState
+    private val cleanable: Cleaner.Cleanable?
+
+    private var nativeHandle: Long
+        get() = cleanupState.nativeHandle
+        set(value) {
+            cleanupState.nativeHandle = value
+        }
 
     // Fallback state if native is absent
     private var fallbackLotBoundary: List<Point2D> = emptyList()
     private var fallbackInnerBuildable: List<Point2D> = emptyList()
-    private var fallbackCrs: String = "EPSG:4326"
+    private var fallbackCrs: String = DEFAULT_CRS
 
     val crs: String
         get() {
-            if (isNativeLoaded && nativeHandle != 0L) {
-                return nativeGetCrs(nativeHandle)
+            val currentHandle = nativeHandle
+            if (isNativeLoaded && currentHandle != 0L) {
+                return nativeGetCrs(currentHandle)
             }
             return fallbackCrs
         }
 
     init {
-        if (isNativeLoaded) {
-            nativeHandle = nativeCreateEngine()
+        val createdHandle = createHandle()
+        cleanupState = NativeCleanupState(createdHandle, destroyHandle)
+        cleanable = if (createdHandle != 0L) {
+            cleaner?.register(this, cleanupState)
+        } else {
+            null
         }
     }
 
@@ -43,56 +90,67 @@ class SpatialCoreJni : AutoCloseable {
         get() = nativeHandle
 
     fun loadJsonBuffer(buffer: ByteBuffer, length: Int): Boolean {
-        if (isNativeLoaded && nativeHandle != 0L) {
-            return nativeLoadJsonBuffer(nativeHandle, buffer, length)
+        val currentHandle = nativeHandle
+        if (isNativeLoaded && currentHandle != 0L) {
+            return nativeLoadJsonBuffer(currentHandle, buffer, length)
         }
-        val bytes = ByteArray(length)
+        if (length <= 0) {
+            loadJsonStringFallback("")
+            return false
+        }
         val dup = buffer.duplicate()
-        dup.get(bytes, 0, length)
+        val safeLength = length.coerceAtMost(dup.remaining())
+        val bytes = ByteArray(safeLength)
+        dup.get(bytes, 0, safeLength)
         val jsonStr = String(bytes, Charsets.UTF_8)
         return loadJsonStringFallback(jsonStr)
     }
 
     fun loadJsonString(jsonStr: String): Boolean {
-        if (isNativeLoaded && nativeHandle != 0L) {
-            return nativeLoadJsonString(nativeHandle, jsonStr)
+        val currentHandle = nativeHandle
+        if (isNativeLoaded && currentHandle != 0L) {
+            return nativeLoadJsonString(currentHandle, jsonStr)
         }
         return loadJsonStringFallback(jsonStr)
     }
 
     fun querySetbackViolations(roomCoords: DoubleArray): List<ViolationResult> {
-        if (isNativeLoaded && nativeHandle != 0L) {
-            val jsonStr = nativeQuerySetbackViolations(nativeHandle, roomCoords)
+        val currentHandle = nativeHandle
+        if (isNativeLoaded && currentHandle != 0L) {
+            val jsonStr = nativeQuerySetbackViolations(currentHandle, roomCoords)
             return parseViolationJson(jsonStr)
         }
         return querySetbackViolationsFallback(roomCoords)
     }
 
     override fun close() {
-        if (isNativeLoaded && nativeHandle != 0L) {
-            nativeDestroyEngine(nativeHandle)
-            nativeHandle = 0L
+        val registeredCleanable = cleanable
+        if (registeredCleanable != null) {
+            registeredCleanable.clean()
+        } else {
+            cleanupState.run()
         }
     }
 
     private fun loadJsonStringFallback(jsonStr: String): Boolean {
+        fallbackLotBoundary = emptyList()
+        fallbackInnerBuildable = emptyList()
         fallbackCrs = extractCrsFallback(jsonStr)
+
         val lotPts = extractNumbersFallback(jsonStr, "lotBoundary")
         if (lotPts.size >= 6) {
-            val pts = mutableListOf<Point2D>()
-            for (i in 0 until lotPts.size - 1 step 2) {
-                pts.add(Point2D(lotPts[i], lotPts[i + 1]))
+            val pts = toPolygonPoints(lotPts)
+            if (pts.size >= 3) {
+                fallbackLotBoundary = pts
             }
-            fallbackLotBoundary = pts
         }
 
         val innerPts = extractNumbersFallback(jsonStr, "innerPoints")
         if (innerPts.size >= 6) {
-            val pts = mutableListOf<Point2D>()
-            for (i in 0 until innerPts.size - 1 step 2) {
-                pts.add(Point2D(innerPts[i], innerPts[i + 1]))
+            val pts = toPolygonPoints(innerPts)
+            if (pts.size >= 3) {
+                fallbackInnerBuildable = pts
             }
-            fallbackInnerBuildable = pts
         }
 
         if (fallbackInnerBuildable.isEmpty() && fallbackLotBoundary.size >= 3) {
@@ -156,6 +214,25 @@ class SpatialCoreJni : AutoCloseable {
     }
 
     companion object {
+        private const val DEFAULT_CRS = "EPSG:4326"
+
+        @SuppressLint("NewApi")
+        private val cleaner: Cleaner? = try {
+            Cleaner.create()
+        } catch (_: LinkageError) {
+            null
+        }
+
+        private val defaultCreateHandle: () -> Long = {
+            if (isNativeLoaded) nativeCreateEngine() else 0L
+        }
+
+        private val defaultDestroyHandle: (Long) -> Unit = { handle ->
+            if (isNativeLoaded && handle != 0L) {
+                nativeDestroyEngine(handle)
+            }
+        }
+
         var isNativeLoaded = false
             private set
 
@@ -214,52 +291,131 @@ class SpatialCoreJni : AutoCloseable {
             return px to py
         }
 
-        private fun extractCrsFallback(content: String): String {
-            val lower = content.lowercase()
+        private fun toPolygonPoints(coords: List<Double>): List<Point2D> {
+            val pts = mutableListOf<Point2D>()
+            for (i in 0 until coords.size - 1 step 2) {
+                pts.add(Point2D(coords[i], coords[i + 1]))
+            }
+            if (pts.size > 3 && pts.first() == pts.last()) {
+                pts.removeAt(pts.lastIndex)
+            }
+            return pts
+        }
 
-            val urnPos = lower.indexOf("urn:ogc:def:crs:epsg:")
+        private fun parseJsonRoot(raw: String): Any? {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) return null
+            return if (trimmed.startsWith("[")) {
+                JSONArray(trimmed)
+            } else {
+                JSONObject(trimmed)
+            }
+        }
+
+        internal fun extractCrsFallback(content: String): String {
+            return try {
+                val root = parseJsonRoot(content) ?: return DEFAULT_CRS
+                extractCrsFromJsonNode(root) ?: DEFAULT_CRS
+            } catch (_: JSONException) {
+                DEFAULT_CRS
+            }
+        }
+
+        private fun extractCrsFromJsonNode(node: Any?): String? {
+            when (node) {
+                is JSONObject -> {
+                    if (node.has("crs") && !node.isNull("crs")) {
+                        parseCrsElement(node.opt("crs"))?.let { return it }
+                    }
+                    node.optJSONObject("spatial")?.let { spatialObj ->
+                        extractCrsFromJsonNode(spatialObj)?.let { return it }
+                    }
+                    val keys = node.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        if (k == "crs" || k == "spatial") continue
+                        val child = node.opt(k)
+                        if (child is JSONObject || child is JSONArray) {
+                            extractCrsFromJsonNode(child)?.let { return it }
+                        }
+                    }
+                }
+                is JSONArray -> {
+                    for (i in 0 until node.length()) {
+                        val item = node.opt(i)
+                        if (item is JSONObject || item is JSONArray) {
+                            extractCrsFromJsonNode(item)?.let { return it }
+                        }
+                    }
+                }
+            }
+            return null
+        }
+
+        private fun parseCrsElement(crsValue: Any?): String? {
+            return when (crsValue) {
+                null, JSONObject.NULL -> null
+                is Number -> normalizeEpsgString(crsValue.toLong().toString(), allowBareDigits = true)
+                is String -> normalizeEpsgString(crsValue, allowBareDigits = true)
+                is JSONObject -> {
+                    val props = crsValue.optJSONObject("properties")
+                    if (props != null) {
+                        for (propKey in listOf("name", "code", "epsg", "srid", "href")) {
+                            if (props.has(propKey) && !props.isNull(propKey)) {
+                                parseCrsElement(props.opt(propKey))?.let { return it }
+                            }
+                        }
+                    }
+                    for (directKey in listOf("name", "code", "epsg", "srid")) {
+                        if (crsValue.has(directKey) && !crsValue.isNull(directKey)) {
+                            parseCrsElement(crsValue.opt(directKey))?.let { return it }
+                        }
+                    }
+                    null
+                }
+                else -> null
+            }
+        }
+
+        private fun normalizeEpsgString(raw: String, allowBareDigits: Boolean): String? {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) return null
+            val lower = trimmed.lowercase()
+
+            if (lower.contains("crs84")) {
+                return DEFAULT_CRS
+            }
+
+            val urnPrefix = "urn:ogc:def:crs:epsg:"
+            val urnPos = lower.indexOf(urnPrefix)
             if (urnPos != -1) {
-                var idx = urnPos + "urn:ogc:def:crs:epsg:".length
-                while (idx < content.length && content[idx] == ':') idx++
+                val tail = trimmed.substring(urnPos + urnPrefix.length)
+                val codeCandidate = tail.substringAfterLast(':').trim()
+                if (codeCandidate.isNotEmpty() && codeCandidate.all { it.isDigit() }) {
+                    return "EPSG:$codeCandidate"
+                }
+            }
+
+            val epsgIdx = lower.indexOf("epsg")
+            if (epsgIdx != -1) {
+                var idx = epsgIdx + "epsg".length
+                while (idx < trimmed.length && (trimmed[idx] == ':' || trimmed[idx] == '/' || trimmed[idx] == '#' || trimmed[idx].isWhitespace())) {
+                    idx++
+                }
                 val sb = StringBuilder()
-                while (idx < content.length && content[idx].isDigit()) {
-                    sb.append(content[idx++])
+                while (idx < trimmed.length && trimmed[idx].isDigit()) {
+                    sb.append(trimmed[idx++])
                 }
                 if (sb.isNotEmpty()) {
                     return "EPSG:$sb"
                 }
             }
 
-            val epsgPos = lower.indexOf("epsg:")
-            if (epsgPos != -1) {
-                var idx = epsgPos + "epsg:".length
-                while (idx < content.length && content[idx] == ':') idx++
-                val sb = StringBuilder()
-                while (idx < content.length && content[idx].isDigit()) {
-                    sb.append(content[idx++])
-                }
-                if (sb.isNotEmpty()) {
-                    return "EPSG:$sb"
-                }
+            if (allowBareDigits && trimmed.all { it.isDigit() }) {
+                return "EPSG:$trimmed"
             }
 
-            val crsKeyPos = lower.indexOf("\"crs\"")
-            if (crsKeyPos != -1) {
-                val codePos = lower.indexOf("\"code\"", crsKeyPos)
-                if (codePos != -1 && codePos - crsKeyPos < 200) {
-                    var idx = codePos + "\"code\"".length
-                    while (idx < content.length && (content[idx].isWhitespace() || content[idx] == ':' || content[idx] == '"')) idx++
-                    val sb = StringBuilder()
-                    while (idx < content.length && content[idx].isDigit()) {
-                        sb.append(content[idx++])
-                    }
-                    if (sb.isNotEmpty()) {
-                        return "EPSG:$sb"
-                    }
-                }
-            }
-
-            return "EPSG:4326"
+            return null
         }
 
         private fun computeVariableBuffersFallback(flatSegmentData: DoubleArray): DoubleArray {
@@ -359,39 +515,275 @@ class SpatialCoreJni : AutoCloseable {
             return inside
         }
 
-        private fun extractNumbersFallback(str: String, key: String): List<Double> {
-            val idx = str.indexOf("\"$key\"")
-            if (idx == -1) return emptyList()
-            val start = str.indexOf('[', idx)
-            if (start == -1) return emptyList()
-            val end = str.indexOf(']', start)
-            if (end == -1) return emptyList()
+        internal fun extractNumbersFallback(str: String, key: String): List<Double> {
+            return try {
+                val root = parseJsonRoot(str) ?: return emptyList()
+                findKeyCoordinates(root, key)
+                    ?: extractGeoJsonCoordinatesForKey(root, key)
+                    ?: emptyList()
+            } catch (_: JSONException) {
+                emptyList()
+            }
+        }
 
-            val arrStr = str.substring(start + 1, end)
-            return arrStr.split(",")
-                .map { it.replace("\"", "").replace("[", "").replace("]", "").trim() }
-                .mapNotNull { it.toDoubleOrNull() }
+        private fun findKeyCoordinates(node: Any?, key: String): List<Double>? {
+            when (node) {
+                is JSONObject -> {
+                    if (node.has(key) && !node.isNull(key)) {
+                        val extracted = extractCoordinatesFromValue(node.opt(key))
+                        if (extracted.isNotEmpty()) {
+                            return extracted
+                        }
+                    }
+                    node.optJSONObject("spatial")?.let { spatialObj ->
+                        findKeyCoordinates(spatialObj, key)?.let { return it }
+                    }
+                    val keys = node.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        if (k == key || k == "spatial") continue
+                        val child = node.opt(k)
+                        if (child is JSONObject || child is JSONArray) {
+                            findKeyCoordinates(child, key)?.let { return it }
+                        }
+                    }
+                }
+                is JSONArray -> {
+                    for (i in 0 until node.length()) {
+                        val item = node.opt(i)
+                        if (item is JSONObject || item is JSONArray) {
+                            findKeyCoordinates(item, key)?.let { return it }
+                        }
+                    }
+                }
+            }
+            return null
+        }
+
+        private fun extractGeoJsonCoordinatesForKey(node: Any?, key: String): List<Double>? {
+            if (node !is JSONObject) return null
+
+            node.optJSONObject("spatial")?.let { spatialObj ->
+                extractGeoJsonCoordinatesForKey(spatialObj, key)?.let { return it }
+            }
+
+            node.optJSONArray("layers")?.let { layers ->
+                for (i in 0 until layers.length()) {
+                    val layer = layers.optJSONObject(i) ?: continue
+                    val layerType = layer.optString("type", "")
+                    if (key == "lotBoundary" && (layerType == "gisLotLine" || layerType == "lotLine")) {
+                        val pts = extractCoordinatesFromValue(layer.opt("points") ?: layer.opt("polygon"))
+                        if (pts.isNotEmpty()) return pts
+                    } else if (key == "innerPoints" && (layerType == "gisSetbackBuffer" || layerType == "setback")) {
+                        val pts = extractCoordinatesFromValue(layer.opt("innerPoints") ?: layer.opt("innerPolygon"))
+                        if (pts.isNotEmpty()) return pts
+                    }
+                }
+            }
+
+            return when (node.optString("type", "")) {
+                "FeatureCollection" -> {
+                    val features = node.optJSONArray("features") ?: return null
+                    extractFromFeatureArray(features, key)
+                }
+                "Feature" -> {
+                    if (key == "innerPoints" && !isInnerSetbackFeature(node)) {
+                        return null
+                    }
+                    extractGeometryCoordinates(node.optJSONObject("geometry"))
+                }
+                "Polygon", "MultiPolygon", "LineString", "MultiLineString", "MultiPoint", "Point" -> {
+                    if (key == "lotBoundary") {
+                        extractGeometryCoordinates(node)
+                    } else {
+                        null
+                    }
+                }
+                else -> null
+            }
+        }
+
+        private fun extractFromFeatureArray(features: JSONArray, key: String): List<Double>? {
+            if (key == "innerPoints") {
+                for (i in 0 until features.length()) {
+                    val feat = features.optJSONObject(i) ?: continue
+                    if (isInnerSetbackFeature(feat)) {
+                        val coords = extractGeometryCoordinates(feat.optJSONObject("geometry"))
+                        if (!coords.isNullOrEmpty()) return coords
+                    }
+                }
+                return null
+            }
+
+            if (key == "lotBoundary") {
+                for (i in 0 until features.length()) {
+                    val feat = features.optJSONObject(i) ?: continue
+                    if (isLotFeature(feat)) {
+                        val coords = extractGeometryCoordinates(feat.optJSONObject("geometry"))
+                        if (!coords.isNullOrEmpty()) return coords
+                    }
+                }
+                for (i in 0 until features.length()) {
+                    val feat = features.optJSONObject(i) ?: continue
+                    if (!isInnerSetbackFeature(feat)) {
+                        val coords = extractGeometryCoordinates(feat.optJSONObject("geometry"))
+                        if (!coords.isNullOrEmpty()) return coords
+                    }
+                }
+            }
+            return null
+        }
+
+        private fun featureTagTokens(feature: JSONObject): List<String> {
+            val tokens = mutableListOf<String>()
+            val idStr = feature.optString("id", "")
+            if (idStr.isNotEmpty()) tokens.add(idStr.lowercase())
+            val props = feature.optJSONObject("properties")
+            if (props != null) {
+                for (field in listOf("layer", "type", "role", "kind", "name", "id")) {
+                    val v = props.optString(field, "")
+                    if (v.isNotEmpty()) tokens.add(v.lowercase())
+                }
+            }
+            return tokens
+        }
+
+        private fun isLotFeature(feature: JSONObject): Boolean {
+            val lotMarkers = setOf("lot", "lotboundary", "lot-boundary", "lot_boundary", "lotline", "gislotline", "parcel", "property")
+            return featureTagTokens(feature).any { token -> token in lotMarkers }
+        }
+
+        private fun isInnerSetbackFeature(feature: JSONObject): Boolean {
+            val innerMarkers = setOf(
+                "innerpoints",
+                "inner-points",
+                "inner_points",
+                "innerbuildable",
+                "inner-buildable",
+                "buildable",
+                "setback",
+                "setback-buffer",
+                "gissetbackbuffer",
+            )
+            return featureTagTokens(feature).any { token -> token in innerMarkers }
+        }
+
+        private fun extractGeometryCoordinates(geometry: JSONObject?): List<Double>? {
+            if (geometry == null) return null
+            val geomType = geometry.optString("type", "")
+            val coords = geometry.optJSONArray("coordinates") ?: return null
+            return when (geomType) {
+                "Polygon" -> {
+                    val exteriorRing = coords.optJSONArray(0) ?: coords
+                    extractCoordinatesFromArray(exteriorRing)
+                }
+                "MultiPolygon" -> {
+                    val firstPolygon = coords.optJSONArray(0)
+                    val exteriorRing = firstPolygon?.optJSONArray(0) ?: firstPolygon ?: coords
+                    extractCoordinatesFromArray(exteriorRing)
+                }
+                else -> extractCoordinatesFromArray(coords)
+            }
+        }
+
+        private fun extractCoordinatesFromValue(value: Any?): List<Double> {
+            return when (value) {
+                null, JSONObject.NULL -> emptyList()
+                is JSONArray -> extractCoordinatesFromArray(value)
+                is JSONObject -> {
+                    if (value.has("geometry")) {
+                        extractGeometryCoordinates(value.optJSONObject("geometry")) ?: emptyList()
+                    } else if (value.has("coordinates")) {
+                        extractGeometryCoordinates(value) ?: extractCoordinatesFromValue(value.opt("coordinates"))
+                    } else if (value.has("points")) {
+                        extractCoordinatesFromValue(value.opt("points"))
+                    } else {
+                        extractPointObjectCoords(value) ?: emptyList()
+                    }
+                }
+                else -> emptyList()
+            }
+        }
+
+        private fun extractCoordinatesFromArray(arr: JSONArray): List<Double> {
+            val len = arr.length()
+            if (len == 0) return emptyList()
+
+            val first = arr.opt(0)
+            if (first is JSONArray) {
+                if (first.length() > 0 && first.opt(0) is JSONArray) {
+                    return extractCoordinatesFromArray(first)
+                }
+                val result = mutableListOf<Double>()
+                for (i in 0 until len) {
+                    val sub = arr.optJSONArray(i) ?: continue
+                    val scalars = extractScalarNumbers(sub)
+                    if (scalars.size == 2 || scalars.size == 3) {
+                        result.add(scalars[0])
+                        result.add(scalars[1])
+                    } else {
+                        result.addAll(scalars)
+                    }
+                }
+                return result
+            }
+
+            if (first is JSONObject) {
+                val result = mutableListOf<Double>()
+                for (i in 0 until len) {
+                    val ptObj = arr.optJSONObject(i) ?: continue
+                    val pair = extractPointObjectCoords(ptObj)
+                    if (pair != null) {
+                        result.addAll(pair)
+                    }
+                }
+                return result
+            }
+
+            return extractScalarNumbers(arr)
+        }
+
+        private fun extractPointObjectCoords(obj: JSONObject): List<Double>? {
+            val x = toFiniteDouble(obj.opt("x") ?: obj.opt("lon") ?: obj.opt("lng"))
+            val y = toFiniteDouble(obj.opt("y") ?: obj.opt("lat"))
+            return if (x != null && y != null) listOf(x, y) else null
+        }
+
+        private fun extractScalarNumbers(arr: JSONArray): List<Double> {
+            val nums = mutableListOf<Double>()
+            for (i in 0 until arr.length()) {
+                toFiniteDouble(arr.opt(i))?.let { nums.add(it) }
+            }
+            return nums
+        }
+
+        private fun toFiniteDouble(value: Any?): Double? {
+            return when (value) {
+                is Number -> value.toDouble().takeIf { it.isFinite() }
+                is String -> value.trim().toDoubleOrNull()?.takeIf { it.isFinite() }
+                else -> null
+            }
         }
 
         private fun parseViolationJson(jsonStr: String): List<ViolationResult> {
             val list = mutableListOf<ViolationResult>()
-            if (jsonStr.contains("setback-clearance")) {
-                list.add(
-                    ViolationResult(
-                        type = "setback-clearance",
-                        featureId = "setback-buffer",
-                        msg = "Room vertex extends into setback buffer zone.",
-                    ),
-                )
-            }
-            if (jsonStr.contains("lot-boundary-exceeded")) {
-                list.add(
-                    ViolationResult(
-                        type = "lot-boundary-exceeded",
-                        featureId = "lot-boundary",
-                        msg = "Room extends outside property lot boundary.",
-                    ),
-                )
+            try {
+                val arr = JSONArray(jsonStr.trim())
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val type = obj.optString("type", "")
+                    if (type.isNotEmpty()) {
+                        list.add(
+                            ViolationResult(
+                                type = type,
+                                featureId = obj.optString("featureId", ""),
+                                msg = obj.optString("msg", ""),
+                            ),
+                        )
+                    }
+                }
+            } catch (_: JSONException) {
+                // Return empty list on invalid violation JSON
             }
             return list
         }
