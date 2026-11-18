@@ -3203,6 +3203,14 @@ canvas?.addEventListener('pointerleave', () => {
   preview = null;
   redraw();
 });
+export function parseRoomDimensionsInput(input) {
+  if (!input) return [];
+  return String(input)
+    .split(/[×x,]/i)
+    .map((segment) => M.parseDistanceInInches(segment, { defaultUnit: 'ft' }))
+    .filter((n) => n !== null && !isNaN(n) && n > 0);
+}
+
 canvas?.addEventListener('dblclick', (e) => {
   if (tool.kind === 'room' && interaction.canCloseRoom && interaction.canCloseRoom()) {
     handleCloseRoom();
@@ -3216,19 +3224,16 @@ canvas?.addEventListener('dblclick', (e) => {
       const currentFtW = (r.w / 12).toFixed(1);
       const currentFtH = (r.h / 12).toFixed(1);
       const input = prompt(
-        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or width in inches "144"):`,
+        `Enter new dimensions for ${r.name} in feet (width × depth, e.g. "12 × 10" or with units "144 in"):`,
         `${currentFtW} × ${currentFtH}`
       );
       if (input) {
-        const parts = input
-          .split(/[×x,]/)
-          .map((s) => parseFloat(s.trim()))
-          .filter((n) => !isNaN(n) && n > 0);
+        const parts = parseRoomDimensionsInput(input);
         if (parts.length >= 1) {
-          const rawWInches = parts[0] < 30 ? Math.round(parts[0] * 12) : Math.round(parts[0]);
+          const rawWInches = parts[0];
           let clamped;
           if (parts.length >= 2) {
-            const rawHInches = parts[1] < 30 ? Math.round(parts[1] * 12) : Math.round(parts[1]);
+            const rawHInches = parts[1];
             clamped = clampRoomDimensions(r, rawWInches, rawHInches);
           } else {
             const clampedW = clampRoomWidth(r, rawWInches, r.h);
@@ -5628,6 +5633,7 @@ if (typeof window !== 'undefined')
     selectTemplate,
     TEMPLATES,
     setTool,
+    parseRoomDimensionsInput,
     select,
     isSelected,
     getSelectionList,

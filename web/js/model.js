@@ -947,32 +947,106 @@ export function deserialize(text) {
   return s;
 }
 
-export function parseDistanceInInches(str) {
-  if (!str) return null;
-  str = String(str).trim().toLowerCase();
-  if (!str) return null;
-  if (str.includes('m') && !str.includes('ft')) {
-    if (str.includes('cm')) return parseFloat(str) * 0.393701;
-    return parseFloat(str) * 39.3701;
+const UNICODE_FRACTIONS = {
+  '¼': ' 1/4',
+  '½': ' 1/2',
+  '¾': ' 3/4',
+  '⅓': ' 1/3',
+  '⅔': ' 2/3',
+  '⅛': ' 1/8',
+  '⅜': ' 3/8',
+  '⅝': ' 5/8',
+  '⅞': ' 7/8',
+};
+
+const DISTANCE_NUM_PATTERN =
+  '(?:\\d+\\s*(?:\\s+|-)\\s*\\d+\\s*\\/\\s*\\d+|\\d+\\s*\\/\\s*\\d+|\\d+(?:\\.\\d+)?|\\.\\d+)';
+const FT_UNIT_PATTERN = "(?:'|feet(?![a-z])|foot(?![a-z])|ft(?:\\.(?!\\d))?(?![a-z]))";
+const IN_UNIT_PATTERN = '(?:"|inches(?![a-z])|inch(?![a-z])|in(?:\\.(?!\\d))?(?![a-z]))';
+
+const FT_IN_DISTANCE_RE = new RegExp(
+  `^(${DISTANCE_NUM_PATTERN})\\s*${FT_UNIT_PATTERN}(?:\\s*(?:-\\s*)?(${DISTANCE_NUM_PATTERN})\\s*(?:${IN_UNIT_PATTERN})?\\s*)?$`
+);
+const IN_ONLY_DISTANCE_RE = new RegExp(`^(${DISTANCE_NUM_PATTERN})\\s*${IN_UNIT_PATTERN}$`);
+const METRIC_DISTANCE_RE = new RegExp(
+  `^(${DISTANCE_NUM_PATTERN})\\s*(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|m|met(?:er|re)s?)$`
+);
+const UNITLESS_DISTANCE_RE = new RegExp(`^(${DISTANCE_NUM_PATTERN})$`);
+
+function parseNumericToken(raw) {
+  const s = raw.trim();
+  const mixedMatch = s.match(/^(\d+)\s*(?:\s+|-)\s*(\d+)\s*\/\s*(\d+)$/);
+  if (mixedMatch) {
+    const whole = parseInt(mixedMatch[1], 10);
+    const num = parseInt(mixedMatch[2], 10);
+    const den = parseInt(mixedMatch[3], 10);
+    if (den === 0) return NaN;
+    return whole + num / den;
   }
-  const hasFt = /'|ft|feet/.test(str);
-  const hasIn = /"|in|inches/.test(str);
-  if (hasFt) {
-    const ftMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:'|ft|feet)/);
-    const inMatch =
-      str.match(/(\d+(?:\.\d+)?)\s*(?:"|in|inches)/) ||
-      str.match(/(?:'|ft|feet)\s*(\d+(?:\.\d+)?)/);
-    const feet = ftMatch ? parseFloat(ftMatch[1]) : 0;
-    const inches = inMatch ? parseFloat(inMatch[1]) : 0;
+  const fracMatch = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fracMatch) {
+    const num = parseInt(fracMatch[1], 10);
+    const den = parseInt(fracMatch[2], 10);
+    if (den === 0) return NaN;
+    return num / den;
+  }
+  const val = Number(s);
+  return Number.isFinite(val) ? val : NaN;
+}
+
+export function parseDistanceInInches(str, { defaultUnit = null } = {}) {
+  if (str === null || str === undefined || str === '') return null;
+  if (typeof str === 'number' && (!Number.isFinite(str) || str <= 0)) return null;
+
+  let normalized = String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/[’‘′]/g, "'")
+    .replace(/[”“″]/g, '"')
+    .replace(/''/g, '"')
+    .replace(/[¼½¾⅓⅔⅛⅜⅝⅞]/g, (ch) => UNICODE_FRACTIONS[ch] || ch)
+    .trim();
+
+  if (!normalized || normalized.startsWith('-')) return null;
+  if (normalized.startsWith('+')) {
+    normalized = normalized.slice(1).trim();
+    if (!normalized) return null;
+  }
+
+  const metricMatch = normalized.match(METRIC_DISTANCE_RE);
+  if (metricMatch) {
+    const val = parseNumericToken(metricMatch[1]);
+    if (isNaN(val)) return null;
+    const unit = metricMatch[2];
+    if (unit === 'mm' || unit.startsWith('millimet')) return val * 0.0393701;
+    if (unit === 'cm' || unit.startsWith('centimet')) return val * 0.393701;
+    return val * 39.3701;
+  }
+
+  const ftInMatch = normalized.match(FT_IN_DISTANCE_RE);
+  if (ftInMatch) {
+    const feet = parseNumericToken(ftInMatch[1]);
+    const inches = ftInMatch[2] !== undefined ? parseNumericToken(ftInMatch[2]) : 0;
+    if (isNaN(feet) || isNaN(inches)) return null;
     return feet * 12 + inches;
   }
-  if (hasIn) {
-    const inMatch = str.match(/(\d+(?:\.\d+)?)/);
-    return inMatch ? parseFloat(inMatch[1]) : null;
+
+  const inMatch = normalized.match(IN_ONLY_DISTANCE_RE);
+  if (inMatch) {
+    const inches = parseNumericToken(inMatch[1]);
+    return isNaN(inches) ? null : inches;
   }
-  const num = parseFloat(str);
-  if (isNaN(num) || num <= 0) return null;
-  return num <= 50 ? num * 12 : num;
+
+  const unitlessMatch = normalized.match(UNITLESS_DISTANCE_RE);
+  if (unitlessMatch) {
+    const num = parseNumericToken(unitlessMatch[1]);
+    if (isNaN(num) || num <= 0) return null;
+    if (defaultUnit === 'ft') return num * 12;
+    if (defaultUnit === 'in') return num;
+    return num <= 50 ? num * 12 : num;
+  }
+
+  return null;
 }
 
 export function formatDistanceInInches(inches) {
