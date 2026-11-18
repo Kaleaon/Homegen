@@ -189,7 +189,8 @@ a:focus-visible {
 k-button,
 k-tab,
 k-card,
-k-input {
+k-input,
+k-kbd {
   display: inline-block;
 }
 * {
@@ -474,8 +475,11 @@ aside {
   position: absolute;
   left: 12px;
   bottom: 12px;
+  z-index: 30;
   max-width: min(560px, calc(100% - 24px));
   display: none;
+  align-items: center;
+  gap: var(--space-2);
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: var(--ktheme-text);
@@ -486,6 +490,33 @@ aside {
 #toast.err {
   background: var(--ktheme-critical);
   color: var(--ktheme-on-primary);
+}
+#toast .toast-msg {
+  flex: 1;
+  min-width: 0;
+}
+#toast .toast-dismiss {
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+}
+#toast .toast-dismiss:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: currentColor;
+}
+#toast .toast-dismiss:focus-visible {
+  outline: var(--focus-ring-width) solid currentColor;
+  outline-offset: var(--focus-ring-offset);
 }
 #inspector,
 #compliance {
@@ -972,6 +1003,15 @@ input.error {
 }
 
 /* Container styling migrated to .k-overlay-hud in overlays.css */
+.walkthrough-hud {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 24px);
+  width: max-content;
+  border-radius: var(--radius-lg);
+  gap: var(--space-2);
+  padding: 8px 14px;
+}
 .walkthrough-hud[hidden] {
   display: none !important;
 }
@@ -982,8 +1022,39 @@ input.error {
   align-items: center;
   gap: var(--space-1);
 }
+.walkthrough-hud .hud-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.walkthrough-hud .hud-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--ktheme-on-primary-container);
+  opacity: 0.9;
+}
+.walkthrough-hud select {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ktheme-on-primary-container);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  min-height: 26px;
+  min-width: 24px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.walkthrough-hud select:hover {
+  border-color: var(--ktheme-accent);
+}
+.walkthrough-hud select option {
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+}
 .walkthrough-hud .hud-keys {
   color: var(--ktheme-on-primary-container);
+  font-size: var(--font-size-sm);
 }
 .walkthrough-hud .hud-keys b {
   color: var(--ktheme-on-primary);
@@ -1000,13 +1071,50 @@ input.error {
   border-radius: var(--radius-lg);
   cursor: pointer;
   font-size: var(--font-size-sm);
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-1);
-  transition: background 0.15s;
+  min-width: 24px;
+  min-height: 26px;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 .walkthrough-hud button:hover {
   background: var(--ktheme-accent);
+}
+.walkthrough-hud .hud-preset-btn,
+.walkthrough-hud .hud-step-btn {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ktheme-on-primary-container);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+}
+.walkthrough-hud .hud-step-btn {
+  min-width: 26px;
+  padding: 3px 7px;
+}
+.walkthrough-hud .hud-preset-btn:hover,
+.walkthrough-hud .hud-step-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: var(--ktheme-accent);
+}
+.walkthrough-hud .hud-preset-btn.on,
+.walkthrough-hud .hud-preset-btn[aria-pressed='true'] {
+  background: var(--ktheme-accent);
+  color: var(--ktheme-on-primary);
+  border-color: var(--ktheme-accent);
+}
+.walkthrough-hud .hud-elev-label {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--ktheme-on-primary-container);
+  min-width: 78px;
+  text-align: center;
+  padding: 2px 4px;
 }
 #bar3d button.on {
   background: var(--ktheme-accent);
@@ -1052,14 +1160,14 @@ input.error {
   font-size: var(--font-size-md);
   border: 1px solid var(--ktheme-border);
   border-radius: var(--radius-md);
-  background: var(--ktheme-bg);
+  background: var(--ktheme-bg-surface);
   color: var(--ktheme-text);
   outline: none;
   box-sizing: border-box;
 }
 #cmd-search:focus {
   border-color: var(--ktheme-accent);
-  box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.2);
+  box-shadow: 0 0 0 2px var(--ktheme-accent-muted);
 }
 #cmd-list {
   list-style: none;
@@ -1070,6 +1178,7 @@ input.error {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  background: var(--ktheme-bg-surface);
 }
 #cmd-list li {
   display: flex;
@@ -1079,12 +1188,15 @@ input.error {
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13.5px;
-  transition: background 0.1s ease;
+  color: var(--ktheme-text);
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 #cmd-list li:hover,
 #cmd-list li.selected,
 #cmd-list li[aria-selected='true'] {
-  background: var(--ktheme-bg);
+  background: var(--ktheme-bg-hover);
   color: var(--ktheme-accent);
 }
 .cmd-item-main {
@@ -1098,8 +1210,9 @@ input.error {
   letter-spacing: 0.5px;
   padding: 2px 6px;
   border-radius: var(--radius-xs);
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--ktheme-bg-elevated);
   color: var(--ktheme-text-muted);
+  border: 1px solid var(--ktheme-border);
 }
 .cmd-no-results {
   padding: 12px;
@@ -1108,7 +1221,8 @@ input.error {
   font-size: 13px;
 }
 
-/* Shortcut Badges (<kbd>) */
+/* Shortcut Badges (<k-kbd>) */
+k-kbd:not(:defined),
 kbd {
   display: inline-block;
   padding: 2px 6px;
@@ -1116,7 +1230,7 @@ kbd {
   font-size: var(--font-size-xs);
   line-height: 1.2;
   color: var(--ktheme-text);
-  background-color: var(--ktheme-bg);
+  background-color: var(--ktheme-bg-elevated);
   border: 1px solid var(--ktheme-border);
   border-radius: var(--radius-xs);
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.15);
@@ -1150,11 +1264,17 @@ kbd {
   align-items: center;
   padding: 4px 0;
   font-size: 13px;
+  color: var(--ktheme-text);
+  border-bottom: 1px solid var(--ktheme-border);
+}
+.shortcut-row:last-child {
+  border-bottom: none;
 }
 .shortcut-row .keys {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  color: var(--ktheme-text-muted);
 }
 
 .sr-only {
@@ -1231,4 +1351,33 @@ k-button.on .snap-badge {
   opacity: 0.85;
   font-weight: 600;
   margin-left: 8px;
+}
+
+.snap-increment-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snap-increment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.snap-increment-label {
+  font-size: var(--font-size-sm);
+  color: var(--ktheme-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.snap-increment-input {
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.snap-increment-input[aria-invalid='true'] {
+  --ktheme-border: var(--ktheme-critical);
 }

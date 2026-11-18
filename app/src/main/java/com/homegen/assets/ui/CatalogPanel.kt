@@ -57,14 +57,29 @@ fun CatalogPanel(
     var selectedCategory by remember { mutableStateOf(CatalogCategory.ALL) }
     var filterByStyle by remember(activeStyleTag) { mutableStateOf(activeStyleTag != null) }
 
-    val entries = remember(search, selectedCategory, catalog, filterByStyle, activeStyleTag) {
-        val baseEntries = repository.filterEntries(catalog, search, selectedCategory)
+    val styleFilteredEntries = remember(catalog, filterByStyle, activeStyleTag, repository) {
         if (filterByStyle && activeStyleTag != null) {
-            baseEntries.filter { entry ->
-                entry.tags.any { it.lowercase() == activeStyleTag.lowercase() }
+            repository.filterByStyleTag(catalog, activeStyleTag)
+        } else {
+            null
+        }
+    }
+    val styleFilteredSet = remember(styleFilteredEntries) {
+        styleFilteredEntries?.toHashSet()
+    }
+
+    val entries = remember(search, selectedCategory, catalog, styleFilteredEntries, styleFilteredSet, repository) {
+        if (styleFilteredEntries != null) {
+            when {
+                styleFilteredEntries.isEmpty() -> emptyList()
+                search.isBlank() && selectedCategory == CatalogCategory.ALL -> styleFilteredEntries
+                else -> {
+                    val allowedEntries = styleFilteredSet.orEmpty()
+                    repository.filterEntries(catalog, search, selectedCategory).filter { it in allowedEntries }
+                }
             }
         } else {
-            baseEntries
+            repository.filterEntries(catalog, search, selectedCategory)
         }
     }
 

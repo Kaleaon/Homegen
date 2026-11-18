@@ -20,8 +20,20 @@ class CatalogRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    private data class IndexedCatalogEntry(
+        val entry: CatalogEntry,
+        val normalizedName: String,
+        val normalizedTags: List<String>,
+    )
+
+    private data class CatalogIndex(
+        val entries: List<CatalogEntry>,
+        val indexedEntries: List<IndexedCatalogEntry>,
+        val tagIndex: Map<String, List<CatalogEntry>>,
+    )
+
     private val catalogCache = ConcurrentHashMap<String, Catalog>()
-    private val entryCache = ConcurrentHashMap<Catalog, List<CatalogEntry>>()
+    private val entryCache = ConcurrentHashMap<Catalog, CatalogIndex>()
 
     private val thumbnailCache = object : LruCache<String, Bitmap>((8 * 1024 * 1024)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
@@ -59,16 +71,27 @@ class CatalogRepository(
     }
 
     fun filterEntries(catalog: Catalog, query: String, category: CatalogCategory): List<CatalogEntry> {
-        val normalizedQuery = query.trim().lowercase()
-        val entries = getEntries(catalog)
+        val index = getIndex(catalog)
+        if (query.isBlank()) {
+            if (category == CatalogCategory.ALL) {
+                return index.entries
+            }
+            return index.entries.filter { entry -> matchesCategory(entry, category) }
+        }
 
-        return entries.filter { entry ->
-            matchesCategory(entry, category) &&
-                (
-                    normalizedQuery.isBlank() ||
-                        entry.name.lowercase().contains(normalizedQuery) ||
-                        entry.tags.any { it.lowercase().contains(normalizedQuery) }
-                    )
+        val normalizedQuery = query.trim().lowercase()
+        return buildList {
+            for (indexed in index.indexedEntries) {
+                if (
+                    matchesCategory(indexed.entry, category) &&
+                    (
+                        indexed.normalizedName.contains(normalizedQuery) ||
+                            indexed.normalizedTags.any { it.contains(normalizedQuery) }
+                        )
+                ) {
+                    add(indexed.entry)
+                }
+            }
         }
     }
 
@@ -77,21 +100,61 @@ class CatalogRepository(
      * Returns items whose tags contain the given style identifier.
      */
     fun filterByStyleTag(catalog: Catalog, styleTag: String): List<CatalogEntry> {
+        if (styleTag.isBlank()) return emptyList()
         val tag = styleTag.trim().lowercase()
-        if (tag.isBlank()) return emptyList()
-        val entries = getEntries(catalog)
-        return entries.filter { entry ->
-            entry.tags.any { it.lowercase() == tag }
-        }
+        return getIndex(catalog).tagIndex[tag] ?: emptyList()
     }
 
-    private fun getEntries(catalog: Catalog): List<CatalogEntry> {
-        return entryCache.computeIfAbsent(catalog) { cat ->
-            buildList {
-                addAll(cat.materials.map(::MaterialEntry))
-                addAll(cat.placeableObjects.map(::PlaceableEntry))
+    private fun getIndex(catalog: Catalog): CatalogIndex {
+        return entryCache.computeIfAbsent(catalog, ::buildCatalogIndex)
+    }
+
+    private fun buildCatalogIndex(catalog: Catalog): CatalogIndex {
+        val totalSize = catalog.materials.size + catalog.placeableObjects.size
+        val entries = ArrayList<CatalogEntry>(totalSize)
+        val indexedEntries = ArrayList<IndexedCatalogEntry>(totalSize)
+        val tagBuckets = LinkedHashMap<String, MutableList<CatalogEntry>>()
+
+        fun addIndexedEntry(entry: CatalogEntry) {
+            entries.add(entry)
+            val normalizedName = entry.name.lowercase()
+            val normalizedTags = buildList(entry.tags.size) {
+                val seenTags = HashSet<String>(entry.tags.size)
+                for (rawTag in entry.tags) {
+                    val normalizedTag = rawTag.trim().lowercase()
+                    if (normalizedTag.isNotEmpty() && seenTags.add(normalizedTag)) {
+                        add(normalizedTag)
+                        tagBuckets.getOrPut(normalizedTag) { mutableListOf() }.add(entry)
+                    }
+                }
+            }
+            indexedEntries.add(
+                IndexedCatalogEntry(
+                    entry = entry,
+                    normalizedName = normalizedName,
+                    normalizedTags = normalizedTags,
+                ),
+            )
+        }
+
+        for (material in catalog.materials) {
+            addIndexedEntry(MaterialEntry(material))
+        }
+        for (placeable in catalog.placeableObjects) {
+            addIndexedEntry(PlaceableEntry(placeable))
+        }
+
+        val tagIndex = buildMap(tagBuckets.size) {
+            for ((tag, bucket) in tagBuckets) {
+                put(tag, bucket.toList())
             }
         }
+
+        return CatalogIndex(
+            entries = entries.toList(),
+            indexedEntries = indexedEntries,
+            tagIndex = tagIndex,
+        )
     }
 
     suspend fun loadThumbnail(path: String): Bitmap? {

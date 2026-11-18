@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, createRoom, addItem, addOpening } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
-import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
+import { ComplianceOverlayScene, getSpatialCellKey } from '../js/complianceOverlay.js';
 import { getToken, invalidateCache, DEFAULT_TOKENS } from '../js/kthemeTokens.js';
 import { draw } from '../js/render.js';
 
@@ -585,4 +585,120 @@ test('drawComplianceScene resolves fallback stroke and fill styles from Ktheme t
     recordedFillStyles.includes(DEFAULT_TOKENS['--ktheme-success']),
     'Compliant egress badge uses --ktheme-success token'
   );
+});
+
+test('getSpatialCellKey packs positive, zero, negative, and boundary grid coordinates into unique 32-bit integers', () => {
+  const coords = [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [-1, -1],
+    [-1, 0],
+    [0, -1],
+    [-32768, -32768],
+    [-32768, 32767],
+    [32767, -32768],
+    [32767, 32767],
+    [-125, 420],
+    [420, -125],
+  ];
+
+  const keys = new Set();
+  for (const [col, row] of coords) {
+    const key = getSpatialCellKey(col, row);
+    assert.equal(typeof key, 'number');
+    assert.equal(Number.isInteger(key), true);
+    assert.equal(key | 0, key, 'Key must fit within signed 32-bit integer');
+    assert.equal(keys.has(key), false, `Collision detected for (${col}, ${row})`);
+    keys.add(key);
+  }
+});
+
+test('Spatial grid uses numeric bin keys and partitions negative coordinate items with deduplicated multi-cell queries', () => {
+  const state = newState();
+  const room = createRoom(state, 'bathroom', -256, -256, 320, 320);
+
+  // Place vanity straddling cell boundary at (-64, -64) so it spans multiple negative cells
+  const vanity = addItem(state, room, 'vanity', { x: -64, y: -64, rot: 0 });
+  const toilet = addItem(state, room, 'toilet', { x: 30, y: 30, rot: 0 });
+
+  const report = evaluate(state);
+  const scene = new ComplianceOverlayScene();
+  scene.update(state, report, { curLevel: 0 });
+
+  assert.ok(scene.spatialGrid.size > 0);
+  for (const key of scene.spatialGrid.keys()) {
+    assert.equal(typeof key, 'number', 'Spatial grid keys must be numeric 32-bit integers');
+  }
+
+  // Query across multiple cells covering the straddling negative-coordinate vanity
+  const negCandidates = scene.querySpatialGrid({ x: -120, y: -120, w: 110, h: 110 }, room.id);
+  const vanityMatches = negCandidates.filter((c) => c.item.id === vanity.id);
+  assert.equal(vanityMatches.length, 1, 'Multi-cell item must be deduplicated in query results');
+  assert.ok(!negCandidates.some((c) => c.item.id === toilet.id));
+  assert.equal(scene._seenItemIds.size, 0, 'Pre-allocated Set must be cleared after query');
+
+  // Subsequent query in positive region should not suffer from stale Set entries
+  const fullCandidates = scene.querySpatialGrid({ x: -256, y: -256, w: 320, h: 320 }, room.id);
+  assert.equal(fullCandidates.length, 2);
+});
+
+test('ComplianceOverlayScene.update short-circuits state hashing and index rebuilds on matching state reference unless options.stateHash or invalidateCache is used', () => {
+  const state = newState();
+  const room = createRoom(state, 'bathroom', 0, 0, 120, 120);
+  const toilet = addItem(state, room, 'toilet', { x: 30, y: 30, rot: 0 });
+  const report = evaluate(state);
+
+  const scene = new ComplianceOverlayScene();
+  let rebuildCount = 0;
+  const origRebuild = scene.rebuildIndexes.bind(scene);
+  scene.rebuildIndexes = (s) => {
+    rebuildCount++;
+    return origRebuild(s);
+  };
+
+  scene.update(state, report, { curLevel: 0 });
+  assert.equal(rebuildCount, 1);
+  const initialHash = scene.lastStateHash;
+
+  // Repeated frame updates with same state reference short-circuit hashing and index rebuild
+  let roomXReads = 0;
+  let currentX = room.x;
+  Object.defineProperty(room, 'x', {
+    get() {
+      roomXReads++;
+      return currentX;
+    },
+    set(v) {
+      currentX = v;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  // Reset counter and invoke update without selected violation on room so only computeStateHash would read room.x if executed
+  const emptyReport = { violations: [], compliant: true };
+  roomXReads = 0;
+  scene.update(state, emptyReport, { curLevel: 1 }); // different level so levelRooms is empty -> zero room geometry reads unless computeStateHash runs!
+  assert.equal(
+    roomXReads,
+    0,
+    'computeStateHash must not serialize rooms when state reference matches'
+  );
+  assert.equal(rebuildCount, 1);
+  assert.equal(scene.lastStateHash, initialHash);
+
+  // In-place coordinate mutation with explicit options.stateHash forces index recomputation
+  toilet.x = 75;
+  scene.update(state, emptyReport, { curLevel: 0, stateHash: 'manual-hash-2' });
+  assert.equal(rebuildCount, 2);
+  assert.equal(scene.lastStateHash, 'manual-hash-2');
+  assert.equal(scene.itemIndex.get(toilet.id).footprint.x > 50, true);
+
+  // In-place coordinate mutation with invalidateCache() also forces recomputation
+  toilet.x = 40;
+  scene.invalidateCache();
+  scene.update(state, emptyReport, { curLevel: 0 });
+  assert.equal(rebuildCount, 3);
+  assert.ok(scene.lastStateHash !== null && scene.lastStateHash !== 'manual-hash-2');
 });
