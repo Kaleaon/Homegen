@@ -7,6 +7,22 @@ import { globalCadWorkerClient } from './cadWorkerClient.js';
  * and provides serialization helpers for plan persistence.
  */
 
+/**
+ * Normalizes an elevation unit string to 'm' or 'ft', defaulting safely to 'm'.
+ */
+export function normalizeElevationUnit(unit) {
+  if (typeof unit === 'string') {
+    const normalized = unit.trim().toLowerCase();
+    if (normalized === 'ft' || normalized === 'feet' || normalized === 'foot') {
+      return 'ft';
+    }
+    if (normalized === 'm' || normalized === 'meter' || normalized === 'meters') {
+      return 'm';
+    }
+  }
+  return 'm';
+}
+
 export class ElevationGrid {
   constructor({
     width = 0,
@@ -17,6 +33,8 @@ export class ElevationGrid {
     bounds = null,
     contourInterval = 1.0,
     verticalScale = 1.0,
+    elevationUnit,
+    unit,
     visible = true,
   } = {}) {
     let capWidth = width;
@@ -63,6 +81,7 @@ export class ElevationGrid {
     this.bounds = bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
     this.contourInterval = Math.max(0.1, contourInterval);
     this.verticalScale = verticalScale;
+    this.elevationUnit = normalizeElevationUnit(elevationUnit ?? unit ?? 'm');
     this.visible = visible;
   }
 
@@ -76,6 +95,7 @@ export class ElevationGrid {
       bounds: this.bounds,
       contourInterval: this.contourInterval,
       verticalScale: this.verticalScale,
+      elevationUnit: normalizeElevationUnit(this.elevationUnit),
       visible: this.visible !== false,
     };
   }
@@ -239,7 +259,7 @@ function toFiniteCoord(val) {
  * Parses Google Maps Elevation API JSON responses.
  * Accepts string or object matching Google Maps Elevation API JSON response format.
  */
-function parseGoogleElevationJson(input, options = {}) {
+export function parseGoogleElevationJson(input, options = {}) {
   const json = typeof input === 'string' ? JSON.parse(input) : input;
   if (!json) {
     throw new Error('Invalid JSON payload');
@@ -252,8 +272,9 @@ function parseGoogleElevationJson(input, options = {}) {
     throw new Error('No elevation results found in payload');
   }
 
-  let width = options.cols || options.width;
-  let height = options.rows || options.height;
+  const opts = options || {};
+  let width = opts.cols || opts.width;
+  let height = opts.rows || opts.height;
   if (!width || !height) {
     const side = Math.round(Math.sqrt(results.length));
     if (side * side === results.length) {
@@ -309,18 +330,19 @@ function parseGoogleElevationJson(input, options = {}) {
     width,
     height,
     data,
-    minElevation: options.minElevation ?? minElevation,
-    maxElevation: options.maxElevation ?? maxElevation,
-    bounds: options.bounds ?? computedBounds,
-    contourInterval: options.contourInterval ?? 1.0,
-    verticalScale: options.verticalScale ?? 1.0,
+    minElevation: opts.minElevation ?? minElevation,
+    maxElevation: opts.maxElevation ?? maxElevation,
+    bounds: opts.bounds ?? computedBounds,
+    contourInterval: opts.contourInterval ?? 1.0,
+    verticalScale: opts.verticalScale ?? 1.0,
+    elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
   });
 }
 
 /**
  * Parses image heightmap (grayscale/RGB) from ImageData or HTMLImageElement/Canvas.
  */
-function parseImageHeightmap(imageInput, options = {}) {
+export function parseImageHeightmap(imageInput, options = {}) {
   let width;
   let height;
   let pixels;
@@ -340,8 +362,9 @@ function parseImageHeightmap(imageInput, options = {}) {
     throw new Error('Unsupported image input for heightmap parsing');
   }
 
-  const minE = options.minElevation ?? 0;
-  const maxE = options.maxElevation ?? 10;
+  const opts = options || {};
+  const minE = opts.minElevation ?? 0;
+  const maxE = opts.maxElevation ?? 10;
   const range = maxE - minE;
   const total = width * height;
   const data = new Float32Array(total);
@@ -366,9 +389,10 @@ function parseImageHeightmap(imageInput, options = {}) {
     data,
     minElevation: actualMin === Infinity ? minE : actualMin,
     maxElevation: actualMax === -Infinity ? maxE : actualMax,
-    bounds: options.bounds,
-    contourInterval: options.contourInterval ?? 1.0,
-    verticalScale: options.verticalScale ?? 1.0,
+    bounds: opts.bounds,
+    contourInterval: opts.contourInterval ?? 1.0,
+    verticalScale: opts.verticalScale ?? 1.0,
+    elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
   });
 }
 
@@ -450,6 +474,7 @@ function parseNoDataValue(raw) {
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
 export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
+  const opts = options || {};
   try {
     const view = new DataView(arrayBuffer);
     if (arrayBuffer.byteLength >= 4) {
@@ -592,7 +617,6 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                       ? view.getInt16(stripOffset + k * 2, littleEndian)
                       : view.getUint16(stripOffset + k * 2, littleEndian);
                   }
-
                   let isVoid = !Number.isFinite(rawVal);
                   if (!isVoid && hasNumericNoData) {
                     if (isFloatSample) {
@@ -698,8 +722,10 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
                   data,
                   minElevation: minE,
                   maxElevation: maxE,
-                  bounds: options.bounds ?? computedBounds ?? undefined,
-                  contourInterval: options.contourInterval ?? 1.0,
+                  bounds: opts.bounds ?? computedBounds ?? undefined,
+                  contourInterval: opts.contourInterval ?? 1.0,
+                  verticalScale: opts.verticalScale ?? 1.0,
+                  elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
                 });
               }
             }
@@ -737,19 +763,23 @@ export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
  */
 export async function parseElevationRaster(input, options = {}) {
   if (!input) throw new Error('No elevation input provided');
+  const opts = {
+    ...(options || {}),
+    elevationUnit: normalizeElevationUnit(options?.elevationUnit ?? options?.unit ?? 'm'),
+  };
 
   if (typeof input === 'string') {
     const trimmed = input.trim();
     if (trimmed.startsWith('{') || trimmed.includes('"results"')) {
-      return parseGoogleElevationJson(trimmed, options);
+      return parseGoogleElevationJson(trimmed, opts);
     }
   } else if (typeof input === 'object' && Array.isArray(input.results)) {
-    return parseGoogleElevationJson(input, options);
+    return parseGoogleElevationJson(input, opts);
   } else if (input instanceof ArrayBuffer || ArrayBuffer.isView(input)) {
     const buffer = input.buffer ? input.buffer : input;
-    return parseGeoTIFFWithFallback(buffer, options);
+    return parseGeoTIFFWithFallback(buffer, opts);
   } else if (input && (input.getContext || input.data)) {
-    return parseImageHeightmap(input, options);
+    return parseImageHeightmap(input, opts);
   }
 
   throw new Error('Unrecognized elevation raster format');
@@ -970,9 +1000,31 @@ export async function computeContoursAsync(grid, intervalOverride = null) {
 }
 
 /**
+ * Serializes ElevationGrid instance to plain object for plan JSON state.
+ */
+export function serializeElevationGrid(grid) {
+  if (!grid) return null;
+  return {
+    width: grid.width,
+    height: grid.height,
+    data: Array.from(grid.data),
+    minElevation: grid.minElevation,
+    maxElevation: grid.maxElevation,
+    bounds: grid.bounds,
+    contourInterval: grid.contourInterval,
+    verticalScale: grid.verticalScale,
+    elevationUnit: normalizeElevationUnit(grid.elevationUnit),
+    visible: grid.visible !== false,
+  };
+}
+
+/**
  * Reconstructs ElevationGrid from plain serialized object.
  */
 export function deserializeElevationGrid(obj) {
   if (!obj) return null;
-  return new ElevationGrid(obj);
+  return new ElevationGrid({
+    ...obj,
+    elevationUnit: normalizeElevationUnit(obj.elevationUnit ?? obj.unit),
+  });
 }
