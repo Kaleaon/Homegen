@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { formRow } from '../js/app.js';
+import { SAMPLE_MUNICIPAL_GIS, formRow } from '../js/app.js';
+import { projectGeoJSON } from '../js/gisBridge.js';
 import { KInput } from '../js/k-components.js';
+import { newState, serialize } from '../js/model.js';
 
 const htmlPath = resolve('index.html');
 const appJsPath = resolve('js/app.js');
@@ -188,6 +190,131 @@ test('k-input component forwards aria-label and aria-labelledby attributes to in
   assert.ok(KInput.observedAttributes.includes('aria-label'));
   assert.ok(KInput.observedAttributes.includes('aria-labelledby'));
   assert.match(kCompContent, /'aria-label',\s*'aria-labelledby'/);
+
+  const innerAttrs = new Map();
+  const hostAttrs = new Map([['aria-label', 'Municipal Parcel Lot 14A setback (inches)']]);
+  const instance = Object.create(KInput.prototype);
+  instance._input = {
+    value: '',
+    disabled: false,
+    readOnly: false,
+    setAttribute(name, val) {
+      innerAttrs.set(name, val);
+    },
+    removeAttribute(name) {
+      innerAttrs.delete(name);
+    },
+  };
+  instance.hasAttribute = (name) => hostAttrs.has(name);
+  instance.getAttribute = (name) => hostAttrs.get(name) ?? null;
+
+  instance.connectedCallback();
+  assert.equal(innerAttrs.get('aria-label'), 'Municipal Parcel Lot 14A setback (inches)');
+
+  hostAttrs.set('aria-label', 'seg-1 setback (inches)');
+  instance.attributeChangedCallback(
+    'aria-label',
+    'Municipal Parcel Lot 14A setback (inches)',
+    'seg-1 setback (inches)'
+  );
+  assert.equal(innerAttrs.get('aria-label'), 'seg-1 setback (inches)');
+
+  hostAttrs.delete('aria-label');
+  instance.attributeChangedCallback('aria-label', 'seg-1 setback (inches)', null);
+  assert.equal(innerAttrs.has('aria-label'), false);
+});
+
+test('renderGISSegments generates accessible aria-label attributes with segment name or id fallback and inches unit', async () => {
+  const prevDocument = global.document;
+  const prevStorage = global.localStorage;
+
+  const state = newState();
+  state.site = projectGeoJSON(SAMPLE_MUNICIPAL_GIS, { x: 50, y: 50, w: 1100, h: 800 });
+  // Include a segment without a label to verify fallback to seg.id
+  state.site.segments.push({
+    id: 'seg-custom-5',
+    p1: { x: 50, y: 50 },
+    p2: { x: 150, y: 50 },
+    setback: 48,
+    label: '',
+  });
+
+  const storeData = new Map([['homegen.plan.v1', serialize(state)]]);
+  global.localStorage = {
+    getItem: (key) => storeData.get(key) ?? null,
+    setItem: (key, val) => storeData.set(key, String(val)),
+  };
+
+  try {
+    // Import fresh module instance while document is undefined so doc initializes from localStorage
+    if (typeof global.document !== 'undefined') delete global.document;
+    const gisApp = await import('../js/app.js?gis-aria-label-test=1');
+
+    const attachedInputs = [];
+    const container = {
+      innerHTML: '',
+      querySelectorAll(selector) {
+        if (selector === '.gis-setback-input') return attachedInputs;
+        return [];
+      },
+    };
+    const dialog = {
+      open: false,
+      showModal() {
+        this.open = true;
+      },
+    };
+
+    global.document = {
+      querySelector(selector) {
+        if (selector === '#gis-segment-list') return container;
+        if (selector === '#dlg-gis') return dialog;
+        return null;
+      },
+      getElementById() {
+        return null;
+      },
+    };
+
+    gisApp.renderGISSegments();
+
+    const expectedLabels = state.site.segments.map(
+      (seg) => `${seg.label || seg.id} setback (inches)`
+    );
+    const labelMatches = [...container.innerHTML.matchAll(/<k-input\b[^>]*aria-label="([^"]+)"/g)];
+    assert.equal(labelMatches.length, state.site.segments.length);
+    assert.deepEqual(
+      labelMatches.map((m) => m[1]),
+      expectedLabels
+    );
+    assert.equal(
+      labelMatches[labelMatches.length - 1][1],
+      'seg-custom-5 setback (inches)',
+      'Segment missing label must fall back to seg.id'
+    );
+
+    // Verify re-rendering via openGISDialog retains valid aria-label attributes
+    container.innerHTML = '';
+    gisApp.openGISDialog();
+    const rerenderedMatches = [
+      ...container.innerHTML.matchAll(/<k-input\b[^>]*aria-label="([^"]+)"/g),
+    ];
+    assert.deepEqual(
+      rerenderedMatches.map((m) => m[1]),
+      expectedLabels
+    );
+  } finally {
+    if (typeof prevDocument === 'undefined') {
+      delete global.document;
+    } else {
+      global.document = prevDocument;
+    }
+    if (typeof prevStorage === 'undefined') {
+      delete global.localStorage;
+    } else {
+      global.localStorage = prevStorage;
+    }
+  }
 });
 
 test('clicking visual label associated via for attribute transfers focus to control in mock DOM environment', () => {
