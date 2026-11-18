@@ -278,6 +278,12 @@ globalThis.window = {
   btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
 };
 
+Object.defineProperty(globalThis, 'navigator', {
+  value: globalThis.window.navigator,
+  configurable: true,
+  writable: true,
+});
+
 await import('../js/app.js');
 
 test('snap toggles and popover synchronize with 2D/3D view mode transitions and block 2D state mutations in 3D mode', async () => {
