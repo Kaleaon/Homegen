@@ -697,6 +697,7 @@ function redraw() {
     snappingBridge,
     bad,
     selection,
+    hover,
     under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
     autoFixDiffs: preview ? [] : autoFixDiffs,
     hoveredDiffIndex,
