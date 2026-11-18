@@ -12,6 +12,36 @@ export const STYLES = {
   boho: 'bohemian eclectic',
 };
 
+export const RESOLUTION_TIERS = {
+  sd: {
+    id: 'sd',
+    label: 'SD (576p)',
+    plan: 'Free',
+    badge: 'Free',
+    locked: false,
+    width: 576,
+    height: 448,
+  },
+  hd: {
+    id: 'hd',
+    label: 'HD (1024p)',
+    plan: 'Pro',
+    badge: 'Pro 🔒',
+    locked: true,
+    width: 1024,
+    height: 768,
+  },
+  '4k': {
+    id: '4k',
+    label: '4K (2048p)',
+    plan: 'Enterprise',
+    badge: 'Enterprise 🔒',
+    locked: true,
+    width: 2048,
+    height: 1536,
+  },
+};
+
 export const NEGATIVE =
   'cartoon, illustration, 3d render, cgi, low quality, blurry, distorted perspective, warped furniture, text, watermark, people';
 
@@ -123,8 +153,26 @@ export async function toWebpDataUrl(pngDataUrl, width = 768) {
   }
 }
 
-/** Anonymous Horde users are capped at 576x576 total work; registered keys can go larger (checked with the service's dry_run). */
-export const hordeWidth = (apikey) => (apikey === '0000000000' ? 576 : 768);
+export function isAnonymousKey(apikey) {
+  const trimmed = typeof apikey === 'string' ? apikey.trim() : '';
+  return !trimmed || trimmed === '0000000000';
+}
+
+export function resolveResolutionTier(tierId = 'sd', apikey = '0000000000') {
+  const key = typeof tierId === 'object' && tierId !== null ? tierId.id : tierId;
+  const requested = RESOLUTION_TIERS[key] || RESOLUTION_TIERS.sd;
+  const downgraded = Boolean(requested.locked && isAnonymousKey(apikey));
+  const effective = downgraded ? RESOLUTION_TIERS.sd : requested;
+  return {
+    requested,
+    effective,
+    downgraded,
+  };
+}
+
+/** Anonymous Horde users are capped at 576x576 total work; registered keys can unlock higher resolution tiers. */
+export const hordeWidth = (apikey = '0000000000', tierId = 'sd') =>
+  resolveResolutionTier(tierId, apikey).effective.width;
 
 export class HordeError extends Error {
   constructor(message, type, status = null) {
@@ -209,6 +257,7 @@ function classifyResponseError(status, message) {
 export async function hordeRender({
   prompt,
   depthWebp,
+  width,
   apikey = '0000000000',
   strength = 1,
   dryRun = false,
@@ -219,13 +268,16 @@ export async function hordeRender({
   retryDelays = [1000, 2000, 4000],
   maxDurationMs = 15 * 60 * 1000,
 }) {
-  const [w, h] = depthWebp.size || [768, 576];
+  const fallbackW = width ? Math.round(width / 64) * 64 : hordeWidth(apikey);
+  const fallbackH = Math.round((fallbackW * 3) / 4 / 64) * 64;
+  const [w, h] = depthWebp.size || [fallbackW, fallbackH];
+  const anon = isAnonymousKey(apikey);
   const body = {
     prompt: `${prompt} ### ${NEGATIVE}`,
     params: {
       sampler_name: 'k_euler_a',
       cfg_scale: 7,
-      steps: apikey === '0000000000' ? 20 : 28,
+      steps: anon ? 20 : 28,
       n: 1,
       width: w,
       height: h,
