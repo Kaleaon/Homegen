@@ -12,12 +12,9 @@ import com.google.android.filament.SwapChain
 import com.google.android.filament.Texture
 import com.google.android.filament.View
 import com.google.android.filament.Viewport
-import com.google.android.filament.android.DisplayHelper
 import com.google.android.filament.android.UiHelper
 import com.homegen.designer3d.SceneController
 import com.ktheme.android.KthemeSemanticColors
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import androidx.compose.material3.ColorScheme as ComposeColorScheme
 import com.ktheme.models.ColorScheme as KthemeColorScheme
 
@@ -35,7 +32,6 @@ class FilamentSurfaceManager(context: Context) {
     val sceneController = SceneController(engine, filamentView, filamentScene)
 
     private val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK)
-    private val displayHelper = DisplayHelper(context)
     private var swapChain: SwapChain? = null
 
     private var camera: Camera? = null
@@ -133,9 +129,7 @@ class FilamentSurfaceManager(context: Context) {
                     .format(Texture.InternalFormat.R32F)
                     .build(engine)
 
-                val buf = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
-                buf.asFloatBuffer().put(data)
-                buf.rewind()
+                val buf = BufferUtils.toFloatBuffer(data)
 
                 val pixelBuffer = Texture.PixelBufferDescriptor(
                     buf,
