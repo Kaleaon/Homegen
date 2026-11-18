@@ -98,7 +98,7 @@
   margin-bottom: 16px;
 }
 
-.branding-tabs .tab-btn {
+.branding-tabs button.tab-btn {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm, 6px);
@@ -109,11 +109,19 @@
   font-size: 13px;
 }
 
-.branding-tabs .tab-btn.on,
-.branding-tabs .tab-btn[aria-selected='true'] {
+.branding-tabs button.tab-btn.on,
+.branding-tabs button.tab-btn[aria-selected='true'] {
   background: var(--ktheme-accent-muted, rgba(129, 140, 248, 0.15));
   border-color: var(--ktheme-accent);
   color: var(--ktheme-text);
+}
+
+.branding-tabs k-tab.tab-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-weight: 500;
+  font-size: 13px;
 }
 
 .stamp-builder-grid {

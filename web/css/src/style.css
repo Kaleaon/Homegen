@@ -38,6 +38,7 @@ k-button:focus-visible,
 k-tab:focus-visible,
 k-card:focus-visible,
 k-input:focus-visible,
+k-select:focus-visible,
 select:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -52,7 +53,8 @@ a:focus-visible {
 k-button,
 k-tab,
 k-card,
-k-input {
+k-input,
+k-select {
   display: inline-block;
 }
 * {
@@ -379,6 +381,12 @@ aside {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg);
+}
+.row k-input,
+.row k-select,
+.row k-button {
+  flex: 1;
+  min-width: 0;
 }
 .chip {
   display: inline-block;
