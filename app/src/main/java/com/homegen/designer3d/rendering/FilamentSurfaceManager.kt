@@ -5,6 +5,7 @@ import android.view.Choreographer
 import android.view.SurfaceView
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
+import com.google.android.filament.MaterialInstance
 import com.google.android.filament.Renderer
 import com.google.android.filament.Scene
 import com.google.android.filament.SwapChain
@@ -14,8 +15,11 @@ import com.google.android.filament.Viewport
 import com.google.android.filament.android.DisplayHelper
 import com.google.android.filament.android.UiHelper
 import com.homegen.designer3d.SceneController
+import com.ktheme.android.KthemeSemanticColors
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import androidx.compose.material3.ColorScheme as ComposeColorScheme
+import com.ktheme.models.ColorScheme as KthemeColorScheme
 
 /**
  * Encapsulates the Filament engine lifecycle: init, frame loop, destroy.
@@ -47,6 +51,8 @@ class FilamentSurfaceManager(context: Context) {
 
     private var terrainEntity: Int = 0
     private var terrainTexture: Texture? = null
+    private var terrainMaterial: MaterialInstance? = null
+    private var isDestroyed: Boolean = false
 
     private val choreographer = Choreographer.getInstance()
     private val frameCallback = object : Choreographer.FrameCallback {
@@ -75,6 +81,31 @@ class FilamentSurfaceManager(context: Context) {
         val gridMaterial = materialFactory.createGridInstance()
         val gridEntity = MeshFactory.createPlane(engine, 50f, 50f, gridMaterial)
         filamentScene.addEntity(gridEntity)
+    }
+
+    /**
+     * Updates active 3D viewport materials (ground grid, terrain fallback, and theme-bound
+     * scene renderables) in place when the Compose Material 3 [ComposeColorScheme] changes.
+     */
+    fun updateTheme(colorScheme: ComposeColorScheme) {
+        if (isDestroyed || !engine.isValid) return
+        materialFactory.updateTheme(colorScheme)
+    }
+
+    /**
+     * Updates active 3D viewport materials in place when the Ktheme [KthemeColorScheme] changes.
+     */
+    fun updateTheme(colorScheme: KthemeColorScheme) {
+        if (isDestroyed || !engine.isValid) return
+        materialFactory.updateTheme(colorScheme)
+    }
+
+    /**
+     * Updates active 3D viewport materials in place when [KthemeSemanticColors] change.
+     */
+    fun updateTheme(semanticColors: KthemeSemanticColors) {
+        if (isDestroyed || !engine.isValid) return
+        materialFactory.updateTheme(semanticColors)
     }
 
     /**
@@ -125,6 +156,7 @@ class FilamentSurfaceManager(context: Context) {
             maxElevation = maxElevation,
             forceFlatFallback = forceFlatFallback,
         )
+        terrainMaterial = terrainMat
 
         val entity = MeshFactory.createSubdividedPlane(
             engine = engine,
@@ -146,12 +178,18 @@ class FilamentSurfaceManager(context: Context) {
      */
     fun removeTerrain() {
         if (terrainEntity != 0) {
-            filamentScene.removeEntity(terrainEntity)
-            engine.destroyEntity(terrainEntity)
+            if (engine.isValid) {
+                filamentScene.removeEntity(terrainEntity)
+                engine.destroyEntity(terrainEntity)
+            }
             terrainEntity = 0
         }
+        materialFactory.releaseTerrainInstance(terrainMaterial)
+        terrainMaterial = null
         terrainTexture?.let { tex ->
-            engine.destroyTexture(tex)
+            if (engine.isValid) {
+                engine.destroyTexture(tex)
+            }
             terrainTexture = null
         }
     }
@@ -198,6 +236,8 @@ class FilamentSurfaceManager(context: Context) {
     }
 
     fun destroy() {
+        if (isDestroyed) return
+        isDestroyed = true
         choreographer.removeFrameCallback(frameCallback)
         uiHelper.detach()
         removeTerrain()
