@@ -341,7 +341,7 @@ export function handleCadWorkerMessage(e) {
             type: 'perpendicular',
           });
         } else if (res.snap.type === 'angle') {
-          if (anchor.x !== res.point.x || anchor.y !== res.point.y) {
+          if (!anchor || anchor.x !== res.point.x || anchor.y !== res.point.y) {
             guideLines.push({
               start: anchor,
               end: res.point,

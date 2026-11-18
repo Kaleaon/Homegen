@@ -508,6 +508,9 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
       ...(opts.walls || {}),
     },
     wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
+    ...(opts.wallAssemblyOverrides
+      ? { wallAssemblyOverrides: JSON.parse(JSON.stringify(opts.wallAssemblyOverrides)) }
+      : {}),
     floorMesh:
       opts.floorMesh ||
       createMeshGraphFromPolygon(points, 0, opts.floorZOffsets || opts.VertexZArray),
@@ -758,6 +761,97 @@ export function applyWallFinish(state, finishId, { scope = 'single', room, wall,
   }
 }
 
+const WALL_ASSEMBLY_LAYER_BOUNDS = {
+  gypsumThickness: { min: 0, max: 48 },
+  studDepth: { min: 1.5, max: 48 },
+  sheathingThickness: { min: 0, max: 48 },
+  airGapThickness: { min: 0, max: 48 },
+  claddingThickness: { min: 0, max: 48 },
+};
+
+export function clampWallAssemblyOverrides(overrides) {
+  if (!overrides || typeof overrides !== 'object') return {};
+  const normalized = { ...overrides };
+  if (normalized.gypsumThickness === undefined && normalized.layerThickness !== undefined) {
+    normalized.gypsumThickness = normalized.layerThickness;
+  }
+  if (normalized.airGapThickness === undefined && normalized.claddingOffset !== undefined) {
+    normalized.airGapThickness = normalized.claddingOffset;
+  }
+  const clamped = {};
+  for (const [key, bounds] of Object.entries(WALL_ASSEMBLY_LAYER_BOUNDS)) {
+    const raw = normalized[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const num = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(num)) continue;
+    clamped[key] = Math.min(bounds.max, Math.max(bounds.min, num));
+  }
+  return clamped;
+}
+
+export function getWallAssemblyOverrides(room, wall) {
+  if (!room || wall == null || wall === '') return {};
+  const existing = room.wallAssemblyOverrides?.[wall];
+  if (!existing || typeof existing !== 'object') return {};
+  return clampWallAssemblyOverrides(existing);
+}
+
+export function setWallAssemblyOverrides(room, wall, overrides) {
+  if (!room || wall == null || wall === '') return;
+  const isReset =
+    overrides == null ||
+    overrides.reset === true ||
+    (typeof overrides === 'object' && Object.keys(overrides).length === 0);
+  if (isReset) {
+    if (room.wallAssemblyOverrides && typeof room.wallAssemblyOverrides === 'object') {
+      delete room.wallAssemblyOverrides[wall];
+    }
+    return;
+  }
+  const sanitized = clampWallAssemblyOverrides(overrides);
+  if (Object.keys(sanitized).length === 0) return;
+  room.wallAssemblyOverrides ||= {};
+  const current = getWallAssemblyOverrides(room, wall);
+  room.wallAssemblyOverrides[wall] = {
+    ...current,
+    ...sanitized,
+  };
+}
+
+export function applyWallAssemblyOverrides(
+  state,
+  overrides,
+  { scope = 'single', room, wall, level = 0 } = {}
+) {
+  const getWallKeysForRoom = (r) => {
+    const pts = getRoomPoints(r);
+    return pts.length === 4 ? WALLS : [...WALLS, ...pts.map((_, i) => i)];
+  };
+  if (scope === 'plan') {
+    if (!state || !Array.isArray(state.rooms)) return;
+    for (const r of state.rooms) {
+      const target = ensureRoomCopy(state, r);
+      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+    }
+  } else if (scope === 'level') {
+    if (!state || !Array.isArray(state.rooms)) return;
+    for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) {
+      const target = ensureRoomCopy(state, r);
+      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+    }
+  } else if (scope === 'room') {
+    const target = ensureRoomCopy(state, room);
+    if (target) {
+      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+    }
+  } else {
+    const target = ensureRoomCopy(state, room);
+    if (target && wall != null && wall !== '') {
+      setWallAssemblyOverrides(target, wall, overrides);
+    }
+  }
+}
+
 export function applyFloorFinish(state, finishId, { scope = 'single', room, level = 0 } = {}) {
   if (scope === 'plan') {
     for (const r of state.rooms) r.floor = finishId;
@@ -912,6 +1006,16 @@ export function deserialize(text) {
     for (const w of WALLS) {
       r.wallUV[w] = getWallUV(r, w);
     }
+    if (r.wallAssemblyOverrides && typeof r.wallAssemblyOverrides === 'object') {
+      const sanitizedOverrides = {};
+      for (const [wKey, wOverrides] of Object.entries(r.wallAssemblyOverrides)) {
+        const cleaned = clampWallAssemblyOverrides(wOverrides);
+        if (Object.keys(cleaned).length > 0) {
+          sanitizedOverrides[wKey] = cleaned;
+        }
+      }
+      r.wallAssemblyOverrides = sanitizedOverrides;
+    }
   }
   const maxRoomLevel = s.rooms.length
     ? Math.max(...s.rooms.map((r) => (r.level != null ? r.level : 0)))
@@ -945,32 +1049,106 @@ export function deserialize(text) {
   return s;
 }
 
-export function parseDistanceInInches(str) {
-  if (!str) return null;
-  str = String(str).trim().toLowerCase();
-  if (!str) return null;
-  if (str.includes('m') && !str.includes('ft')) {
-    if (str.includes('cm')) return parseFloat(str) * 0.393701;
-    return parseFloat(str) * 39.3701;
+const UNICODE_FRACTIONS = {
+  '¼': ' 1/4',
+  '½': ' 1/2',
+  '¾': ' 3/4',
+  '⅓': ' 1/3',
+  '⅔': ' 2/3',
+  '⅛': ' 1/8',
+  '⅜': ' 3/8',
+  '⅝': ' 5/8',
+  '⅞': ' 7/8',
+};
+
+const DISTANCE_NUM_PATTERN =
+  '(?:\\d+\\s*(?:\\s+|-)\\s*\\d+\\s*\\/\\s*\\d+|\\d+\\s*\\/\\s*\\d+|\\d+(?:\\.\\d+)?|\\.\\d+)';
+const FT_UNIT_PATTERN = "(?:'|feet(?![a-z])|foot(?![a-z])|ft(?:\\.(?!\\d))?(?![a-z]))";
+const IN_UNIT_PATTERN = '(?:"|inches(?![a-z])|inch(?![a-z])|in(?:\\.(?!\\d))?(?![a-z]))';
+
+const FT_IN_DISTANCE_RE = new RegExp(
+  `^(${DISTANCE_NUM_PATTERN})\\s*${FT_UNIT_PATTERN}(?:\\s*(?:-\\s*)?(${DISTANCE_NUM_PATTERN})\\s*(?:${IN_UNIT_PATTERN})?\\s*)?$`
+);
+const IN_ONLY_DISTANCE_RE = new RegExp(`^(${DISTANCE_NUM_PATTERN})\\s*${IN_UNIT_PATTERN}$`);
+const METRIC_DISTANCE_RE = new RegExp(
+  `^(${DISTANCE_NUM_PATTERN})\\s*(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|m|met(?:er|re)s?)$`
+);
+const UNITLESS_DISTANCE_RE = new RegExp(`^(${DISTANCE_NUM_PATTERN})$`);
+
+function parseNumericToken(raw) {
+  const s = raw.trim();
+  const mixedMatch = s.match(/^(\d+)\s*(?:\s+|-)\s*(\d+)\s*\/\s*(\d+)$/);
+  if (mixedMatch) {
+    const whole = parseInt(mixedMatch[1], 10);
+    const num = parseInt(mixedMatch[2], 10);
+    const den = parseInt(mixedMatch[3], 10);
+    if (den === 0) return NaN;
+    return whole + num / den;
   }
-  const hasFt = /'|ft|feet/.test(str);
-  const hasIn = /"|in|inches/.test(str);
-  if (hasFt) {
-    const ftMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:'|ft|feet)/);
-    const inMatch =
-      str.match(/(\d+(?:\.\d+)?)\s*(?:"|in|inches)/) ||
-      str.match(/(?:'|ft|feet)\s*(\d+(?:\.\d+)?)/);
-    const feet = ftMatch ? parseFloat(ftMatch[1]) : 0;
-    const inches = inMatch ? parseFloat(inMatch[1]) : 0;
+  const fracMatch = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fracMatch) {
+    const num = parseInt(fracMatch[1], 10);
+    const den = parseInt(fracMatch[2], 10);
+    if (den === 0) return NaN;
+    return num / den;
+  }
+  const val = Number(s);
+  return Number.isFinite(val) ? val : NaN;
+}
+
+export function parseDistanceInInches(str, { defaultUnit = null } = {}) {
+  if (str === null || str === undefined || str === '') return null;
+  if (typeof str === 'number' && (!Number.isFinite(str) || str <= 0)) return null;
+
+  let normalized = String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/[’‘′]/g, "'")
+    .replace(/[”“″]/g, '"')
+    .replace(/''/g, '"')
+    .replace(/[¼½¾⅓⅔⅛⅜⅝⅞]/g, (ch) => UNICODE_FRACTIONS[ch] || ch)
+    .trim();
+
+  if (!normalized || normalized.startsWith('-')) return null;
+  if (normalized.startsWith('+')) {
+    normalized = normalized.slice(1).trim();
+    if (!normalized) return null;
+  }
+
+  const metricMatch = normalized.match(METRIC_DISTANCE_RE);
+  if (metricMatch) {
+    const val = parseNumericToken(metricMatch[1]);
+    if (isNaN(val)) return null;
+    const unit = metricMatch[2];
+    if (unit === 'mm' || unit.startsWith('millimet')) return val * 0.0393701;
+    if (unit === 'cm' || unit.startsWith('centimet')) return val * 0.393701;
+    return val * 39.3701;
+  }
+
+  const ftInMatch = normalized.match(FT_IN_DISTANCE_RE);
+  if (ftInMatch) {
+    const feet = parseNumericToken(ftInMatch[1]);
+    const inches = ftInMatch[2] !== undefined ? parseNumericToken(ftInMatch[2]) : 0;
+    if (isNaN(feet) || isNaN(inches)) return null;
     return feet * 12 + inches;
   }
-  if (hasIn) {
-    const inMatch = str.match(/(\d+(?:\.\d+)?)/);
-    return inMatch ? parseFloat(inMatch[1]) : null;
+
+  const inMatch = normalized.match(IN_ONLY_DISTANCE_RE);
+  if (inMatch) {
+    const inches = parseNumericToken(inMatch[1]);
+    return isNaN(inches) ? null : inches;
   }
-  const num = parseFloat(str);
-  if (isNaN(num) || num <= 0) return null;
-  return num <= 50 ? num * 12 : num;
+
+  const unitlessMatch = normalized.match(UNITLESS_DISTANCE_RE);
+  if (unitlessMatch) {
+    const num = parseNumericToken(unitlessMatch[1]);
+    if (isNaN(num) || num <= 0) return null;
+    if (defaultUnit === 'ft') return num * 12;
+    if (defaultUnit === 'in') return num;
+    return num <= 50 ? num * 12 : num;
+  }
+
+  return null;
 }
 
 export function formatDistanceInInches(inches) {
