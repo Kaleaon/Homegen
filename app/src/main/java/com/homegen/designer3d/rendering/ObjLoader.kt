@@ -11,8 +11,6 @@ import com.google.android.filament.VertexBuffer
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
 
@@ -266,16 +264,16 @@ class ObjLoader(
             .attribute(VertexBuffer.VertexAttribute.UV0, 2, VertexBuffer.AttributeType.FLOAT2, 0, 8)
             .build(engine)
 
-        vertexBuffer.setBufferAt(engine, 0, toBuffer(parsed.positions))
-        vertexBuffer.setBufferAt(engine, 1, toBuffer(parsed.normals))
-        vertexBuffer.setBufferAt(engine, 2, toBuffer(parsed.uvs))
+        vertexBuffer.setBufferAt(engine, 0, BufferUtils.toFloatBuffer(parsed.positions))
+        vertexBuffer.setBufferAt(engine, 1, BufferUtils.toFloatBuffer(parsed.normals))
+        vertexBuffer.setBufferAt(engine, 2, BufferUtils.toFloatBuffer(parsed.uvs))
 
         val indexBuffer = IndexBuffer.Builder()
             .indexCount(parsed.indexCount)
             .bufferType(IndexBuffer.Builder.IndexType.USHORT)
             .build(engine)
 
-        indexBuffer.setBuffer(engine, toShortBuffer(parsed.indices))
+        indexBuffer.setBuffer(engine, BufferUtils.toShortBuffer(parsed.indices))
 
         // Bounding box
         val cx = (parsed.minBound[0] + parsed.maxBound[0]) / 2f
@@ -306,20 +304,6 @@ class ObjLoader(
 
     fun clearCache() {
         cache.clear()
-    }
-
-    private fun toBuffer(data: FloatArray): ByteBuffer {
-        val buf = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
-        buf.asFloatBuffer().put(data)
-        buf.rewind()
-        return buf
-    }
-
-    private fun toShortBuffer(data: ShortArray): ByteBuffer {
-        val buf = ByteBuffer.allocateDirect(data.size * 2).order(ByteOrder.nativeOrder())
-        buf.asShortBuffer().put(data)
-        buf.rewind()
-        return buf
     }
 
     companion object {
