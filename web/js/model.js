@@ -1430,46 +1430,100 @@ export function alignItems(state, ids, alignment) {
   return true;
 }
 
-export function distributeItems(state, ids, direction) {
+export function distributeItems(state, ids, direction, spacing = null, spacingType = 'center') {
+  if (spacing !== null && typeof spacing === 'object') {
+    const opts = spacing;
+    spacingType = opts.spacingType ?? opts.type ?? opts.mode ?? 'center';
+    spacing = opts.spacing ?? opts.distance ?? null;
+  }
+
+  let resolvedSpacing = null;
+  if (typeof spacing === 'number') {
+    resolvedSpacing = Number.isFinite(spacing) && spacing > 0 ? spacing : null;
+  } else if (typeof spacing === 'string') {
+    const parsed = parseDistanceInInches(spacing);
+    resolvedSpacing =
+      typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
   const idArray = Array.from(ids || []);
   const boundsList = idArray.map((id) => getBounds(state, id)).filter((b) => b !== null);
 
-  if (boundsList.length < 3) return false;
+  const minCount = resolvedSpacing !== null ? 2 : 3;
+  if (boundsList.length < minCount) return false;
+
+  const isGap = spacingType === 'gap' || spacingType === 'edge' || spacingType === 'edge-to-edge';
 
   if (direction === 'horizontal') {
-    boundsList.sort((a, b) => a.x - b.x || a.w - b.w);
-    const first = boundsList[0];
-    const last = boundsList[boundsList.length - 1];
-    const outerSpan = last.x + last.w - first.x;
-    const totalWidth = boundsList.reduce((sum, b) => sum + b.w, 0);
-    const gap = (outerSpan - totalWidth) / (boundsList.length - 1);
-
-    let currentX = first.x + first.w + gap;
-    for (let i = 1; i < boundsList.length - 1; i++) {
-      const b = boundsList[i];
-      const hit = findOwner(state, b.id);
-      if (hit) {
-        setItemPosition(state, hit, currentX + b.w / 2, b.cy);
+    if (resolvedSpacing !== null) {
+      boundsList.sort((a, b) => (isGap ? a.x - b.x || a.w - b.w : a.cx - b.cx));
+      const first = boundsList[0];
+      let prevRight = first.x + first.w;
+      for (let i = 1; i < boundsList.length; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        const targetCX = isGap
+          ? prevRight + resolvedSpacing + b.w / 2
+          : first.cx + i * resolvedSpacing;
+        if (hit) {
+          setItemPosition(state, hit, targetCX, b.cy);
+        }
+        prevRight = isGap ? prevRight + resolvedSpacing + b.w : targetCX + b.w / 2;
       }
-      currentX += b.w + gap;
+    } else {
+      boundsList.sort((a, b) => a.x - b.x || a.w - b.w);
+      const first = boundsList[0];
+      const last = boundsList[boundsList.length - 1];
+      const outerSpan = last.x + last.w - first.x;
+      const totalWidth = boundsList.reduce((sum, b) => sum + b.w, 0);
+      const gap = (outerSpan - totalWidth) / (boundsList.length - 1);
+
+      let currentX = first.x + first.w + gap;
+      for (let i = 1; i < boundsList.length - 1; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        if (hit) {
+          setItemPosition(state, hit, currentX + b.w / 2, b.cy);
+        }
+        currentX += b.w + gap;
+      }
     }
   } else if (direction === 'vertical') {
-    boundsList.sort((a, b) => a.y - b.y || a.h - b.h);
-    const first = boundsList[0];
-    const last = boundsList[boundsList.length - 1];
-    const outerSpan = last.y + last.h - first.y;
-    const totalHeight = boundsList.reduce((sum, b) => sum + b.h, 0);
-    const gap = (outerSpan - totalHeight) / (boundsList.length - 1);
-
-    let currentY = first.y + first.h + gap;
-    for (let i = 1; i < boundsList.length - 1; i++) {
-      const b = boundsList[i];
-      const hit = findOwner(state, b.id);
-      if (hit) {
-        setItemPosition(state, hit, b.cx, currentY + b.h / 2);
+    if (resolvedSpacing !== null) {
+      boundsList.sort((a, b) => (isGap ? a.y - b.y || a.h - b.h : a.cy - b.cy));
+      const first = boundsList[0];
+      let prevBottom = first.y + first.h;
+      for (let i = 1; i < boundsList.length; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        const targetCY = isGap
+          ? prevBottom + resolvedSpacing + b.h / 2
+          : first.cy + i * resolvedSpacing;
+        if (hit) {
+          setItemPosition(state, hit, b.cx, targetCY);
+        }
+        prevBottom = isGap ? prevBottom + resolvedSpacing + b.h : targetCY + b.h / 2;
       }
-      currentY += b.h + gap;
+    } else {
+      boundsList.sort((a, b) => a.y - b.y || a.h - b.h);
+      const first = boundsList[0];
+      const last = boundsList[boundsList.length - 1];
+      const outerSpan = last.y + last.h - first.y;
+      const totalHeight = boundsList.reduce((sum, b) => sum + b.h, 0);
+      const gap = (outerSpan - totalHeight) / (boundsList.length - 1);
+
+      let currentY = first.y + first.h + gap;
+      for (let i = 1; i < boundsList.length - 1; i++) {
+        const b = boundsList[i];
+        const hit = findOwner(state, b.id);
+        if (hit) {
+          setItemPosition(state, hit, b.cx, currentY + b.h / 2);
+        }
+        currentY += b.h + gap;
+      }
     }
+  } else {
+    return false;
   }
 
   return true;

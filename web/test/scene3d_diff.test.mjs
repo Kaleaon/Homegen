@@ -210,7 +210,7 @@ test('customTexture caches dataUrl textures, preserves async render callback, an
   doc.getElementById = (id) => {
     if (id === 'view3d-fallback-summary') {
       renderCalls += 1;
-      return { textContent: '' };
+      return { isConnected: false, textContent: '' };
     }
     return null;
   };
