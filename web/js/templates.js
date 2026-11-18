@@ -10,7 +10,7 @@ function buildBlank() {
   return s;
 }
 
-function buildStudio() {
+export function buildStudio() {
   let s = M.newState();
   s.name = 'Studio Apartment';
   s.levels = 1;
