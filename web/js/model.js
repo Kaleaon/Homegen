@@ -15,7 +15,7 @@ import {
   getRoomBoundingBox,
   computeGeoBounds,
 } from './geometry.js';
-import { isRegisteredEPSG } from './epsgRegistry.js';
+import { isRegisteredEPSG, normalizeCode, getEPSGDefinition } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
@@ -62,8 +62,7 @@ export function defaultCRS() {
 
 export function isValidEPSGCode(code) {
   if (!code || typeof code !== 'string') return false;
-  const trimmed = code.trim().toUpperCase();
-  const normalized = trimmed.startsWith('EPSG:') ? trimmed : `EPSG:${trimmed}`;
+  const normalized = normalizeCode(code);
   if (!/^EPSG:\d+$/.test(normalized)) return false;
   return isRegisteredEPSG(normalized);
 }
@@ -71,9 +70,8 @@ export function isValidEPSGCode(code) {
 export function normalizeEPSGCode(code) {
   if (code == null) return 'EPSG:4326';
   if (typeof code === 'number') return `EPSG:${code}`;
-  const str = String(code).trim().toUpperCase();
-  if (/^\d+$/.test(str)) return `EPSG:${str}`;
-  if (/^EPSG:\d+$/.test(str)) return str;
+  const normalized = normalizeCode(String(code));
+  if (/^EPSG:\d+$/.test(normalized)) return normalized;
   return 'EPSG:4326';
 }
 
@@ -867,7 +865,7 @@ export function deserialize(text) {
   } else {
     const fallback = defaultCRS();
     s.crs.epsg = normalizeEPSGCode(s.crs.epsg);
-    s.crs.proj4 = s.crs.proj4 || fallback.proj4;
+    s.crs.proj4 = s.crs.proj4 || getEPSGDefinition(s.crs.epsg) || fallback.proj4;
     s.crs.wkt = s.crs.wkt || fallback.wkt;
     s.crs.origin = s.crs.origin || fallback.origin;
     s.crs.units = s.crs.units || fallback.units;
