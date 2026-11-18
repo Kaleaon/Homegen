@@ -5860,6 +5860,7 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
