@@ -598,6 +598,19 @@
     </div>
   </form>
 </dialog>
+<dialog id="dlg-confirm" aria-labelledby="dlg-confirm-title" aria-describedby="dlg-confirm-msg" class="k-overlay-dialog">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-confirm-title">Confirm Action</h2>
+    <button value="close" id="dlg-confirm-close" aria-label="Close confirmation modal"><span aria-hidden="true">✕</span></button>
+  </form>
+  <div class="dlg-body">
+    <p id="dlg-confirm-msg" class="confirm-msg"></p>
+    <div class="btns confirm-btns">
+      <button id="dlg-confirm-cancel" type="button">Cancel</button>
+      <button id="dlg-confirm-ok" class="primary" type="button">Confirm</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="command-palette" aria-labelledby="cmd-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head">
     <h2 id="cmd-title">Command Palette</h2>
