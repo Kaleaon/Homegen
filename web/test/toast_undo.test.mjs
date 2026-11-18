@@ -246,22 +246,24 @@ test('toast() renders plain text span without action button and supports action 
   const { toast } = mod;
   const toastEl = getEl('toast');
 
-  // 1. Standard plain-text toast
+  // 1. Standard plain-text toast (.toast-msg + .toast-dismiss, no .toast-action-btn)
   toast('Saved project successfully', false, 120);
   assert.equal(toastEl.style.display, 'flex');
   assert.equal(toastEl.className, '');
-  assert.equal(toastEl.children.length, 1, 'Plain toast should have 1 text span child');
+  assert.equal(toastEl.children.length, 2, 'Plain toast should have .toast-msg + .toast-dismiss');
   assert.equal(toastEl.children[0].tagName, 'SPAN');
-  assert.equal(toastEl.textContent, 'Saved project successfully');
+  assert.equal(toastEl.querySelector('.toast-msg').textContent, 'Saved project successfully');
+  assert.ok(toastEl.querySelector('.toast-dismiss'), 'Plain toast keeps .toast-dismiss button');
   assert.equal(toastEl.querySelector('.toast-action-btn'), null);
 
   // 2. Error toast without action
   toast('Export failed', true, 120);
   assert.equal(toastEl.className, 'err');
-  assert.equal(toastEl.children.length, 1);
-  assert.equal(toastEl.textContent, 'Export failed');
+  assert.equal(toastEl.children.length, 2);
+  assert.equal(toastEl.querySelector('.toast-msg').textContent, 'Export failed');
+  assert.equal(toastEl.querySelector('.toast-action-btn'), null);
 
-  // 3. Toast with action button
+  // 3. Toast with action button (.toast-msg + .toast-action-btn + .toast-dismiss)
   let undoCount = 0;
   toast('Deleted Sofa in Living room', false, 5000, {
     label: 'Undo',
@@ -272,9 +274,15 @@ test('toast() renders plain text span without action button and supports action 
 
   assert.equal(toastEl.className, '');
   assert.equal(toastEl.style.display, 'flex');
-  assert.equal(toastEl.children.length, 2, 'Action toast should contain span + action button');
+  assert.equal(
+    toastEl.children.length,
+    3,
+    'Action toast should contain .toast-msg + .toast-action-btn + .toast-dismiss'
+  );
   assert.equal(toastEl.children[0].tagName, 'SPAN');
   assert.equal(toastEl.children[0].textContent, 'Deleted Sofa in Living room');
+  assert.equal(toastEl.children[1].className, 'toast-action-btn');
+  assert.equal(toastEl.children[2].className, 'toast-dismiss');
 
   const btn = toastEl.querySelector('.toast-action-btn');
   assert.ok(btn, 'Action toast must contain .toast-action-btn button');
@@ -296,7 +304,7 @@ test('toast() renders plain text span without action button and supports action 
     null,
     'Subsequent plain toast must clear previous action button'
   );
-  assert.equal(toastEl.textContent, 'Selection cleared');
+  assert.equal(toastEl.querySelector('.toast-msg').textContent, 'Selection cleared');
 
   // Wait for auto-hide timer
   await new Promise((r) => setTimeout(r, 60));

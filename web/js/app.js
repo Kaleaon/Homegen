@@ -212,52 +212,329 @@ const roomAt = (p) =>
     .filter((r) => inRect(r, p, WT / 2))
     .sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
 
-export function toast(msg, err = false, ms = 4500, action = null) {
-  const t = $('#toast');
+function isElementInsideToast(toastEl, dismissBtn, node) {
+  if (!node || !toastEl) return false;
+  if (node === toastEl || (dismissBtn && node === dismissBtn)) return true;
+  if (toastEl._actionBtn && node === toastEl._actionBtn) return true;
+  if (typeof toastEl.contains === 'function') return toastEl.contains(node);
+  if (Array.isArray(toastEl.children) && toastEl.children.includes(node)) return true;
+  return false;
+}
+
+function removeToastActionBtn(t) {
   if (!t) return;
-  if (typeof t.replaceChildren === 'function') {
-    t.replaceChildren();
-  } else {
-    while (t.firstChild && typeof t.removeChild === 'function') {
-      t.removeChild(t.firstChild);
-    }
-    t.textContent = '';
+  const prevBtn =
+    t._actionBtn ||
+    (typeof t.querySelector === 'function' ? t.querySelector('.toast-action-btn') : null);
+  t._actionBtn = null;
+  if (!prevBtn) return;
+  if (typeof prevBtn.remove === 'function') {
+    prevBtn.remove();
+  } else if (prevBtn.parentNode && typeof prevBtn.parentNode.removeChild === 'function') {
+    prevBtn.parentNode.removeChild(prevBtn);
+  } else if (typeof t.removeChild === 'function') {
+    t.removeChild(prevBtn);
+  } else if (Array.isArray(t.children)) {
+    const idx = t.children.indexOf(prevBtn);
+    if (idx !== -1) t.children.splice(idx, 1);
   }
+}
+
+function ensureToastElements(t) {
+  let msgEl = typeof t.querySelector === 'function' ? t.querySelector('.toast-msg') : null;
+  let dismissBtn = typeof t.querySelector === 'function' ? t.querySelector('.toast-dismiss') : null;
 
   if (
+    (!msgEl || !dismissBtn) &&
     typeof document !== 'undefined' &&
     typeof document.createElement === 'function' &&
     typeof t.appendChild === 'function'
   ) {
-    const textSpan = document.createElement('span');
-    textSpan.textContent = msg;
-    t.appendChild(textSpan);
+    t.textContent = '';
+    msgEl = document.createElement('span');
+    msgEl.className = 'toast-msg';
+    if (typeof msgEl.setAttribute === 'function') msgEl.setAttribute('class', 'toast-msg');
 
-    if (action && action.label && typeof action.onClick === 'function') {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'toast-action-btn';
-      btn.textContent = action.label;
-      let clicked = false;
-      btn.addEventListener('click', () => {
-        if (clicked) return;
-        clicked = true;
-        clearTimeout(toast.t);
-        t.style.display = 'none';
-        action.onClick();
-      });
-      t.appendChild(btn);
+    dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'toast-dismiss';
+    if (typeof dismissBtn.setAttribute === 'function') {
+      dismissBtn.setAttribute('type', 'button');
+      dismissBtn.setAttribute('class', 'toast-dismiss');
+      dismissBtn.setAttribute('aria-label', 'Dismiss notification');
     }
+    const iconSpan = document.createElement('span');
+    if (typeof iconSpan.setAttribute === 'function') {
+      iconSpan.setAttribute('aria-hidden', 'true');
+    }
+    iconSpan.textContent = '✕';
+    if (typeof dismissBtn.appendChild === 'function') {
+      dismissBtn.appendChild(iconSpan);
+    } else {
+      dismissBtn.textContent = '✕';
+    }
+
+    t.appendChild(msgEl);
+    t.appendChild(dismissBtn);
+  }
+
+  return { msgEl, dismissBtn };
+}
+
+function focusElementCleanly(el) {
+  if (!el) return false;
+  const shadowFocusable =
+    el.shadowRoot && typeof el.shadowRoot.querySelector === 'function'
+      ? el.shadowRoot.querySelector(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      : null;
+  if (shadowFocusable && typeof shadowFocusable.focus === 'function') {
+    shadowFocusable.focus();
+    return true;
+  }
+  if (typeof el.focus === 'function') {
+    el.focus();
+    return true;
+  }
+  return false;
+}
+
+export function dismissToast({ restoreFocus = false } = {}) {
+  clearTimeout(toast.t);
+  toast.t = null;
+  const state = toast._state;
+  if (state) state.active = false;
+
+  const t = $('#toast');
+  if (!t) return;
+
+  const dismissBtn =
+    typeof t.querySelector === 'function' ? t.querySelector('.toast-dismiss') : null;
+  const msgEl = typeof t.querySelector === 'function' ? t.querySelector('.toast-msg') : null;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const focusWasInside = isElementInsideToast(t, dismissBtn, activeEl);
+
+  removeToastActionBtn(t);
+  t._toastHovered = false;
+  t._toastFocused = false;
+  if (t.style) t.style.display = 'none';
+  if (msgEl) msgEl.textContent = '';
+
+  if (restoreFocus) {
+    const returnEl = toast._returnFocusEl;
+    toast._returnFocusEl = null;
+    if (!focusElementCleanly(returnEl) && focusWasInside) {
+      const fallback = ($('#plan') && !$('#plan').hidden ? $('#plan') : null) || $('#stage');
+      focusElementCleanly(fallback);
+    }
+  }
+}
+
+function pauseActiveToastTimer() {
+  const state = toast._state;
+  if (!state || !state.active || state.err || state.paused || state.duration <= 0) return;
+  clearTimeout(toast.t);
+  toast.t = null;
+  const elapsed = Math.max(0, Date.now() - state.startTime);
+  state.remaining = Math.max(0, state.remaining - elapsed);
+  state.paused = true;
+}
+
+function resumeActiveToastTimer(t) {
+  const state = toast._state;
+  if (!state || !state.active || state.err || !state.paused || state.duration <= 0) return;
+  if (t && (t._toastHovered || t._toastFocused)) return;
+  state.paused = false;
+  state.startTime = Date.now();
+  const delay = Math.max(1, state.remaining);
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => {
+    dismissToast({ restoreFocus: false });
+  }, delay);
+}
+
+function bindToastListeners(t, dismissBtn) {
+  if (t && !t._toastListenersAttached && typeof t.addEventListener === 'function') {
+    t._toastListenersAttached = true;
+
+    t.addEventListener('mouseenter', () => {
+      t._toastHovered = true;
+      pauseActiveToastTimer();
+    });
+
+    t.addEventListener('mouseleave', () => {
+      t._toastHovered = false;
+      resumeActiveToastTimer(t);
+    });
+
+    t.addEventListener('focusin', (e) => {
+      if (
+        !toast._returnFocusEl &&
+        e?.relatedTarget &&
+        !isElementInsideToast(t, dismissBtn, e.relatedTarget)
+      ) {
+        toast._returnFocusEl = e.relatedTarget;
+      }
+      t._toastFocused = true;
+      pauseActiveToastTimer();
+    });
+
+    t.addEventListener('focusout', (e) => {
+      if (e?.relatedTarget && isElementInsideToast(t, dismissBtn, e.relatedTarget)) {
+        return;
+      }
+      t._toastFocused = false;
+      resumeActiveToastTimer(t);
+    });
+
+    t.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+  }
+
+  if (
+    dismissBtn &&
+    !dismissBtn._toastDismissBound &&
+    typeof dismissBtn.addEventListener === 'function'
+  ) {
+    dismissBtn._toastDismissBound = true;
+
+    dismissBtn.addEventListener('click', (e) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+      dismissToast({ restoreFocus: true });
+    });
+
+    dismissBtn.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+  }
+}
+
+export function toast(msg, err = false, ms = 4500, action = null) {
+  const t = $('#toast');
+  clearTimeout(toast.t);
+  toast.t = null;
+  if (toast._state) toast._state.active = false;
+  if (!t) return;
+
+  const isErr = Boolean(err);
+  const wasVisible = Boolean(t.style && t.style.display && t.style.display !== 'none');
+  if (!wasVisible) {
+    t._toastHovered = false;
+    t._toastFocused = false;
+  }
+
+  removeToastActionBtn(t);
+  const { msgEl, dismissBtn } = ensureToastElements(t);
+  bindToastListeners(t, dismissBtn);
+
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (
+    activeEl &&
+    !isElementInsideToast(t, dismissBtn, activeEl) &&
+    activeEl.tagName !== 'BODY' &&
+    activeEl.tagName !== 'HTML'
+  ) {
+    toast._returnFocusEl = activeEl;
+  } else if (!isElementInsideToast(t, dismissBtn, activeEl)) {
+    toast._returnFocusEl = null;
+  }
+
+  t.className = isErr ? 'err' : '';
+  if (typeof t.classList?.toggle === 'function') {
+    t.classList.toggle('err', isErr);
+  }
+  if (typeof t.setAttribute === 'function') {
+    t.setAttribute('role', isErr ? 'alert' : 'status');
+    t.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
+  }
+
+  if (msgEl) {
+    msgEl.textContent = '';
+    msgEl.textContent = msg;
   } else {
     t.textContent = msg;
   }
 
-  t.className = err ? 'err' : '';
-  t.style.display = 'flex';
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => {
-    t.style.display = 'none';
-  }, ms);
+  if (
+    action &&
+    action.label &&
+    typeof action.onClick === 'function' &&
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function' &&
+    typeof t.appendChild === 'function'
+  ) {
+    const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'toast-action-btn';
+    if (typeof actionBtn.setAttribute === 'function') {
+      actionBtn.setAttribute('type', 'button');
+      actionBtn.setAttribute('class', 'toast-action-btn');
+    }
+    actionBtn.textContent = action.label;
+    let clicked = false;
+    actionBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.();
+      if (clicked) return;
+      clicked = true;
+      dismissToast({ restoreFocus: false });
+      action.onClick();
+    });
+    actionBtn.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+    if (dismissBtn && typeof t.insertBefore === 'function') {
+      t.insertBefore(actionBtn, dismissBtn);
+    } else if (dismissBtn && Array.isArray(t.children)) {
+      const idx = t.children.indexOf(dismissBtn);
+      if (idx !== -1) {
+        actionBtn.parentNode = t;
+        t.children.splice(idx, 0, actionBtn);
+      } else {
+        t.appendChild(actionBtn);
+      }
+    } else {
+      t.appendChild(actionBtn);
+    }
+    t._actionBtn = actionBtn;
+  }
+
+  if (t.style) t.style.display = 'flex';
+
+  const effectiveMs = isErr ? 0 : Number(ms) || 0;
+  const focusInside = isElementInsideToast(t, dismissBtn, activeEl);
+  if (focusInside) t._toastFocused = true;
+  const initiallyPaused = Boolean(t._toastHovered || t._toastFocused);
+
+  const state = {
+    active: true,
+    err: isErr,
+    duration: effectiveMs,
+    remaining: effectiveMs,
+    startTime: Date.now(),
+    paused: initiallyPaused,
+  };
+  toast._state = state;
+
+  if (effectiveMs > 0 && !initiallyPaused) {
+    toast.t = setTimeout(() => {
+      dismissToast({ restoreFocus: false });
+    }, effectiveMs);
+  }
 }
 
 const UNDO_TOAST_ACTION = {
@@ -739,6 +1016,7 @@ function redraw() {
     snappingBridge,
     bad,
     selection,
+    hover,
     under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
     autoFixDiffs: preview ? [] : autoFixDiffs,
     hoveredDiffIndex,
@@ -3363,19 +3641,24 @@ function setDoc(next, label) {
   refresh();
 }
 
-function trapFocus(containerEl, returnFocusEl) {
+export function trapFocus(containerEl, returnFocusEl) {
   const focusableSelector =
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-  const focusableElements = Array.from(containerEl.querySelectorAll(focusableSelector));
-  if (!focusableElements.length) return () => {};
+  const getVisibleFocusables = () =>
+    Array.from(containerEl.querySelectorAll(focusableSelector)).filter(
+      (el) =>
+        !el.hidden && !el.disabled && !(typeof el.closest === 'function' && el.closest('[hidden]'))
+    );
 
-  const firstEl = focusableElements[0];
-  const lastEl = focusableElements[focusableElements.length - 1];
+  const initialFocusables = getVisibleFocusables();
+  if (!initialFocusables.length) return () => {};
 
-  firstEl.focus();
+  initialFocusables[0].focus();
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
       if (typeof containerEl.close === 'function') {
         containerEl.close();
       } else {
@@ -3386,19 +3669,27 @@ function trapFocus(containerEl, returnFocusEl) {
           redraw();
         }
       }
-      if (returnFocusEl) returnFocusEl.focus();
+      if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
       return;
     }
 
     if (e.key !== 'Tab') return;
 
+    const focusableElements = getVisibleFocusables();
+    if (!focusableElements.length) return;
+    const firstEl = focusableElements[0];
+    const lastEl = focusableElements[focusableElements.length - 1];
+    const activeEl =
+      (containerEl.ownerDocument && containerEl.ownerDocument.activeElement) ||
+      (typeof document !== 'undefined' ? document.activeElement : null);
+
     if (e.shiftKey) {
-      if (document.activeElement === firstEl) {
+      if (activeEl === firstEl) {
         e.preventDefault();
         lastEl.focus();
       }
     } else {
-      if (document.activeElement === lastEl) {
+      if (activeEl === lastEl) {
         e.preventDefault();
         firstEl.focus();
       }
@@ -3408,7 +3699,7 @@ function trapFocus(containerEl, returnFocusEl) {
   containerEl.addEventListener('keydown', handleKeyDown);
   return () => {
     containerEl.removeEventListener('keydown', handleKeyDown);
-    if (returnFocusEl) returnFocusEl.focus();
+    if (returnFocusEl && typeof returnFocusEl.focus === 'function') returnFocusEl.focus();
   };
 }
 
@@ -3622,8 +3913,7 @@ $('#undo')?.addEventListener('click', () => {
     hoveredDiffIndex = null;
     const t = $('#toast');
     if (t && typeof t.querySelector === 'function' && t.querySelector('.toast-action-btn')) {
-      clearTimeout(toast.t);
-      t.style.display = 'none';
+      dismissToast({ restoreFocus: false });
     }
     refresh();
   }
@@ -3917,6 +4207,250 @@ $('#png')?.addEventListener('click', () => {
     a.click();
   });
 });
+export const PLAN_TIER_RANKS = {
+  free: 0,
+  plus: 1,
+  pro: 2,
+};
+
+const EXPORT_UPGRADE_MESSAGES = {
+  pdf: 'Upgrade to Homegen Pro to unlock multi-page scaled Vector PDF sheets, custom branding logos, and approval stamps.',
+  csv: 'Upgrade to Homegen Plus or Pro to unlock full Bill of Materials CSV schedules, finish takeoffs, and room area metrics.',
+  dxf: 'Upgrade to Homegen Pro to unlock layered AutoCAD DXF geometry, SI metric scaling, and multi-story CAD exchange.',
+  export:
+    'Compare Homegen Plus and Pro plans for architectural PDF sheets, BOM schedules, and CAD exports.',
+};
+
+export function getCurrentPlanTier(state = doc) {
+  const fromState = state?.settings?.planTier;
+  if (typeof fromState === 'string' && PLAN_TIER_RANKS[fromState.toLowerCase()] !== undefined) {
+    return fromState.toLowerCase();
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('homegen.planTier');
+      if (stored && PLAN_TIER_RANKS[stored.toLowerCase()] !== undefined) {
+        return stored.toLowerCase();
+      }
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return 'free';
+}
+
+export function initExportModalTierState(modalEl, currentTier = getCurrentPlanTier()) {
+  if (!modalEl) return null;
+  const normalizedTier =
+    typeof currentTier === 'string' && PLAN_TIER_RANKS[currentTier.toLowerCase()] !== undefined
+      ? currentTier.toLowerCase()
+      : 'free';
+  const currentRank = PLAN_TIER_RANKS[normalizedTier];
+
+  if (modalEl.dataset) {
+    modalEl.dataset.activePlanTier = normalizedTier;
+  } else if (typeof modalEl.setAttribute === 'function') {
+    modalEl.setAttribute('data-active-plan-tier', normalizedTier);
+  }
+
+  const badges = Array.from(modalEl.querySelectorAll?.('.plan-tier-badge') || []);
+  for (const badge of badges) {
+    const rawTier =
+      badge.dataset?.tier ||
+      badge.getAttribute?.('data-tier') ||
+      (badge.classList?.contains('plan-tier-pro') ? 'pro' : 'plus');
+    const badgeTier = rawTier === 'pro' ? 'pro' : 'plus';
+    const unlocked = currentRank >= PLAN_TIER_RANKS[badgeTier];
+    const tierLabel = badgeTier === 'pro' ? 'Pro' : 'Plus';
+
+    if (badge.dataset) {
+      badge.dataset.tier = badgeTier;
+      badge.dataset.tierState = unlocked ? 'unlocked' : 'locked';
+    }
+    if (typeof badge.setAttribute === 'function') {
+      badge.setAttribute('data-tier', badgeTier);
+      badge.setAttribute('data-tier-state', unlocked ? 'unlocked' : 'locked');
+      badge.setAttribute(
+        'aria-label',
+        unlocked ? `${tierLabel} plan feature (unlocked)` : `${tierLabel} plan feature`
+      );
+    }
+    badge.classList?.toggle('is-unlocked', unlocked);
+    badge.classList?.toggle('is-locked', !unlocked);
+    badge.hidden = false;
+  }
+
+  const banners = Array.from(modalEl.querySelectorAll?.('.upgrade-trigger-banner') || []);
+  for (const banner of banners) {
+    const reqRaw =
+      banner.dataset?.requiredTier || banner.getAttribute?.('data-required-tier') || 'pro';
+    const requiredTier = PLAN_TIER_RANKS[reqRaw] !== undefined ? reqRaw : 'pro';
+    const isProTier = currentRank >= PLAN_TIER_RANKS.pro;
+    banner.hidden = isProTier;
+
+    if (banner.dataset) {
+      banner.dataset.currentTier = normalizedTier;
+      banner.dataset.requiredTier = requiredTier;
+    } else if (typeof banner.setAttribute === 'function') {
+      banner.setAttribute('data-current-tier', normalizedTier);
+      banner.setAttribute('data-required-tier', requiredTier);
+    }
+
+    const link = banner.querySelector?.('.upgrade-trigger-link');
+    if (link && !isProTier) {
+      const targetTier =
+        currentRank >= PLAN_TIER_RANKS.plus && requiredTier === 'plus' ? 'pro' : requiredTier;
+      const targetLabel = targetTier === 'pro' ? 'Pro' : 'Plus';
+      if (link.dataset) link.dataset.upgradeTier = targetTier;
+      if (typeof link.setAttribute === 'function') {
+        link.setAttribute('data-upgrade-tier', targetTier);
+      }
+      link.textContent = `Upgrade to ${targetLabel}`;
+    }
+  }
+
+  return {
+    activePlanTier: normalizedTier,
+    badgeCount: badges.length,
+    bannerCount: banners.length,
+  };
+}
+
+export function openPlanUpgradePrompt(options = {}) {
+  const {
+    tier = 'pro',
+    exportType = 'export',
+    triggerEl = null,
+    root = typeof document !== 'undefined' ? document : null,
+  } = options;
+
+  const targetTier = tier === 'plus' ? 'plus' : 'pro';
+  const message = EXPORT_UPGRADE_MESSAGES[exportType] || EXPORT_UPGRADE_MESSAGES.export;
+  const upgradeDlg = root?.querySelector?.('#dlg-plan-upgrade') || null;
+
+  if (upgradeDlg) {
+    const contextEl = upgradeDlg.querySelector?.('#upgrade-prompt-context');
+    if (contextEl) contextEl.textContent = message;
+
+    if (upgradeDlg.dataset) {
+      upgradeDlg.dataset.requestedTier = targetTier;
+      upgradeDlg.dataset.exportContext = exportType;
+    }
+    if (typeof upgradeDlg.setAttribute === 'function') {
+      upgradeDlg.setAttribute('data-requested-tier', targetTier);
+      upgradeDlg.setAttribute('data-export-context', exportType);
+    }
+
+    const cards = Array.from(upgradeDlg.querySelectorAll?.('.upgrade-tier-card') || []);
+    for (const card of cards) {
+      const cardTier = card.dataset?.tier || card.getAttribute?.('data-tier');
+      const isHighlighted = cardTier === targetTier;
+      card.classList?.toggle('highlighted', isHighlighted);
+      if (card.dataset) card.dataset.highlighted = isHighlighted ? 'true' : 'false';
+      if (typeof card.setAttribute === 'function') {
+        card.setAttribute('data-highlighted', isHighlighted ? 'true' : 'false');
+      }
+    }
+
+    if (typeof upgradeDlg.showModal === 'function') {
+      try {
+        if (!upgradeDlg.open) upgradeDlg.showModal();
+      } catch {
+        upgradeDlg.setAttribute?.('open', '');
+        upgradeDlg.open = true;
+      }
+    } else {
+      upgradeDlg.setAttribute?.('open', '');
+      upgradeDlg.open = true;
+    }
+    upgradeDlg.hidden = false;
+
+    const cleanup = trapFocus(upgradeDlg, triggerEl);
+    upgradeDlg.addEventListener?.('close', () => cleanup(), { once: true });
+  } else if ($('#toast')) {
+    toast(message);
+  }
+
+  announceToLiveRegion(message);
+  return { tier: targetTier, exportType, message, dialogOpened: Boolean(upgradeDlg) };
+}
+
+export function bindUpgradeTriggerLinks(root = typeof document !== 'undefined' ? document : null) {
+  if (!root || typeof root.querySelectorAll !== 'function') return 0;
+  let boundCount = 0;
+
+  const links = Array.from(root.querySelectorAll('.upgrade-trigger-link'));
+  for (const link of links) {
+    const alreadyBound =
+      link.dataset?.upgradeBound === 'true' || link.getAttribute?.('data-upgrade-bound') === 'true';
+    if (alreadyBound) continue;
+
+    if (link.dataset) link.dataset.upgradeBound = 'true';
+    else link.setAttribute?.('data-upgrade-bound', 'true');
+
+    link.addEventListener('click', (e) => {
+      if (typeof e?.preventDefault === 'function') e.preventDefault();
+      const targetTier =
+        link.dataset?.upgradeTier || link.getAttribute?.('data-upgrade-tier') || 'pro';
+      const exportType =
+        link.dataset?.exportType || link.getAttribute?.('data-export-type') || 'export';
+      openPlanUpgradePrompt({
+        tier: targetTier,
+        exportType,
+        triggerEl: link,
+        root,
+      });
+    });
+    boundCount++;
+  }
+
+  const upgradeDlg = root.querySelector?.('#dlg-plan-upgrade');
+  if (upgradeDlg) {
+    const dlgAlreadyBound =
+      upgradeDlg.dataset?.upgradeControlsBound === 'true' ||
+      upgradeDlg.getAttribute?.('data-upgrade-controls-bound') === 'true';
+    if (!dlgAlreadyBound) {
+      if (upgradeDlg.dataset) upgradeDlg.dataset.upgradeControlsBound = 'true';
+      else upgradeDlg.setAttribute?.('data-upgrade-controls-bound', 'true');
+
+      const closeUpgradeModal = () => {
+        if (typeof upgradeDlg.close === 'function') {
+          upgradeDlg.close();
+        } else {
+          upgradeDlg.removeAttribute?.('open');
+          upgradeDlg.open = false;
+          upgradeDlg.hidden = true;
+        }
+      };
+
+      upgradeDlg
+        .querySelector?.('#btn-upgrade-close')
+        ?.addEventListener('click', closeUpgradeModal);
+
+      const tierButtons = Array.from(upgradeDlg.querySelectorAll?.('[data-select-tier]') || []);
+      for (const btn of tierButtons) {
+        btn.addEventListener('click', () => {
+          const selected =
+            btn.dataset?.selectTier || btn.getAttribute?.('data-select-tier') || 'pro';
+          const label = selected === 'plus' ? 'Plus' : 'Pro';
+          closeUpgradeModal();
+          if ($('#toast')) {
+            toast(
+              `Homegen ${label} upgrade selected. Visit billing settings to activate ${label}.`
+            );
+          }
+        });
+      }
+    }
+  }
+
+  return boundCount;
+}
+
+if (typeof document !== 'undefined') {
+  bindUpgradeTriggerLinks(document);
+}
+
 $('#export-pdf')?.addEventListener('click', (e) => {
   if (!doc.rooms || doc.rooms.length === 0) {
     toast('Cannot export PDF: add at least one room first.', true);
@@ -3953,6 +4487,8 @@ $('#export-pdf')?.addEventListener('click', (e) => {
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
   const dlg = $('#pdf-export');
   if (dlg) {
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4029,6 +4565,8 @@ $('#export-csv')?.addEventListener('click', (e) => {
   const returnFocusEl = e.currentTarget || document.activeElement;
   const dlg = $('#csv-export');
   if (dlg) {
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4093,6 +4631,8 @@ $('#export-dxf')?.addEventListener('click', (e) => {
         }
       }
     }
+    initExportModalTierState(dlg);
+    bindUpgradeTriggerLinks(dlg);
     dlg.showModal();
     const cleanup = trapFocus(dlg, returnFocusEl);
     dlg.addEventListener('close', () => cleanup(), { once: true });
@@ -4335,7 +4875,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-export const SAMPLE_MUNICIPAL_GIS = {
+const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -4376,7 +4916,7 @@ export const SAMPLE_MUNICIPAL_GIS = {
   ],
 };
 
-export function loadGISSubsystem(geojson, options = {}) {
+function loadGISSubsystem(geojson, options = {}) {
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.importGeoJSON(geojson, {
     targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
@@ -4390,7 +4930,7 @@ export function loadGISSubsystem(geojson, options = {}) {
   return doc.site;
 }
 
-export function setGISSegmentSetback(segmentId, setbackDistance) {
+function setGISSegmentSetback(segmentId, setbackDistance) {
   if (!doc.site) return null;
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
@@ -4401,7 +4941,7 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-export function openGISDialog() {
+function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisMapSelect = $('#gis-map-preset');
@@ -4411,14 +4951,14 @@ export function openGISDialog() {
   else dlg.setAttribute('open', '');
 }
 
-export function closeGISDialog() {
+function closeGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
 }
 
-export function renderGISSegments() {
+function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
   if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
@@ -4698,13 +5238,19 @@ if (typeof window !== 'undefined') {
       $('#redo').click();
     } else if (lk === 'r') rotateSelected();
     else if (lk === 'escape') {
+      const historyPopover = $('#history-popover');
+      const hasOpenHistory = Boolean(historyPopover && !historyPopover.hidden);
+      if (toast._state?.active && !selection && tool.kind === 'select' && !hasOpenHistory) {
+        e.preventDefault();
+        dismissToast({ restoreFocus: true });
+        return;
+      }
       if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
       if (hint && tool.kind === 'room') hint.textContent = '';
-      const historyPopover = $('#history-popover');
-      if (historyPopover && !historyPopover.hidden) {
+      if (hasOpenHistory) {
         historyPopover.hidden = true;
         $('#history-btn')?.setAttribute('aria-expanded', 'false');
       }
@@ -4718,10 +5264,7 @@ if (typeof window !== 'undefined') {
         const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
         if (r.ok) {
           select(null);
-          toast(`Deleted ${label || 'selected element(s)'}`, false, 4500, {
-            label: 'Undo',
-            onClick: () => $('#undo')?.click(),
-          });
+          toast(`Deleted ${label || 'selected element(s)'}`, false, 4500, UNDO_TOAST_ACTION);
         }
       }
     } else if (lk === 'v') setTool({ kind: 'select' });
@@ -5602,7 +6145,7 @@ function renderCommandList(query = '') {
       const isSelected = idx === selectedCmdIndex;
       const optionId = `cmd-option-${idx}`;
       const kbdHtml = cmd.shortcut
-        ? `<span class="keys"><kbd>${esc(cmd.shortcut)}</kbd></span>`
+        ? `<span class="keys"><k-kbd>${esc(cmd.shortcut)}</k-kbd></span>`
         : '';
       return `<li id="${optionId}" data-cmd-idx="${idx}" class="${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}">
         <div class="cmd-item-main">
@@ -5689,6 +6232,8 @@ function initCommandPaletteUI() {
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
+    toast,
+    dismissToast,
     setLevel,
     formRow,
     get doc() {
@@ -5697,7 +6242,6 @@ if (typeof window !== 'undefined')
     get report() {
       return report;
     },
-    toast,
     apply,
     sampleHome,
     openTemplatePicker,
@@ -5754,4 +6298,9 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     SAMPLE_MUNICIPAL_GIS,
+    PLAN_TIER_RANKS,
+    getCurrentPlanTier,
+    initExportModalTierState,
+    openPlanUpgradePrompt,
+    bindUpgradeTriggerLinks,
   };
