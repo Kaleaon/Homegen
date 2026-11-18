@@ -8,6 +8,7 @@ import {
   openingMetrics,
 } from './catalog.js';
 import { interior, interiorPolygon, polygonPerimeter, floorAreaSqFt } from './geometry.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
 /**
  * Escapes a single CSV field value per RFC 4180 standards.
@@ -43,12 +44,16 @@ export function formatCSVRow(fields) {
  * @returns {string} Formatted feet-and-inches string.
  */
 export function fmtLen(inches) {
-  if (inches == null || isNaN(inches)) return '';
-  const ft = Math.floor(inches / 12);
-  const inch = Math.round(inches % 12);
-  if (ft === 0) return `${inch}"`;
-  if (inch === 0) return `${ft}'`;
-  return `${ft}' ${inch}"`;
+  if (
+    inches == null ||
+    typeof inches === 'boolean' ||
+    typeof inches === 'object' ||
+    (typeof inches === 'string' && inches.trim() === '') ||
+    !Number.isFinite(Number(inches))
+  ) {
+    return '';
+  }
+  return formatFractionalInches(inches);
 }
 
 /**

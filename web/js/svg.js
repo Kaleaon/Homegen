@@ -5,9 +5,8 @@ import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geomet
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { getPalette } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
-const fmt = (inches) =>
-  `${Math.floor(inches / 12)}'${Math.round(inches % 12) ? ` ${Math.round(inches % 12)}"` : ''}`;
 const escXml = (s) =>
   String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -430,7 +429,7 @@ ${themeCssVars}
     const cy = py(r.y + r.h / 2);
     const area = floorAreaSqFt(r);
     const label = escXml(r.name);
-    const sub = `${fmt(ir.w)} × ${fmt(ir.h)} · ${area.toFixed(0)} sq ft`;
+    const sub = `${formatFractionalInches(ir.w)} × ${formatFractionalInches(ir.h)} · ${area.toFixed(0)} sq ft`;
 
     svgParts.push(`    <g transform="translate(${cx.toFixed(2)}, ${cy.toFixed(2)})">`);
     svgParts.push(`      <text class="label-title" x="0" y="-2">${label}</text>`);
@@ -483,7 +482,7 @@ ${themeCssVars}
       `      <text class="tbl-cell" x="${schedX + colW[0] + 4}" y="${currentY + 10}">${escXml(ROOM_TYPES[r.type]?.name || r.type)}</text>`
     );
     svgParts.push(
-      `      <text class="tbl-cell" x="${schedX + colW[0] + colW[1] + 4}" y="${currentY + 10}">${fmt(ir.w)} × ${fmt(ir.h)}</text>`
+      `      <text class="tbl-cell" x="${schedX + colW[0] + colW[1] + 4}" y="${currentY + 10}">${formatFractionalInches(ir.w)} × ${formatFractionalInches(ir.h)}</text>`
     );
     svgParts.push(
       `      <text class="tbl-cell" x="${schedX + colW[0] + colW[1] + colW[2] + 4}" y="${currentY + 10}">${area.toFixed(0)} sf</text>`
