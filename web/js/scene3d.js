@@ -18,7 +18,6 @@ import {
   resolveWallIndex,
   getArcParameters,
   pointOnArc,
-  subtractInterval,
 } from './geometry.js';
 import { OPENING_BY_ID, ITEM_BY_ID, WALL_BY_ID, FLOOR_BY_ID } from './catalog.js';
 import { wallOpenings, openingInfo } from './codes.js';
@@ -405,11 +404,11 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   const plain = (color, rough = 0.85, extra = {}) =>
     new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...extra });
 
-  function proceduralTexture(finish, rx, ry) {
+  function getOrCreateTexture(finish, rx, ry, createFn) {
     const tileInches = finish.tileInches || 24;
     const key = `${finish.id}|${tileInches}|${rx.toFixed(2)}|${ry.toFixed(2)}`;
     if (texCache.has(key)) return texCache.get(key);
-    const t = new THREE.CanvasTexture(tileCanvasFor(finish));
+    const t = createFn();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(rx, ry);
     t.colorSpace = THREE.SRGBColorSpace;
@@ -418,24 +417,19 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     return t;
   }
 
+  function proceduralTexture(finish, rx, ry) {
+    return getOrCreateTexture(finish, rx, ry, () => new THREE.CanvasTexture(tileCanvasFor(finish)));
+  }
+
   function customTexture(finish, rx, ry) {
-    const tileInches = finish.tileInches || 24;
-    const key = `${finish.id}|${tileInches}|${rx.toFixed(2)}|${ry.toFixed(2)}`;
-    if (texCache.has(key)) return texCache.get(key);
-    let t;
     if (finish.dataUrl) {
-      t = loader.load(finish.dataUrl, () => {
-        render();
-      });
-      t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      t.repeat.set(rx, ry);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 8;
-    } else {
-      t = proceduralTexture(finish, rx, ry);
+      return getOrCreateTexture(finish, rx, ry, () =>
+        loader.load(finish.dataUrl, () => {
+          render();
+        })
+      );
     }
-    texCache.set(key, t);
-    return t;
+    return proceduralTexture(finish, rx, ry);
   }
 
   const preloader = new MaterialPreloader(loader);
