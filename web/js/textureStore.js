@@ -9,6 +9,7 @@ const STORE_NAME = 'homegen_textures';
 const memoryStore = new Map();
 
 let dbPromise = null;
+let dbSource = null;
 
 function isIDBSupported() {
   return typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined';
@@ -16,7 +17,8 @@ function isIDBSupported() {
 
 function getDB() {
   if (!isIDBSupported()) return Promise.resolve(null);
-  if (!dbPromise) {
+  if (!dbPromise || dbSource !== window.indexedDB) {
+    dbSource = window.indexedDB;
     dbPromise = new Promise((resolve) => {
       try {
         const request = window.indexedDB.open(DB_NAME, DB_VERSION);
@@ -61,6 +63,54 @@ export async function saveTextureBlob(id, blob, metadata = {}) {
   } else {
     memoryStore.set(id, record);
     return id;
+  }
+}
+
+export async function saveTextureBlobsBatch(items) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  const now = Date.now();
+  const records = [];
+  for (const item of items) {
+    if (!item || !item.id || !item.blob) continue;
+    const meta = item.metadata || {};
+    records.push({
+      id: item.id,
+      blob: item.blob,
+      mimeType: item.blob.type || item.mimeType || meta.mimeType || 'image/png',
+      name: item.name || meta.name || item.id,
+      createdAt: now,
+    });
+  }
+  if (records.length === 0) return [];
+
+  const ids = records.map((r) => r.id);
+
+  if (!isIDBSupported()) {
+    for (const record of records) {
+      memoryStore.set(record.id, record);
+    }
+    return ids;
+  }
+
+  const db = await getDB();
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      tx.oncomplete = () => resolve(ids);
+      tx.onerror = (e) => reject(e?.target?.error || tx.error);
+      tx.onabort = (e) =>
+        reject(e?.target?.error || tx.error || new Error('IndexedDB batch transaction aborted'));
+      for (const record of records) {
+        store.put(record);
+      }
+    });
+  } else {
+    for (const record of records) {
+      memoryStore.set(record.id, record);
+    }
+    return ids;
   }
 }
 

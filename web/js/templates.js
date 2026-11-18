@@ -4,13 +4,13 @@ import * as M from './model.js';
 import { commit } from './codes.js';
 import { ROOM_TYPES } from './catalog.js';
 
-export function buildBlank() {
+function buildBlank() {
   const s = M.newState();
   s.name = 'Blank Canvas';
   return s;
 }
 
-export function buildStudio() {
+function buildStudio() {
   let s = M.newState();
   s.name = 'Studio Apartment';
   s.levels = 1;
@@ -27,7 +27,7 @@ export function buildStudio() {
   return s;
 }
 
-export function build2BR() {
+function build2BR() {
   let s = M.newState();
   s.name = '2-Bedroom Home';
   s.levels = 1;

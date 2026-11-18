@@ -328,7 +328,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   let raf = 0;
   let framed = false;
   let cachedHudParent = null;
-  let cachedHudBadge = null;
+  let hudBadge = null;
   let lastHudAttrText = null;
 
   async function fetchWithTimeout(url, timeoutMs = 8000) {
@@ -2515,33 +2515,28 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const parent = canvas?.parentElement || null;
     if (!parent) {
       cachedHudParent = null;
-      cachedHudBadge = null;
+      hudBadge = null;
       lastHudAttrText = null;
       return;
     }
 
-    if (
-      parent !== cachedHudParent ||
-      (cachedHudBadge && !isHudBadgeAttached(cachedHudBadge, parent))
-    ) {
+    if (parent !== cachedHudParent || (hudBadge && !isHudBadgeAttached(hudBadge, parent))) {
       cachedHudParent = parent;
-      cachedHudBadge = null;
+      hudBadge = null;
       lastHudAttrText = null;
     }
 
     const attrText = get3DAttributionText();
     if (attrText === lastHudAttrText) return;
 
-    if (!cachedHudBadge && typeof parent.querySelector === 'function') {
-      cachedHudBadge = parent.querySelector('.scene3d-hud-attribution');
+    if (!hudBadge && typeof parent.querySelector === 'function') {
+      hudBadge = parent.querySelector('.scene3d-hud-attribution');
     }
 
     if (attrText) {
-      if (!cachedHudBadge && typeof document.createElement === 'function') {
-        cachedHudBadge = document.createElement('div');
-        cachedHudBadge.className = 'scene3d-hud-attribution';
-        cachedHudBadge.style.cssText =
-          'position:absolute; bottom:12px; right:12px; pointer-events:none; z-index:15; background:rgba(15, 23, 42, 0.88); color:#f8fafc; padding:5px 10px; border-radius:4px; font-size:11px; font-family:sans-serif; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.25); box-shadow:0 2px 6px rgba(0,0,0,0.3);';
+      if (!hudBadge && typeof document.createElement === 'function') {
+        hudBadge = document.createElement('div');
+        hudBadge.className = 'scene3d-hud-attribution';
         try {
           if (getComputedStyle(parent).position === 'static') {
             parent.style.position = 'relative';
@@ -2549,17 +2544,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
         } catch {
           // ignore computed style check error in headless environments
         }
-        parent.appendChild(cachedHudBadge);
+        parent.appendChild(hudBadge);
       }
-      if (cachedHudBadge) {
-        if (cachedHudBadge.style.display !== 'block') {
-          cachedHudBadge.style.display = 'block';
+      if (hudBadge) {
+        if (hudBadge.style.display !== 'block') {
+          hudBadge.style.display = 'block';
         }
-        cachedHudBadge.textContent = attrText;
+        hudBadge.textContent = attrText;
       }
-    } else if (cachedHudBadge) {
-      if (cachedHudBadge.style.display !== 'none') {
-        cachedHudBadge.style.display = 'none';
+    } else if (hudBadge) {
+      if (hudBadge.style.display !== 'none') {
+        hudBadge.style.display = 'none';
       }
     }
 
@@ -2795,7 +2790,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       active = false;
       cancelAnimationFrame(raf);
       cachedHudParent = null;
-      cachedHudBadge = null;
+      hudBadge = null;
       lastHudAttrText = null;
       if (typeof unsubscribe === 'function') {
         unsubscribe();
