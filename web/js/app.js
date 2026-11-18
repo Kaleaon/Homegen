@@ -147,6 +147,7 @@ let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | 
 let tab = 'build';
 let selectionSet = new Set();
 let selection = null;
+let view3d = null;
 
 function isSelected(id) {
   return selectionSet.has(id);
@@ -172,6 +173,8 @@ let calibPoints = [];
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
+let distSpacingInput = '';
+let distSpacingType = 'center';
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -469,7 +472,10 @@ export function toast(msg, err = false, ms = 4500) {
   }
 }
 
+export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
+let zoomAnnounceTimeout = null;
+let a11yDebounceTimer = null;
 function announceToLiveRegion(msg) {
   const live3dEl = $('#view3d-a11y-live');
   if (live3dEl) live3dEl.textContent = msg;
@@ -485,6 +491,31 @@ function announceToLiveRegion(msg) {
   }, 220);
 }
 
+export function announceZoom(scale) {
+  if (zoomAnnounceTimeout) clearTimeout(zoomAnnounceTimeout);
+  if (a11yDebounceTimer) {
+    clearTimeout(a11yDebounceTimer);
+    a11yDebounceTimer = null;
+  }
+  if (liveRegionTimeout) {
+    clearTimeout(liveRegionTimeout);
+    liveRegionTimeout = null;
+  }
+  zoomAnnounceTimeout = setTimeout(() => {
+    zoomAnnounceTimeout = null;
+    const liveEl =
+      $('#plan-fallback-summary') ||
+      (typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('plan-fallback-summary')
+        : null);
+    if (!liveEl) return;
+    if (typeof liveEl.setAttribute === 'function' && !liveEl.getAttribute?.('role')) {
+      liveEl.setAttribute('role', 'status');
+    }
+    liveEl.textContent = `Zoom level: ${Math.round((scale / 1.6) * 100)}%`;
+  }, ZOOM_ANNOUNCE_DEBOUNCE_MS);
+}
+
 function persist() {
   try {
     localStorage.setItem(STORE, M.serialize(doc));
@@ -493,9 +524,27 @@ function persist() {
   }
 }
 
-function renderSnapToggles() {
+function is3DViewActive() {
+  if (view3d && typeof view3d.isThree === 'function' && view3d.isThree()) {
+    return true;
+  }
+  const view3dBtn = $('#toolbar [data-view="3d"]') || $('[data-view="3d"]');
+  if (
+    view3dBtn &&
+    view3dBtn.classList &&
+    typeof view3dBtn.classList.contains === 'function' &&
+    view3dBtn.classList.contains('on')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function renderSnapToggles() {
   const container = $('#snap-toggles');
   if (!container) return;
+  const is3d = is3DViewActive();
+  const disabledAttr = is3d ? 'disabled' : '';
   const viewModels = buildToggleViewModel(interaction);
   const gridVm = buildGridSettingsViewModel(interaction);
   const activeCount = viewModels.filter((vm) => vm.enabled).length;
@@ -505,8 +554,8 @@ function renderSnapToggles() {
 
   const existingPopover =
     typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
-  const wasOpen = existingPopover ? existingPopover.open : false;
-  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  const wasOpen = !is3d && existingPopover ? existingPopover.open : false;
+  const activeEl = !is3d && typeof document !== 'undefined' ? document.activeElement : null;
   const isContained =
     activeEl &&
     (typeof container.contains === 'function'
@@ -521,7 +570,7 @@ function renderSnapToggles() {
         const tokenHover = vm.tokenHover || '--ktheme-accent-hover';
         const styleAttr = `--snap-accent: var(${token}); --snap-accent-hover: var(${tokenHover});`;
         return `
-        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
+        <k-button class="snap-toggle-btn ${vm.enabled ? 'on' : ''}" ${vm.enabled ? 'active' : ''} ${disabledAttr} data-snap-id="${vm.id}" style="${styleAttr}" title="${esc(vm.description)}">
           <span>${esc(vm.label)}</span>
           <span class="snap-status">${vm.enabled ? 'ON' : 'OFF'}</span>
         </k-button>
@@ -531,7 +580,7 @@ function renderSnapToggles() {
 
   container.innerHTML = `
     <k-popover id="snap-popover">
-      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} title="Snapping modes (${activeCount} enabled)">
+      <k-button id="snap-trigger" slot="trigger" ${activeCount > 0 ? 'active' : ''} ${disabledAttr} title="Snapping modes (${activeCount} enabled)">
         <span aria-hidden="true">🧲</span> Snapping <span class="snap-badge badge">${activeCount}</span>
       </k-button>
       <div class="snap-popover-menu">
@@ -566,8 +615,26 @@ function renderSnapToggles() {
 
   const newPopover =
     typeof container.querySelector === 'function' ? container.querySelector('k-popover') : null;
-  if (newPopover && wasOpen) {
-    newPopover.open = true;
+  if (newPopover) {
+    if (wasOpen && !is3d) {
+      newPopover.open = true;
+    } else if (is3d) {
+      newPopover.open = false;
+      if (typeof newPopover.removeAttribute === 'function') {
+        newPopover.removeAttribute('open');
+      }
+    }
+  }
+
+  const snapTrigger =
+    typeof container.querySelector === 'function' ? container.querySelector('#snap-trigger') : null;
+  if (snapTrigger) {
+    snapTrigger.disabled = is3d;
+    if (is3d) {
+      if (typeof snapTrigger.setAttribute === 'function') snapTrigger.setAttribute('disabled', '');
+    } else if (typeof snapTrigger.removeAttribute === 'function') {
+      snapTrigger.removeAttribute('disabled');
+    }
   }
 
   if (focusedInputId && typeof container.querySelector === 'function') {
@@ -578,8 +645,21 @@ function renderSnapToggles() {
   }
 
   container.querySelectorAll('[data-snap-id]').forEach((btn) => {
+    btn.disabled = is3d;
+    if (is3d) {
+      if (typeof btn.setAttribute === 'function') btn.setAttribute('disabled', '');
+    } else if (typeof btn.removeAttribute === 'function') {
+      btn.removeAttribute('disabled');
+    }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (
+        is3DViewActive() ||
+        btn.disabled ||
+        (typeof btn.hasAttribute === 'function' && btn.hasAttribute('disabled'))
+      ) {
+        return;
+      }
       const id = btn.dataset.snapId;
       const vm = viewModels.find((x) => x.id === id);
       if (vm) {
@@ -639,7 +719,8 @@ function renderSnapToggles() {
   bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
-export function renderBgToolbar(bg = doc.background) {
+function renderBgToolbar() {
+  const bg = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : doc.background;
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
   if (bg && (bg.dataUrl || bg.presetKey)) {
@@ -670,6 +751,8 @@ export function renderBgToolbar(bg = doc.background) {
     }
   }
 }
+
+export { renderBgToolbar };
 
 function renderHistoryTimeline() {
   const listEl = $('#history-list');
@@ -755,8 +838,10 @@ function refresh() {
     redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   }
   renderHistoryTimeline();
-  $('#plan-name').value = doc.name;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const planNameInput = $('#plan-name');
+  if (planNameInput) planNameInput.value = doc.name;
+  const zoomLabelEl = $('#zoom-label');
+  if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
@@ -991,8 +1076,6 @@ export function badIds(rep) {
   return s;
 }
 
-let a11yDebounceTimer = null;
-
 export function updatePlanA11yTree(state, curLevel = 0) {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   if (a11yDebounceTimer) clearTimeout(a11yDebounceTimer);
@@ -1025,7 +1108,7 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const state = preview ? preview.next : doc;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
   const bad = new Set([
@@ -1041,19 +1124,21 @@ function redraw() {
     preview,
     freshViolations: preview?.fresh || [],
   });
-  draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
-    dpr,
-    gridSettings: interaction.gridSettings,
-    complianceScene,
-    snappingBridge,
-    bad,
-    selection,
-    hover,
-    under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
-    autoFixDiffs: preview ? [] : autoFixDiffs,
-    hoveredDiffIndex,
-    overlay: (c) => drawOverlay(c, state),
-  });
+  if (ctx) {
+    draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
+      dpr,
+      gridSettings: interaction.gridSettings,
+      complianceScene,
+      snappingBridge,
+      bad,
+      selection,
+      hover,
+      under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
+      autoFixDiffs: preview ? [] : autoFixDiffs,
+      hoveredDiffIndex,
+      overlay: (c) => drawOverlay(c, state),
+    });
+  }
   updatePlanA11yTree(state, curLevel);
 }
 
@@ -1474,9 +1559,22 @@ function renderInspector() {
       </div>
       <div class="align-section" style="margin-top:10px">
         <div class="align-label">Distribute</div>
-        <div class="align-grid">
-          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 ? 'disabled' : ''}>Horizontal</button>
-          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 ? 'disabled' : ''}>Vertical</button>
+        ${formRow(
+          'dist-spacing-input',
+          'Spacing',
+          `<input id="dist-spacing-input" type="text" placeholder="Auto (e.g. 16&quot;, 2' 6&quot;)" value="${esc(distSpacingInput)}">`
+        )}
+        ${formRow(
+          'dist-spacing-type',
+          'Mode',
+          `<select id="dist-spacing-type">
+            <option value="center" ${distSpacingType === 'center' ? 'selected' : ''}>Center-to-Center</option>
+            <option value="gap" ${distSpacingType === 'gap' ? 'selected' : ''}>Edge-to-Edge Gap</option>
+          </select>`
+        )}
+        <div class="align-grid" style="margin-top:6px">
+          <button id="dist-h" class="align-btn" title="Distribute Horizontally" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Horizontal</button>
+          <button id="dist-v" class="align-btn" title="Distribute Vertically" ${selectedList.length < 3 && !(M.parseDistanceInInches(distSpacingInput) > 0) ? 'disabled' : ''}>Vertical</button>
         </div>
       </div>
       <div class="btns" style="margin-top:14px">
@@ -1502,12 +1600,44 @@ function renderInspector() {
       apply((n) => M.alignItems(n, selectedList, 'bottom'), 'Align Bottom')
     );
 
-    $('#dist-h')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'horizontal'), 'Distribute Horizontally')
-    );
-    $('#dist-v')?.addEventListener('click', () =>
-      apply((n) => M.distributeItems(n, selectedList, 'vertical'), 'Distribute Vertically')
-    );
+    const syncDistControls = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const hasExplicit = typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0;
+      const canDistribute = selectedList.length >= 3 || (selectedList.length >= 2 && hasExplicit);
+      const btnH = $('#dist-h');
+      const btnV = $('#dist-v');
+      if (btnH) btnH.disabled = !canDistribute;
+      if (btnV) btnV.disabled = !canDistribute;
+    };
+
+    const readDistOptions = () => {
+      distSpacingInput = $('#dist-spacing-input')?.value ?? '';
+      distSpacingType = $('#dist-spacing-type')?.value || 'center';
+      const parsed = M.parseDistanceInInches(distSpacingInput);
+      const spacing =
+        typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      return { spacing, spacingType: distSpacingType };
+    };
+
+    $('#dist-spacing-input')?.addEventListener('input', syncDistControls);
+    $('#dist-spacing-type')?.addEventListener('change', syncDistControls);
+
+    $('#dist-h')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'horizontal', spacing, spacingType),
+        'Distribute Horizontally'
+      );
+    });
+    $('#dist-v')?.addEventListener('click', () => {
+      const { spacing, spacingType } = readDistOptions();
+      apply(
+        (n) => M.distributeItems(n, selectedList, 'vertical', spacing, spacingType),
+        'Distribute Vertically'
+      );
+    });
 
     $('#i-del-all')?.addEventListener('click', () => {
       apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
@@ -2758,7 +2888,74 @@ function card(label, sub, on, attrs, swatch) {
   return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
-function renderPalette() {
+export function getCatalogFilters() {
+  return {
+    query: catalogSearchQuery,
+    maxW: catalogMaxWidth,
+    maxD: catalogMaxDepth,
+  };
+}
+
+export function setCatalogFilters({ query, maxW, maxD } = {}) {
+  if (query !== undefined) catalogSearchQuery = String(query);
+  if (maxW !== undefined) catalogMaxWidth = String(maxW);
+  if (maxD !== undefined) catalogMaxDepth = String(maxD);
+}
+
+export function resetCatalogFilters() {
+  catalogSearchQuery = '';
+  catalogMaxWidth = '';
+  catalogMaxDepth = '';
+}
+
+export function renderCatalogPanel(items = ITEMS) {
+  let h = `<div class="catalog-search-container">
+      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
+    </div>
+    <div class="catalog-filters">
+      <div class="catalog-dim-group">
+        <label for="catalog-max-w">Max W (in)</label>
+        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
+      </div>
+      <div class="catalog-dim-group">
+        <label for="catalog-max-d">Max D (in)</label>
+        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
+      </div>
+    </div>`;
+
+  const filtered = filterItems(items, {
+    query: catalogSearchQuery,
+    maxW: catalogMaxWidth,
+    maxD: catalogMaxDepth,
+  });
+
+  if (filtered.length === 0) {
+    h += `<div class="catalog-empty"><p>No matching items found</p><button id="catalog-reset-filters" class="btn secondary btn-sm catalog-reset-btn" type="button">Clear filters</button></div>`;
+  } else {
+    for (const [cat, label] of ITEM_CATEGORIES) {
+      const catItems = filtered.filter((i) => i.cat === cat);
+      if (catItems.length === 0) continue;
+      h +=
+        `<h4>${label}</h4><div class="grid">` +
+        catItems
+          .map((i) =>
+            card(
+              i.name,
+              i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
+              tool.kind === 'item' && tool.id === i.id,
+              `data-tool="item" data-id="${i.id}"`,
+              `background:${i.color}`
+            )
+          )
+          .join('') +
+        '</div>';
+    }
+  }
+
+  return h;
+}
+
+export function renderPalette() {
   const p = $('#palette');
   if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   if (!p) return;
@@ -2819,48 +3016,7 @@ function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    h += `<div class="catalog-search-container">
-      <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Search furniture..." value="${esc(catalogSearchQuery)}" aria-label="Search furniture catalog">
-    </div>
-    <div class="catalog-filters">
-      <div class="catalog-dim-group">
-        <label for="catalog-max-w">Max W (in)</label>
-        <input type="number" id="catalog-max-w" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxWidth)}" aria-label="Maximum width in inches">
-      </div>
-      <div class="catalog-dim-group">
-        <label for="catalog-max-d">Max D (in)</label>
-        <input type="number" id="catalog-max-d" class="catalog-dim-input" placeholder="Any" min="0" value="${esc(catalogMaxDepth)}" aria-label="Maximum depth in inches">
-      </div>
-    </div>`;
-
-    const filtered = filterItems(ITEMS, {
-      query: catalogSearchQuery,
-      maxW: catalogMaxWidth,
-      maxD: catalogMaxDepth,
-    });
-
-    if (filtered.length === 0) {
-      h += `<div class="catalog-empty">No matching items found</div>`;
-    } else {
-      for (const [cat, label] of ITEM_CATEGORIES) {
-        const catItems = filtered.filter((i) => i.cat === cat);
-        if (catItems.length === 0) continue;
-        h +=
-          `<h4>${label}</h4><div class="grid">` +
-          catItems
-            .map((i) =>
-              card(
-                i.name,
-                i.mount === 'floor' ? `${Math.round(i.w)}×${Math.round(i.d)}"` : i.mount,
-                tool.kind === 'item' && tool.id === i.id,
-                `data-tool="item" data-id="${i.id}"`,
-                `background:${i.color}`
-              )
-            )
-            .join('') +
-          '</div>';
-      }
-    }
+    h += renderCatalogPanel();
   } else if (tab === 'paint') {
     h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
@@ -2992,6 +3148,14 @@ function renderPalette() {
   });
   bindCatalogInput('catalog-max-d', (v) => {
     catalogMaxDepth = v;
+  });
+
+  $('#catalog-reset-filters')?.addEventListener('click', () => {
+    catalogSearchQuery = '';
+    catalogMaxWidth = '';
+    catalogMaxDepth = '';
+    renderPalette();
+    $('#catalog-search')?.focus?.();
   });
 
   if (activeId && ['catalog-search', 'catalog-max-w', 'catalog-max-d'].includes(activeId)) {
@@ -3770,20 +3934,24 @@ canvas?.addEventListener(
   { passive: false }
 );
 
-function zoomAt(mx, my, f) {
+export function zoomAt(mx, my, f) {
   const ns = Math.max(0.4, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
   view.oy = my - ((my - view.oy) / view.scale) * ns;
   view.scale = ns;
-  $('#zoom-label').textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
+  const zoomLabel = $('#zoom-label');
+  if (zoomLabel) zoomLabel.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
+  announceZoom(view.scale);
 }
 
-function fit() {
-  const r = canvas.getBoundingClientRect();
+export function fit() {
+  const r = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
   if (!doc.rooms.length) {
     view = { scale: 1.6, ox: 40, oy: 40 };
-    return refresh();
+    refresh();
+    announceZoom(view.scale);
+    return;
   }
   const x0 = Math.min(...doc.rooms.map((q) => q.x));
   const y0 = Math.min(...doc.rooms.map((q) => q.y));
@@ -3796,6 +3964,7 @@ function fit() {
   view.ox = (r.width - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.oy = (r.height - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
   refresh();
+  announceZoom(view.scale);
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
@@ -4777,6 +4946,7 @@ $('#csv-generate')?.addEventListener('click', () => {
       includeOpenings: $('#csv-sec-openings')?.checked !== false,
       includeFinishes: $('#csv-sec-finishes')?.checked !== false,
       includeRooms: $('#csv-sec-rooms')?.checked !== false,
+      includePricing: $('#csv-inc-pricing')?.checked !== false,
     };
 
     if (
@@ -5057,12 +5227,17 @@ if (typeof document !== 'undefined') {
   });
 
   $('#gis-crs')?.addEventListener('change', (e) => {
-    if (doc.site && doc.site.features) {
-      loadGISSubsystem(
-        { type: 'FeatureCollection', features: doc.site.features },
-        { crs: e.target.value }
-      );
+    const crs = e.detail?.value ?? e.target?.value;
+    if (crs && doc.site && doc.site.features) {
+      loadGISSubsystem({ type: 'FeatureCollection', features: doc.site.features }, { crs });
     }
+  });
+
+  document.querySelector('label[for="gis-crs"]')?.addEventListener('click', () => {
+    $('#gis-crs')?.focus();
+  });
+  document.querySelector('label[for="gis-map-preset"]')?.addEventListener('click', () => {
+    $('#gis-map-preset')?.focus();
   });
 }
 
@@ -5136,6 +5311,16 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
 export function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  const gisCrsSelect = $('#gis-crs');
+  if (gisCrsSelect && doc.site?.crs) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
+      gisCrsSelect.value = doc.site.crs;
+    }
+  }
   const gisMapSelect = $('#gis-map-preset');
   if (gisMapSelect) gisMapSelect.value = doc.background?.presetKey || '';
   renderGISSegments();
@@ -5182,6 +5367,7 @@ function renderGISSegments() {
 }
 
 export { renderGISSegments };
+
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -5299,7 +5485,7 @@ if (typeof document !== 'undefined')
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.addEventListener('click', () => setTool({ kind: b.dataset.tool })));
-function switchTab(targetBtn, shouldFocus = false) {
+export function switchTab(targetBtn, shouldFocus = false) {
   if (!targetBtn) return;
   tab = targetBtn.dataset.tab;
   const buttons = document.querySelectorAll('#tabs button, #tabs k-tab');
@@ -5359,9 +5545,9 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   }
 }
 
-let view3d = null;
 if (typeof window !== 'undefined') {
   initCommandPaletteUI();
+  initShortcutOverlayUI();
   setupAddRoomDimsModal();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
@@ -5468,8 +5654,8 @@ if (typeof window !== 'undefined') {
     } else if (lk === 'v') setTool({ kind: 'select' });
     else if (lk === 'x') setTool({ kind: 'erase' });
     else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in').click();
-    else if (k === '-') $('#zoom-out').click();
+    else if (k === '+' || k === '=') $('#zoom-in')?.click();
+    else if (k === '-') $('#zoom-out')?.click();
   });
 
   window.addEventListener('resize', resize);
@@ -5740,7 +5926,8 @@ $('#bg-map-preset')?.addEventListener('change', (e) => {
   handleMapPresetSelect(e.target.value);
 });
 $('#gis-map-preset')?.addEventListener('change', (e) => {
-  handleMapPresetSelect(e.target.value);
+  const presetKey = e.detail?.value ?? e.target?.value ?? '';
+  handleMapPresetSelect(presetKey);
 });
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
@@ -6285,9 +6472,94 @@ function closeCommandPalette() {
   dlg.open = false;
 }
 
-function openShortcutOverlay() {
+function setShortcutElementHidden(el, isHidden) {
+  if (!el) return;
+  el.hidden = isHidden;
+  if (isHidden) {
+    if (typeof el.setAttribute === 'function') el.setAttribute('hidden', '');
+  } else if (typeof el.removeAttribute === 'function') {
+    el.removeAttribute('hidden');
+  }
+}
+
+function getShortcutRowSearchText(row) {
+  if (!row) return '';
+  if (row.children && row.children.length > 0) {
+    const parts = Array.from(row.children).map((child) => child.textContent || '');
+    return `${parts.join(' ')} ${row.textContent || ''}`.toLowerCase();
+  }
+  return (row.textContent || '').toLowerCase();
+}
+
+export function filterShortcuts(query = '') {
+  const dlg = $('#shortcut-overlay');
+  if (!dlg) return 0;
+  const q = String(query ?? '')
+    .trim()
+    .toLowerCase();
+  const compactQuery = q.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+  const groups =
+    typeof dlg.querySelectorAll === 'function'
+      ? Array.from(dlg.querySelectorAll('.shortcut-group'))
+      : [];
+  let totalVisible = 0;
+
+  groups.forEach((group) => {
+    const rows =
+      typeof group.querySelectorAll === 'function'
+        ? Array.from(group.querySelectorAll('.shortcut-row'))
+        : [];
+    let groupVisibleCount = 0;
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) {
+        groupVisibleCount += 1;
+        totalVisible += 1;
+      }
+    });
+    setShortcutElementHidden(group, Boolean(q) && groupVisibleCount === 0);
+  });
+
+  if (groups.length === 0 && typeof dlg.querySelectorAll === 'function') {
+    const rows = Array.from(dlg.querySelectorAll('.shortcut-row'));
+    rows.forEach((row) => {
+      const rawText = getShortcutRowSearchText(row);
+      const compactText = rawText.replace(/\s*([+/])\s*/g, '$1').replace(/\s+/g, ' ');
+      const matches = !q || rawText.includes(q) || compactText.includes(compactQuery);
+      setShortcutElementHidden(row, !matches);
+      if (matches) totalVisible += 1;
+    });
+  }
+
+  const gridEl =
+    typeof dlg.querySelector === 'function' ? dlg.querySelector('.shortcut-grid') : null;
+  if (gridEl) {
+    setShortcutElementHidden(gridEl, Boolean(q) && totalVisible === 0);
+  }
+
+  const noResultsEl =
+    $('#shortcut-no-results') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-no-results') : null);
+  if (noResultsEl) {
+    setShortcutElementHidden(noResultsEl, !(Boolean(q) && totalVisible === 0));
+  }
+
+  return totalVisible;
+}
+
+export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  const searchInput =
+    $('#shortcut-search') ||
+    (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.value = '';
+  }
+  filterShortcuts('');
   if (typeof dlg.showModal === 'function') {
     try {
       dlg.showModal();
@@ -6298,9 +6570,12 @@ function openShortcutOverlay() {
     dlg.setAttribute('open', '');
   }
   dlg.open = true;
+  if (searchInput && typeof searchInput.focus === 'function') {
+    searchInput.focus();
+  }
 }
 
-function closeShortcutOverlay() {
+export function closeShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
   if (typeof dlg.close === 'function') {
@@ -6442,10 +6717,30 @@ function initCommandPaletteUI() {
   }
 }
 
+function initShortcutOverlayUI() {
+  const dlg = $('#shortcut-overlay');
+  const searchInput =
+    $('#shortcut-search') ||
+    (dlg && typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      const val =
+        e && e.target && typeof e.target.value === 'string' ? e.target.value : searchInput.value;
+      filterShortcuts(val);
+    });
+  }
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
+    get view() {
+      return view;
+    },
+    announceZoom,
+    zoomAt,
+    fit,
     toast,
     dismissToast,
     setLevel,
@@ -6492,6 +6787,7 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    filterShortcuts,
     renderCommandList,
     trapFocus,
     toggleHistoryPopover,
@@ -6521,4 +6817,9 @@ if (typeof window !== 'undefined')
     initExportModalTierState,
     openPlanUpgradePrompt,
     bindUpgradeTriggerLinks,
+    renderCatalogPanel,
+    renderPalette,
+    getCatalogFilters,
+    setCatalogFilters,
+    resetCatalogFilters,
   };
