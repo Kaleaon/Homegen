@@ -92,4 +92,40 @@ describe('RoomDrawingTool with curve bulge support', () => {
     expect(fallbackCorner.corner.x).toBeCloseTo(10, 4);
     expect(fallbackCorner.corner.y).toBeCloseTo(0, 4);
   });
+
+  test('preview and closeRoom propagate context.getToken to placement feedback', () => {
+    const tool = new RoomDrawingTool(settings, snapModes);
+    tool.addCorner({ x: 0, y: 0 });
+    tool.addCorner({ x: 10, y: 0 });
+    tool.addCorner({ x: 10, y: 10 });
+
+    const customGetToken = (name) => (name === '--ktheme-success' ? '#11aa22' : '#bb2233');
+    const existingRooms = [
+      [
+        { x: 5, y: 5 },
+        { x: 15, y: 5 },
+        { x: 15, y: 15 },
+        { x: 5, y: 15 },
+      ],
+    ];
+
+    const validPreview = tool.preview({ x: 0, y: 10 }, { getToken: customGetToken });
+    expect(validPreview.invalid).toBe(false);
+    expect(validPreview.style.color).toBe('#11aa22');
+    expect(validPreview.style.outline).toBe('#11aa22');
+
+    const invalidPreview = tool.preview(
+      { x: 0, y: 10 },
+      { existingRooms, getToken: customGetToken }
+    );
+    expect(invalidPreview.invalid).toBe(true);
+    expect(invalidPreview.style.color).toBe('#bb2233');
+    expect(invalidPreview.style.outline).toBe('#bb2233');
+
+    tool.addCorner({ x: 0, y: 10 });
+    const closeInvalid = tool.closeRoom({ existingRooms, getToken: customGetToken });
+    expect(closeInvalid.ok).toBe(false);
+    expect(closeInvalid.feedback.style.color).toBe('#bb2233');
+    expect(closeInvalid.feedback.style.outline).toBe('#bb2233');
+  });
 });

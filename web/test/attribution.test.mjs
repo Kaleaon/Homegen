@@ -282,6 +282,11 @@ test('Vector PDF export resolves dataset attribution text and licensing notices 
     resolved.fullNotice.includes('License: https://city.gov/license'),
     'Full notice should include license URL'
   );
+  assert.equal(
+    resolved.crsText,
+    'EPSG:4326 (37.7749° N, 122.4194° W)',
+    'Resolved metadata should format default CRS EPSG and site origin coordinates'
+  );
 
   const pdfDoc = generatePDF(docState, {
     attributionText: 'Custom GIS Survey 2026',
@@ -291,6 +296,47 @@ test('Vector PDF export resolves dataset attribution text and licensing notices 
   assert.ok(pdfDoc, 'PDF generator should return a valid jsPDF document instance');
   const pdfOutput = pdfDoc.output('arraybuffer');
   assert.ok(pdfOutput.byteLength > 500, 'Generated PDF should contain binary output');
+  const pdfString = Buffer.from(pdfOutput).toString('latin1');
+  assert.ok(
+    pdfString.includes('CRS: EPSG:4326 \\(37.7749° N, 122.4194° W\\)'),
+    'Generated vector PDF title block should render active CRS EPSG and origin coordinates'
+  );
+  assert.ok(
+    pdfString.includes('CRS: EPSG:4326 (37.7749') || pdfString.includes('EPSG:4326'),
+    'Generated vector PDF metadata should include CRS identifier'
+  );
+});
+
+test('resolvePDFAttributionAndLicensing formats custom CRS origins and unprojected fallbacks without altering licensing notices', () => {
+  let docState = M.newState();
+  const res = commit(docState, (n) => M.placeRoomKit(n, 'kit_living', 0, 0, 0));
+  if (res.ok) docState = res.state;
+
+  docState.crs = {
+    epsg: 'EPSG:26910',
+    origin: [-122.4194, 37.7749],
+  };
+  docState.background = {
+    visible: true,
+    provider: 'USGS',
+    licenseUrl: 'https://usgs.gov/license',
+  };
+
+  const resolved = resolvePDFAttributionAndLicensing(docState);
+  assert.equal(resolved.crsText, 'EPSG:26910 (37.7749° N, 122.4194° W)');
+  assert.equal(resolved.attribution, 'Map & Geospatial Data © USGS');
+  assert.equal(resolved.licenseNotice, 'License: https://usgs.gov/license');
+
+  // Verify missing CRS or local PLAN coordinates cleanly fall back
+  const unprojected = resolvePDFAttributionAndLicensing({
+    ...docState,
+    crs: { epsg: '' },
+  });
+  assert.equal(unprojected.crsText, 'PLAN (Local Plan Coordinates)');
+  assert.equal(
+    resolvePDFAttributionAndLicensing({ rooms: docState.rooms }).crsText,
+    'PLAN (Local Plan Coordinates)'
+  );
 });
 
 test('MAP_PRESETS catalog exposes OpenStreetMap, CARTO Positron, USGS Topo, and Copernicus Sentinel', () => {

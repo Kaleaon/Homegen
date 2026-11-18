@@ -101,7 +101,7 @@ export class RoomDrawingTool {
 
     const candidate = [...this.points, point];
     const validation = validatePlacement(candidate, context.existingRooms || []);
-    const feedback = createPlacementFeedback(candidate, validation);
+    const feedback = createPlacementFeedback(candidate, validation, context);
 
     return {
       ...feedback,
@@ -126,7 +126,7 @@ export class RoomDrawingTool {
     if (!validation.valid) {
       return {
         ok: false,
-        feedback: createPlacementFeedback(closedPoints, validation),
+        feedback: createPlacementFeedback(closedPoints, validation, context),
       };
     }
 
