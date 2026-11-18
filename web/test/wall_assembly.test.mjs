@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import * as THREE from '#three';
 import { WALL_BY_ID } from '../js/catalog.js';
 import {
@@ -222,4 +224,192 @@ test('Requirement 5 & AC 5: Door head frame and side jamb assemblies scale depth
   });
 
   assert.ok(doorGroup.children.length >= 3, 'Door group contains head frame and side jambs');
+});
+
+test('applyWallAssemblyOverrides supports single, room, level, and plan scopes while preserving finishes and openings', () => {
+  const state = m.newState();
+  const r1 = m.createRoom(state, 'living', 0, 0, 144, 144, {
+    level: 0,
+    wallFinish: 'paint_sage',
+    cladding: 'cladding_siding_white',
+  });
+  const r2 = m.createRoom(state, 'bedroom', 160, 0, 144, 144, { level: 0 });
+  const r3 = m.createRoom(state, 'office', 0, 0, 144, 144, { level: 1 });
+  const win = m.addOpening(state, r1, 'win_hung_36x60', 'N', 36);
+
+  // Un-overridden rooms keep undefined wallAssemblyOverrides and intact finishes/openings
+  assert.strictEqual(r1.wallAssemblyOverrides, undefined);
+  assert.strictEqual(r1.walls.N, 'paint_sage');
+  assert.strictEqual(r1.openings[0].id, win.id);
+
+  // 1. Single wall scope
+  m.applyWallAssemblyOverrides(
+    state,
+    { gypsumThickness: 0.625, studDepth: 7.25 },
+    { scope: 'single', room: r1, wall: 'N' }
+  );
+  assert.deepEqual(r1.wallAssemblyOverrides.N, { gypsumThickness: 0.625, studDepth: 7.25 });
+  assert.strictEqual(r1.wallAssemblyOverrides.E, undefined);
+  assert.strictEqual(r2.wallAssemblyOverrides, undefined);
+  assert.strictEqual(r1.walls.N, 'paint_sage');
+  assert.strictEqual(r1.openings[0].offset, 36);
+
+  // 2. Room scope
+  m.applyWallAssemblyOverrides(state, { sheathingThickness: 0.75 }, { scope: 'room', room: r1 });
+  assert.strictEqual(r1.wallAssemblyOverrides.N.gypsumThickness, 0.625);
+  assert.strictEqual(r1.wallAssemblyOverrides.N.sheathingThickness, 0.75);
+  assert.deepEqual(r1.wallAssemblyOverrides.S, { sheathingThickness: 0.75 });
+  assert.strictEqual(r2.wallAssemblyOverrides, undefined);
+
+  // 3. Level scope (level 0)
+  m.applyWallAssemblyOverrides(state, { airGapThickness: 1.0 }, { scope: 'level', level: 0 });
+  assert.strictEqual(r1.wallAssemblyOverrides.W.airGapThickness, 1.0);
+  assert.strictEqual(r2.wallAssemblyOverrides.N.airGapThickness, 1.0);
+  assert.strictEqual(r3.wallAssemblyOverrides, undefined);
+
+  // 4. Plan scope
+  m.applyWallAssemblyOverrides(state, { claddingThickness: 1.25 }, { scope: 'plan' });
+  assert.strictEqual(r1.wallAssemblyOverrides.E.claddingThickness, 1.25);
+  assert.strictEqual(r2.wallAssemblyOverrides.S.claddingThickness, 1.25);
+  assert.strictEqual(r3.wallAssemblyOverrides.N.claddingThickness, 1.25);
+});
+
+test('applyWallAssemblyOverrides clamps physical ranges, serializes cleanly, and clears overrides on reset', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'living', 0, 0, 144, 144, {
+    cladding: 'cladding_siding_white',
+  });
+
+  // Below-minimum inputs clamp to >= 0" for non-structural layers and >= 1.5" for studDepth
+  m.applyWallAssemblyOverrides(
+    state,
+    {
+      gypsumThickness: -0.5,
+      studDepth: 0.25,
+      sheathingThickness: -1,
+      airGapThickness: -0.75,
+      claddingThickness: -2,
+    },
+    { scope: 'single', room, wall: 'N' }
+  );
+
+  assert.deepEqual(room.wallAssemblyOverrides.N, {
+    gypsumThickness: 0,
+    studDepth: 1.5,
+    sheathingThickness: 0,
+    airGapThickness: 0,
+    claddingThickness: 0,
+  });
+
+  const clampedAssembly = resolveWallAssembly(
+    room.walls.N,
+    room.cladding,
+    room.wallAssemblyOverrides.N
+  );
+  assert.strictEqual(clampedAssembly.totalThickness, 1.5);
+
+  // Persistence round-trip preserves overrides
+  const restored = m.deserialize(m.serialize(state));
+  assert.deepEqual(restored.rooms[0].wallAssemblyOverrides.N, {
+    gypsumThickness: 0,
+    studDepth: 1.5,
+    sheathingThickness: 0,
+    airGapThickness: 0,
+    claddingThickness: 0,
+  });
+
+  // Reset clears wallAssemblyOverrides[wall] and restores default preset dimensions
+  m.applyWallAssemblyOverrides(state, null, { scope: 'single', room, wall: 'N' });
+  assert.strictEqual(room.wallAssemblyOverrides.N, undefined);
+
+  const resetAssembly = resolveWallAssembly(
+    room.walls.N,
+    room.cladding,
+    room.wallAssemblyOverrides?.N
+  );
+  assert.strictEqual(resetAssembly.gypsumThickness, 0.5);
+  assert.strictEqual(resetAssembly.studDepth, 5.5);
+  assert.strictEqual(resetAssembly.sheathingThickness, 0.5);
+  assert.strictEqual(resetAssembly.airGapThickness, 0.75);
+  assert.strictEqual(resetAssembly.claddingThickness, 0.75);
+  assert.strictEqual(resetAssembly.totalThickness, 8.0);
+});
+
+test('3D scene builder rebuilds wall layer meshes and opening depths when wallAssemblyOverrides change or reset', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'living', 0, 0, 144, 144, {
+    cladding: 'cladding_siding_white',
+  });
+  const win = m.addOpening(state, room, 'win_hung_36x60', 'N', 36);
+
+  const api = createScene3D(
+    canvas,
+    () => state,
+    () => 0
+  );
+  api.show();
+
+  const initialWallGroup = api.entityMap.get(`${room.id}:wall:N`);
+  const initialSig = initialWallGroup.userData.sig;
+  assert.ok(initialWallGroup, 'Initial North wall group created');
+
+  // Measure initial bounding thickness across wall meshes (in feet, S = 1/12)
+  const measureWallSpanFeet = (group) => {
+    const box = new THREE.Box3().setFromObject(group);
+    return box.max.z - box.min.z;
+  };
+  const initialSpanFeet = measureWallSpanFeet(initialWallGroup);
+
+  // Override North wall to thicker assembly (0.625 + 9.25 + 0.75 + 1.0 + 1.5 = 13.125")
+  m.applyWallAssemblyOverrides(
+    state,
+    {
+      gypsumThickness: 0.625,
+      studDepth: 9.25,
+      sheathingThickness: 0.75,
+      airGapThickness: 1.0,
+      claddingThickness: 1.5,
+    },
+    { scope: 'single', room, wall: 'N' }
+  );
+  api.update();
+
+  const updatedWallGroup = api.entityMap.get(`${room.id}:wall:N`);
+  assert.notStrictEqual(updatedWallGroup, initialWallGroup, 'Wall group rebuilt on override');
+  assert.notStrictEqual(updatedWallGroup.userData.sig, initialSig, 'Wall signature updated');
+
+  const updatedSpanFeet = measureWallSpanFeet(updatedWallGroup);
+  assert.ok(
+    updatedSpanFeet > initialSpanFeet + 0.3,
+    `Updated wall assembly depth (${updatedSpanFeet.toFixed(3)}ft) exceeds initial depth (${initialSpanFeet.toFixed(3)}ft)`
+  );
+
+  const updatedWinGroup = api.entityMap.get(win.id);
+  assert.ok(updatedWinGroup, 'Window opening rebuilt with updated wall assembly thickness');
+
+  // Reset North wall overrides and confirm 3D wall group restores initial dimensions
+  m.applyWallAssemblyOverrides(state, null, { scope: 'single', room, wall: 'N' });
+  api.update();
+
+  const resetWallGroup = api.entityMap.get(`${room.id}:wall:N`);
+  const resetSpanFeet = measureWallSpanFeet(resetWallGroup);
+  assert.ok(
+    Math.abs(resetSpanFeet - initialSpanFeet) < 1e-4,
+    'Resetting wall assembly overrides restores original 3D wall depth'
+  );
+});
+
+test('Room inspector in app.js renders accessible Wall Assembly Layer Thicknesses controls and announces updates', () => {
+  const appJsContent = readFileSync(resolve('js/app.js'), 'utf8');
+  assert.match(appJsContent, /Wall Assembly Layer Thicknesses/);
+  assert.match(appJsContent, /formRow\(\s*'i-wa-gypsum',\s*'Gypsum Board \(in\)'/);
+  assert.match(appJsContent, /formRow\(\s*'i-wa-stud',\s*'Stud Depth \(in\)'/);
+  assert.match(appJsContent, /formRow\(\s*'i-wa-sheathing',\s*'Sheathing \(in\)'/);
+  assert.match(appJsContent, /formRow\(\s*'i-wa-airgap',\s*'Air Gap \(in\)'/);
+  assert.match(appJsContent, /formRow\(\s*'i-wa-cladding',\s*'Exterior Cladding \(in\)'/);
+  assert.match(appJsContent, /id="i-wa-total"/);
+  assert.match(appJsContent, /id="i-wa-scope"/);
+  assert.match(appJsContent, /id="i-wa-reset"/);
+  assert.match(appJsContent, /M\.applyWallAssemblyOverrides/);
+  assert.match(appJsContent, /announceToLiveRegion/);
 });

@@ -309,6 +309,423 @@ export function draw(ctx, state, view, opts = {}) {
     drawSnapGuides(ctx, opts.snappingBridge.getActiveSnap(), view);
   if (opts.overlay) opts.overlay(ctx, view);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (opts.showRulers !== false) {
+    drawRulers(ctx, view, w / dpr, h / dpr, opts);
+  }
+}
+
+export const RULER_SIZE = 22;
+
+export function formatRulerCoord(inches) {
+  if (!Number.isFinite(inches) || Math.abs(inches) < 1e-6) return "0'";
+  const sign = inches < 0 ? '-' : '';
+  const abs = Math.abs(inches);
+  const rounded = Math.round(abs * 100) / 100;
+  const wholeFeet = Math.floor((rounded + 1e-6) / 12);
+  const remInches = Math.round((rounded - wholeFeet * 12) * 10) / 10;
+  if (remInches >= 12 - 1e-6) {
+    return `${sign}${wholeFeet + 1}'`;
+  }
+  if (wholeFeet === 0) {
+    return `${sign}${remInches}"`;
+  }
+  if (remInches < 1e-6) {
+    return `${sign}${wholeFeet}'`;
+  }
+  return `${sign}${wholeFeet}' ${remInches}"`;
+}
+
+export function computeRulerSteps(scale, opts = {}) {
+  const rawUnit =
+    opts.gridSettings?.unitSize ??
+    opts.unitSize ??
+    opts.snappingBridge?.interaction?.gridSettings?.unitSize ??
+    6;
+  const rawMinor = opts.gridSettings?.minorGrid ?? opts.minorGrid ?? 12;
+  const rawMajor = opts.gridSettings?.majorGrid ?? opts.majorGrid ?? 60;
+
+  const unitSize = Number.isFinite(rawUnit) && rawUnit > 0 ? rawUnit : 6;
+  const minorGrid = Number.isFinite(rawMinor) && rawMinor > 0 ? rawMinor : 12;
+  const majorGrid = Number.isFinite(rawMajor) && rawMajor > 0 ? rawMajor : 60;
+
+  const candidates = [];
+  if (unitSize * scale >= 36) {
+    candidates.push(1);
+    if (unitSize >= 4 && Number.isInteger(unitSize / 2)) {
+      candidates.push(unitSize / 2);
+    }
+  }
+  candidates.push(
+    unitSize,
+    minorGrid,
+    majorGrid,
+    majorGrid * 2,
+    majorGrid * 5,
+    majorGrid * 10,
+    majorGrid * 20,
+    majorGrid * 50,
+    majorGrid * 100
+  );
+
+  const uniqueSteps = [...new Set(candidates.filter((s) => Number.isFinite(s) && s > 0))].sort(
+    (a, b) => a - b
+  );
+
+  const minLabelPx = 48;
+  const minTickPx = 6;
+
+  let maxCandidate = uniqueSteps[uniqueSteps.length - 1] || 60;
+  const scaleMultipliers = [2, 2.5, 2];
+  let multIdx = 0;
+  while (maxCandidate * scale < minLabelPx && maxCandidate < 1e9) {
+    maxCandidate = Math.round(maxCandidate * scaleMultipliers[multIdx % 3]);
+    uniqueSteps.push(maxCandidate);
+    multIdx++;
+  }
+
+  const labelStep = uniqueSteps.find((s) => s * scale >= minLabelPx) || maxCandidate;
+  const subCandidates = uniqueSteps.filter((s) => s < labelStep && s * scale >= minTickPx);
+  const minorStep = subCandidates.length > 0 ? subCandidates[subCandidates.length - 1] : null;
+  const subStep = subCandidates.length > 1 ? subCandidates[subCandidates.length - 2] : null;
+
+  return { labelStep, minorStep, subStep, unitSize, minorGrid, majorGrid };
+}
+
+function isMultipleOf(val, step) {
+  if (!step) return false;
+  const ratio = val / step;
+  return Math.abs(ratio - Math.round(ratio)) < 1e-6;
+}
+
+export function drawRulers(ctx, view, cw, ch, opts = {}) {
+  if (cw !== undefined && typeof cw === 'object') {
+    opts = cw;
+    cw = undefined;
+    ch = undefined;
+  }
+  if (!ctx || !view || !Number.isFinite(view.scale) || view.scale <= 0) return;
+  if (!Number.isFinite(view.ox) || !Number.isFinite(view.oy)) return;
+
+  const dpr = opts.dpr || 1;
+  const width = cw ?? (ctx.canvas ? ctx.canvas.width / dpr : NaN);
+  const height = ch ?? (ctx.canvas ? ctx.canvas.height / dpr : NaN);
+  const rulerSize = opts.rulerSize ?? RULER_SIZE;
+
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+  if (width <= rulerSize || height <= rulerSize) return;
+
+  const { labelStep, minorStep, subStep } = computeRulerSteps(view.scale, opts);
+
+  const surfaceColor = getToken('--ktheme-bg-surface', '#1a1c25');
+  const elevatedColor = getToken('--ktheme-bg-elevated', '#22252f');
+  const borderColor = getToken('--ktheme-border', '#2e3140');
+  const subTickColor = getToken('--ktheme-border-light', '#3b3f50');
+  const minorTickColor = getToken('--ktheme-text-dim', '#6b7280');
+  const majorTickColor = getToken('--ktheme-text-muted', '#9ca3af');
+  const textColor = getToken('--ktheme-text', '#f3f4f6');
+  const accentColor = getToken('--ktheme-accent', '#818cf8');
+  const monoFont = getToken('--font-family-mono', 'monospace');
+
+  const hover = opts.hover;
+  const hasHover = Boolean(hover) && Number.isFinite(hover.x) && Number.isFinite(hover.y);
+  const hx = hasHover ? hover.x * view.scale + view.ox : NaN;
+  const hy = hasHover ? hover.y * view.scale + view.oy : NaN;
+  const hoverXInBounds = hasHover && hx >= rulerSize && hx <= width;
+  const hoverYInBounds = hasHover && hy >= rulerSize && hy <= height;
+
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // 1. Cursor projection guide lines across interior canvas viewport
+  if (hoverXInBounds || hoverYInBounds) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1;
+    if (ctx.setLineDash) ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    if (hoverXInBounds) {
+      ctx.moveTo(hx, rulerSize);
+      ctx.lineTo(hx, height);
+    }
+    if (hoverYInBounds) {
+      ctx.moveTo(rulerSize, hy);
+      ctx.lineTo(width, hy);
+    }
+    ctx.stroke();
+    if (ctx.setLineDash) ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // 2. Top and left perimeter ruler bar backgrounds
+  ctx.globalAlpha = 0.96;
+  ctx.fillStyle = surfaceColor;
+  ctx.fillRect(rulerSize, 0, width - rulerSize, rulerSize);
+  ctx.fillRect(0, rulerSize, rulerSize, height - rulerSize);
+  ctx.globalAlpha = 1;
+
+  const xMin = (rulerSize - view.ox) / view.scale;
+  const xMax = (width - view.ox) / view.scale;
+  const yMin = (rulerSize - view.oy) / view.scale;
+  const yMax = (height - view.oy) / view.scale;
+
+  // 3. Top horizontal ruler ticks & coordinate labels (restricted to [rulerSize, width])
+  ctx.save();
+  if (ctx.clip && ctx.rect) {
+    ctx.beginPath();
+    ctx.rect(rulerSize, 0, width - rulerSize, rulerSize);
+    ctx.clip();
+  }
+
+  if (subStep) {
+    ctx.strokeStyle = subTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(xMin / subStep - 1e-9);
+    const endIdx = Math.floor(xMax / subStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wx = i * subStep;
+      if (isMultipleOf(wx, minorStep) || isMultipleOf(wx, labelStep)) continue;
+      const sx = wx * view.scale + view.ox;
+      if (sx < rulerSize || sx > width) continue;
+      ctx.moveTo(sx, rulerSize - 4.5);
+      ctx.lineTo(sx, rulerSize);
+    }
+    ctx.stroke();
+  }
+
+  if (minorStep) {
+    ctx.strokeStyle = minorTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(xMin / minorStep - 1e-9);
+    const endIdx = Math.floor(xMax / minorStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wx = i * minorStep;
+      if (isMultipleOf(wx, labelStep)) continue;
+      const sx = wx * view.scale + view.ox;
+      if (sx < rulerSize || sx > width) continue;
+      ctx.moveTo(sx, rulerSize - 8);
+      ctx.lineTo(sx, rulerSize);
+    }
+    ctx.stroke();
+  }
+
+  {
+    ctx.strokeStyle = majorTickColor;
+    ctx.lineWidth = 1;
+    ctx.font = `500 9.5px ${monoFont}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.beginPath();
+    const startIdx = Math.ceil(xMin / labelStep - 1e-9);
+    const endIdx = Math.floor(xMax / labelStep + 1e-9);
+    const labels = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wx = i * labelStep;
+      const sx = wx * view.scale + view.ox;
+      if (sx < rulerSize || sx > width) continue;
+      ctx.moveTo(sx, 2);
+      ctx.lineTo(sx, rulerSize);
+      labels.push({ wx, sx });
+    }
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      for (const { wx, sx } of labels) {
+        const label = formatRulerCoord(wx);
+        const tw = ctx.measureText ? ctx.measureText(label).width : label.length * 5.8;
+        if (sx + 3 + tw <= width - 2) {
+          ctx.fillStyle = Math.abs(wx) < 1e-6 ? textColor : majorTickColor;
+          ctx.fillText(label, sx + 3, 2);
+        }
+      }
+    }
+  }
+
+  // Active X cursor marker & live coordinate badge on top ruler
+  if (hoverXInBounds) {
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(hx, 0);
+    ctx.lineTo(hx, rulerSize);
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      const coordLabel = formatRulerCoord(hover.x);
+      ctx.font = `600 9px ${monoFont}`;
+      const tw = ctx.measureText ? ctx.measureText(coordLabel).width : coordLabel.length * 5.6;
+      const padX = 4;
+      const badgeW = tw + padX * 2;
+      const badgeH = 13;
+      const clampedX = Math.max(rulerSize + 2, Math.min(width - badgeW - 2, hx + 4));
+      if (clampedX >= rulerSize + 1 && clampedX + badgeW <= width) {
+        ctx.fillStyle = elevatedColor;
+        ctx.fillRect(clampedX, 2, badgeW, badgeH);
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 1;
+        if (ctx.strokeRect) ctx.strokeRect(clampedX, 2, badgeW, badgeH);
+        ctx.fillStyle = textColor;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(coordLabel, clampedX + padX, 2 + badgeH / 2);
+      }
+    }
+  }
+  ctx.restore();
+
+  // 4. Left vertical ruler ticks & coordinate labels (restricted to [rulerSize, height])
+  ctx.save();
+  if (ctx.clip && ctx.rect) {
+    ctx.beginPath();
+    ctx.rect(0, rulerSize, rulerSize, height - rulerSize);
+    ctx.clip();
+  }
+
+  if (subStep) {
+    ctx.strokeStyle = subTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(yMin / subStep - 1e-9);
+    const endIdx = Math.floor(yMax / subStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wy = i * subStep;
+      if (isMultipleOf(wy, minorStep) || isMultipleOf(wy, labelStep)) continue;
+      const sy = wy * view.scale + view.oy;
+      if (sy < rulerSize || sy > height) continue;
+      ctx.moveTo(rulerSize - 4.5, sy);
+      ctx.lineTo(rulerSize, sy);
+    }
+    ctx.stroke();
+  }
+
+  if (minorStep) {
+    ctx.strokeStyle = minorTickColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const startIdx = Math.ceil(yMin / minorStep - 1e-9);
+    const endIdx = Math.floor(yMax / minorStep + 1e-9);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wy = i * minorStep;
+      if (isMultipleOf(wy, labelStep)) continue;
+      const sy = wy * view.scale + view.oy;
+      if (sy < rulerSize || sy > height) continue;
+      ctx.moveTo(rulerSize - 8, sy);
+      ctx.lineTo(rulerSize, sy);
+    }
+    ctx.stroke();
+  }
+
+  {
+    ctx.strokeStyle = majorTickColor;
+    ctx.lineWidth = 1;
+    ctx.font = `500 9.5px ${monoFont}`;
+    ctx.beginPath();
+    const startIdx = Math.ceil(yMin / labelStep - 1e-9);
+    const endIdx = Math.floor(yMax / labelStep + 1e-9);
+    const labels = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const wy = i * labelStep;
+      const sy = wy * view.scale + view.oy;
+      if (sy < rulerSize || sy > height) continue;
+      ctx.moveTo(2, sy);
+      ctx.lineTo(rulerSize, sy);
+      labels.push({ wy, sy });
+    }
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      for (const { wy, sy } of labels) {
+        const label = formatRulerCoord(wy);
+        const tw = ctx.measureText ? ctx.measureText(label).width : label.length * 5.8;
+        if (sy + 3 + tw <= height - 2) {
+          ctx.fillStyle = Math.abs(wy) < 1e-6 ? textColor : majorTickColor;
+          if (ctx.translate && ctx.rotate) {
+            ctx.save();
+            ctx.translate(2, sy + 3);
+            ctx.rotate(-Math.PI / 2);
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'top';
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+          } else {
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(label, 2, sy + 3);
+          }
+        }
+      }
+    }
+  }
+
+  // Active Y cursor marker & live coordinate badge on left ruler
+  if (hoverYInBounds) {
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, hy);
+    ctx.lineTo(rulerSize, hy);
+    ctx.stroke();
+
+    if (ctx.fillText) {
+      const coordLabel = formatRulerCoord(hover.y);
+      ctx.font = `600 9px ${monoFont}`;
+      const tw = ctx.measureText ? ctx.measureText(coordLabel).width : coordLabel.length * 5.6;
+      const padY = 4;
+      const badgeLen = tw + padY * 2;
+      const badgeThick = 13;
+      const clampedY = Math.max(rulerSize + 2, Math.min(height - badgeLen - 2, hy + 4));
+      if (clampedY >= rulerSize + 1 && clampedY + badgeLen <= height) {
+        ctx.fillStyle = elevatedColor;
+        ctx.fillRect(2, clampedY, badgeThick, badgeLen);
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 1;
+        if (ctx.strokeRect) ctx.strokeRect(2, clampedY, badgeThick, badgeLen);
+        ctx.fillStyle = textColor;
+        if (ctx.translate && ctx.rotate) {
+          ctx.save();
+          ctx.translate(2 + badgeThick / 2, clampedY + padY);
+          ctx.rotate(-Math.PI / 2);
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(coordLabel, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(coordLabel, 2, clampedY + padY);
+        }
+      }
+    }
+  }
+  ctx.restore();
+
+  // 5. Ruler perimeter borders & top-left unit corner box
+  ctx.fillStyle = elevatedColor;
+  ctx.fillRect(0, 0, rulerSize, rulerSize);
+
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, rulerSize);
+  ctx.lineTo(width, rulerSize);
+  ctx.moveTo(rulerSize, 0);
+  ctx.lineTo(rulerSize, height);
+  ctx.stroke();
+
+  if (ctx.fillText) {
+    const unitLabel = labelStep < 12 ? 'in' : 'ft';
+    ctx.font = `600 8.5px ${monoFont}`;
+    ctx.fillStyle = majorTickColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(unitLabel, rulerSize / 2, rulerSize / 2);
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.restore();
 }
 
 function drawComplianceScene(ctx, complianceScene, view) {
@@ -1447,12 +1864,13 @@ function drawSnapGuides(ctx, snapResult, view) {
     return;
   }
   const { snap, guideLines, indicator } = snapResult;
+  const scale = view?.scale || 1;
   ctx.save();
 
   // Draw guide lines
   if (guideLines && guideLines.length) {
-    ctx.lineWidth = 1.5 / view.scale;
-    ctx.setLineDash([4 / view.scale, 4 / view.scale]);
+    ctx.lineWidth = 1.5 / scale;
+    ctx.setLineDash([4 / scale, 4 / scale]);
 
     for (const g of guideLines) {
       if (g.type === 'midpoint') ctx.strokeStyle = getToken('--ktheme-info', '#a855f7');
@@ -1473,8 +1891,8 @@ function drawSnapGuides(ctx, snapResult, view) {
   // Draw magnetic indicator points
   if (indicator) {
     ctx.setLineDash([]);
-    const rOuter = 8 / view.scale;
-    const rInner = 3.5 / view.scale;
+    const rOuter = 8 / scale;
+    const rInner = 3.5 / scale;
 
     let color = getToken('--ktheme-accent', '#3b82f6');
     if (snap?.type === 'midpoint') color = getToken('--ktheme-info', '#a855f7');
@@ -1482,7 +1900,7 @@ function drawSnapGuides(ctx, snapResult, view) {
     else if (snap?.type === 'grid') color = getToken('--ktheme-success', '#10b981');
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2 / view.scale;
+    ctx.lineWidth = 2 / scale;
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rOuter, 0, 2 * Math.PI);
     ctx.stroke();
@@ -1491,6 +1909,61 @@ function drawSnapGuides(ctx, snapResult, view) {
     ctx.beginPath();
     ctx.arc(indicator.x, indicator.y, rInner, 0, 2 * Math.PI);
     ctx.fill();
+  }
+
+  // Draw angle degree status badge overlay when angle snapping is active
+  const badgeAnchor = indicator || snap?.point;
+  if (
+    snap?.type === 'angle' &&
+    typeof snap.angleDegrees === 'number' &&
+    Number.isFinite(snap.angleDegrees) &&
+    badgeAnchor
+  ) {
+    const normalizedDeg = Object.is(snap.angleDegrees, -0) ? 0 : snap.angleDegrees;
+    const badgeText = `${normalizedDeg}°`;
+    const fontSize = 11 / scale;
+    const padX = 6 / scale;
+    const boxH = 20 / scale;
+    const radius = 5 / scale;
+
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.font = `600 ${fontSize}px ${getToken('--font-family-sans', 'sans-serif')}`;
+    const measured = typeof ctx.measureText === 'function' ? ctx.measureText(badgeText) : null;
+    const textWidth =
+      measured && typeof measured.width === 'number'
+        ? measured.width
+        : badgeText.length * fontSize * 0.6;
+    const boxW = textWidth + padX * 2;
+    const boxX = badgeAnchor.x + 12 / scale;
+    const boxY = badgeAnchor.y - 10 / scale - boxH;
+
+    ctx.fillStyle = getToken('--ktheme-bg-surface', 'rgba(15, 23, 42, 0.92)');
+    ctx.strokeStyle = getToken('--ktheme-accent', '#3b82f6');
+    ctx.lineWidth = 1.25 / scale;
+
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+      ctx.fill();
+      ctx.stroke();
+    } else if (typeof ctx.rect === 'function') {
+      ctx.beginPath();
+      ctx.rect(boxX, boxY, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      if (typeof ctx.fillRect === 'function') ctx.fillRect(boxX, boxY, boxW, boxH);
+      if (typeof ctx.strokeRect === 'function') ctx.strokeRect(boxX, boxY, boxW, boxH);
+    }
+
+    ctx.fillStyle = getToken('--ktheme-on-primary', '#ffffff');
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (typeof ctx.fillText === 'function') {
+      ctx.fillText(badgeText, boxX + boxW / 2, boxY + boxH / 2);
+    }
+    ctx.restore();
   }
 
   ctx.restore();
