@@ -1675,7 +1675,7 @@ function renderInspector() {
     $('#i-custom-tex-file')?.addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const texId = `tex_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const texId = `tex_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       try {
         await saveTextureBlob(texId, file, { name: file.name, mimeType: file.type });
         apply((n) => {
