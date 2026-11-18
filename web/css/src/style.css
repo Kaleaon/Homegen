@@ -254,10 +254,30 @@ aside {
   outline-offset: var(--focus-ring-offset);
 }
 .catalog-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   padding: 20px 8px;
   text-align: center;
   color: var(--muted);
   font-size: 13px;
+}
+.catalog-empty p {
+  margin: 0;
+}
+.catalog-reset-btn {
+  margin-top: 2px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.catalog-reset-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 #palette h4 {
   margin: 14px 0 6px;
@@ -1104,7 +1124,40 @@ kbd {
   width: min(640px, 92vw);
 }
 .shortcut-body {
-  padding: 16px;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#shortcut-search {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--ink);
+  box-sizing: border-box;
+}
+#shortcut-search:focus {
+  border-color: var(--accent);
+}
+#shortcut-search:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+.shortcut-no-results,
+#shortcut-no-results {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.shortcut-grid[hidden],
+.shortcut-group[hidden],
+.shortcut-row[hidden],
+#shortcut-no-results[hidden] {
+  display: none;
 }
 .shortcut-grid {
   display: grid;
@@ -1214,4 +1267,33 @@ k-button.on .snap-badge {
   opacity: 0.85;
   font-weight: 600;
   margin-left: 8px;
+}
+
+.snap-increment-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snap-increment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snap-increment-label {
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.snap-increment-input {
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.snap-increment-input[aria-invalid='true'] {
+  --ktheme-border: var(--ktheme-critical);
 }
