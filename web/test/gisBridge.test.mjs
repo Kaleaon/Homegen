@@ -214,3 +214,245 @@ test('Requirement 4: projectGeoJSON transforms regional State Plane GeoJSON with
     assert.ok(pt.y >= targetBounds.y - 1, `pt.y (${pt.y}) should be within target bounds`);
   }
 });
+
+test('MultiPolygon: projectGeoJSON decomposes disjoint rings without cross-ring segments or corrupted buffers', () => {
+  const multiPolygonGeoJSON = {
+    type: 'FeatureCollection',
+    crs: { properties: { name: 'EPSG:4326' } },
+    features: [
+      {
+        type: 'Feature',
+        id: 'split-lot',
+        properties: { name: 'Split Parcel Lot', layer: 'lot', setback: 24 },
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: [
+            // West parcel ring
+            [
+              [
+                [-122.42, 37.775],
+                [-122.419, 37.775],
+                [-122.419, 37.774],
+                [-122.42, 37.774],
+                [-122.42, 37.775],
+              ],
+            ],
+            // East parcel ring (disjoint across road gap)
+            [
+              [
+                [-122.417, 37.775],
+                [-122.416, 37.775],
+                [-122.416, 37.774],
+                [-122.417, 37.774],
+                [-122.417, 37.775],
+              ],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
+  const projected = projectGeoJSON(multiPolygonGeoJSON, { x: 100, y: 100, w: 1000, h: 500 });
+
+  // Should decompose into 2 independent single-ring features
+  assert.equal(projected.features.length, 2);
+  assert.equal(projected.features[0].id, 'split-lot-0');
+  assert.equal(projected.features[1].id, 'split-lot-1');
+  assert.equal(projected.features[0].parentId, 'split-lot');
+  assert.equal(projected.features[1].parentId, 'split-lot');
+  assert.equal(projected.features[0].points.length, 5);
+  assert.equal(projected.features[1].points.length, 5);
+
+  // Should extract 4 segments per ring = 8 segments total, with zero cross-ring segments
+  assert.equal(projected.segments.length, 8);
+  const westMaxX = Math.max(...projected.features[0].points.map((p) => p.x));
+  const eastMinX = Math.min(...projected.features[1].points.map((p) => p.x));
+  assert.ok(westMaxX < eastMinX, 'Disjoint component rings must remain spatially separated');
+
+  for (const seg of projected.segments) {
+    const spansWest = seg.p1.x <= westMaxX + 0.01 && seg.p2.x <= westMaxX + 0.01;
+    const spansEast = seg.p1.x >= eastMinX - 0.01 && seg.p2.x >= eastMinX - 0.01;
+    assert.ok(
+      spansWest !== spansEast,
+      `Segment ${seg.id} (${seg.p1.x},${seg.p1.y})->(${seg.p2.x},${seg.p2.y}) must stay within one component ring`
+    );
+  }
+
+  // Should emit 2 independent gisLotLine layers and 2 independent gisSetbackBuffer layers
+  const lotLayers = projected.layers.filter((l) => l.type === 'gisLotLine');
+  const setbackLayers = projected.layers.filter((l) => l.type === 'gisSetbackBuffer');
+  assert.equal(lotLayers.length, 2);
+  assert.equal(setbackLayers.length, 2);
+
+  for (let i = 0; i < 2; i++) {
+    const lotBounds = lotLayers[i].bounds;
+    const bufLayer = setbackLayers[i];
+    assert.equal(bufLayer.innerPoints.length, 4);
+    for (const pt of bufLayer.innerPoints) {
+      assert.ok(
+        pt.x > lotBounds.minX &&
+          pt.x < lotBounds.maxX &&
+          pt.y > lotBounds.minY &&
+          pt.y < lotBounds.maxY,
+        `Inner setback vertex (${pt.x}, ${pt.y}) must lie strictly inside component ring ${i}`
+      );
+    }
+  }
+});
+
+test('MultiPolygon: computeVariableBuffers and GISBridge handle multi-ring setbacks and compliance', () => {
+  // Verify raw unannotated multi-ring segment loops also group cleanly
+  const rawMultiLoopSegments = [
+    { id: 'w1', p1: { x: 0, y: 0 }, p2: { x: 200, y: 0 }, setback: 20 },
+    { id: 'w2', p1: { x: 200, y: 0 }, p2: { x: 200, y: 200 }, setback: 20 },
+    { id: 'w3', p1: { x: 200, y: 200 }, p2: { x: 0, y: 200 }, setback: 20 },
+    { id: 'w4', p1: { x: 0, y: 200 }, p2: { x: 0, y: 0 }, setback: 20 },
+    { id: 'e1', p1: { x: 500, y: 0 }, p2: { x: 700, y: 0 }, setback: 30 },
+    { id: 'e2', p1: { x: 700, y: 0 }, p2: { x: 700, y: 200 }, setback: 30 },
+    { id: 'e3', p1: { x: 700, y: 200 }, p2: { x: 500, y: 200 }, setback: 30 },
+    { id: 'e4', p1: { x: 500, y: 200 }, p2: { x: 500, y: 0 }, setback: 30 },
+  ];
+
+  const multiBuf = computeVariableBuffers(rawMultiLoopSegments);
+  assert.equal(multiBuf.rings.length, 2);
+  assert.deepEqual(multiBuf.rings[0].innerPoints[0], { x: 20, y: 20 });
+  assert.deepEqual(multiBuf.rings[1].innerPoints[0], { x: 530, y: 30 });
+
+  // End-to-end GISBridge compliance check across MultiPolygon components
+  const mpGeoJSON = {
+    type: 'Feature',
+    id: 'mp-parcel',
+    properties: { name: 'Twin Lot', layer: 'lot', setback: 20 },
+    geometry: {
+      type: 'MultiPolygon',
+      coordinates: [
+        [
+          [
+            [-122.42, 37.775],
+            [-122.419, 37.775],
+            [-122.419, 37.774],
+            [-122.42, 37.774],
+            [-122.42, 37.775],
+          ],
+        ],
+        [
+          [
+            [-122.417, 37.775],
+            [-122.416, 37.775],
+            [-122.416, 37.774],
+            [-122.417, 37.774],
+            [-122.417, 37.775],
+          ],
+        ],
+      ],
+    },
+  };
+
+  const bridge = new GISBridge();
+  const site = bridge.importGeoJSON(mpGeoJSON, {
+    targetBounds: { x: 100, y: 100, w: 1000, h: 400 },
+  });
+
+  // Updating one segment setback preserves multi-ring buffer layers
+  const eastSeg = site.segments.find((s) => s.ringId === 'mp-parcel-1');
+  bridge.setSegmentSetback(eastSeg.id, 30);
+  const setbackLayers = site.layers.filter((l) => l.type === 'gisSetbackBuffer');
+  assert.equal(setbackLayers.length, 2);
+
+  // Room placed inside East component's inner buildable bounds should have 0 violations
+  const eastInnerBounds = setbackLayers[1].bounds;
+  const validEastRoom = [
+    { x: eastInnerBounds.minX + 40, y: eastInnerBounds.minY + 40 },
+    { x: eastInnerBounds.minX + 80, y: eastInnerBounds.minY + 40 },
+    { x: eastInnerBounds.minX + 80, y: eastInnerBounds.minY + 80 },
+    { x: eastInnerBounds.minX + 40, y: eastInnerBounds.minY + 80 },
+  ];
+  assert.equal(bridge.querySetbackViolations(validEastRoom).length, 0);
+
+  // Room placed in the gap between the two disjoint parcel rings must trigger violations
+  const westLotBounds = site.layers.find((l) => l.id === 'mp-parcel-0').bounds;
+  const eastLotBounds = site.layers.find((l) => l.id === 'mp-parcel-1').bounds;
+  const midGapX = (westLotBounds.maxX + eastLotBounds.minX) / 2;
+  const midGapY = (westLotBounds.minY + westLotBounds.maxY) / 2;
+  const gapRoom = [
+    { x: midGapX - 10, y: midGapY - 10 },
+    { x: midGapX + 10, y: midGapY - 10 },
+    { x: midGapX + 10, y: midGapY + 10 },
+    { x: midGapX - 10, y: midGapY + 10 },
+  ];
+  const gapViolations = bridge.querySetbackViolations(gapRoom);
+  assert.ok(gapViolations.some((v) => v.type === 'setback-clearance'));
+  assert.ok(gapViolations.some((v) => v.type === 'lot-boundary-exceeded'));
+});
+
+test('MultiPolygon edge cases: empty coordinates and rings with fewer than 3 vertices are filtered out', () => {
+  const emptyMultiPolygon = {
+    type: 'Feature',
+    id: 'empty-mp',
+    properties: { layer: 'lot' },
+    geometry: {
+      type: 'MultiPolygon',
+      coordinates: [
+        [],
+        [[]],
+        [
+          [
+            [-122.42, 37.775],
+            [-122.419, 37.775],
+            [-122.42, 37.775],
+          ],
+        ],
+      ],
+    },
+  };
+
+  const emptyRes = projectGeoJSON(emptyMultiPolygon);
+  assert.equal(emptyRes.features.length, 0);
+  assert.equal(emptyRes.segments.length, 0);
+  assert.equal(emptyRes.layers.length, 0);
+
+  const mixedMultiPolygon = {
+    type: 'Feature',
+    id: 'mixed-mp',
+    properties: { layer: 'lot', setback: 24 },
+    geometry: {
+      type: 'MultiPolygon',
+      coordinates: [
+        [],
+        [[[0, 0]]],
+        [
+          [
+            [-122.42, 37.775],
+            [-122.419, 37.775],
+          ],
+        ],
+        // Closed 3-point degenerate line (only 2 distinct vertices)
+        [
+          [
+            [-122.42, 37.775],
+            [-122.419, 37.775],
+            [-122.42, 37.775],
+          ],
+        ],
+        // Valid 4-vertex closed polygon ring
+        [
+          [
+            [-122.42, 37.775],
+            [-122.418, 37.775],
+            [-122.418, 37.773],
+            [-122.42, 37.773],
+            [-122.42, 37.775],
+          ],
+        ],
+      ],
+    },
+  };
+
+  const mixedRes = projectGeoJSON(mixedMultiPolygon, { x: 100, y: 100, w: 600, h: 600 });
+  assert.equal(mixedRes.features.length, 1);
+  assert.equal(mixedRes.features[0].id, 'mixed-mp-0');
+  assert.equal(mixedRes.segments.length, 4);
+  assert.equal(mixedRes.layers.filter((l) => l.type === 'gisLotLine').length, 1);
+  assert.equal(mixedRes.layers.filter((l) => l.type === 'gisSetbackBuffer').length, 1);
+});

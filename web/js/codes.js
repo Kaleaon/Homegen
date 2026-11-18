@@ -988,8 +988,8 @@ export function evaluate(state, options = {}) {
           'floor finish must be moisture-resistant.',
           { fixable: true }
         );
-      for (const w of WALLS)
-        if (!WALL_WET(room.walls[w]))
+      for (const w of getRoomWallKeys(room))
+        if (!WALL_WET(room.walls?.[w]))
           R(
             'wet-wall',
             'IRC R702.4 / practice',
@@ -1377,10 +1377,10 @@ export function autoComply(state, options = {}) {
     if (!checkTarget) return false;
     const t = String(targetId).toLowerCase();
     const c = String(checkTarget).toLowerCase();
-    if (t === 'home' || c === 'home') return true;
-    return (
-      c === t || t.includes(c) || c.includes(t) || t.startsWith(c + ':') || c.startsWith(t + ':')
-    );
+    if (t === 'home' || t.endsWith(':home') || c === 'home') return true;
+    if (c === t || t.endsWith(':' + c) || c.startsWith(t + ':')) return true;
+    if ((':' + t).includes(':outlets:' + c + ':')) return true;
+    return false;
   };
 
   const log = [];
@@ -1423,8 +1423,9 @@ export function autoComply(state, options = {}) {
           r.floor = 'floor_tile_gray';
           addDiff(r.id, 'modify', 'floor', `${r.name}: moisture-resistant floor`);
         }
-        for (const w of WALLS)
-          if (!WALL_WET(r.walls[w]) && shouldFix(`${r.id}:${w}`)) {
+        for (const w of getRoomWallKeys(r))
+          if (!WALL_WET(r.walls?.[w]) && shouldFix(`${r.id}:${w}`)) {
+            r.walls ||= {};
             r.walls[w] = r.type === 'bathroom' ? 'wall_tile_white' : 'paint_white';
             addDiff(
               `${r.id}:${w}`,
