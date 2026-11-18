@@ -97,7 +97,7 @@ function getEdgePoint(x, y, edge, v0, v1, v2, v3, z, width, height, bounds) {
   return { x: wx, y: wy };
 }
 
-function computeMarchingSquaresWorker(
+export function computeMarchingSquaresWorker(
   gridData,
   width,
   height,
@@ -108,24 +108,71 @@ function computeMarchingSquaresWorker(
 ) {
   if (!gridData || width < 2 || height < 2) return [];
 
-  const startLevel = Math.ceil(minElevation / interval) * interval;
-  const contours = [];
+  const step = interval || 1.0;
+  if (!Number.isFinite(step) || step <= 0) return [];
+  if (
+    !Number.isFinite(minElevation) ||
+    !Number.isFinite(maxElevation) ||
+    minElevation > maxElevation
+  ) {
+    return [];
+  }
 
-  for (let z = startLevel; z <= maxElevation; z += interval) {
-    const levelVal = Number(z.toFixed(2));
-    const lines = [];
+  const startLevel = Math.ceil(minElevation / step) * step;
+  const levels = [];
+  for (let z = startLevel; z <= maxElevation; z += step) {
+    levels.push(Number(z.toFixed(2)));
+  }
 
-    for (let y = 0; y < height - 1; y++) {
-      for (let x = 0; x < width - 1; x++) {
-        const i0 = y * width + x;
-        const i1 = y * width + (x + 1);
-        const i2 = (y + 1) * width + (x + 1);
-        const i3 = (y + 1) * width + x;
+  const numLevels = levels.length;
+  if (numLevels === 0) return [];
 
-        const v0 = gridData[i0];
-        const v1 = gridData[i1];
-        const v2 = gridData[i2];
-        const v3 = gridData[i3];
+  const resolvedBounds = bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
+  const minLevel = levels[0];
+  const maxLevel = levels[numLevels - 1];
+  const invStep = 1 / step;
+
+  const buckets = new Array(numLevels);
+  for (let i = 0; i < numLevels; i++) {
+    buckets[i] = [];
+  }
+
+  for (let y = 0; y < height - 1; y++) {
+    const row0 = y * width;
+    const row1 = row0 + width;
+
+    for (let x = 0; x < width - 1; x++) {
+      const v0 = gridData[row0 + x];
+      const v1 = gridData[row0 + x + 1];
+      const v2 = gridData[row1 + x + 1];
+      const v3 = gridData[row1 + x];
+
+      let cellMin = v0;
+      let cellMax = v0;
+      if (v1 < cellMin) cellMin = v1;
+      else if (v1 > cellMax) cellMax = v1;
+      if (v2 < cellMin) cellMin = v2;
+      else if (v2 > cellMax) cellMax = v2;
+      if (v3 < cellMin) cellMin = v3;
+      else if (v3 > cellMax) cellMax = v3;
+
+      if (!(cellMin < cellMax) || cellMax < minLevel || cellMin >= maxLevel) {
+        continue;
+      }
+
+      let startIdx = Math.floor((cellMin - startLevel) * invStep);
+      if (startIdx < 0) startIdx = 0;
+      else if (startIdx >= numLevels) startIdx = numLevels - 1;
+      while (startIdx > 0 && levels[startIdx - 1] > cellMin) {
+        startIdx--;
+      }
+      while (startIdx < numLevels && levels[startIdx] <= cellMin) {
+        startIdx++;
+      }
+
+      for (let lIdx = startIdx; lIdx < numLevels; lIdx++) {
+        const levelVal = levels[lIdx];
+        if (levelVal > cellMax) break;
 
         let index = 0;
         if (v0 >= levelVal) index |= 8;
@@ -136,17 +183,45 @@ function computeMarchingSquaresWorker(
         if (index === 0 || index === 15) continue;
 
         const edges = MARCHING_SQUARES_LOOKUP[index];
+        const lines = buckets[lIdx];
         for (let k = 0; k < edges.length; k++) {
           const e = edges[k];
-          const pA = getEdgePoint(x, y, e[0], v0, v1, v2, v3, levelVal, width, height, bounds);
-          const pB = getEdgePoint(x, y, e[1], v0, v1, v2, v3, levelVal, width, height, bounds);
+          const pA = getEdgePoint(
+            x,
+            y,
+            e[0],
+            v0,
+            v1,
+            v2,
+            v3,
+            levelVal,
+            width,
+            height,
+            resolvedBounds
+          );
+          const pB = getEdgePoint(
+            x,
+            y,
+            e[1],
+            v0,
+            v1,
+            v2,
+            v3,
+            levelVal,
+            width,
+            height,
+            resolvedBounds
+          );
           lines.push({ x1: pA.x, y1: pA.y, x2: pB.x, y2: pB.y });
         }
       }
     }
+  }
 
-    if (lines.length > 0) {
-      contours.push({ elevation: levelVal, lines });
+  const contours = [];
+  for (let i = 0; i < numLevels; i++) {
+    if (buckets[i].length > 0) {
+      contours.push({ elevation: levels[i], lines: buckets[i] });
     }
   }
 
@@ -261,6 +336,24 @@ export function handleCadWorkerMessage(e) {
             end: res.point,
             type: 'perpendicular',
           });
+        } else if (res.snap.type === 'angle') {
+          guideLines.push({
+            start: anchor,
+            end: res.point,
+            type: 'angle',
+          });
+          if (res.snap.edgeIndex !== undefined) {
+            const edge =
+              edges.find((eItem) => eItem.index === res.snap.edgeIndex) ||
+              edges[res.snap.edgeIndex];
+            if (edge) {
+              guideLines.push({
+                start: edge.start,
+                end: edge.end,
+                type: 'angle_reference',
+              });
+            }
+          }
         }
       }
 
