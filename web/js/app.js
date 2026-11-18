@@ -4265,7 +4265,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-export const SAMPLE_MUNICIPAL_GIS = {
+const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -4306,7 +4306,7 @@ export const SAMPLE_MUNICIPAL_GIS = {
   ],
 };
 
-export function loadGISSubsystem(geojson, options = {}) {
+function loadGISSubsystem(geojson, options = {}) {
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.importGeoJSON(geojson, {
     targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
@@ -4320,7 +4320,7 @@ export function loadGISSubsystem(geojson, options = {}) {
   return doc.site;
 }
 
-export function setGISSegmentSetback(segmentId, setbackDistance) {
+function setGISSegmentSetback(segmentId, setbackDistance) {
   if (!doc.site) return null;
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.setSegmentSetback(segmentId, setbackDistance);
@@ -4331,7 +4331,7 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-export function openGISDialog() {
+function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisMapSelect = $('#gis-map-preset');
@@ -4341,14 +4341,14 @@ export function openGISDialog() {
   else dlg.setAttribute('open', '');
 }
 
-export function closeGISDialog() {
+function closeGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
 }
 
-export function renderGISSegments() {
+function renderGISSegments() {
   const container = $('#gis-segment-list');
   if (!container) return;
   if (!doc.site || !doc.site.segments || !doc.site.segments.length) {
