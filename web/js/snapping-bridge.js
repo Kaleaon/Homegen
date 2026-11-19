@@ -1,6 +1,173 @@
-import { getSnappedPoint } from '../../designer3d/tools/index.mjs';
+import { getSnappedPoint, createEdgeSpatialIndex } from '../../designer3d/tools/index.mjs';
 import { extractRoomEdges } from './geometry.js';
 import { globalCadWorkerClient } from './cadWorkerClient.js';
+
+function createRoomSnapshot(room) {
+  if (!room || typeof room !== 'object') {
+    return { isNullish: true, roomRef: room };
+  }
+
+  const pts = room.points || room.corners || room.vertices;
+  let ptsCoords = null;
+  let ptsLength = 0;
+  if (Array.isArray(pts)) {
+    ptsLength = pts.length;
+    ptsCoords = new Float64Array(ptsLength * 3);
+    for (let i = 0; i < ptsLength; i++) {
+      const p = pts[i];
+      if (p && typeof p === 'object') {
+        ptsCoords[i * 3] = p.x ?? Number.NaN;
+        ptsCoords[i * 3 + 1] = p.y ?? Number.NaN;
+        ptsCoords[i * 3 + 2] = p.bulge ?? 0;
+      } else {
+        ptsCoords[i * 3] = Number.NaN;
+        ptsCoords[i * 3 + 1] = Number.NaN;
+        ptsCoords[i * 3 + 2] = Number.NaN;
+      }
+    }
+  }
+
+  let bulgesKind = 0;
+  let bulgesArr = null;
+  let bulgesEntries = null;
+  if (Array.isArray(room.bulges)) {
+    bulgesKind = 1;
+    bulgesArr = room.bulges.slice();
+  } else if (room.bulges && typeof room.bulges === 'object') {
+    bulgesKind = 2;
+    bulgesEntries = Object.entries(room.bulges);
+  }
+
+  return {
+    isNullish: false,
+    roomRef: room,
+    id: room.id,
+    x: room.x,
+    y: room.y,
+    w: room.w,
+    h: room.h,
+    closed: room.closed,
+    ptsLength,
+    ptsCoords,
+    bulgesKind,
+    bulgesArr,
+    bulgesEntries,
+  };
+}
+
+function isRoomSnapshotValid(snap, room) {
+  if (!room || typeof room !== 'object') {
+    return Boolean(snap.isNullish && Object.is(snap.roomRef, room));
+  }
+  if (snap.isNullish || snap.roomRef !== room) {
+    return false;
+  }
+  if (
+    snap.id !== room.id ||
+    !Object.is(snap.x, room.x) ||
+    !Object.is(snap.y, room.y) ||
+    !Object.is(snap.w, room.w) ||
+    !Object.is(snap.h, room.h) ||
+    snap.closed !== room.closed
+  ) {
+    return false;
+  }
+
+  const pts = room.points || room.corners || room.vertices;
+  if (Array.isArray(pts)) {
+    if (!snap.ptsCoords || snap.ptsLength !== pts.length) {
+      return false;
+    }
+    const coords = snap.ptsCoords;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (p && typeof p === 'object') {
+        if (
+          !Object.is(p.x ?? Number.NaN, coords[i * 3]) ||
+          !Object.is(p.y ?? Number.NaN, coords[i * 3 + 1]) ||
+          !Object.is(p.bulge ?? 0, coords[i * 3 + 2])
+        ) {
+          return false;
+        }
+      } else if (
+        !Number.isNaN(coords[i * 3]) ||
+        !Number.isNaN(coords[i * 3 + 1]) ||
+        !Number.isNaN(coords[i * 3 + 2])
+      ) {
+        return false;
+      }
+    }
+  } else if (snap.ptsCoords !== null) {
+    return false;
+  }
+
+  if (Array.isArray(room.bulges)) {
+    if (snap.bulgesKind !== 1 || snap.bulgesArr.length !== room.bulges.length) {
+      return false;
+    }
+    for (let i = 0; i < room.bulges.length; i++) {
+      if (!Object.is(room.bulges[i], snap.bulgesArr[i])) {
+        return false;
+      }
+    }
+  } else if (room.bulges && typeof room.bulges === 'object') {
+    if (snap.bulgesKind !== 2) {
+      return false;
+    }
+    const entries = snap.bulgesEntries;
+    if (Object.keys(room.bulges).length !== entries.length) {
+      return false;
+    }
+    for (let i = 0; i < entries.length; i++) {
+      const [key, val] = entries[i];
+      if (!(key in room.bulges) || !Object.is(room.bulges[key], val)) {
+        return false;
+      }
+    }
+  } else if (snap.bulgesKind !== 0) {
+    return false;
+  }
+
+  return true;
+}
+
+function isRoomCacheValid(cache, roomList) {
+  if (!cache || cache.snapshots.length !== roomList.length) {
+    return false;
+  }
+  if (roomList.length === 0) {
+    return true;
+  }
+  const sameArrayRef = cache.roomsRef === roomList;
+  for (let i = 0; i < roomList.length; i++) {
+    if (!sameArrayRef && cache.snapshots[i].roomRef !== roomList[i]) {
+      return false;
+    }
+    if (!isRoomSnapshotValid(cache.snapshots[i], roomList[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function readSnapModeFlag(snapModes, mode) {
+  if (!snapModes) return false;
+  if (typeof snapModes.isEnabled === 'function') {
+    return Boolean(snapModes.isEnabled(mode));
+  }
+  if (snapModes.modes && typeof snapModes.modes === 'object') {
+    return Boolean(snapModes.modes[mode]);
+  }
+  return Boolean(snapModes[mode]);
+}
+
+function resolveEdgeByIndex(edges, edgeIndex) {
+  const direct = edges[edgeIndex];
+  if (direct && direct.index === edgeIndex) {
+    return direct;
+  }
+  return edges.find((e) => e.index === edgeIndex) || direct || null;
+}
 
 /**
  * Event-driven SnappingBridge connecting canvas pointer interactions to multi-mode snapping logic
@@ -20,6 +187,10 @@ export class SnappingBridge {
     this.activeSnap = null;
     this.attached = false;
 
+    this._defaultEdgeCache = null;
+    this._overrideEdgeCache = null;
+    this._lastSyncedWorkerState = null;
+
     this._onPointerMove = this._handlePointerMove.bind(this);
     this._onPointerDown = this._handlePointerDown.bind(this);
     this._onPointerUp = this._handlePointerUp.bind(this);
@@ -28,6 +199,90 @@ export class SnappingBridge {
     if (this.canvas) {
       this.attach(this.canvas);
     }
+  }
+
+  invalidateEdgeCache() {
+    this._defaultEdgeCache = null;
+    this._overrideEdgeCache = null;
+  }
+
+  _resolveRoomEdges(rooms, isOverride = false) {
+    const roomList = Array.isArray(rooms) ? rooms : [];
+    const currentCache = isOverride ? this._overrideEdgeCache : this._defaultEdgeCache;
+
+    if (isRoomCacheValid(currentCache, roomList)) {
+      return {
+        rooms: roomList,
+        edges: currentCache.edges,
+        spatialIndex: currentCache.spatialIndex,
+        invalidated: false,
+      };
+    }
+
+    const edges = extractRoomEdges(roomList);
+    const spatialIndex = createEdgeSpatialIndex(edges);
+    const snapshots = new Array(roomList.length);
+    for (let i = 0; i < roomList.length; i++) {
+      snapshots[i] = createRoomSnapshot(roomList[i]);
+    }
+
+    const nextCache = {
+      roomsRef: roomList,
+      snapshots,
+      edges,
+      spatialIndex,
+    };
+
+    if (isOverride) {
+      this._overrideEdgeCache = nextCache;
+    } else {
+      this._defaultEdgeCache = nextCache;
+    }
+
+    return {
+      rooms: roomList,
+      edges,
+      spatialIndex,
+      invalidated: true,
+    };
+  }
+
+  _shouldSyncWorker(edges, settings, snapModes, scale) {
+    const prev = this._lastSyncedWorkerState;
+    if (!prev) return true;
+    return (
+      prev.edges !== edges ||
+      !Object.is(prev.scale, scale) ||
+      !Object.is(prev.unitSize, settings?.unitSize) ||
+      !Object.is(prev.angleSnapDegrees, settings?.angleSnapDegrees) ||
+      !Object.is(prev.magneticThreshold, settings?.magneticThreshold) ||
+      !Object.is(prev.edgeThreshold, settings?.edgeThreshold) ||
+      !Object.is(prev.midpointThreshold, settings?.midpointThreshold) ||
+      !Object.is(prev.perpendicularThreshold, settings?.perpendicularThreshold) ||
+      prev.snapGrid !== readSnapModeFlag(snapModes, 'grid') ||
+      prev.snapEdge !== readSnapModeFlag(snapModes, 'edge') ||
+      prev.snapMidpoint !== readSnapModeFlag(snapModes, 'midpoint') ||
+      prev.snapPerpendicular !== readSnapModeFlag(snapModes, 'perpendicular') ||
+      prev.snapAngle !== readSnapModeFlag(snapModes, 'angle')
+    );
+  }
+
+  _recordWorkerSync(edges, settings, snapModes, scale) {
+    this._lastSyncedWorkerState = {
+      edges,
+      scale,
+      unitSize: settings?.unitSize,
+      angleSnapDegrees: settings?.angleSnapDegrees,
+      magneticThreshold: settings?.magneticThreshold,
+      edgeThreshold: settings?.edgeThreshold,
+      midpointThreshold: settings?.midpointThreshold,
+      perpendicularThreshold: settings?.perpendicularThreshold,
+      snapGrid: readSnapModeFlag(snapModes, 'grid'),
+      snapEdge: readSnapModeFlag(snapModes, 'edge'),
+      snapMidpoint: readSnapModeFlag(snapModes, 'midpoint'),
+      snapPerpendicular: readSnapModeFlag(snapModes, 'perpendicular'),
+      snapAngle: readSnapModeFlag(snapModes, 'angle'),
+    };
   }
 
   attach(canvas = this.canvas) {
@@ -61,7 +316,10 @@ export class SnappingBridge {
   }
 
   setGetRooms(getRooms) {
-    this.getRooms = getRooms;
+    if (this.getRooms !== getRooms) {
+      this.getRooms = getRooms;
+      this._defaultEdgeCache = null;
+    }
   }
 
   setToWorld(toWorld) {
@@ -164,8 +422,13 @@ export class SnappingBridge {
   computeSnap(point, anchor = point, roomsOverride = null, scaleOverride = null) {
     if (!point) return null;
 
-    const rooms = roomsOverride || (typeof this.getRooms === 'function' ? this.getRooms() : []);
-    const edges = extractRoomEdges(rooms || []);
+    const hasOverride = roomsOverride !== null && roomsOverride !== undefined;
+    const rawRooms = hasOverride
+      ? roomsOverride
+      : typeof this.getRooms === 'function'
+        ? this.getRooms()
+        : [];
+    const { rooms, edges, spatialIndex } = this._resolveRoomEdges(rawRooms, hasOverride);
 
     const settings = this.interaction ? this.interaction.gridSettings : null;
     const snapModes = this.interaction ? this.interaction.snapModes : null;
@@ -195,6 +458,7 @@ export class SnappingBridge {
       point,
       anchor,
       edges,
+      spatialIndex,
       settings,
       snapModes,
       scale,
@@ -203,7 +467,7 @@ export class SnappingBridge {
     const guideLines = [];
     if (res.snap) {
       if (res.snap.type === 'edge' || res.snap.type === 'midpoint') {
-        const edge = edges.find((e) => e.index === res.snap.edgeIndex) || edges[res.snap.edgeIndex];
+        const edge = resolveEdgeByIndex(edges, res.snap.edgeIndex);
         if (edge) {
           guideLines.push({
             start: edge.start,
@@ -224,8 +488,7 @@ export class SnappingBridge {
           type: 'angle',
         });
         if (res.snap.edgeIndex !== undefined) {
-          const edge =
-            edges.find((e) => e.index === res.snap.edgeIndex) || edges[res.snap.edgeIndex];
+          const edge = resolveEdgeByIndex(edges, res.snap.edgeIndex);
           if (edge) {
             guideLines.push({
               start: edge.start,
@@ -251,9 +514,12 @@ export class SnappingBridge {
       indicator: finalIndicator,
     };
 
-    // Also sync scene diff and dispatch off-thread async worker calculation
+    // Sync scene diff on invalidation/config changes and dispatch off-thread async worker calculation
     if (this.workerClient) {
-      this.workerClient.syncSceneDiff({ rooms, edges, settings, snapModes, scale });
+      if (this._shouldSyncWorker(edges, settings, snapModes, scale)) {
+        this.workerClient.syncSceneDiff({ rooms, edges, settings, snapModes, scale });
+        this._recordWorkerSync(edges, settings, snapModes, scale);
+      }
       this.workerClient
         .computeSnapAsync(point, anchor, { rooms, edges, settings, snapModes, scale })
         .then((asyncRes) => {
