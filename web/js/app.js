@@ -51,6 +51,8 @@ import {
   parseElevationRaster,
   computeContoursAsync,
   ElevationGrid,
+  sanitizeSlopePercent,
+  sanitizeSlopeDirection,
   normalizeElevationUnit,
 } from './elevationEngine.js';
 import {
@@ -5554,11 +5556,15 @@ function syncElevationDialog(grid) {
   const unitEl = $('#elevation-unit');
   const intervalEl = $('#elevation-contour-interval');
   const scaleEl = $('#elevation-vertical-scale');
+  const slopeEl = $('#elevation-slope-percent');
+  const dirEl = $('#elevation-slope-direction');
   const visibleEl = $('#elevation-visible');
 
   if (unitEl) unitEl.value = unit;
   if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
   if (scaleEl) scaleEl.value = String(grid?.verticalScale ?? 1.0);
+  if (slopeEl) slopeEl.value = String(sanitizeSlopePercent(grid?.targetSlopePercent ?? 0));
+  if (dirEl) dirEl.value = String(sanitizeSlopeDirection(grid?.slopeDirectionDeg ?? 0));
   if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
   updateElevationIntervalLabel(unit);
 }
@@ -5567,10 +5573,16 @@ $('#elevation-unit')?.addEventListener('change', (e) => {
   updateElevationIntervalLabel(e.target.value);
 });
 
-$('#import-elevation')?.addEventListener('click', () => {
+$('#import-elevation')?.addEventListener('click', (e) => {
   if (doc.elevationGrid) {
     syncElevationDialog(doc.elevationGrid);
-    $('#dlg-elevation')?.showModal();
+    const dlg = $('#dlg-elevation');
+    if (dlg) {
+      const returnFocusEl = e?.currentTarget || document.activeElement;
+      dlg.showModal();
+      const cleanup = trapFocus(dlg, returnFocusEl);
+      dlg.addEventListener('close', () => cleanup(), { once: true });
+    }
   } else {
     $('#elevation-file')?.click();
   }
@@ -5623,18 +5635,40 @@ $('#elevation-file')?.addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-$('#btn-apply-elevation')?.addEventListener('click', async () => {
+export async function applyElevationSettings() {
   if (!doc.elevationGrid) return;
-  const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
-  const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
-  const unit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
-  const visible = $('#elevation-visible')?.checked !== false;
+  const intervalEl = $('#elevation-contour-interval');
+  const scaleEl = $('#elevation-vertical-scale');
+  const unitEl = $('#elevation-unit');
+  const slopeEl = $('#elevation-slope-percent');
+  const dirEl = $('#elevation-slope-direction');
+  const visEl = $('#elevation-visible');
+
+  const rawInterval = parseFloat(intervalEl?.value ?? '');
+  const interval = Number.isFinite(rawInterval) ? Math.max(0.1, Math.min(50, rawInterval)) : 1.0;
+  const rawScale = parseFloat(scaleEl?.value ?? '');
+  const scale = Number.isFinite(rawScale) ? Math.max(0.1, Math.min(10, rawScale)) : 1.0;
+  const unit = normalizeElevationUnit(unitEl?.value || 'm');
+  const slopePercent = sanitizeSlopePercent(slopeEl?.value ?? '');
+  const directionDegrees = sanitizeSlopeDirection(dirEl?.value ?? '');
+  const visible = visEl?.checked !== false;
+
+  if (unitEl) unitEl.value = unit;
+  if (intervalEl) intervalEl.value = String(interval);
+  if (scaleEl) scaleEl.value = String(scale);
+  if (slopeEl) slopeEl.value = String(slopePercent);
+  if (dirEl) dirEl.value = String(directionDegrees);
 
   doc.elevationGrid.contourInterval = interval;
   doc.elevationGrid.verticalScale = scale;
   doc.elevationGrid.elevationUnit = unit;
   doc.elevationGrid.visible = visible;
   updateElevationIntervalLabel(unit);
+  doc.elevationGrid.applyGradedSlope({
+    slopePercent,
+    directionDegrees,
+    unitScale: unit === 'ft' ? 1 / 12 : 0.0254,
+  });
 
   doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
   window.__scene3d?.update();
@@ -5642,6 +5676,10 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
   persist();
   $('#dlg-elevation')?.close();
   toast('Updated elevation terrain settings.');
+}
+
+$('#btn-apply-elevation')?.addEventListener('click', () => {
+  applyElevationSettings();
 });
 
 $('#btn-clear-elevation')?.addEventListener('click', () => {
@@ -6393,7 +6431,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-export const SAMPLE_MUNICIPAL_GIS = {
+const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -6459,7 +6497,7 @@ function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-export function openGISDialog() {
+function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisCrsSelect = $('#gis-crs');
@@ -6486,7 +6524,7 @@ function closeGISDialog() {
   else dlg.removeAttribute('open');
 }
 
-export { renderGISSegments };
+export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
 
 function renderGISSegments() {
   const container = $('#gis-segment-list');
@@ -8006,6 +8044,7 @@ if (typeof window !== 'undefined')
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
+    applyElevationSettings,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,

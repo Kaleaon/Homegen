@@ -213,7 +213,7 @@
     <button value="close" aria-label="Close elevation dialog"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
-    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals, elevation units, and 3D vertex displacement scale.</p>
+    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals, elevation units, surface slope grading, and 3D vertex displacement scale.</p>
     <div class="row">
       <label for="elevation-unit">Elevation Unit</label>
       <select id="elevation-unit">
@@ -228,6 +228,14 @@
     <div class="row">
       <label for="elevation-vertical-scale">3D Displacement Scale</label>
       <input id="elevation-vertical-scale" type="number" min="0.1" max="10" step="0.1" value="1.0" />
+    </div>
+    <div class="row">
+      <label for="elevation-slope-percent">Surface Slope Grade (%)</label>
+      <input id="elevation-slope-percent" type="number" min="0" max="100" step="0.5" value="0" />
+    </div>
+    <div class="row">
+      <label for="elevation-slope-direction">Slope Bearing (°)</label>
+      <input id="elevation-slope-direction" type="number" min="0" max="360" step="1" value="0" title="Compass bearing in degrees (0° = North, 90° = East, 180° = South, 270° = West)" />
     </div>
     <div class="row">
       <label class="toggle" for="elevation-visible">
