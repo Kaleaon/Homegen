@@ -10,7 +10,14 @@ import {
   isValidGridIncrement,
   SNAP_TOGGLE_DEFINITIONS,
 } from './uiSnapToggles.mjs';
-import { getSnappedPoint, snapAngle, snapToAngle, parseExplicitAngleDegrees } from './snapping.mjs';
+import {
+  getSnappedPoint,
+  snapAngle,
+  snapToAngle,
+  parseExplicitAngleDegrees,
+  EdgeSpatialIndex,
+  createEdgeSpatialIndex,
+} from './snapping.mjs';
 import {
   getSnappedPoint3D,
   distance3D,
@@ -32,6 +39,18 @@ import {
   fmtLenInches,
   fmtAngleDegrees,
 } from './constraintHandles.mjs';
+import {
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  closestPointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
+} from './math2d.mjs';
 
 export {
   InteractionLayer,
@@ -52,6 +71,8 @@ export {
   snapAngle,
   snapToAngle,
   parseExplicitAngleDegrees,
+  EdgeSpatialIndex,
+  createEdgeSpatialIndex,
   getSnappedPoint3D,
   distance3D,
   closestPointOnSegment3D,
@@ -69,4 +90,14 @@ export {
   fmtDimensionText,
   fmtLenInches,
   fmtAngleDegrees,
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  closestPointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
 };

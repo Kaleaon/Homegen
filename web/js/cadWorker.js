@@ -237,12 +237,14 @@ export function handleCadWorkerMessage(e) {
 
   switch (type) {
     case 'SYNC_SCENE_DIFF': {
-      if (payload.rooms) {
+      if (payload.edges !== undefined) {
+        cachedEdges = payload.edges;
+        if (payload.rooms !== undefined) {
+          cachedRooms = payload.rooms;
+        }
+      } else if (payload.rooms !== undefined) {
         cachedRooms = payload.rooms;
         cachedEdges = extractRoomEdges(cachedRooms);
-      }
-      if (payload.edges) {
-        cachedEdges = payload.edges;
       }
       if (payload.settings) {
         cachedSettings = payload.settings;
@@ -284,8 +286,15 @@ export function handleCadWorkerMessage(e) {
         anchor = { x: payload.pointArray[2] ?? point.x, y: payload.pointArray[3] ?? point.y };
       }
 
-      const rooms = payload.rooms || cachedRooms;
-      const edges = payload.edges || (rooms ? extractRoomEdges(rooms) : cachedEdges);
+      const rooms = payload.rooms !== undefined ? payload.rooms : cachedRooms;
+      let edges;
+      if (Array.isArray(payload.edges)) {
+        edges = payload.edges;
+      } else if (rooms && rooms !== cachedRooms) {
+        edges = extractRoomEdges(rooms);
+      } else {
+        edges = cachedEdges;
+      }
       const settings = payload.settings || cachedSettings;
       const modes = payload.snapModes || snapModes;
       const scale = payload.scale !== undefined ? payload.scale : cachedScale;

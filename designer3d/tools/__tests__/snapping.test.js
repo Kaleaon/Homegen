@@ -3,6 +3,8 @@ import {
   snapAngle,
   snapToAngle,
   parseExplicitAngleDegrees,
+  EdgeSpatialIndex,
+  createEdgeSpatialIndex,
 } from '../snapping.mjs';
 import { SnapModeState, SNAP_MODES } from '../snapModes.mjs';
 import { createGridSettings } from '../gridSettings.mjs';
@@ -568,6 +570,216 @@ describe('getSnappedPoint', () => {
       });
       expect(resZero.snap).not.toBeNull();
     });
+  });
+});
+
+describe('EdgeSpatialIndex', () => {
+  test('filters large room grids via spatial buckets while matching exact snap points', () => {
+    const edges = [];
+    let idx = 0;
+    // 10x10 grid of 120x120 rooms spaced 180 units apart = 400 edges
+    for (let row = -5; row < 5; row++) {
+      for (let col = -5; col < 5; col++) {
+        const x = col * 180;
+        const y = row * 180;
+        const w = 120;
+        const h = 120;
+        edges.push({ start: { x, y }, end: { x: x + w, y }, index: idx++ });
+        edges.push({ start: { x: x + w, y }, end: { x: x + w, y: y + h }, index: idx++ });
+        edges.push({ start: { x: x + w, y: y + h }, end: { x, y: y + h }, index: idx++ });
+        edges.push({ start: { x, y: y + h }, end: { x, y }, index: idx++ });
+      }
+    }
+
+    const spatialIndex = createEdgeSpatialIndex(edges);
+    expect(spatialIndex).toBeInstanceOf(EdgeSpatialIndex);
+    expect(spatialIndex.entries).toHaveLength(400);
+
+    // Query near room (col=2, row=3) -> x=360, y=540
+    let visitedEdges = 0;
+    spatialIndex.forEachEdgeCandidate({ x: 420, y: 543 }, 14, () => {
+      visitedEdges++;
+    });
+    expect(visitedEdges).toBeGreaterThan(0);
+    expect(visitedEdges).toBeLessThan(20);
+
+    let visitedMidpoints = 0;
+    spatialIndex.forEachMidpointCandidate({ x: 420, y: 543 }, 14, () => {
+      visitedMidpoints++;
+    });
+    expect(visitedMidpoints).toBeGreaterThan(0);
+    expect(visitedMidpoints).toBeLessThan(10);
+
+    const settings = createGridSettings({
+      unitSize: 6,
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      midpointThreshold: 14,
+      perpendicularThreshold: 14,
+    });
+
+    // Midpoint snap at (420, 540)
+    const midModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: false,
+      [SNAP_MODES.MIDPOINT]: true,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+    const midRes = getSnappedPoint({
+      point: { x: 422, y: 543 },
+      edges,
+      spatialIndex,
+      settings,
+      snapModes: midModes,
+    });
+    expect(midRes.snap).not.toBeNull();
+    expect(midRes.snap.type).toBe('midpoint');
+    expect(midRes.point.x).toBeCloseTo(420, 5);
+    expect(midRes.point.y).toBeCloseTo(540, 5);
+
+    // Edge snap on negative-coordinate room (col=-3 -> x=-540.. -420, row=-2 -> y=-360)
+    const edgeModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+      [SNAP_MODES.MIDPOINT]: false,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+    const edgeRes = getSnappedPoint({
+      point: { x: -500, y: -355 },
+      edges,
+      spatialIndex,
+      settings,
+      snapModes: edgeModes,
+    });
+    expect(edgeRes.snap).not.toBeNull();
+    expect(edgeRes.snap.type).toBe('edge');
+    expect(edgeRes.point.x).toBeCloseTo(-500, 5);
+    expect(edgeRes.point.y).toBeCloseTo(-360, 5);
+  });
+
+  test('indexes curved arc bounds accurately when bulge extends beyond chord endpoints', () => {
+    // Chord from (0, 0) to (0, 100) with bulge = 1.5 extends far in X beyond x=0
+    const curvedEdge = {
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 100 },
+      bulge: 1.5,
+      index: 7,
+    };
+    const fillerEdges = [];
+    for (let i = 0; i < 40; i++) {
+      fillerEdges.push({
+        start: { x: 500 + i * 50, y: 500 },
+        end: { x: 530 + i * 50, y: 500 },
+        index: 100 + i,
+      });
+    }
+    const edges = [curvedEdge, ...fillerEdges];
+    const index = createEdgeSpatialIndex(edges);
+    const apex = index.entries[0].midpoint;
+
+    expect(Math.abs(apex.x)).toBeGreaterThan(50);
+
+    const settings = createGridSettings({
+      magneticThreshold: 10,
+      edgeThreshold: 10,
+      midpointThreshold: 10,
+    });
+    const snapModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+      [SNAP_MODES.MIDPOINT]: false,
+      [SNAP_MODES.PERPENDICULAR]: false,
+    });
+
+    const res = getSnappedPoint({
+      point: { x: apex.x + 3, y: apex.y },
+      edges,
+      settings,
+      snapModes,
+    });
+    expect(res.snap).not.toBeNull();
+    expect(res.snap.type).toBe('edge');
+    expect(res.snap.edgeIndex).toBe(7);
+    expect(res.point.x).toBeCloseTo(apex.x, 4);
+    expect(res.point.y).toBeCloseTo(apex.y, 4);
+  });
+
+  test('preserves tie-breaking order and angular perpendicular bucketing across many angled edges', () => {
+    const cornerEdges = [
+      { start: { x: 100, y: 0 }, end: { x: 200, y: 0 }, index: 10 },
+      { start: { x: 100, y: 0 }, end: { x: 100, y: 100 }, index: 20 },
+    ];
+    const settings = createGridSettings({
+      magneticThreshold: 14,
+      edgeThreshold: 14,
+      perpendicularThreshold: 14,
+    });
+    const edgeModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.EDGE]: true,
+    });
+    // Equidistant from both edges at corner (100, 0) -> first edge (index 10) wins
+    const cornerSnap = getSnappedPoint({
+      point: { x: 96, y: -4 },
+      edges: cornerEdges,
+      settings,
+      snapModes: edgeModes,
+    });
+    expect(cornerSnap.snap).not.toBeNull();
+    expect(cornerSnap.snap.edgeIndex).toBe(10);
+
+    // >16 unique edge angles exercises angular perpendicular buckets
+    const manyAngledEdges = [];
+    for (let i = 0; i < 36; i++) {
+      const theta = (i * 5 * Math.PI) / 180;
+      manyAngledEdges.push({
+        start: { x: 0, y: 0 },
+        end: { x: 100 * Math.cos(theta), y: 100 * Math.sin(theta) },
+        index: i,
+      });
+    }
+    const perpModes = new SnapModeState({
+      [SNAP_MODES.GRID]: false,
+      [SNAP_MODES.PERPENDICULAR]: true,
+    });
+    // Edge i=6 is at 30 deg -> perpendicular direction is 120 deg
+    const perpAngle = (120 * Math.PI) / 180;
+    const anchor = { x: 50, y: 50 };
+    const queryPt = {
+      x: anchor.x + 100 * Math.cos(perpAngle) + 2,
+      y: anchor.y + 100 * Math.sin(perpAngle),
+    };
+    const perpSnap = getSnappedPoint({
+      point: queryPt,
+      anchor,
+      edges: manyAngledEdges,
+      settings,
+      snapModes: perpModes,
+    });
+    expect(perpSnap.snap).not.toBeNull();
+    expect(perpSnap.snap.type).toBe('perpendicular');
+    expect(perpSnap.snap.edgeIndex).toBe(6);
+
+    // Mutating edges array in place invalidates WeakMap spatial index
+    const mutableEdges = [{ start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, index: 0 }];
+    expect(
+      getSnappedPoint({
+        point: { x: 50, y: 205 },
+        edges: mutableEdges,
+        settings,
+        snapModes: edgeModes,
+      }).snap
+    ).toBeNull();
+    mutableEdges.push({ start: { x: 0, y: 200 }, end: { x: 100, y: 200 }, index: 1 });
+    const afterPush = getSnappedPoint({
+      point: { x: 50, y: 205 },
+      edges: mutableEdges,
+      settings,
+      snapModes: edgeModes,
+    });
+    expect(afterPush.snap).not.toBeNull();
+    expect(afterPush.snap.edgeIndex).toBe(1);
+    expect(afterPush.point.y).toBeCloseTo(200, 5);
   });
 });
 
