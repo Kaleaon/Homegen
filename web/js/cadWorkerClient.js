@@ -95,10 +95,15 @@ export class CadWorkerClient {
   }
 
   syncSceneDiff(diff = {}) {
-    if (diff.rooms) this.activeSceneState.rooms = diff.rooms;
-    if (diff.edges) this.activeSceneState.edges = diff.edges;
-    if (diff.settings) this.activeSceneState.settings = diff.settings;
-    if (diff.snapModes) this.activeSceneState.snapModes = diff.snapModes;
+    if (diff.rooms !== undefined) {
+      this.activeSceneState.rooms = diff.rooms;
+      if (diff.edges === undefined) {
+        this.activeSceneState.edges = null;
+      }
+    }
+    if (diff.edges !== undefined) this.activeSceneState.edges = diff.edges;
+    if (diff.settings !== undefined) this.activeSceneState.settings = diff.settings;
+    if (diff.snapModes !== undefined) this.activeSceneState.snapModes = diff.snapModes;
     if (diff.scale !== undefined) this.activeSceneState.scale = diff.scale;
 
     if (this.useWorker && this.worker) {

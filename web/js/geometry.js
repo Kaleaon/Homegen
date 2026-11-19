@@ -5,16 +5,34 @@ import {
   getArcParameters,
   pointOnArc,
   tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
 } from '../../designer3d/tools/math2d.mjs';
 import proj4 from '#proj4';
 import { registerAllEPSG, isRegisteredEPSG, normalizeCode } from './epsgRegistry.js';
 
-export { closestPointOnArc, arcPolygonEdges, getArcParameters, pointOnArc, tessellateArc };
+export {
+  closestPointOnArc,
+  arcPolygonEdges,
+  getArcParameters,
+  pointOnArc,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
+};
 
 // Register pre-compiled EPSG projection definitions
 if (proj4 && proj4.defs) {
   registerAllEPSG(proj4);
 }
+
+const proj4ConverterCache = new Map();
 
 function tryProj4(sDef, tDef, pt) {
   try {
@@ -26,7 +44,15 @@ function tryProj4(sDef, tDef, pt) {
       console.warn(`[Geometry] Unsupported EPSG projection code "${tDef}". Falling back safely.`);
       return null;
     }
-    const res = proj4(sDef, tDef, pt);
+    const pairKey = `${sDef}->${tDef}`;
+    let converter = proj4ConverterCache.get(pairKey);
+    if (!converter) {
+      converter = proj4(sDef, tDef);
+      if (proj4ConverterCache.size < 128) {
+        proj4ConverterCache.set(pairKey, converter);
+      }
+    }
+    const res = converter.forward([pt[0], pt[1]]);
     if (!res || isNaN(res[0]) || isNaN(res[1])) {
       console.warn(`[Geometry] Reprojection returned invalid coordinates for ${sDef} -> ${tDef}`);
       return null;
@@ -63,7 +89,9 @@ class SpatialCache {
           : JSON.stringify(targetCRS);
     if (typeof coords === 'number') return `${coords}:${sStr}:${tStr}`;
     if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === 'number') {
-      return `${coords[0].toFixed(6)},${coords[1].toFixed(6)}:${sStr}:${tStr}`;
+      if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return null;
+      const base = `${Math.round(coords[0] * 1e6)},${Math.round(coords[1] * 1e6)}:${sStr}:${tStr}`;
+      return coords.length === 2 ? base : `${base}:${coords.slice(2).join(',')}`;
     }
     return null;
   }
@@ -790,6 +818,35 @@ export function wallSeg(room, wall) {
 
 export const wallLength = (room, wall) => wallSeg(room, wall).len;
 
+export function getWallBulge(room, wall) {
+  if (!room) return 0;
+  const pts = getRoomPoints(room);
+  const idx = resolveWallIndex(wall) % pts.length;
+  const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
+  if (room.bulges) {
+    if (typeof room.bulges[wall] === 'number') return room.bulges[wall];
+    if (typeof room.bulges[wallKey] === 'number') return room.bulges[wallKey];
+    if (Array.isArray(room.bulges) && typeof room.bulges[idx] === 'number') return room.bulges[idx];
+    if (typeof room.bulges[idx] === 'number') return room.bulges[idx];
+  }
+  const rawPts = room.points || room.corners || room.vertices;
+  if (Array.isArray(rawPts) && typeof rawPts[idx]?.bulge === 'number') {
+    return rawPts[idx].bulge;
+  }
+  return 0;
+}
+
+export function getWallEdgeSegment(room, wall) {
+  const pts = getRoomPoints(room);
+  const idx = resolveWallIndex(wall) % pts.length;
+  const start = pts[idx];
+  const end = pts[(idx + 1) % pts.length];
+  const chordLen = Math.hypot(end.x - start.x, end.y - start.y);
+  const wallKey = pts.length === 4 ? LEGACY_WALL_NAMES[idx] : `${idx}`;
+  const bulge = getWallBulge(room, wall);
+  return { start, end, chordLen, bulge, index: idx, wall: wallKey };
+}
+
 export function wallArcLength(room, wall) {
   if (!room) return 0;
   const s = wallSeg(room, wall);
@@ -1192,11 +1249,34 @@ export function intersectInterval(intervals, [s0, s1]) {
   return out;
 }
 
-/** Footprint rect of a floor item (rotations are multiples of 90). */
+/** Footprint rect of a floor item (supports arbitrary rotation and scale). */
 export function footprint(item, def) {
-  const swap = item.rot % 180 !== 0;
-  const w = swap ? def.d : def.w;
-  const d = swap ? def.w : def.d;
+  const sx =
+    typeof item.scale === 'number' && Number.isFinite(item.scale)
+      ? item.scale
+      : Number.isFinite(item.scale?.x)
+        ? item.scale.x
+        : 1;
+  const sy =
+    typeof item.scale === 'number' && Number.isFinite(item.scale)
+      ? item.scale
+      : Number.isFinite(item.scale?.y)
+        ? item.scale.y
+        : sx;
+  const rot = (((item.rot || 0) % 360) + 360) % 360;
+  const w0 = def.w * sx;
+  const d0 = def.d * sy;
+  if (rot % 90 === 0) {
+    const swap = rot % 180 !== 0;
+    const w = swap ? d0 : w0;
+    const d = swap ? w0 : d0;
+    return { x: item.x - w / 2, y: item.y - d / 2, w, h: d };
+  }
+  const rad = (rot * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const w = w0 * cos + d0 * sin;
+  const d = w0 * sin + d0 * cos;
   return { x: item.x - w / 2, y: item.y - d / 2, w, h: d };
 }
 
@@ -1248,15 +1328,10 @@ export function extractRoomEdges(rooms) {
     } else {
       const roomPts = getRoomPoints(r);
       for (let i = 0; i < roomPts.length; i++) {
-        const s = wallSeg(r, i);
-        const start = { x: s.ax, y: s.ay };
-        const end = { x: s.ax + s.dx * s.len, y: s.ay + s.dy * s.len };
+        const start = roomPts[i];
+        const end = roomPts[(i + 1) % roomPts.length];
         const wall = roomPts.length === 4 ? LEGACY_WALL_NAMES[i] : `${i}`;
-        let bulge = 0;
-        if (r.bulges) {
-          if (typeof r.bulges[wall] === 'number') bulge = r.bulges[wall];
-          else if (Array.isArray(r.bulges) && typeof r.bulges[i] === 'number') bulge = r.bulges[i];
-        }
+        const bulge = getWallBulge(r, i);
         edges.push({ start, end, bulge, index: index++, roomId: r.id, wall, edgeIndex: i });
       }
     }

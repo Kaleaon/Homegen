@@ -97,6 +97,45 @@ class KButton extends BaseElement {
       <button part="button" type="button"><slot></slot></button>
     `;
       this._btn = this.shadowRoot.querySelector('button');
+      if (this._btn && typeof this._btn.addEventListener === 'function') {
+        this._btn.addEventListener('click', (e) => {
+          if (this.disabled) {
+            if (typeof e.preventDefault === 'function') e.preventDefault();
+            if (typeof e.stopPropagation === 'function') e.stopPropagation();
+            return;
+          }
+          if (this.getAttribute('type') === 'submit') {
+            const form = typeof this.closest === 'function' ? this.closest('form') : null;
+            if (form) {
+              const requiredInputs =
+                typeof form.querySelectorAll === 'function'
+                  ? form.querySelectorAll('k-input[required]')
+                  : [];
+              for (const ki of requiredInputs) {
+                if (
+                  ki._input &&
+                  typeof ki._input.reportValidity === 'function' &&
+                  !ki._input.reportValidity()
+                ) {
+                  return;
+                }
+              }
+              if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+              } else if (typeof form.dispatchEvent === 'function') {
+                const submitEvt = new Event('submit', { bubbles: true, cancelable: true });
+                const notCancelled = form.dispatchEvent(submitEvt);
+                if (notCancelled && form.getAttribute?.('method') === 'dialog') {
+                  const dlg = typeof form.closest === 'function' ? form.closest('dialog') : null;
+                  if (dlg && typeof dlg.close === 'function') {
+                    dlg.close(this.getAttribute('value') || '');
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
     }
   }
 
@@ -160,7 +199,7 @@ class KButton extends BaseElement {
   }
 
   focus(options) {
-    if (this._btn) {
+    if (this._btn && typeof this._btn.focus === 'function') {
       this._btn.focus(options);
     } else if (typeof super.focus === 'function') {
       super.focus(options);
@@ -168,7 +207,7 @@ class KButton extends BaseElement {
   }
 
   blur() {
-    if (this._btn) {
+    if (this._btn && typeof this._btn.blur === 'function') {
       this._btn.blur();
     } else if (typeof super.blur === 'function') {
       super.blur();
@@ -187,12 +226,15 @@ export class KInput extends BaseElement {
       'placeholder',
       'disabled',
       'readonly',
+      'required',
+      'autofocus',
       'min',
       'max',
       'step',
       'accept',
       'aria-label',
       'aria-labelledby',
+      'aria-valuetext',
     ];
   }
 
@@ -222,9 +264,25 @@ export class KInput extends BaseElement {
           outline: none;
           transition: border-color 0.15s;
         }
+        input[type="color"] {
+          height: 30px;
+          padding: 2px 4px;
+          cursor: pointer;
+        }
+        input[type="range"] {
+          padding: 4px 0;
+          border: none;
+          background: transparent;
+          cursor: pointer;
+          accent-color: var(--ktheme-accent, var(--accent, #2f6f5e));
+        }
         input:hover,
         input:focus {
           border-color: var(--ktheme-accent, var(--accent, #2f6f5e));
+        }
+        :host(.invalid) input,
+        :host(.error) input {
+          border-color: var(--ktheme-critical, var(--err, #c43b3b));
         }
         input:disabled {
           opacity: 0.5;
@@ -246,8 +304,11 @@ export class KInput extends BaseElement {
     `;
       this._input = this.shadowRoot.querySelector('input');
 
-      this._input.addEventListener('input', () => {
-        this.setAttribute('value', this._input.value);
+      this._input.addEventListener('input', (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (this._input.type !== 'file') {
+          this.setAttribute('value', this._input.value);
+        }
         this.dispatchEvent(
           new CustomEvent('input', {
             bubbles: true,
@@ -258,7 +319,9 @@ export class KInput extends BaseElement {
       });
 
       this._input.addEventListener('change', () => {
-        this.setAttribute('value', this._input.value);
+        if (this._input.type !== 'file') {
+          this.setAttribute('value', this._input.value);
+        }
         this.dispatchEvent(
           new CustomEvent('change', {
             bubbles: true,
@@ -266,6 +329,33 @@ export class KInput extends BaseElement {
             detail: { value: this._input.value },
           })
         );
+      });
+
+      this._input.addEventListener('keydown', (e) => {
+        if (e && e.key === 'Enter' && this._input.type !== 'file') {
+          const form = typeof this.closest === 'function' ? this.closest('form') : null;
+          if (form) {
+            if (
+              this._input.required &&
+              typeof this._input.reportValidity === 'function' &&
+              !this._input.reportValidity()
+            ) {
+              return;
+            }
+            if (typeof form.requestSubmit === 'function') {
+              if (typeof e.preventDefault === 'function') e.preventDefault();
+              form.requestSubmit();
+            } else if (typeof form.dispatchEvent === 'function') {
+              if (typeof e.preventDefault === 'function') e.preventDefault();
+              const submitEvt = new Event('submit', { bubbles: true, cancelable: true });
+              const notCancelled = form.dispatchEvent(submitEvt);
+              if (notCancelled && form.getAttribute?.('method') === 'dialog') {
+                const dlg = typeof form.closest === 'function' ? form.closest('dialog') : null;
+                if (dlg && typeof dlg.close === 'function') dlg.close();
+              }
+            }
+          }
+        }
       });
     }
   }
@@ -290,6 +380,7 @@ export class KInput extends BaseElement {
       'accept',
       'aria-label',
       'aria-labelledby',
+      'aria-valuetext',
     ];
     for (const a of attrs) {
       if (this.hasAttribute(a)) {
@@ -298,11 +389,17 @@ export class KInput extends BaseElement {
         this._input.removeAttribute(a);
       }
     }
-    if (this.hasAttribute('value') && this._input.value !== this.getAttribute('value')) {
+    if (this._input.type === 'file') {
+      if (this.hasAttribute('value') && this.getAttribute('value') === '') {
+        this._input.value = '';
+      }
+    } else if (this.hasAttribute('value') && this._input.value !== this.getAttribute('value')) {
       this._input.value = this.getAttribute('value');
     }
     this._input.disabled = this.hasAttribute('disabled');
     this._input.readOnly = this.hasAttribute('readonly');
+    this._input.required = this.hasAttribute('required');
+    this._input.autofocus = this.hasAttribute('autofocus');
   }
 
   get value() {
@@ -311,10 +408,21 @@ export class KInput extends BaseElement {
 
   set value(val) {
     const strVal = val == null ? '' : String(val);
+    if (this._input && this._input.type === 'file') {
+      if (strVal === '') {
+        this.removeAttribute('value');
+        this._input.value = '';
+      }
+      return;
+    }
     this.setAttribute('value', strVal);
     if (this._input) {
       this._input.value = strVal;
     }
+  }
+
+  get files() {
+    return this._input ? this._input.files : null;
   }
 
   get disabled() {
@@ -473,6 +581,22 @@ class KTab extends BaseElement {
   click() {
     if (this.hasAttribute('disabled')) return;
     if (this._btn) this._btn.click();
+  }
+
+  focus(options) {
+    if (this._btn && typeof this._btn.focus === 'function') {
+      this._btn.focus(options);
+    } else if (typeof super.focus === 'function') {
+      super.focus(options);
+    }
+  }
+
+  blur() {
+    if (this._btn && typeof this._btn.blur === 'function') {
+      this._btn.blur();
+    } else if (typeof super.blur === 'function') {
+      super.blur();
+    }
   }
 }
 
@@ -639,7 +763,8 @@ export class KSelect extends BaseElement {
           z-index: 1;
         }
       </style>
-      <select part="select"><slot></slot></select>
+      <select part="select"></select>
+      <slot hidden></slot>
     `;
       this._select = this.shadowRoot.querySelector('select');
       this._slot = this.shadowRoot.querySelector('slot');
@@ -677,15 +802,30 @@ export class KSelect extends BaseElement {
   }
 
   _syncChildOptions() {
-    if (!this._select) return;
+    if (!this._select || typeof this.querySelectorAll !== 'function') return;
     const lightOptions = Array.from(this.querySelectorAll('option'));
-    if (lightOptions.length > 0) {
-      if (this._select.options.length !== lightOptions.length) {
-        this._select.innerHTML = '';
-        for (const opt of lightOptions) {
-          const clone = opt.cloneNode(true);
-          this._select.appendChild(clone);
-        }
+    const shadowOptions = Array.from(this._select.options || []);
+    const same =
+      lightOptions.length === shadowOptions.length &&
+      lightOptions.every(
+        (opt, idx) =>
+          shadowOptions[idx] &&
+          opt.value === shadowOptions[idx].value &&
+          opt.textContent === shadowOptions[idx].textContent &&
+          opt.disabled === shadowOptions[idx].disabled
+      );
+    if (!same) {
+      const prevAttrVal = this.hasAttribute('value') ? this.getAttribute('value') : null;
+      this._select.innerHTML = '';
+      for (const opt of lightOptions) {
+        const clone = opt.cloneNode(true);
+        this._select.appendChild(clone);
+      }
+      const nextOptions = Array.from(this._select.options || []);
+      if (prevAttrVal !== null && nextOptions.some((o) => o.value === prevAttrVal)) {
+        this._select.value = prevAttrVal;
+      } else if (prevAttrVal !== null && nextOptions.length > 0) {
+        this.setAttribute('value', this._select.value);
       }
     }
   }
@@ -703,14 +843,18 @@ export class KSelect extends BaseElement {
     this._select.disabled = this.hasAttribute('disabled');
     if (this.hasAttribute('value')) {
       const val = this.getAttribute('value');
-      if (this._select.value !== val) {
-        this._select.value = val;
+      const opts = Array.from(this._select.options || []);
+      if (opts.length === 0 || opts.some((o) => o.value === val)) {
+        if (this._select.value !== val) {
+          this._select.value = val;
+        }
       }
     }
   }
 
   get value() {
-    if (this._select && this._select.options.length > 0) {
+    this._syncChildOptions();
+    if (this._select && this._select.options && this._select.options.length > 0) {
       return this._select.value;
     }
     return this.getAttribute('value') || '';
@@ -719,6 +863,7 @@ export class KSelect extends BaseElement {
   set value(val) {
     const strVal = val == null ? '' : String(val);
     this.setAttribute('value', strVal);
+    this._syncChildOptions();
     if (this._select) {
       this._select.value = strVal;
     }

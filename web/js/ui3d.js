@@ -13,6 +13,7 @@ import {
   toWebpDataUrl,
 } from './photoreal.js';
 import { getSnappedPoint3D } from '../../designer3d/tools/index.mjs';
+import { isSingleKeyShortcutDisabled } from './shortcutPrefs.js';
 
 const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
 const KEY = 'homegen.horde.key';
@@ -110,6 +111,7 @@ export function initView3D({
   setLevel,
   interaction,
   _snappingBridge,
+  createScene,
   scene3dApi = null,
   hordeOptions = {},
 }) {
@@ -121,8 +123,8 @@ export function initView3D({
 
   async function ensure() {
     if (api) return api;
-    const { createScene3D } = await import('./scene3d.js');
-    api = createScene3D(v3, getDoc, getLevel, {
+    const factory = createScene || (await import('./scene3d.js')).createScene3D;
+    api = factory(v3, getDoc, getLevel, {
       onError: (msg) => toast(msg, true),
       onEnvChange: (env) => {
         const el = $('#o-env');
@@ -217,6 +219,12 @@ export function initView3D({
     plan.hidden = next === '3d';
     v3.hidden = next !== '3d';
     $('#bar3d').hidden = next !== '3d';
+    const dropzone = $('#blueprint-dropzone');
+    if (dropzone) {
+      const bg = getDoc?.()?.background;
+      const hasBg = Boolean(bg && (bg.dataUrl || bg.presetKey));
+      dropzone.hidden = next === '3d' || hasBg;
+    }
     const hud = $('#walkthrough-hud');
     if (hud) hud.hidden = next !== '3d' || api?.getCameraMode() !== 'walk';
     if (next === '3d') syncWalkthroughHUD();
@@ -406,6 +414,8 @@ export function initView3D({
     if (!api || mode !== '3d') return;
     const k = e.key;
     const lower = k.toLowerCase();
+    const singleKeyDisabled = isSingleKeyShortcutDisabled();
+    const hasCmdModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
 
     // 1. Tab / Shift + Tab: Cycle object/handle selection in 3D canvas
     if (k === 'Tab') {
@@ -432,20 +442,22 @@ export function initView3D({
     // 3. If an object/handle is selected:
     const selEntity = api.getSelected3DEntity();
     if (selEntity) {
-      if (lower === 'g') {
-        e.preventDefault();
-        api.set3DTransformMode('move');
-        return;
-      }
-      if (lower === 'r') {
-        e.preventDefault();
-        api.set3DTransformMode('rotate');
-        return;
-      }
-      if (lower === 's') {
-        e.preventDefault();
-        api.set3DTransformMode('scale');
-        return;
+      if (!singleKeyDisabled && !hasCmdModifier) {
+        if (lower === 'g') {
+          e.preventDefault();
+          api.set3DTransformMode('move');
+          return;
+        }
+        if (lower === 'r') {
+          e.preventDefault();
+          api.set3DTransformMode('rotate');
+          return;
+        }
+        if (lower === 's') {
+          e.preventDefault();
+          api.set3DTransformMode('scale');
+          return;
+        }
       }
 
       if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
@@ -466,25 +478,25 @@ export function initView3D({
     // 4. Default camera navigation when no object is selected:
     const camMode = api.getCameraMode();
     if (camMode === 'walk') {
-      if (lower === 'w' || k === 'ArrowUp') {
+      if ((!singleKeyDisabled && !hasCmdModifier && lower === 'w') || k === 'ArrowUp') {
         e.preventDefault();
         api.walkKeys.forward = true;
-      } else if (lower === 's' || k === 'ArrowDown') {
+      } else if ((!singleKeyDisabled && !hasCmdModifier && lower === 's') || k === 'ArrowDown') {
         e.preventDefault();
         api.walkKeys.backward = true;
-      } else if (lower === 'a' || k === 'ArrowLeft') {
+      } else if ((!singleKeyDisabled && !hasCmdModifier && lower === 'a') || k === 'ArrowLeft') {
         e.preventDefault();
         api.walkKeys.left = true;
-      } else if (lower === 'd' || k === 'ArrowRight') {
+      } else if ((!singleKeyDisabled && !hasCmdModifier && lower === 'd') || k === 'ArrowRight') {
         e.preventDefault();
         api.walkKeys.right = true;
       } else if (k === 'Shift') {
         api.walkKeys.sprint = true;
-      } else if (k === 'Escape' || lower === 'r') {
+      } else if (k === 'Escape' || (!singleKeyDisabled && !hasCmdModifier && lower === 'r')) {
         e.preventDefault();
         api.setCameraMode('orbit');
         toast('Switched to Orbit mode', false, 2000);
-      } else if (lower === 'e') {
+      } else if (!singleKeyDisabled && !hasCmdModifier && lower === 'e') {
         e.preventDefault();
         if (api.eyeLevel(getSelectedRoomId())) toast('Entered eye-level view', false, 2000);
         else toast('Add a room first.', true);
@@ -528,19 +540,27 @@ export function initView3D({
         api.orbitBy(0, 0.08);
         toast('Orbited 3D camera down', false, 1500);
       }
-    } else if (k === '+' || k === '=' || k === 'NumpadAdd') {
+    } else if (
+      !singleKeyDisabled &&
+      !hasCmdModifier &&
+      (k === '+' || k === '=' || k === 'NumpadAdd')
+    ) {
       e.preventDefault();
       api.zoomBy(0.88);
       toast('Zoomed in 3D view', false, 1500);
-    } else if (k === '-' || k === '_' || k === 'NumpadSubtract') {
+    } else if (
+      !singleKeyDisabled &&
+      !hasCmdModifier &&
+      (k === '-' || k === '_' || k === 'NumpadSubtract')
+    ) {
       e.preventDefault();
       api.zoomBy(1.14);
       toast('Zoomed out 3D view', false, 1500);
-    } else if (k.toLowerCase() === 'e' || k === 'Enter') {
+    } else if ((!singleKeyDisabled && !hasCmdModifier && lower === 'e') || k === 'Enter') {
       e.preventDefault();
       if (api.eyeLevel(getSelectedRoomId())) toast('Entered eye-level view', false, 2000);
       else toast('Add a room first.', true, 2000);
-    } else if (k.toLowerCase() === 'r' || k === 'Home') {
+    } else if ((!singleKeyDisabled && !hasCmdModifier && lower === 'r') || k === 'Home') {
       e.preventDefault();
       api.resetCamera();
       toast('Reset 3D camera view', false, 2000);
@@ -551,10 +571,11 @@ export function initView3D({
     if (!api || mode !== '3d') return;
     const k = e.key;
     const lower = k.toLowerCase();
-    if (lower === 'w' || k === 'ArrowUp') api.walkKeys.forward = false;
-    if (lower === 's' || k === 'ArrowDown') api.walkKeys.backward = false;
-    if (lower === 'a' || k === 'ArrowLeft') api.walkKeys.left = false;
-    if (lower === 'd' || k === 'ArrowRight') api.walkKeys.right = false;
+    const singleKeyDisabled = isSingleKeyShortcutDisabled();
+    if ((!singleKeyDisabled && lower === 'w') || k === 'ArrowUp') api.walkKeys.forward = false;
+    if ((!singleKeyDisabled && lower === 's') || k === 'ArrowDown') api.walkKeys.backward = false;
+    if ((!singleKeyDisabled && lower === 'a') || k === 'ArrowLeft') api.walkKeys.left = false;
+    if ((!singleKeyDisabled && lower === 'd') || k === 'ArrowRight') api.walkKeys.right = false;
     if (k === 'Shift') api.walkKeys.sprint = false;
   });
 

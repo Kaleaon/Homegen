@@ -15,6 +15,7 @@ import {
   updateRangeAriaValueText as ui3dUpdateRangeAriaValueText,
 } from '../js/ui3d.js';
 import { updateView3dA11yTree } from '../js/scene3d.js';
+import { KInput } from '../js/k-components.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const htmlContent = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
@@ -64,12 +65,36 @@ test('static range sliders in index.html declare initial formatted aria-valuetex
   );
   assert.match(
     htmlContent,
-    /<input id="stamp-opacity"[^>]*type="range"[^>]*value="0\.9"[^>]*aria-valuetext="90%"/
+    /<k-input id="stamp-opacity"[^>]*type="range"[^>]*value="0\.9"[^>]*aria-valuetext="90%"/
   );
   assert.match(
     htmlContent,
-    /<input id="wm-opacity"[^>]*type="range"[^>]*value="0\.2"[^>]*aria-valuetext="20%"/
+    /<k-input id="wm-opacity"[^>]*type="range"[^>]*value="0\.2"[^>]*aria-valuetext="20%"/
   );
+
+  assert.ok(KInput.observedAttributes.includes('aria-valuetext'));
+  const innerAttrs = new Map();
+  const hostAttrs = new Map([['aria-valuetext', '90%']]);
+  const instance = Object.create(KInput.prototype);
+  instance._input = {
+    value: '0.9',
+    disabled: false,
+    readOnly: false,
+    setAttribute(name, val) {
+      innerAttrs.set(name, val);
+    },
+    removeAttribute(name) {
+      innerAttrs.delete(name);
+    },
+  };
+  instance.hasAttribute = (name) => hostAttrs.has(name);
+  instance.getAttribute = (name) => hostAttrs.get(name) ?? null;
+  instance.connectedCallback();
+  assert.equal(innerAttrs.get('aria-valuetext'), '90%');
+
+  hostAttrs.set('aria-valuetext', '45%');
+  instance.attributeChangedCallback('aria-valuetext', '90%', '45%');
+  assert.equal(innerAttrs.get('aria-valuetext'), '45%');
 });
 
 test('dynamic UV inspector range templates and bindPair in app.js wire initial and reactive aria-valuetext', () => {
