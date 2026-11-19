@@ -1,6 +1,6 @@
 import { createGridSettings } from './gridSettings.mjs';
 import { SnapModeState } from './snapModes.mjs';
-import { TransformGizmo } from './transformGizmos.mjs';
+import { TransformGizmo, clampPositionToBounds } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback, invalidateBoundingBox } from './collision.mjs';
 import {
@@ -173,6 +173,11 @@ export class InteractionLayer {
       result = this.transformGizmo.setExactPosition(entity, positionOrX, yOrContext);
     }
 
+    if (context.bounds) {
+      const clamped = clampPositionToBounds(result.position, context.bounds);
+      result.position = result.position.z !== undefined ? clamped : { x: clamped.x, y: clamped.y };
+    }
+
     const basePos =
       entity.position ||
       (typeof entity.x === 'number' && Number.isFinite(entity.x)
@@ -188,8 +193,12 @@ export class InteractionLayer {
         x: p.x + offset.x,
         y: p.y + offset.y,
       }));
-      const validation = validatePlacement(movedPolygon, context.existingPolygons);
-      result.placementFeedback = createPlacementFeedback(movedPolygon, validation);
+      const validation = validatePlacement(movedPolygon, context.existingPolygons, {
+        boundingBoxCache: this._boundingBoxCache,
+        existingBoundingBoxes: context.existingBoundingBoxes,
+        dynamicPolygons: context.dynamicPolygons,
+      });
+      result.placementFeedback = createPlacementFeedback(movedPolygon, validation, context);
     }
 
     return result;
@@ -224,8 +233,12 @@ export class InteractionLayer {
           y: cy + dx * sin + dy * cos,
         };
       });
-      const validation = validatePlacement(rotatedPolygon, safeContext.existingPolygons);
-      result.placementFeedback = createPlacementFeedback(rotatedPolygon, validation);
+      const validation = validatePlacement(rotatedPolygon, safeContext.existingPolygons, {
+        boundingBoxCache: this._boundingBoxCache,
+        existingBoundingBoxes: safeContext.existingBoundingBoxes,
+        dynamicPolygons: safeContext.dynamicPolygons,
+      });
+      result.placementFeedback = createPlacementFeedback(rotatedPolygon, validation, safeContext);
     }
 
     return result;
@@ -262,8 +275,12 @@ export class InteractionLayer {
         x: cx + (p.x - cx) * factorX,
         y: cy + (p.y - cy) * factorY,
       }));
-      const validation = validatePlacement(scaledPolygon, safeContext.existingPolygons);
-      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation);
+      const validation = validatePlacement(scaledPolygon, safeContext.existingPolygons, {
+        boundingBoxCache: this._boundingBoxCache,
+        existingBoundingBoxes: safeContext.existingBoundingBoxes,
+        dynamicPolygons: safeContext.dynamicPolygons,
+      });
+      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation, safeContext);
     }
 
     return result;

@@ -362,15 +362,19 @@ aside {
   bottom: 12px;
   z-index: 30;
   max-width: min(560px, calc(100% - 24px));
-  display: none;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: var(--ink);
   color: var(--bg);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
   white-space: pre-line;
+}
+#toast:empty,
+#toast:has(.toast-msg:empty) {
+  display: none;
 }
 #toast.err {
   background: var(--err);
@@ -379,6 +383,35 @@ aside {
 #toast .toast-msg {
   flex: 1;
   min-width: 0;
+}
+.toast-action-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 10px;
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold, 600);
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.toast-action-btn:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.toast-action-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--bg);
+  outline-offset: var(--focus-ring-offset);
 }
 #toast .toast-dismiss {
   flex-shrink: 0;
@@ -445,15 +478,15 @@ aside {
   border-radius: var(--radius-full);
   font-size: 12px;
   font-weight: 600;
-  background: var(--err);
+  background: var(--ktheme-critical);
   color: var(--ktheme-on-primary);
 }
 .chip.ok {
-  background: var(--ok);
+  background: var(--ktheme-success);
 }
 .chip.mid {
-  background: var(--warn);
-  color: var(--warn-ink);
+  background: var(--ktheme-warning);
+  color: var(--ktheme-on-secondary);
 }
 .score {
   display: flex;
@@ -477,8 +510,8 @@ ul.v li {
 }
 ul.v li:not(.v-item) {
   padding: 6px 8px;
-  border-left: 3px solid var(--err);
-  background: var(--bg);
+  border-left: 3px solid var(--ktheme-critical);
+  background: var(--ktheme-bg);
   border-radius: var(--radius-xs);
 }
 .v-item-btn {
@@ -487,8 +520,8 @@ ul.v li:not(.v-item) {
   text-align: left;
   padding: 6px 8px;
   border: none;
-  border-left: 3px solid var(--err);
-  background: var(--bg);
+  border-left: 3px solid var(--ktheme-critical);
+  background: var(--ktheme-bg);
   border-radius: var(--radius-xs);
   cursor: pointer;
   color: inherit;
@@ -497,25 +530,25 @@ ul.v li:not(.v-item) {
   box-sizing: border-box;
 }
 .v-item-btn.warn {
-  border-left-color: var(--warn);
+  border-left-color: var(--ktheme-warning);
 }
 .v-item-btn:hover {
-  outline: 1px solid var(--accent);
+  outline: 1px solid var(--ktheme-accent);
 }
 .v-item-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ktheme-accent);
   outline-offset: 2px;
 }
 ul.v .ref {
   display: block;
-  color: var(--muted);
+  color: var(--ktheme-text-muted);
   font-size: 11px;
 }
 ul.v .msg {
   margin: 2px 0 3px;
 }
 .note {
-  color: var(--muted);
+  color: var(--ktheme-text-muted);
   font-size: 11.5px;
   margin-top: 10px;
 }

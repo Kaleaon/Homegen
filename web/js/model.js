@@ -23,6 +23,7 @@ import { isRegisteredEPSG, normalizeCode, getEPSGDefinition } from './epsgRegist
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
 import { registerCustomWallFinish } from './presetRegistry.js';
 import { deserializeElevationGrid } from './elevationEngine.js';
+import { formatFractionalInches } from './dimensionFormatter.js';
 
 export function defaultBranding() {
   return {
@@ -318,12 +319,22 @@ export function setLevelMetadata(state, metadataArray) {
 
 export function formatElevationBadge(inches) {
   if (typeof inches !== 'number' || isNaN(inches)) return '+0\' 0"';
-  const sign = inches >= 0 ? '+' : '-';
-  const abs = Math.abs(inches);
-  const ft = Math.floor(abs / 12);
-  const rem = abs % 12;
-  const remStr = rem.toFixed(rem % 1 === 0 ? 0 : 1);
-  return `${sign}${ft}' ${remStr}"`;
+  const roundedSixteenths = Math.round(Math.abs(inches) * 16);
+  const sign = inches < 0 && roundedSixteenths > 0 ? '-' : '+';
+  const ft = Math.floor(roundedSixteenths / 192);
+  const remSixteenths = roundedSixteenths % 192;
+  const wholeInches = Math.floor(remSixteenths / 16);
+  let num = remSixteenths % 16;
+  let den = 16;
+  while (num > 0 && num % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+  if (num === 0) {
+    return `${sign}${ft}' ${wholeInches}"`;
+  }
+  const inchPart = wholeInches > 0 ? `${wholeInches} ${num}/${den}` : `${num}/${den}`;
+  return `${sign}${ft}' ${inchPart}"`;
 }
 
 export function newState() {
@@ -1309,9 +1320,24 @@ function parseNumericToken(raw) {
   return Number.isFinite(val) ? val : NaN;
 }
 
-export function parseDistanceInInches(str, { defaultUnit = null } = {}) {
-  if (str === null || str === undefined || str === '') return null;
-  if (typeof str === 'number' && (!Number.isFinite(str) || str <= 0)) return null;
+export function parseDistanceInInches(str, options = {}) {
+  const {
+    defaultUnit = 'auto',
+    allowZero = false,
+    allowNegative = false,
+  } = options && typeof options === 'object' ? options : {};
+
+  if (str === null || str === undefined) return null;
+  if (typeof str === 'number') {
+    if (!Number.isFinite(str)) return null;
+    if (str < 0 && !allowNegative) return null;
+    if (str === 0) return allowZero ? 0 : null;
+    const absNum = Math.abs(str);
+    const sign = str < 0 ? -1 : 1;
+    if (defaultUnit === 'in') return sign * absNum;
+    if (defaultUnit === 'ft') return sign * absNum * 12;
+    return sign * (absNum <= 50 ? absNum * 12 : absNum);
+  }
 
   let normalized = String(str)
     .trim()
@@ -1322,20 +1348,32 @@ export function parseDistanceInInches(str, { defaultUnit = null } = {}) {
     .replace(/[¼½¾⅓⅔⅛⅜⅝⅞]/g, (ch) => UNICODE_FRACTIONS[ch] || ch)
     .trim();
 
-  if (!normalized || normalized.startsWith('-')) return null;
-  if (normalized.startsWith('+')) {
+  if (!normalized) return null;
+
+  let isNegative = false;
+  if (normalized.startsWith('-')) {
+    if (!allowNegative) return null;
+    isNegative = true;
     normalized = normalized.slice(1).trim();
-    if (!normalized) return null;
+  } else if (normalized.startsWith('+')) {
+    normalized = normalized.slice(1).trim();
   }
+  if (!normalized) return null;
+
+  const applySign = (val) => {
+    if (val === null || !Number.isFinite(val)) return null;
+    if (val === 0) return allowZero ? 0 : null;
+    return isNegative ? -val : val;
+  };
 
   const metricMatch = normalized.match(METRIC_DISTANCE_RE);
   if (metricMatch) {
     const val = parseNumericToken(metricMatch[1]);
     if (isNaN(val)) return null;
     const unit = metricMatch[2];
-    if (unit === 'mm' || unit.startsWith('millimet')) return val * 0.0393701;
-    if (unit === 'cm' || unit.startsWith('centimet')) return val * 0.393701;
-    return val * 39.3701;
+    if (unit === 'mm' || unit.startsWith('millimet')) return applySign(val * 0.0393701);
+    if (unit === 'cm' || unit.startsWith('centimet')) return applySign(val * 0.393701);
+    return applySign(val * 39.3701);
   }
 
   const ftInMatch = normalized.match(FT_IN_DISTANCE_RE);
@@ -1343,37 +1381,46 @@ export function parseDistanceInInches(str, { defaultUnit = null } = {}) {
     const feet = parseNumericToken(ftInMatch[1]);
     const inches = ftInMatch[2] !== undefined ? parseNumericToken(ftInMatch[2]) : 0;
     if (isNaN(feet) || isNaN(inches)) return null;
-    return feet * 12 + inches;
+    return applySign(feet * 12 + inches);
   }
 
   const inMatch = normalized.match(IN_ONLY_DISTANCE_RE);
   if (inMatch) {
     const inches = parseNumericToken(inMatch[1]);
-    return isNaN(inches) ? null : inches;
+    return isNaN(inches) ? null : applySign(inches);
   }
 
   const unitlessMatch = normalized.match(UNITLESS_DISTANCE_RE);
   if (unitlessMatch) {
     const num = parseNumericToken(unitlessMatch[1]);
-    if (isNaN(num) || num <= 0) return null;
-    if (defaultUnit === 'ft') return num * 12;
-    if (defaultUnit === 'in') return num;
-    return num <= 50 ? num * 12 : num;
+    if (isNaN(num)) return null;
+    if (num === 0) return allowZero ? 0 : null;
+    if (defaultUnit === 'ft') return applySign(num * 12);
+    if (defaultUnit === 'in') return applySign(num);
+    if (normalized.includes('/')) return applySign(num);
+    return applySign(num <= 50 ? num * 12 : num);
   }
 
   return null;
 }
 
-export function formatDistanceInInches(inches) {
-  if (typeof inches !== 'number' || isNaN(inches)) return '0"';
-  const sign = inches < 0 ? '-' : '';
-  const abs = Math.abs(inches);
-  const ft = Math.floor(abs / 12);
-  const rem = abs % 12;
-  const remStr = rem.toFixed(rem % 1 === 0 ? 0 : 1);
-  if (ft === 0) return `${sign}${remStr}"`;
-  if (rem === 0) return `${sign}${ft}'`;
-  return `${sign}${ft}' ${remStr}"`;
+export function formatDistanceInInches(inches, options = {}) {
+  const {
+    zeroInchesSuffix = false,
+    includeZeroInches = false,
+    emptyOnInvalid = false,
+  } = options && typeof options === 'object' ? options : {};
+  if (
+    inches === null ||
+    inches === undefined ||
+    typeof inches !== 'number' ||
+    !Number.isFinite(inches)
+  ) {
+    return emptyOnInvalid ? '' : zeroInchesSuffix || includeZeroInches ? '0\' 0"' : '0"';
+  }
+  return formatFractionalInches(inches, {
+    includeZeroInches: Boolean(zeroInchesSuffix || includeZeroInches),
+  });
 }
 
 export function parseElevationInInches(str) {

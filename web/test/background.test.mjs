@@ -43,6 +43,9 @@ test('parseDistanceInInches parses various measurement formats correctly', () =>
   assert.equal(m.parseDistanceInInches(''), null);
   assert.equal(m.parseDistanceInInches('abc'), null);
   assert.equal(m.parseDistanceInInches('-10'), null);
+  assert.equal(m.parseDistanceInInches('10\' 6 1/2"'), 126.5);
+  assert.equal(m.parseDistanceInInches('6 1/4"'), 6.25);
+  assert.equal(m.parseDistanceInInches('1/16"'), 0.0625);
 });
 
 test('parseDistanceInInches handles large spans, sub-30 inch values, quote marks, mixed units, and fractions', () => {
