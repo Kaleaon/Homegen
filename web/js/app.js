@@ -96,6 +96,8 @@ import {
   validatePlacement,
   createPlacementFeedback,
   buildToggleViewModel,
+  parseCoordinateInput,
+  normalizeRotationDegrees,
   buildGridSettingsViewModel,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
@@ -1241,6 +1243,7 @@ function refresh() {
   renderBgToolbar();
   renderDiffDrawer();
   if (typeof window !== 'undefined') window.__scene3d?.update();
+  view3d?.syncOverlay?.();
   const undoBtn = $('#undo');
   if (undoBtn) {
     undoBtn.disabled = !hist.canUndo();
@@ -1977,7 +1980,11 @@ export function select(target, { toggle = false, append = false } = {}) {
 
   renderInspector();
   redraw();
+  view3d?.syncSelection?.(typeof selection === 'string' ? selection : null);
 }
+
+const isInvalidNumericInput = (raw) =>
+  raw === null || raw === undefined || String(raw).trim() === '' || !Number.isFinite(Number(raw));
 
 export function getDoc() {
   return doc;
@@ -2202,8 +2209,13 @@ export function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="text" value="${esc(fmtLen(room.w))}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="text" value="${esc(fmtLen(room.h))}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="text" value="${esc(fmtLen(room.ceiling))}">`)}
-      ${formRow('i-pos-x', 'Position X (in)', `<input id="i-pos-x" type="number" step="any" value="${formatNumericInput(room.x)}">`)}
-      ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="any" value="${formatNumericInput(room.y)}">`)}
+      <div class="inspector-coords-group" style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">3D Coordinates &amp; Rotation</h4>
+        ${formRow('i-pos-x', 'Position X (in)', `<input id="i-pos-x" type="number" step="any" value="${formatNumericInput(room.x)}">`)}
+        ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="any" value="${formatNumericInput(room.y)}">`)}
+        ${formRow('i-pos-z', 'Elevation Z (in)', `<input id="i-pos-z" type="number" step="any" value="${formatNumericInput(Number.isFinite(room.z) ? room.z : 0)}">`)}
+        ${formRow('i-rot-deg', 'Rotation (°)', `<input id="i-rot-deg" type="number" step="15" min="0" max="360" value="${formatNumericInput(normalizeRotationDegrees(room.rot ?? 0, 0))}">`)}
+      </div>
       <div class="curve-inspector-group">
         <div class="curve-inspector-head">
           <h4>Parametric Wall Curve</h4>
@@ -2510,6 +2522,48 @@ export function renderInspector() {
     $('#i-pos-y')?.addEventListener('change', (e) =>
       applyExactRoomPosition('y', e.target.value, e.target)
     );
+    $('#i-pos-z')?.addEventListener('change', (e) => {
+      const curZ = Number.isFinite(room.z) ? room.z : 0;
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = formatNumericInput(curZ);
+        return;
+      }
+      const nextZ = Math.round(parseCoordinateInput(e.target.value, curZ) * 100) / 100;
+      if (nextZ === curZ) {
+        e.target.value = formatNumericInput(curZ);
+        return;
+      }
+      const res = apply((n) => {
+        const r = roomOf(n, room.id);
+        if (r) r.z = nextZ;
+      }, 'Set Room Elevation Z');
+      if (res.ok) {
+        announceToLiveRegion(`${room.name} elevation set to Z ${formatNumericInput(nextZ)}".`);
+      } else {
+        e.target.value = formatNumericInput(curZ);
+      }
+    });
+    $('#i-rot-deg')?.addEventListener('change', (e) => {
+      const curRot = normalizeRotationDegrees(room.rot ?? 0, 0);
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = formatNumericInput(curRot);
+        return;
+      }
+      const nextRot = normalizeRotationDegrees(e.target.value, curRot);
+      if (nextRot === curRot) {
+        e.target.value = formatNumericInput(curRot);
+        return;
+      }
+      const res = apply((n) => {
+        const r = roomOf(n, room.id);
+        if (r) r.rot = nextRot;
+      }, 'Set Room Rotation');
+      if (res.ok) {
+        announceToLiveRegion(`${room.name} rotated to ${formatNumericInput(nextRot)} degrees.`);
+      } else {
+        e.target.value = formatNumericInput(curRot);
+      }
+    });
     $('#i-del').addEventListener('click', () => {
       const label = getSelectionLabel(room.id) || room.name;
       const r = apply((n) => M.removeById(n, room.id), 'Delete Room');
@@ -2920,7 +2974,20 @@ export function renderInspector() {
       kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
         ? obj.y
         : (elemBounds?.cy ?? 0);
-    const itemRotDeg = kind === 'item' ? (obj.rot ?? 0) : 0;
+    let curZ = 0;
+    if (kind === 'item') {
+      if (def.mount === 'wall') {
+        const defaultWallZ = def.shape === 'switch' ? 48 : 16;
+        curZ = Number.isFinite(obj.z) ? obj.z : defaultWallZ;
+      } else {
+        const defaultZ = def.mount === 'ceiling' ? (room.ceiling || 96) - 0.75 : 0;
+        curZ = Number.isFinite(obj.z) ? obj.z : defaultZ;
+      }
+    } else {
+      const defaultSill = def.sill || 0;
+      curZ = Number.isFinite(obj.sill) ? obj.sill : Number.isFinite(obj.z) ? obj.z : defaultSill;
+    }
+    const itemRotDeg = kind === 'item' ? normalizeRotationDegrees(obj.rot ?? 0, 0) : 0;
     const itemScaleVal =
       kind === 'item'
         ? typeof obj.scale === 'number' && Number.isFinite(obj.scale)
@@ -2934,7 +3001,8 @@ export function renderInspector() {
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
       <button id="i-del">Delete</button></div>
-      <div class="exact-transform-group" style="margin-top:10px">
+      <div class="inspector-coords-group exact-transform-group" style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">3D Coordinates &amp; Transform</h4>
         ${formRow(
           'i-item-pos-x',
           'Position X (in)',
@@ -2944,6 +3012,11 @@ export function renderInspector() {
           'i-item-pos-y',
           'Position Y (in)',
           `<input id="i-item-pos-y" type="number" step="any" value="${formatNumericInput(posY)}">`
+        )}
+        ${formRow(
+          'i-item-z',
+          'Elevation Z (in)',
+          `<input id="i-item-z" type="number" step="any" min="0" max="${room.ceiling || 96}" value="${formatNumericInput(curZ)}">`
         )}
         ${
           kind === 'item' && def.mount !== 'wall'
@@ -3251,6 +3324,29 @@ export function renderInspector() {
       return polygons;
     };
 
+    const clampFloorOrCeilingXY = (rm, rawNextX, rawNextY) => {
+      const ir = interior(rm);
+      if (def.mount === 'ceiling') {
+        const minX = ir.x + 6;
+        const maxX = Math.max(minX, ir.x + ir.w - 6);
+        const minY = ir.y + 6;
+        const maxY = Math.max(minY, ir.y + ir.h - 6);
+        return {
+          x: Math.max(minX, Math.min(maxX, rawNextX)),
+          y: Math.max(minY, Math.min(maxY, rawNextY)),
+        };
+      }
+      const fp = footprint({ x: 0, y: 0, rot: obj.rot || 0, scale: obj.scale }, def);
+      const minX = ir.x + fp.w / 2;
+      const maxX = Math.max(minX, ir.x + ir.w - fp.w / 2);
+      const minY = ir.y + fp.h / 2;
+      const maxY = Math.max(minY, ir.y + ir.h - fp.h / 2);
+      return {
+        x: Math.max(minX, Math.min(maxX, rawNextX)),
+        y: Math.max(minY, Math.min(maxY, rawNextY)),
+      };
+    };
+
     const applyExactElementPosition = (axis, rawValue, inputEl) => {
       const existingPolygons = kind === 'item' ? getOtherFloorItemPolygons() : [];
       const entity = {
@@ -3265,8 +3361,18 @@ export function renderInspector() {
         { x: rawX, y: rawY },
         { existingPolygons }
       );
-      const nextX = posRes.position.x;
-      const nextY = posRes.position.y;
+      let nextX = posRes.position.x;
+      let nextY = posRes.position.y;
+      if (kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')) {
+        const targetRoom = doc.rooms.find(
+          (rm) => (rm.level || 0) === (room.level || 0) && inRect(rm, { x: nextX, y: nextY }, 0)
+        );
+        if (!targetRoom) {
+          const clamped = clampFloorOrCeilingXY(room, nextX, nextY);
+          nextX = clamped.x;
+          nextY = clamped.y;
+        }
+      }
       if (nextX === posX && nextY === posY) {
         if (inputEl) inputEl.value = formatNumericInput(axis === 'x' ? posX : posY);
         return;
@@ -3303,6 +3409,36 @@ export function renderInspector() {
       applyExactElementPosition('y', e.target.value, e.target)
     );
 
+    $('#i-item-z')?.addEventListener('change', (e) => {
+      if (isInvalidNumericInput(e.target.value)) {
+        e.target.value = formatNumericInput(curZ);
+        return;
+      }
+      const parsedZ = parseCoordinateInput(e.target.value, curZ);
+      const maxZ =
+        kind === 'item'
+          ? def.mount === 'floor'
+            ? Math.max(0, (room.ceiling || 96) - (def.h || 0))
+            : Math.max(0, room.ceiling || 96)
+          : Math.max(0, (room.ceiling || 96) - (def.h || 0));
+      const nextZ = Math.round(Math.max(0, Math.min(maxZ, parsedZ)) * 1000) / 1000;
+      if (nextZ === curZ) {
+        e.target.value = formatNumericInput(curZ);
+        return;
+      }
+      const r = apply((n) => {
+        const found = M.findOwner(n, obj.id);
+        if (!found) return;
+        if (kind === 'opening') found.obj.sill = nextZ;
+        else found.obj.z = nextZ;
+      }, 'Set Element Elevation Z');
+      if (r.ok) {
+        announceToLiveRegion(`${def.name} elevation set to Z ${formatNumericInput(nextZ)}".`);
+      } else {
+        renderInspector();
+      }
+    });
+
     $('#i-item-rot')?.addEventListener('change', (e) => {
       const existingPolygons = getOtherFloorItemPolygons();
       const entity = {
@@ -3320,7 +3456,18 @@ export function renderInspector() {
       }
       const r = apply((n) => {
         const targetHit = M.findOwner(n, obj.id);
-        if (targetHit) targetHit.obj.rot = nextRot;
+        if (!targetHit) return;
+        targetHit.obj.rot = nextRot;
+        if (def.mount === 'floor') {
+          const ir = interior(targetHit.room);
+          const fp = footprint({ x: 0, y: 0, rot: nextRot, scale: targetHit.obj.scale }, def);
+          const minX = ir.x + fp.w / 2;
+          const maxX = Math.max(minX, ir.x + ir.w - fp.w / 2);
+          const minY = ir.y + fp.h / 2;
+          const maxY = Math.max(minY, ir.y + ir.h - fp.h / 2);
+          targetHit.obj.x = Math.max(minX, Math.min(maxX, targetHit.obj.x));
+          targetHit.obj.y = Math.max(minY, Math.min(maxY, targetHit.obj.y));
+        }
       }, 'Set Item Rotation');
       if (r.ok) {
         announceToLiveRegion(`${def.name} rotated to ${formatNumericInput(nextRot)} degrees.`);
@@ -3345,7 +3492,18 @@ export function renderInspector() {
       }
       const r = apply((n) => {
         const targetHit = M.findOwner(n, obj.id);
-        if (targetHit) targetHit.obj.scale = nextScale;
+        if (!targetHit) return;
+        targetHit.obj.scale = nextScale;
+        if (def.mount === 'floor') {
+          const ir = interior(targetHit.room);
+          const fp = footprint({ x: 0, y: 0, rot: targetHit.obj.rot || 0, scale: nextScale }, def);
+          const minX = ir.x + fp.w / 2;
+          const maxX = Math.max(minX, ir.x + ir.w - fp.w / 2);
+          const minY = ir.y + fp.h / 2;
+          const maxY = Math.max(minY, ir.y + ir.h - fp.h / 2);
+          targetHit.obj.x = Math.max(minX, Math.min(maxX, targetHit.obj.x));
+          targetHit.obj.y = Math.max(minY, Math.min(maxY, targetHit.obj.y));
+        }
       }, 'Set Item Scale');
       if (r.ok) {
         announceToLiveRegion(`${def.name} scaled to ${formatNumericInput(nextScale)}x.`);
@@ -7068,6 +7226,20 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     getSelectedRoomId: () => {
       const h = selection && M.findOwner(doc, selection);
       return h ? h.room.id : null;
+    },
+    getSelectionId: () => (typeof selection === 'string' ? selection : null),
+    onSelectEntity: (id) => {
+      select(id);
+    },
+    onTransformCommit: () => {
+      report = evaluate(doc);
+      complianceManager.syncState(doc);
+      hist.push(doc, 'Transform 3D Element');
+      persist();
+      renderCompliance();
+      renderInspector();
+      renderHistoryTimeline();
+      redraw();
     },
     toast,
     setLevel,

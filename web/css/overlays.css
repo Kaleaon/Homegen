@@ -890,3 +890,77 @@
 #dlg-confirm button.danger:hover {
   opacity: 0.92;
 }
+
+/* 14. 3D Coordinate Input HUD Overlay */
+.coord3d-overlay {
+  top: auto;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: calc(100% - 28px);
+}
+
+.coord3d-overlay[hidden],
+.coord3d-snap[hidden] {
+  display: none !important;
+}
+
+.coord3d-target {
+  font-weight: 600;
+  font-size: var(--font-size-xs, 12px);
+  color: var(--ktheme-text);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coord3d-overlay[data-state='selected'] .coord3d-target {
+  color: var(--ktheme-accent);
+}
+
+.coord3d-snap {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-accent);
+  color: var(--ktheme-on-primary);
+}
+
+.coord3d-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.coord3d-field label {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  color: var(--ktheme-text-muted, var(--muted));
+  white-space: nowrap;
+}
+
+.coord3d-input {
+  width: 66px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--overlay-border);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 12px);
+  box-sizing: border-box;
+}
+
+.coord3d-input:focus-visible {
+  outline: 2px solid var(--ktheme-accent);
+  outline-offset: 1px;
+}
