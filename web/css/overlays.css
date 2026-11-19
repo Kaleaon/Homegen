@@ -734,6 +734,49 @@
   pointer-events: none;
 }
 
+/* 11b. Opening Offset Canvas HUD Editor */
+.opening-offset-hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-md);
+  gap: 6px;
+  padding: 6px 10px;
+  z-index: 16;
+  font-family: var(--font-family-sans);
+}
+
+.opening-offset-hud[hidden] {
+  display: none !important;
+}
+
+.opening-hud-label {
+  font-size: var(--font-size-xs, 12px);
+  font-weight: 600;
+  color: var(--ktheme-text);
+  white-space: nowrap;
+}
+
+.opening-hud-input {
+  width: 82px;
+  padding: 3px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--ktheme-accent);
+  background: var(--overlay-bg);
+  color: var(--overlay-color);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm, 13px);
+}
+
+.opening-hud-unit-btn,
+.opening-hud-cancel-btn {
+  padding: 3px 7px;
+  border-radius: var(--radius-xs);
+  font-size: var(--font-size-xs, 12px);
+  cursor: pointer;
+}
+
 /* 12. Parametric Curve Drafting HUD & Inspector Controls */
 .k-overlay-hud[hidden],
 .curve-drafting-hud[hidden],

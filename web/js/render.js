@@ -22,6 +22,7 @@ import { patternFor } from './patterns.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares, normalizeElevationUnit } from './elevationEngine.js';
+import { clampOpeningOffset, formatOpeningOffset, normalizeOpeningUnit } from './model.js';
 import { formatFractionalInches } from './dimensionFormatter.js';
 
 export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
@@ -311,6 +312,7 @@ export function draw(ctx, state, view, opts = {}) {
   if (opts.snapResult) drawSnapGuides(ctx, opts.snapResult, view);
   else if (opts.snappingBridge?.getActiveSnap())
     drawSnapGuides(ctx, opts.snappingBridge.getActiveSnap(), view);
+  if (opts.selection) drawOpeningOffsetHUD(ctx, state, opts.selection, view, opts);
   if (opts.overlay) opts.overlay(ctx, view);
   if (
     opts.showSpatialOverlay !== false &&
@@ -2427,4 +2429,305 @@ export function drawContours(ctx, state, view, opts = {}) {
   }
 
   ctx.restore();
+}
+
+export function computeOpeningOffsetHUD(
+  state,
+  selection,
+  view = { scale: 1, ox: 0, oy: 0 },
+  opts = {}
+) {
+  if (!state || !Array.isArray(state.rooms) || !selection) return null;
+
+  let singleId = null;
+  if (typeof selection === 'string') {
+    singleId = selection;
+  } else if (selection instanceof Set || Array.isArray(selection)) {
+    const arr = Array.from(selection);
+    if (arr.length !== 1) return null;
+    singleId = arr[0];
+  } else {
+    return null;
+  }
+
+  let room = null;
+  let opening = null;
+  for (const r of state.rooms) {
+    const found = (r.openings || []).find((o) => o.id === singleId);
+    if (found) {
+      room = r;
+      opening = found;
+      break;
+    }
+  }
+  if (!room || !opening) return null;
+
+  const s = wallSeg(room, opening.wall);
+  if (!s || !(s.len > 0)) return null;
+
+  const scale = Math.max(0.1, view?.scale || 1);
+  const unit = normalizeOpeningUnit(opts.openingUnits || state.settings?.openingUnits || 'ft-in');
+  const width = Math.max(0, Number(opening.width ?? OPENING_BY_ID[opening.type]?.w ?? 0) || 0);
+  const offset = clampOpeningOffset(room, opening.wall, opening.offset ?? 0, width);
+  const endPos = Math.min(s.len, offset + width);
+  const cornerDistance = Math.max(0, s.len - endPos);
+
+  const offsetText = formatOpeningOffset(offset, unit);
+  const cornerText = formatOpeningOffset(cornerDistance, unit);
+
+  const minW = 48 / scale;
+  const badgeH = 24 / scale;
+  const charW = 7.2 / scale;
+  const padX = 16 / scale;
+
+  const w1 = Math.max(minW, offsetText.length * charW + padX);
+  const w2 = Math.max(minW, cornerText.length * charW + padX);
+
+  const ox = -s.nx;
+  const oy = -s.ny;
+  const dimDist = WT / 2 + 20 / scale + Math.abs(ox) * (Math.max(w1, w2) * 0.22);
+
+  const ptAt = (t, nDist) => ({
+    x: s.ax + s.dx * t + ox * nDist,
+    y: s.ay + s.dy * t + oy * nDist,
+  });
+
+  const alongExtent1 = Math.abs(s.dx) * w1 + Math.abs(s.dy) * badgeH;
+  const alongExtent2 = Math.abs(s.dx) * w2 + Math.abs(s.dy) * badgeH;
+
+  const rawMid1 = offset / 2;
+  const rawMid2 = (endPos + s.len) / 2;
+
+  let t1 =
+    offset >= alongExtent1 ? rawMid1 : Math.min(rawMid1, offset - alongExtent1 / 2 - 4 / scale);
+  let t2 =
+    cornerDistance >= alongExtent2
+      ? rawMid2
+      : Math.max(rawMid2, endPos + alongExtent2 / 2 + 4 / scale);
+
+  const minSep = (alongExtent1 + alongExtent2) / 2 + 6 / scale;
+  if (t2 - t1 < minSep) {
+    const mid = (t1 + t2) / 2;
+    t1 = mid - minSep / 2;
+    t2 = mid + minSep / 2;
+  }
+
+  const buildLabel = (side, label, value, text, t, rawMid, badgeW) => {
+    const center = ptAt(t, dimDist);
+    const anchor = ptAt(rawMid, dimDist);
+    return {
+      side,
+      label,
+      value,
+      text,
+      t,
+      center,
+      anchor,
+      bounds: {
+        x: center.x - badgeW / 2,
+        y: center.y - badgeH / 2,
+        w: badgeW,
+        h: badgeH,
+      },
+      screenCenter: {
+        x: center.x * scale + (view?.ox || 0),
+        y: center.y * scale + (view?.oy || 0),
+      },
+    };
+  };
+
+  const offsetLabel = buildLabel('offset', 'Wall Offset', offset, offsetText, t1, rawMid1, w1);
+  const cornerLabel = buildLabel(
+    'corner',
+    'Corner Distance',
+    cornerDistance,
+    cornerText,
+    t2,
+    rawMid2,
+    w2
+  );
+
+  const witnessInner = WT / 2 + 2 / scale;
+  const witnessOuter = dimDist + 5 / scale;
+  const witnessStops = [0, offset, endPos, s.len];
+  const witnessLines = witnessStops.map((t) => ({
+    t,
+    from: ptAt(t, witnessInner),
+    to: ptAt(t, witnessOuter),
+  }));
+
+  const segments = [
+    {
+      side: 'offset',
+      value: offset,
+      from: ptAt(0, dimDist),
+      to: ptAt(offset, dimDist),
+    },
+    {
+      side: 'corner',
+      value: cornerDistance,
+      from: ptAt(endPos, dimDist),
+      to: ptAt(s.len, dimDist),
+    },
+  ];
+
+  return {
+    room,
+    opening,
+    wall: opening.wall,
+    wallLength: s.len,
+    width,
+    offset,
+    cornerDistance,
+    unit,
+    seg: s,
+    normal: { x: ox, y: oy },
+    dimDist,
+    witnessLines,
+    segments,
+    offsetLabel,
+    cornerLabel,
+    labels: [offsetLabel, cornerLabel],
+  };
+}
+
+export function hitTestOpeningHUD(
+  state,
+  selection,
+  point,
+  view = { scale: 1, ox: 0, oy: 0 },
+  opts = {}
+) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+  const hud = computeOpeningOffsetHUD(state, selection, view, opts);
+  if (!hud) return null;
+
+  for (const lbl of hud.labels) {
+    const b = lbl.bounds;
+    if (point.x >= b.x && point.x <= b.x + b.w && point.y >= b.y && point.y <= b.y + b.h) {
+      return {
+        ...lbl,
+        openingId: hud.opening.id,
+        roomId: hud.room.id,
+        wall: hud.wall,
+        wallLength: hud.wallLength,
+        openingWidth: hud.width,
+        unit: hud.unit,
+      };
+    }
+  }
+  return null;
+}
+
+export function drawOpeningOffsetHUD(
+  ctx,
+  state,
+  selection,
+  view = { scale: 1, ox: 0, oy: 0 },
+  opts = {}
+) {
+  if (!ctx) return null;
+  const hud = computeOpeningOffsetHUD(state, selection, view, opts);
+  if (!hud) return null;
+
+  const scale = Math.max(0.1, view?.scale || 1);
+  const accent = getToken('--ktheme-accent', '#2563eb');
+  const accentHover = getToken('--ktheme-accent-hover', '#1d4ed8');
+  const pillBg = 'rgba(15, 23, 42, 0.92)';
+  const pillText = '#f8fafc';
+
+  ctx.save();
+
+  // 1. Witness extension lines
+  ctx.strokeStyle = accent;
+  ctx.globalAlpha = 0.75;
+  ctx.lineWidth = 1.2 / scale;
+  if (ctx.setLineDash) ctx.setLineDash([3 / scale, 2.5 / scale]);
+  ctx.beginPath();
+  for (const wl of hud.witnessLines) {
+    ctx.moveTo(wl.from.x, wl.from.y);
+    ctx.lineTo(wl.to.x, wl.to.y);
+  }
+  ctx.stroke();
+
+  // 2. Dimension span lines + architectural ticks
+  if (ctx.setLineDash) ctx.setLineDash([]);
+  ctx.globalAlpha = 0.95;
+  ctx.lineWidth = 1.6 / scale;
+  ctx.beginPath();
+  for (const seg of hud.segments) {
+    if (seg.value > 0.25) {
+      ctx.moveTo(seg.from.x, seg.from.y);
+      ctx.lineTo(seg.to.x, seg.to.y);
+    }
+  }
+  ctx.stroke();
+
+  const tickLen = 3.5 / scale;
+  const tx = (hud.seg.dx + hud.normal.x) * 0.7071 * tickLen;
+  const ty = (hud.seg.dy + hud.normal.y) * 0.7071 * tickLen;
+  ctx.lineWidth = 1.6 / scale;
+  ctx.beginPath();
+  for (const stopT of [
+    0,
+    hud.offset,
+    Math.min(hud.wallLength, hud.offset + hud.width),
+    hud.wallLength,
+  ]) {
+    const px = hud.seg.ax + hud.seg.dx * stopT + hud.normal.x * hud.dimDist;
+    const py = hud.seg.ay + hud.seg.dy * stopT + hud.normal.y * hud.dimDist;
+    ctx.moveTo(px - tx, py - ty);
+    ctx.lineTo(px + tx, py + ty);
+  }
+  ctx.stroke();
+
+  // 3. Connector leader if pill was shifted away from segment midpoint
+  for (const lbl of hud.labels) {
+    if (Math.hypot(lbl.center.x - lbl.anchor.x, lbl.center.y - lbl.anchor.y) > 4 / scale) {
+      ctx.save();
+      ctx.strokeStyle = accent;
+      ctx.globalAlpha = 0.65;
+      ctx.lineWidth = 1 / scale;
+      if (ctx.setLineDash) ctx.setLineDash([2 / scale, 2 / scale]);
+      ctx.beginPath();
+      ctx.moveTo(lbl.anchor.x, lbl.anchor.y);
+      ctx.lineTo(lbl.center.x, lbl.center.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // 4. Interactive dimension pill badges
+  const fontSize = 11.5 / scale;
+  for (const lbl of hud.labels) {
+    const isHovered = opts.hoveredOpeningHudSide === lbl.side;
+    const isActive = opts.activeOpeningHudSide === lbl.side;
+    const b = lbl.bounds;
+    const r = Math.min(b.h / 2, 6 / scale);
+
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = isActive || isHovered ? accentHover : pillBg;
+    ctx.strokeStyle = isActive || isHovered ? '#ffffff' : accent;
+    ctx.lineWidth = (isActive || isHovered ? 2 : 1.4) / scale;
+
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(b.x, b.y, b.w, b.h, r);
+    } else if (ctx.rect) {
+      ctx.rect(b.x, b.y, b.w, b.h);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = pillText;
+    ctx.font = `600 ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(lbl.text, lbl.center.x, lbl.center.y);
+    ctx.restore();
+  }
+
+  ctx.restore();
+  return hud;
 }

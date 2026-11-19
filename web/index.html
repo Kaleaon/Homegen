@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="dist/css/style.css">
 <link rel="stylesheet" href="css/overlays.css">
+<script type="importmap">{"imports":{"proj4":"./vendor/proj4/proj4.js","#proj4":"./vendor/proj4/proj4.js","three":"./vendor/three/three.module.js","#three":"./vendor/three/three.module.js","#three/":"./vendor/three/","jspdf":"./vendor/jspdf/jspdf.es.min.js","#jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","#jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/k-components.js"></script>
 </head>
 <body>
@@ -104,6 +105,13 @@
     <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" aria-describedby="view3d-fallback-summary" hidden></canvas>
     <div id="view3d-fallback-summary" class="sr-only" aria-live="polite"></div>
     <div id="view3d-a11y-live" class="sr-only" aria-live="polite"></div>
+    <form id="opening-offset-hud" class="opening-offset-hud k-overlay-hud" aria-label="Edit opening wall offset" hidden>
+      <label id="opening-hud-label" class="opening-hud-label" for="opening-hud-input">Wall Offset</label>
+      <input id="opening-hud-input" class="opening-hud-input k-target-min-size" type="text" inputmode="decimal" autocomplete="off" />
+      <button id="opening-hud-unit-btn" type="button" class="opening-hud-unit-btn k-target-min-size" title="Toggle offset display units" aria-label="Toggle offset display units">ft&#39; in&quot;</button>
+      <button id="opening-hud-apply-btn" type="submit" class="primary k-target-min-size">Apply</button>
+      <button id="opening-hud-cancel-btn" type="button" class="opening-hud-cancel-btn k-target-min-size" title="Cancel edit" aria-label="Cancel offset edit"><span aria-hidden="true">✕</span></button>
+    </form>
     <div id="walkthrough-hud" class="walkthrough-hud k-overlay-hud" hidden>
       <span class="hud-title"><span aria-hidden="true">🚶</span> Walkthrough Mode</span>
       <div class="hud-group hud-level-group">
@@ -899,7 +907,6 @@
     </div>
   </div>
 </dialog>
-<script type="importmap">{"imports":{"proj4":"./vendor/proj4/proj4.js","#proj4":"./vendor/proj4/proj4.js","three":"./vendor/three/three.module.js","#three":"./vendor/three/three.module.js","#three/":"./vendor/three/","jspdf":"./vendor/jspdf/jspdf.es.min.js","#jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","#jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

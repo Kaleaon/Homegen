@@ -72,6 +72,11 @@ class SpatialCache {
   constructor(maxSize = 2000) {
     this.maxSize = maxSize;
     this.cache = new Map();
+    this._hotX = NaN;
+    this._hotY = NaN;
+    this._hotS = null;
+    this._hotT = null;
+    this._hotVal = undefined;
   }
 
   getKey(coords, sourceCRS, targetCRS) {
@@ -97,23 +102,69 @@ class SpatialCache {
   }
 
   get(coords, sourceCRS, targetCRS) {
+    if (
+      typeof sourceCRS === 'string' &&
+      typeof targetCRS === 'string' &&
+      sourceCRS === this._hotS &&
+      targetCRS === this._hotT &&
+      Array.isArray(coords) &&
+      coords.length === 2 &&
+      coords[0] === this._hotX &&
+      coords[1] === this._hotY
+    ) {
+      return this._hotVal;
+    }
     const key = this.getKey(coords, sourceCRS, targetCRS);
     if (!key) return null;
-    return this.cache.get(key);
+    const hit = this.cache.get(key);
+    if (
+      hit !== undefined &&
+      typeof sourceCRS === 'string' &&
+      typeof targetCRS === 'string' &&
+      Array.isArray(coords) &&
+      coords.length === 2 &&
+      typeof coords[0] === 'number'
+    ) {
+      this._hotX = coords[0];
+      this._hotY = coords[1];
+      this._hotS = sourceCRS;
+      this._hotT = targetCRS;
+      this._hotVal = hit;
+    }
+    return hit;
   }
 
   set(coords, sourceCRS, targetCRS, result) {
     const key = this.getKey(coords, sourceCRS, targetCRS);
     if (!key) return;
-    if (this.cache.size >= this.maxSize) {
+    if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
       const firstKey = this.cache.keys().next().value;
       this.cache.delete(firstKey);
+      this._hotS = null;
     }
     this.cache.set(key, result);
+    if (
+      typeof sourceCRS === 'string' &&
+      typeof targetCRS === 'string' &&
+      Array.isArray(coords) &&
+      coords.length === 2 &&
+      typeof coords[0] === 'number'
+    ) {
+      this._hotX = coords[0];
+      this._hotY = coords[1];
+      this._hotS = sourceCRS;
+      this._hotT = targetCRS;
+      this._hotVal = result;
+    }
   }
 
   clear() {
     this.cache.clear();
+    this._hotX = NaN;
+    this._hotY = NaN;
+    this._hotS = null;
+    this._hotT = null;
+    this._hotVal = undefined;
   }
 }
 
