@@ -1689,6 +1689,13 @@ export function drawItem(ctx, room, it, def, isBad, selected, ghost) {
   }
   if (def.mount === 'ceiling') {
     ctx.translate(it.x, it.y);
+    const sc =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.x)
+          ? it.scale.x
+          : 1;
+    if (sc !== 1) ctx.scale(sc, sc);
     const r = def.w / 2;
     ctx.fillStyle = isBad ? '#d33' : def.color;
     ctx.strokeStyle = 'rgba(0,0,0,.55)';
@@ -1719,7 +1726,20 @@ export function drawItem(ctx, room, it, def, isBad, selected, ghost) {
     return;
   }
   ctx.translate(it.x, it.y);
-  ctx.rotate((it.rot * Math.PI) / 180);
+  ctx.rotate(((it.rot || 0) * Math.PI) / 180);
+  const sx =
+    typeof it.scale === 'number' && Number.isFinite(it.scale)
+      ? it.scale
+      : Number.isFinite(it.scale?.x)
+        ? it.scale.x
+        : 1;
+  const sy =
+    typeof it.scale === 'number' && Number.isFinite(it.scale)
+      ? it.scale
+      : Number.isFinite(it.scale?.y)
+        ? it.scale.y
+        : sx;
+  if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
   const w = def.w;
   const d = def.d;
   const x = -w / 2;
