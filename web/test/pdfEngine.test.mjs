@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../js/model.js';
 import { commit } from '../js/codes.js';
-import { generatePDF, resolvePDFAttributionAndLicensing, SCALE_OPTIONS } from '../js/pdfEngine.js';
+import {
+  generatePDF,
+  resolvePDFAttributionAndLicensing,
+  SCALE_OPTIONS,
+  fmtLen,
+} from '../js/pdfEngine.js';
 
 test('pdfEngine scale options map 1/4"=1\'0" scale correctly', () => {
   const scaleOpt = SCALE_OPTIONS['1/4"=1\'0"'];
@@ -308,4 +313,13 @@ test('generatePDF exports valid vector PDF for custom 5-sided and angled polygon
   assert.ok(pdf);
   const buf = pdf.output('arraybuffer');
   assert.ok(buf.byteLength > 1000);
+});
+
+test('pdfEngine fmtLen formats fractional 1/16th inch measurements and carries over cleanly', () => {
+  assert.equal(fmtLen(144), "12'");
+  assert.equal(fmtLen(126.5), '10\' 6 1/2"');
+  assert.equal(fmtLen(6.125), '6 1/8"');
+  assert.equal(fmtLen(0.0625), '1/16"');
+  assert.equal(fmtLen(143.99), "12'");
+  assert.equal(fmtLen(5.99), '6"');
 });

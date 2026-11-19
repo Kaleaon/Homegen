@@ -7,6 +7,44 @@ import { globalCadWorkerClient } from './cadWorkerClient.js';
  * and provides serialization helpers for plan persistence.
  */
 
+export function sanitizeSlopePercent(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') return 0;
+  if (typeof value === 'string' && value.trim() === '') return 0;
+  const num = Number(value);
+  if (Number.isNaN(num)) return 0;
+  if (num === Infinity) return 100;
+  if (num === -Infinity) return 0;
+  return Math.max(0, Math.min(100, num));
+}
+
+export function sanitizeSlopeDirection(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') return 0;
+  if (typeof value === 'string' && value.trim() === '') return 0;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  const normalized = ((num % 360) + 360) % 360;
+  return normalized === 0 ? 0 : normalized;
+}
+
+function computeDirectionalGradeOffset(
+  wx,
+  wy,
+  bounds,
+  slopePercent,
+  directionDegrees,
+  unitScale = 1
+) {
+  if (!slopePercent) return 0;
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cy = (bounds.minY + bounds.maxY) / 2;
+  const rad = (directionDegrees * Math.PI) / 180;
+  // Compass bearing: 0° = North (-Y), 90° = East (+X), 180° = South (+Y), 270° = West (-X)
+  const dirX = Math.sin(rad);
+  const dirY = -Math.cos(rad);
+  const projectedDist = ((wx - cx) * dirX + (wy - cy) * dirY) * unitScale;
+  return projectedDist * (slopePercent / 100);
+}
+
 /**
  * Normalizes an elevation unit string to 'm' or 'ft', defaulting safely to 'm'.
  */
@@ -33,9 +71,13 @@ export class ElevationGrid {
     bounds = null,
     contourInterval = 1.0,
     verticalScale = 1.0,
+    targetSlopePercent = 0,
+    slopeDirectionDeg = 0,
     elevationUnit,
     unit,
     visible = true,
+    _slopeApplied = false,
+    _appliedUnitScale = 1,
   } = {}) {
     let capWidth = width;
     let capHeight = height;
@@ -81,8 +123,15 @@ export class ElevationGrid {
     this.bounds = bounds || { minX: -600, maxX: 600, minY: -600, maxY: 600 };
     this.contourInterval = Math.max(0.1, contourInterval);
     this.verticalScale = verticalScale;
+    this.targetSlopePercent = sanitizeSlopePercent(targetSlopePercent);
+    this.slopeDirectionDeg = sanitizeSlopeDirection(slopeDirectionDeg);
     this.elevationUnit = normalizeElevationUnit(elevationUnit ?? unit ?? 'm');
     this.visible = visible;
+    this._slopeApplied = Boolean(_slopeApplied);
+    this._appliedSlopePercent = this._slopeApplied ? this.targetSlopePercent : 0;
+    this._appliedDirectionDeg = this._slopeApplied ? this.slopeDirectionDeg : 0;
+    this._appliedUnitScale =
+      Number.isFinite(_appliedUnitScale) && _appliedUnitScale > 0 ? _appliedUnitScale : 1;
   }
 
   toJSON() {
@@ -95,9 +144,96 @@ export class ElevationGrid {
       bounds: this.bounds,
       contourInterval: this.contourInterval,
       verticalScale: this.verticalScale,
+      targetSlopePercent: this.targetSlopePercent,
+      slopeDirectionDeg: this.slopeDirectionDeg,
       elevationUnit: normalizeElevationUnit(this.elevationUnit),
       visible: this.visible !== false,
+      _slopeApplied: Boolean(this._slopeApplied),
+      _appliedUnitScale: this._appliedUnitScale,
     };
+  }
+
+  applyGradedSlope(options = {}) {
+    const hasSlopeArg =
+      options !== null && typeof options === 'object' && 'slopePercent' in options;
+    const hasDirArg =
+      options !== null && typeof options === 'object' && 'directionDegrees' in options;
+
+    const clampedSlope = sanitizeSlopePercent(
+      hasSlopeArg ? options.slopePercent : this.targetSlopePercent
+    );
+    const normalizedDir = sanitizeSlopeDirection(
+      hasDirArg ? options.directionDegrees : this.slopeDirectionDeg
+    );
+    const unitScale =
+      Number.isFinite(options?.unitScale) && options.unitScale > 0 ? options.unitScale : 1;
+    const hasExplicitOrigin =
+      typeof options?.originElevation === 'number' && Number.isFinite(options.originElevation);
+
+    const prevSlope = this._slopeApplied ? this._appliedSlopePercent : 0;
+    const prevDir = this._slopeApplied ? this._appliedDirectionDeg : 0;
+    const prevUnitScale = this._slopeApplied ? this._appliedUnitScale : 1;
+
+    this.targetSlopePercent = clampedSlope;
+    this.slopeDirectionDeg = normalizedDir;
+
+    if (!this.data || this.data.length === 0 || this.width <= 0 || this.height <= 0) {
+      this._slopeApplied = clampedSlope > 0;
+      this._appliedSlopePercent = clampedSlope;
+      this._appliedDirectionDeg = normalizedDir;
+      this._appliedUnitScale = unitScale;
+      return this;
+    }
+
+    const { width, height, bounds, data } = this;
+    let minE = Infinity;
+    let maxE = -Infinity;
+
+    for (let y = 0; y < height; y++) {
+      const v = y / Math.max(1, height - 1);
+      const wy = bounds.minY + v * (bounds.maxY - bounds.minY);
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const wx = bounds.minX + u * (bounds.maxX - bounds.minX);
+        const idx = y * width + x;
+
+        const newOffset = computeDirectionalGradeOffset(
+          wx,
+          wy,
+          bounds,
+          clampedSlope,
+          normalizedDir,
+          unitScale
+        );
+
+        if (hasExplicitOrigin) {
+          data[idx] = options.originElevation + newOffset;
+        } else {
+          const prevOffset = computeDirectionalGradeOffset(
+            wx,
+            wy,
+            bounds,
+            prevSlope,
+            prevDir,
+            prevUnitScale
+          );
+          data[idx] = (data[idx] || 0) - prevOffset + newOffset;
+        }
+
+        const currentVal = data[idx];
+        if (currentVal < minE) minE = currentVal;
+        if (currentVal > maxE) maxE = currentVal;
+      }
+    }
+
+    this.minElevation = minE === Infinity ? 0 : minE;
+    this.maxElevation = maxE === -Infinity ? 0 : maxE;
+    this._slopeApplied = clampedSlope > 0;
+    this._appliedSlopePercent = clampedSlope;
+    this._appliedDirectionDeg = normalizedDir;
+    this._appliedUnitScale = unitScale;
+
+    return this;
   }
 
   getElevationAt(u, v) {
@@ -1109,8 +1245,15 @@ export function serializeElevationGrid(grid) {
     bounds: grid.bounds,
     contourInterval: grid.contourInterval,
     verticalScale: grid.verticalScale,
+    targetSlopePercent: sanitizeSlopePercent(grid.targetSlopePercent),
+    slopeDirectionDeg: sanitizeSlopeDirection(grid.slopeDirectionDeg),
     elevationUnit: normalizeElevationUnit(grid.elevationUnit),
     visible: grid.visible !== false,
+    _slopeApplied: Boolean(grid._slopeApplied),
+    _appliedUnitScale:
+      Number.isFinite(grid._appliedUnitScale) && grid._appliedUnitScale > 0
+        ? grid._appliedUnitScale
+        : 1,
   };
 }
 
