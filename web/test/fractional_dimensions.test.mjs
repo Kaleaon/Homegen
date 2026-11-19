@@ -158,12 +158,12 @@ test('BOM, SVG, PDF, and ComplianceOverlay render fractional room dimensions acc
 test('app.js and index.html wire Add Room Dims and Inspector inputs through parseDistanceInInches', () => {
   assert.match(
     htmlContent,
-    /<input id="room-dims-width" type="text"/,
+    /<k-input id="room-dims-width" type="text"/,
     '#room-dims-width must use type="text" to allow fractional imperial input'
   );
   assert.match(
     htmlContent,
-    /<input id="room-dims-depth" type="text"/,
+    /<k-input id="room-dims-depth" type="text"/,
     '#room-dims-depth must use type="text" to allow fractional imperial input'
   );
   assert.match(

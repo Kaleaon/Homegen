@@ -30,10 +30,13 @@ test('index.html Photoreal modal (#photo) labels have explicit for attributes ma
 });
 
 test('index.html SVG export modal (#dlg-export) labels have explicit for attributes matching select IDs', () => {
-  assert.match(htmlContent, /<label for="e-sheet">Sheet Size<\/label>\s*<select id="e-sheet">/);
-  assert.match(htmlContent, /<label for="e-orient">Orientation<\/label>\s*<select id="e-orient">/);
-  assert.match(htmlContent, /<label for="e-scale">Scale<\/label>\s*<select id="e-scale">/);
-  assert.match(htmlContent, /<label for="e-level">Floor Level<\/label>\s*<select id="e-level">/);
+  assert.match(htmlContent, /<label for="e-sheet">Sheet Size<\/label>\s*<k-select id="e-sheet">/);
+  assert.match(
+    htmlContent,
+    /<label for="e-orient">Orientation<\/label>\s*<k-select id="e-orient">/
+  );
+  assert.match(htmlContent, /<label for="e-scale">Scale<\/label>\s*<k-select id="e-scale">/);
+  assert.match(htmlContent, /<label for="e-level">Floor Level<\/label>\s*<k-select id="e-level">/);
 });
 
 test('index.html PDF export modal (#pdf-export) labels have explicit for attributes matching control IDs', () => {
@@ -97,54 +100,57 @@ test('index.html Project Branding modal (#dlg-branding) labels have explicit for
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-shape">Frame shape<\/label>\s*<select id="stamp-shape">/
+    /<label for="stamp-shape">Frame shape<\/label>\s*<k-select id="stamp-shape">/
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-title">Primary title<\/label>\s*<input id="stamp-title"/
+    /<label for="stamp-title">Primary title<\/label>\s*<k-input id="stamp-title"/
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-subtitle">Subtitle line<\/label>\s*<input id="stamp-subtitle"/
+    /<label for="stamp-subtitle">Subtitle line<\/label>\s*<k-input id="stamp-subtitle"/
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-license">License \/ ID<\/label>\s*<input id="stamp-license"/
-  );
-  assert.match(htmlContent, /<label for="stamp-date">Date text<\/label>\s*<input id="stamp-date"/);
-  assert.match(
-    htmlContent,
-    /<label for="stamp-border-style">Border style<\/label>\s*<select id="stamp-border-style">/
+    /<label for="stamp-license">License \/ ID<\/label>\s*<k-input id="stamp-license"/
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-border-color">Border color<\/label>\s*<input id="stamp-border-color"/
+    /<label for="stamp-date">Date text<\/label>\s*<k-input id="stamp-date"/
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-text-color">Text color<\/label>\s*<input id="stamp-text-color"/
+    /<label for="stamp-border-style">Border style<\/label>\s*<k-select id="stamp-border-style">/
   );
   assert.match(
     htmlContent,
-    /<label for="stamp-opacity">Opacity<\/label>\s*<input id="stamp-opacity"/
+    /<label for="stamp-border-color">Border color<\/label>\s*<k-input id="stamp-border-color"/
   );
   assert.match(
     htmlContent,
-    /<label for="logo-file">Upload Logo Image<\/label>\s*<input type="file" id="logo-file"/
+    /<label for="stamp-text-color">Text color<\/label>\s*<k-input id="stamp-text-color"/
+  );
+  assert.match(
+    htmlContent,
+    /<label for="stamp-opacity">Opacity<\/label>\s*<k-input id="stamp-opacity"/
+  );
+  assert.match(
+    htmlContent,
+    /<label for="logo-file">Upload Logo Image<\/label>\s*<k-input type="file" id="logo-file"/
   );
   assert.match(
     htmlContent,
     /<label class="toggle" for="wm-enabled"><input type="checkbox" id="wm-enabled"/
   );
-  assert.match(htmlContent, /<label for="wm-text">Watermark text<\/label>\s*<input id="wm-text"/);
-  assert.match(htmlContent, /<label for="wm-color">Text color<\/label>\s*<input id="wm-color"/);
-  assert.match(htmlContent, /<label for="wm-opacity">Opacity<\/label>\s*<input id="wm-opacity"/);
+  assert.match(htmlContent, /<label for="wm-text">Watermark text<\/label>\s*<k-input id="wm-text"/);
+  assert.match(htmlContent, /<label for="wm-color">Text color<\/label>\s*<k-input id="wm-color"/);
+  assert.match(htmlContent, /<label for="wm-opacity">Opacity<\/label>\s*<k-input id="wm-opacity"/);
 });
 
 test('index.html Scale Calibration modal (#calib-dlg) labels have explicit for attributes', () => {
   assert.match(
     htmlContent,
-    /<label for="calib-distance">Distance<\/label>\s*<input id="calib-distance"/
+    /<label for="calib-distance">Distance<\/label>\s*<k-input id="calib-distance"/
   );
 });
 

@@ -21,7 +21,7 @@ import { patternFor } from './patterns.js';
 // import { openingInfo } from './codes.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
-import { computeMarchingSquares } from './elevationEngine.js';
+import { computeMarchingSquares, normalizeElevationUnit } from './elevationEngine.js';
 import { formatFractionalInches } from './dimensionFormatter.js';
 
 export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
@@ -1659,6 +1659,13 @@ export function drawItem(ctx, room, it, def, isBad, selected, ghost) {
   }
   if (def.mount === 'ceiling') {
     ctx.translate(it.x, it.y);
+    const sc =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.x)
+          ? it.scale.x
+          : 1;
+    if (sc !== 1) ctx.scale(sc, sc);
     const r = def.w / 2;
     ctx.fillStyle = isBad ? '#d33' : def.color;
     ctx.strokeStyle = 'rgba(0,0,0,.55)';
@@ -1689,7 +1696,20 @@ export function drawItem(ctx, room, it, def, isBad, selected, ghost) {
     return;
   }
   ctx.translate(it.x, it.y);
-  ctx.rotate((it.rot * Math.PI) / 180);
+  ctx.rotate(((it.rot || 0) * Math.PI) / 180);
+  const sx =
+    typeof it.scale === 'number' && Number.isFinite(it.scale)
+      ? it.scale
+      : Number.isFinite(it.scale?.x)
+        ? it.scale.x
+        : 1;
+  const sy =
+    typeof it.scale === 'number' && Number.isFinite(it.scale)
+      ? it.scale
+      : Number.isFinite(it.scale?.y)
+        ? it.scale.y
+        : sx;
+  if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
   const w = def.w;
   const d = def.d;
   const x = -w / 2;
@@ -2376,7 +2396,8 @@ export function drawContours(ctx, state, view, opts = {}) {
         const mx = (seg.x1 + seg.x2) / 2;
         const my = (seg.y1 + seg.y2) / 2;
 
-        const text = `${elev.toFixed(1)}m`;
+        const unitSuffix = normalizeElevationUnit(grid.elevationUnit);
+        const text = `${elev.toFixed(1)}${unitSuffix}`;
         ctx.font = `${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';

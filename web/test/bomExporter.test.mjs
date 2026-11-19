@@ -19,6 +19,7 @@ import {
   WALL_BY_ID,
   FLOOR_FINISHES,
   FLOOR_BY_ID,
+  openingMetrics,
 } from '../js/catalog.js';
 import { polygonPerimeter, interiorPolygon, floorAreaSqFt } from '../js/geometry.js';
 import { buildMultiLevel } from '../js/templates.js';
@@ -564,5 +565,53 @@ test('generateBOMCSV cost summary only rolls up enabled schedule sections', () =
     totalMatch[1],
     furnitureMatch[1],
     'Grand total must equal Furniture subtotal when Openings and Finishes are excluded'
+  );
+});
+
+test('generateBOMCSV exports net glazed area in sq ft for window and door schedules', () => {
+  const docState = {
+    name: 'Net Glazing BOM Test',
+    levels: 1,
+    rooms: [
+      {
+        id: 'r1',
+        name: 'Living Room',
+        type: 'living',
+        x: 0,
+        y: 0,
+        w: 192,
+        h: 168,
+        openings: [
+          { id: 'o1', type: 'win_hung_36x60', wall: 'N', offset: 24, width: 36 },
+          { id: 'o2', type: 'door_patio_slider', wall: 'S', offset: 24, width: 72 },
+        ],
+      },
+    ],
+  };
+
+  const csv = generateBOMCSV(docState, {
+    includeMetadata: false,
+    includeFurniture: false,
+    includeOpenings: true,
+    includeFinishes: false,
+    includeRooms: false,
+  });
+
+  const expectedWinGlazeSqFt = (openingMetrics(OPENING_BY_ID.win_hung_36x60).glaze / 144).toFixed(
+    2
+  );
+  const grossWinSqFt = ((36 * 60) / 144).toFixed(2);
+  assert.notEqual(expectedWinGlazeSqFt, grossWinSqFt);
+  assert.ok(
+    csv.includes(`win_hung_36x60,Double-hung 36×60,Window,1,36,60,24,${expectedWinGlazeSqFt},`),
+    `Expected BOM window row to contain net glazed area ${expectedWinGlazeSqFt} sq ft`
+  );
+
+  const expectedDoorGlazeSqFt = (
+    openingMetrics(OPENING_BY_ID.door_patio_slider).glaze / 144
+  ).toFixed(2);
+  assert.ok(
+    csv.includes(`door_patio_slider,"Patio slider 72""",Door,1,72,80,0,${expectedDoorGlazeSqFt},`),
+    `Expected BOM door row to contain glazed area ${expectedDoorGlazeSqFt} sq ft`
   );
 });
