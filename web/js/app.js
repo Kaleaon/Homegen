@@ -5442,7 +5442,6 @@ function handleCloseRoom() {
       createdId = created.id;
     }, 'Close Room');
     if (r.ok) {
-      if (createdId) select(createdId);
       closeWallHud();
       const labelName = ROOM_TYPES[roomType]?.name || 'Living';
       announceToLiveRegion(

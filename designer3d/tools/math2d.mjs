@@ -202,92 +202,6 @@ export function tessellateArc(start, end, bulge = 0, numSegments = 16) {
   return points;
 }
 
-function cleanCoordinate(value) {
-  const rounded = Math.round(value);
-  if (Math.abs(value - rounded) < 1e-9) {
-    return rounded === 0 ? 0 : rounded;
-  }
-  const fixed = Number(value.toFixed(6));
-  return fixed === 0 ? 0 : fixed;
-}
-
-/**
- * Parse an explicit numeric or architectural length into positive inches.
- * Supports positive numbers (inches) and strings like `174`, `174"`, `14'6"`, `14' 6"`, `14ft`, `14'`.
- * Returns `null` for invalid, zero, negative, or non-numeric inputs.
- */
-export function parseExplicitLengthInches(input) {
-  if (typeof input === 'number') {
-    return Number.isFinite(input) && input > 0 ? input : null;
-  }
-  if (typeof input !== 'string') {
-    return null;
-  }
-
-  const trimmed = input.trim();
-  if (!trimmed || trimmed.startsWith('-')) {
-    return null;
-  }
-
-  const feetInchesMatch = trimmed.match(
-    /^(\d+(?:\.\d+)?)\s*(?:'|′|ft|feet)(?:\s*-?\s*(\d+(?:\.\d+)?)\s*(?:"|″|in|inch|inches)?)?$/i
-  );
-  if (feetInchesMatch) {
-    const feet = Number.parseFloat(feetInchesMatch[1]);
-    const inches = feetInchesMatch[2] !== undefined ? Number.parseFloat(feetInchesMatch[2]) : 0;
-    const total = feet * 12 + inches;
-    return Number.isFinite(total) && total > 0 ? total : null;
-  }
-
-  const inchesMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:"|″|in|inch|inches)$/i);
-  if (inchesMatch) {
-    const inches = Number.parseFloat(inchesMatch[1]);
-    return Number.isFinite(inches) && inches > 0 ? inches : null;
-  }
-
-  if (/^(\d+(?:\.\d+)?)$/.test(trimmed)) {
-    const numeric = Number(trimmed);
-    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
-  }
-
-  return null;
-}
-
-/**
- * Compute vector direction angle in radians from `anchor` toward `targetPoint`.
- */
-export function computeVectorAngle(anchor, targetPoint) {
-  if (!anchor || !targetPoint) {
-    return 0;
-  }
-  const dx = targetPoint.x - anchor.x;
-  const dy = targetPoint.y - anchor.y;
-  if (Math.hypot(dx, dy) < 1e-9) {
-    return 0;
-  }
-  return Math.atan2(dy, dx);
-}
-
-/**
- * Compute a 2D vertex coordinate at `lengthInches` from `anchor` along `angleRadians`.
- */
-export function computeVertexFromAngle(anchor, angleRadians, lengthInches) {
-  if (!anchor || typeof anchor.x !== 'number' || typeof anchor.y !== 'number') {
-    throw new Error('computeVertexFromAngle: anchor point {x, y} is required');
-  }
-  if (typeof angleRadians !== 'number' || !Number.isFinite(angleRadians)) {
-    throw new Error('computeVertexFromAngle: finite angleRadians is required');
-  }
-  const parsedLen = parseExplicitLengthInches(lengthInches);
-  if (parsedLen === null) {
-    throw new Error('computeVertexFromAngle: positive lengthInches is required');
-  }
-  return {
-    x: cleanCoordinate(anchor.x + Math.cos(angleRadians) * parsedLen),
-    y: cleanCoordinate(anchor.y + Math.sin(angleRadians) * parsedLen),
-  };
-}
-
 const LINEAR_EPS = 1e-12;
 const MAX_FINITE_ARC_RADIUS = 1e9;
 const CHORD_RADIUS_TOLERANCE = 1e-7;
@@ -575,5 +489,91 @@ export function parseCurveHudInput(field, rawValue, chordLen, currentBulge = 0) 
     sagitta: NaN,
     isLinear: false,
     error: `Unsupported curve parameter "${field}".`,
+  };
+}
+
+function cleanCoordinate(value) {
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) < 1e-9) {
+    return rounded === 0 ? 0 : rounded;
+  }
+  const fixed = Number(value.toFixed(6));
+  return fixed === 0 ? 0 : fixed;
+}
+
+/**
+ * Parse an explicit numeric or architectural length into positive inches.
+ * Supports positive numbers (inches) and strings like `174`, `174"`, `14'6"`, `14' 6"`, `14ft`, `14'`.
+ * Returns `null` for invalid, zero, negative, or non-numeric inputs.
+ */
+export function parseExplicitLengthInches(input) {
+  if (typeof input === 'number') {
+    return Number.isFinite(input) && input > 0 ? input : null;
+  }
+  if (typeof input !== 'string') {
+    return null;
+  }
+
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.startsWith('-')) {
+    return null;
+  }
+
+  const feetInchesMatch = trimmed.match(
+    /^(\d+(?:\.\d+)?)\s*(?:'|′|ft|feet)(?:\s*-?\s*(\d+(?:\.\d+)?)\s*(?:"|″|in|inch|inches)?)?$/i
+  );
+  if (feetInchesMatch) {
+    const feet = Number.parseFloat(feetInchesMatch[1]);
+    const inches = feetInchesMatch[2] !== undefined ? Number.parseFloat(feetInchesMatch[2]) : 0;
+    const total = feet * 12 + inches;
+    return Number.isFinite(total) && total > 0 ? total : null;
+  }
+
+  const inchesMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:"|″|in|inch|inches)$/i);
+  if (inchesMatch) {
+    const inches = Number.parseFloat(inchesMatch[1]);
+    return Number.isFinite(inches) && inches > 0 ? inches : null;
+  }
+
+  if (/^(\d+(?:\.\d+)?)$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  }
+
+  return null;
+}
+
+/**
+ * Compute vector direction angle in radians from `anchor` toward `targetPoint`.
+ */
+export function computeVectorAngle(anchor, targetPoint) {
+  if (!anchor || !targetPoint) {
+    return 0;
+  }
+  const dx = targetPoint.x - anchor.x;
+  const dy = targetPoint.y - anchor.y;
+  if (Math.hypot(dx, dy) < 1e-9) {
+    return 0;
+  }
+  return Math.atan2(dy, dx);
+}
+
+/**
+ * Compute a 2D vertex coordinate at `lengthInches` from `anchor` along `angleRadians`.
+ */
+export function computeVertexFromAngle(anchor, angleRadians, lengthInches) {
+  if (!anchor || typeof anchor.x !== 'number' || typeof anchor.y !== 'number') {
+    throw new Error('computeVertexFromAngle: anchor point {x, y} is required');
+  }
+  if (typeof angleRadians !== 'number' || !Number.isFinite(angleRadians)) {
+    throw new Error('computeVertexFromAngle: finite angleRadians is required');
+  }
+  const parsedLen = parseExplicitLengthInches(lengthInches);
+  if (parsedLen === null) {
+    throw new Error('computeVertexFromAngle: positive lengthInches is required');
+  }
+  return {
+    x: cleanCoordinate(anchor.x + Math.cos(angleRadians) * parsedLen),
+    y: cleanCoordinate(anchor.y + Math.sin(angleRadians) * parsedLen),
   };
 }
