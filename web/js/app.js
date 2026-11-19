@@ -3903,6 +3903,46 @@ function card(label, sub, on, attrs, swatch) {
   return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
+const CATALOG_ANNOUNCE_DEBOUNCE_MS = 300;
+let catalogAnnounceTimer = null;
+
+function getCatalogStatusAnnouncer() {
+  if (typeof document === 'undefined') return null;
+  if (typeof document.getElementById === 'function') {
+    const byId = document.getElementById('catalog-status-announcer');
+    if (byId) return byId;
+  }
+  return $('#catalog-status-announcer');
+}
+
+export function clearCatalogAnnouncement() {
+  if (catalogAnnounceTimer) {
+    clearTimeout(catalogAnnounceTimer);
+    catalogAnnounceTimer = null;
+  }
+  const announcer = getCatalogStatusAnnouncer();
+  if (announcer) {
+    announcer.textContent = '';
+  }
+}
+
+export function announceCatalogResults(count, delayMs = CATALOG_ANNOUNCE_DEBOUNCE_MS) {
+  if (catalogAnnounceTimer) {
+    clearTimeout(catalogAnnounceTimer);
+    catalogAnnounceTimer = null;
+  }
+  catalogAnnounceTimer = setTimeout(() => {
+    catalogAnnounceTimer = null;
+    const announcer = getCatalogStatusAnnouncer();
+    if (!announcer) return;
+    const n = Number.isFinite(Number(count)) ? Math.max(0, Math.trunc(Number(count))) : 0;
+    const msg = `${n} furniture ${n === 1 ? 'item' : 'items'} found`;
+    if (announcer.textContent !== msg) {
+      announcer.textContent = msg;
+    }
+  }, delayMs);
+}
+
 export function getCatalogFilters() {
   return {
     query: catalogSearchQuery,
@@ -3971,6 +4011,9 @@ export function renderCatalogPanel(items = ITEMS) {
 }
 
 export function renderPalette() {
+  if (tab !== 'buy') {
+    clearCatalogAnnouncement();
+  }
   const p = $('#palette');
   if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   if (!p) return;
@@ -4031,7 +4074,9 @@ export function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    h += renderCatalogPanel();
+    const filtered = filterItems(ITEMS, getCatalogFilters());
+    announceCatalogResults(filtered.length);
+    h += renderCatalogPanel(ITEMS);
   } else if (tab === 'paint') {
     h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
@@ -6737,6 +6782,7 @@ export function switchTab(targetBtn, shouldFocus = false) {
   if (palette && targetBtn.id) {
     palette.setAttribute('aria-labelledby', targetBtn.id);
   }
+  clearCatalogAnnouncement();
   renderPalette();
   if (shouldFocus) {
     targetBtn.focus();
@@ -8099,8 +8145,11 @@ if (typeof window !== 'undefined')
     computeOpeningOffsetHUD,
     drawOpeningOffsetHUD,
     hitTestOpeningHUD,
+    announceCatalogResults,
+    clearCatalogAnnouncement,
     renderCatalogPanel,
     renderPalette,
+    switchTab,
     getCatalogFilters,
     setCatalogFilters,
     resetCatalogFilters,
