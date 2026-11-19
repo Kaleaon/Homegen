@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="dist/css/style.css">
 <link rel="stylesheet" href="css/overlays.css">
+<script type="importmap">{"imports":{"proj4":"./vendor/proj4/proj4.js","#proj4":"./vendor/proj4/proj4.js","three":"./vendor/three/three.module.js","#three":"./vendor/three/three.module.js","#three/":"./vendor/three/","jspdf":"./vendor/jspdf/jspdf.es.min.js","#jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","#jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/k-components.js"></script>
 </head>
 <body>
@@ -15,6 +16,12 @@
   <header id="top">
   <div class="brand">🏠 Homegen <span>Designer</span></div>
   <k-input id="plan-name" aria-label="Plan name" value="My home"></k-input>
+  <div id="header-quota-badge" class="quota-badge" data-quota-state="full" role="status" aria-live="polite" aria-label="Render credit quota">
+    <span class="quota-badge-icon" aria-hidden="true">⚡</span>
+    <span id="header-quota-count" class="quota-badge-count">30 / 30 credits</span>
+    <span id="header-quota-queue" class="quota-badge-queue" hidden></span>
+    <button type="button" id="header-quota-upgrade" class="quota-upgrade-btn" title="Configure priority AI Horde API key for faster HD renders">Upgrade</button>
+  </div>
   <div class="spacer"></div>
   <k-button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><span aria-hidden="true">↶</span></k-button>
   <k-button id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><span aria-hidden="true">↷</span></k-button>
@@ -104,6 +111,13 @@
     <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" aria-describedby="view3d-fallback-summary" hidden></canvas>
     <div id="view3d-fallback-summary" class="sr-only" aria-live="polite"></div>
     <div id="view3d-a11y-live" class="sr-only" aria-live="polite"></div>
+    <form id="opening-offset-hud" class="opening-offset-hud k-overlay-hud" aria-label="Edit opening wall offset" hidden>
+      <label id="opening-hud-label" class="opening-hud-label" for="opening-hud-input">Wall Offset</label>
+      <input id="opening-hud-input" class="opening-hud-input k-target-min-size" type="text" inputmode="decimal" autocomplete="off" />
+      <button id="opening-hud-unit-btn" type="button" class="opening-hud-unit-btn k-target-min-size" title="Toggle offset display units" aria-label="Toggle offset display units">ft&#39; in&quot;</button>
+      <button id="opening-hud-apply-btn" type="submit" class="primary k-target-min-size">Apply</button>
+      <button id="opening-hud-cancel-btn" type="button" class="opening-hud-cancel-btn k-target-min-size" title="Cancel edit" aria-label="Cancel offset edit"><span aria-hidden="true">✕</span></button>
+    </form>
     <div id="walkthrough-hud" class="walkthrough-hud k-overlay-hud" hidden>
       <span class="hud-title"><span aria-hidden="true">🚶</span> Walkthrough Mode</span>
       <div class="hud-group hud-level-group">
@@ -131,6 +145,56 @@
         <k-kbd id="wall-length-hud-hint" class="wall-length-hud__hint" aria-hidden="true">Tab</k-kbd>
       </div>
       <div id="wall-length-hud-error" class="wall-length-hud__error" role="alert" aria-live="assertive" hidden></div>
+    </div>
+    <div id="wall-angle-hud" class="wall-angle-hud k-overlay-hud" role="region" aria-label="Wall angle controls" hidden>
+      <div class="wall-angle-hud-group" id="hud-draw-angle-group">
+        <label for="hud-wall-angle" class="wall-angle-hud-label">Wall Angle (°)</label>
+        <input
+          id="hud-wall-angle"
+          class="wall-angle-hud-input k-target-min-size"
+          type="number"
+          step="any"
+          min="-360"
+          max="360"
+          placeholder="Auto (15°)"
+          aria-label="Explicit wall angle in degrees"
+        >
+        <span id="hud-wall-angle-readout" class="wall-angle-hud-readout" aria-live="polite">Auto</span>
+        <button
+          id="hud-wall-angle-clear"
+          class="wall-angle-hud-btn k-target-min-size"
+          type="button"
+          title="Reset wall angle to automatic 15-degree step snapping"
+          aria-label="Reset wall angle override"
+        >Auto</button>
+      </div>
+      <div class="wall-angle-hud-group" id="hud-handle-group" hidden>
+        <span class="wall-angle-hud-sep" aria-hidden="true">|</span>
+        <label for="hud-handle-select" class="wall-angle-hud-label">Corner</label>
+        <select
+          id="hud-handle-select"
+          class="wall-angle-hud-select k-target-min-size"
+          aria-label="Constraint handle corner"
+        ></select>
+        <label for="hud-handle-angle" class="wall-angle-hud-label">Handle (°)</label>
+        <input
+          id="hud-handle-angle"
+          class="wall-angle-hud-input k-target-min-size"
+          type="number"
+          step="any"
+          min="-360"
+          max="360"
+          placeholder="Angle °"
+          aria-label="Constraint handle wall angle in degrees"
+        >
+        <button
+          id="hud-handle-angle-apply"
+          class="wall-angle-hud-btn primary k-target-min-size"
+          type="button"
+          title="Apply exact wall angle to selected constraint handle"
+          aria-label="Apply constraint handle wall angle"
+        >Apply</button>
+      </div>
     </div>
     <div id="coord3d-overlay" class="coord3d-overlay k-overlay-hud" role="region" aria-label="3D Coordinate Controls" hidden>
       <span id="coord3d-target" class="coord3d-target">Cursor</span>
@@ -352,6 +416,18 @@
 <dialog id="photo" aria-labelledby="photo-title" class="k-overlay-dialog">
   <form method="dialog" class="dlg-head"><h2 id="photo-title">Photoreal render</h2><button value="close" aria-label="Close photoreal render"><span aria-hidden="true">✕</span></button></form>
   <div class="dlg-body">
+    <div id="photo-quota-badge" class="quota-badge photo-quota-badge" data-quota-state="full" role="status" aria-live="polite" aria-label="Photoreal render credit quota">
+      <div class="photo-quota-main">
+        <span class="quota-badge-icon" aria-hidden="true">⚡</span>
+        <span id="photo-quota-count" class="quota-badge-count">30 / 30 credits</span>
+        <span id="photo-quota-queue" class="quota-badge-queue" hidden></span>
+        <span id="photo-quota-tier" class="quota-tier-badge">Anonymous · 576px</span>
+      </div>
+      <div id="photo-quota-upgrade-wrap" class="photo-quota-upgrade">
+        <button type="button" id="photo-quota-upgrade" class="quota-upgrade-btn">Add HD Key</button>
+        <a id="photo-quota-upgrade-link" class="quota-upgrade-link" href="https://aihorde.net/register" target="_blank" rel="noopener">Get free HD key ↗</a>
+      </div>
+    </div>
     <div class="row"><label for="p-room">Room</label><k-select id="p-room"></k-select></div>
     <div class="row"><label for="p-style">Style</label><k-select id="p-style"></k-select></div>
     <div class="row">
@@ -906,7 +982,6 @@
     </div>
   </div>
 </dialog>
-<script type="importmap">{"imports":{"proj4":"./vendor/proj4/proj4.js","#proj4":"./vendor/proj4/proj4.js","three":"./vendor/three/three.module.js","#three":"./vendor/three/three.module.js","#three/":"./vendor/three/","jspdf":"./vendor/jspdf/jspdf.es.min.js","#jspdf":"./vendor/jspdf/jspdf.es.min.js","jszip":"./vendor/jszip/jszip.module.js","#jszip":"./vendor/jszip/jszip.module.js","designer3d/tools":"/designer3d/tools/index.mjs","designer3d/tools/":"/designer3d/tools/"}}</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

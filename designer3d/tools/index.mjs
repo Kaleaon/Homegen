@@ -23,6 +23,8 @@ import {
 import {
   getSnappedPoint,
   snapAngle,
+  snapToAngle,
+  parseExplicitAngleDegrees,
   EdgeSpatialIndex,
   createEdgeSpatialIndex,
 } from './snapping.mjs';
@@ -45,6 +47,7 @@ import {
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
+  fmtAngleDegrees,
 } from './constraintHandles.mjs';
 import {
   arcPolygonEdges,
@@ -82,6 +85,8 @@ export {
   SNAP_TOGGLE_DEFINITIONS,
   getSnappedPoint,
   snapAngle,
+  snapToAngle,
+  parseExplicitAngleDegrees,
   EdgeSpatialIndex,
   createEdgeSpatialIndex,
   getSnappedPoint3D,
@@ -100,6 +105,7 @@ export {
   validateRoomDimensions,
   fmtDimensionText,
   fmtLenInches,
+  fmtAngleDegrees,
   arcPolygonEdges,
   getArcParameters,
   pointOnArc,

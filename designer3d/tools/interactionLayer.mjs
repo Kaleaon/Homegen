@@ -13,6 +13,7 @@ import {
   resizeRoomWithConstraints,
   validateRoomDimensions,
   fmtDimensionText,
+  fmtAngleDegrees,
 } from './constraintHandles.mjs';
 
 export { parseExplicitLengthInches, computeVectorAngle, computeVertexFromAngle };
@@ -44,7 +45,11 @@ export class InteractionLayer {
     if (handleIndexOrId === undefined || handleIndexOrId === null)
       throw new Error('resizeRoomWithConstraints: handleIndexOrId is required');
     if (!pointerPoint) throw new Error('resizeRoomWithConstraints: pointerPoint is required');
-    return resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, options);
+    const mergedOptions =
+      options.explicitAngleDegrees !== undefined
+        ? options
+        : { ...options, explicitAngleDegrees: this.gridSettings?.explicitAngleDegrees };
+    return resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, mergedOptions);
   }
 
   validateRoomDimensions(roomType, w, h) {
@@ -53,6 +58,10 @@ export class InteractionLayer {
 
   fmtDimensionText(w, h) {
     return fmtDimensionText(w, h);
+  }
+
+  fmtAngleDegrees(degrees) {
+    return fmtAngleDegrees(degrees);
   }
 
   setGridSettings(partialSettings) {

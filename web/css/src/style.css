@@ -1405,3 +1405,156 @@ k-button.on .snap-badge {
 .snap-increment-input[aria-invalid='true'] {
   --ktheme-border: var(--ktheme-critical);
 }
+
+/* Render Credit Quota Badges */
+.quota-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.quota-badge[data-quota-state='low'] {
+  border-color: var(--warn);
+}
+
+.quota-badge[data-quota-state='exhausted'] {
+  border-color: var(--err);
+}
+
+.quota-badge-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.quota-badge-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quota-badge[data-quota-state='low'] .quota-badge-count {
+  color: var(--warn);
+}
+
+.quota-badge[data-quota-state='exhausted'] .quota-badge-count {
+  color: var(--err);
+}
+
+.quota-badge-queue {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.quota-badge-queue[hidden],
+.photo-quota-upgrade[hidden] {
+  display: none !important;
+}
+
+.quota-upgrade-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.quota-upgrade-btn.upgraded {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--ok);
+}
+
+.quota-upgrade-btn.quota-upgrade-urgent {
+  background: var(--warn);
+  color: var(--warn-ink);
+  border-color: var(--warn);
+}
+
+.quota-badge[data-quota-state='exhausted'] .quota-upgrade-btn.quota-upgrade-urgent {
+  background: var(--err);
+  color: var(--accent-ink);
+  border-color: var(--err);
+}
+
+.photo-quota-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+}
+
+.photo-quota-main {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quota-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.quota-tier-badge.upgraded {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--accent-ink);
+}
+
+.photo-quota-upgrade {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quota-upgrade-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}

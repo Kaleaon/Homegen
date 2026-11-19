@@ -207,13 +207,21 @@ export class RoomDrawingTool {
   }
 
   _resolveTargetPoint(rawPoint, explicitLength, context = {}) {
+    const hasPreviousCorner = this.points.length > 0 || Boolean(context.anchor);
     const anchor = this.points[this.points.length - 1] || context.anchor || rawPoint;
+    const explicitAngleDegrees = hasPreviousCorner
+      ? context.explicitAngleDegrees !== undefined
+        ? context.explicitAngleDegrees
+        : this.settings?.explicitAngleDegrees
+      : null;
     const { point: snappedPoint, snap } = getSnappedPoint({
       point: rawPoint,
       anchor,
       edges: context.edges || [],
       settings: this.settings,
       snapModes: this.snapModes,
+      scale: context.scale,
+      explicitAngleDegrees,
     });
 
     if (this.points.length === 0 && !context.anchor) {
@@ -270,13 +278,22 @@ export class RoomDrawingTool {
    * Add a corner, snapped against reference edges.
    */
   addCorner(rawPoint, context = {}) {
-    const anchor = this.points[this.points.length - 1] || rawPoint;
+    const hasPreviousCorner = this.points.length > 0;
+    const anchor = hasPreviousCorner ? this.points[this.points.length - 1] : rawPoint;
+    const explicitAngleDegrees = hasPreviousCorner
+      ? context.explicitAngleDegrees !== undefined
+        ? context.explicitAngleDegrees
+        : this.settings?.explicitAngleDegrees
+      : null;
+
     const { point, snap } = getSnappedPoint({
       point: rawPoint,
       anchor,
       edges: context.edges || [],
       settings: this.settings,
       snapModes: this.snapModes,
+      scale: context.scale,
+      explicitAngleDegrees,
     });
 
     this.points.push(point);
@@ -411,6 +428,8 @@ export class RoomDrawingTool {
 
     return {
       ...feedback,
+      point: resolved.targetPoint,
+      snap: resolved.snap,
       bulges: previewBulges,
       anchor: resolved.anchor,
       targetPoint: resolved.targetPoint,

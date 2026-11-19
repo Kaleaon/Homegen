@@ -10,6 +10,7 @@ import {
   snap,
   wallSeg,
   wallLength,
+  wallNeighbors,
   interior,
   wallPoint,
   footprint,
@@ -562,19 +563,178 @@ export function addRoom(state, x, y, w, h, type = 'living', opts = {}) {
   return createRoom(state, type || 'living', x, y, w, h, opts);
 }
 
+export function clampOpeningOffset(room, wallOrOpening, offset, openingWidth) {
+  let wall = wallOrOpening;
+  let width = openingWidth;
+  if (typeof wallOrOpening === 'object' && wallOrOpening !== null) {
+    wall = wallOrOpening.wall;
+    if (width === undefined) {
+      width = wallOrOpening.width ?? OPENING_BY_ID[wallOrOpening.type]?.w ?? 0;
+    }
+  }
+  const len = room ? wallLength(room, wall) : 0;
+  const w = typeof width === 'number' && Number.isFinite(width) && width > 0 ? width : 0;
+  const maxOffset = Math.max(0, len - w);
+  const raw = typeof offset === 'number' && Number.isFinite(offset) ? offset : 0;
+  return Math.max(0, Math.min(raw, maxOffset));
+}
+
+export function getOpeningCornerDistance(room, opening) {
+  if (!room || !opening) return 0;
+  const width = opening.width ?? OPENING_BY_ID[opening.type]?.w ?? 0;
+  const len = wallLength(room, opening.wall);
+  const clamped = clampOpeningOffset(room, opening.wall, opening.offset ?? 0, width);
+  return Math.max(0, len - width - clamped);
+}
+
+export function hasOpeningOverlap(
+  state,
+  room,
+  wall,
+  offset,
+  openingWidth,
+  ignoreId = null,
+  minClearance = 0
+) {
+  if (!room) return false;
+  const w =
+    typeof openingWidth === 'number' && Number.isFinite(openingWidth) && openingWidth > 0
+      ? openingWidth
+      : 0;
+  const start = offset;
+  const end = offset + w;
+  const targetWallIdx = resolveWallIndex(wall);
+
+  for (const other of room.openings || []) {
+    if (!other || other.id === ignoreId) continue;
+    if (other.wall !== wall && resolveWallIndex(other.wall) !== targetWallIdx) continue;
+    const ow = other.width ?? OPENING_BY_ID[other.type]?.w ?? 0;
+    const from = other.offset ?? 0;
+    const to = from + ow;
+    if (Math.min(to, end) - Math.max(from, start) > -minClearance + 1e-6) {
+      return true;
+    }
+  }
+
+  if (state && Array.isArray(state.rooms)) {
+    const s1 = wallSeg(room, wall);
+    if (s1.len > EPS) {
+      for (const n of wallNeighbors(state.rooms, room, wall)) {
+        const nWallIdx = n.wall !== undefined ? n.wall : n.neighborWall;
+        for (const other of n.room.openings || []) {
+          if (!other || other.id === ignoreId) continue;
+          if (nWallIdx !== undefined && resolveWallIndex(other.wall) !== resolveWallIndex(nWallIdx))
+            continue;
+          const ow = other.width ?? OPENING_BY_ID[other.type]?.w ?? 0;
+          const p1 = wallPoint(n.room, other.wall, other.offset ?? 0, 0);
+          const p2 = wallPoint(n.room, other.wall, (other.offset ?? 0) + ow, 0);
+          const t1 = (p1.x - s1.ax) * s1.dx + (p1.y - s1.ay) * s1.dy;
+          const t2 = (p2.x - s1.ax) * s1.dx + (p2.y - s1.ay) * s1.dy;
+          const from = Math.min(t1, t2);
+          const to = Math.max(t1, t2);
+          if (to > n.from + EPS && from < n.to - EPS) {
+            if (Math.min(to, end) - Math.max(from, start) > -minClearance + 1e-6) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+export function setOpeningOffset(state, openingId, rawOffset, opts = {}) {
+  if (!state || !openingId) return { ok: false, reason: 'not-found' };
+  const hit = findOwner(state, openingId);
+  if (!hit || hit.kind !== 'opening') return { ok: false, reason: 'not-found' };
+
+  const room = ensureRoomCopy(state, hit.room);
+  const o = room.openings.find((x) => x.id === openingId);
+  if (!o) return { ok: false, reason: 'not-found' };
+
+  const width = o.width ?? OPENING_BY_ID[o.type]?.w ?? 0;
+  const len = wallLength(room, o.wall);
+
+  if (typeof rawOffset !== 'number' || !Number.isFinite(rawOffset)) {
+    return {
+      ok: false,
+      reason: 'invalid-number',
+      offset: o.offset,
+      cornerDistance: Math.max(0, len - width - o.offset),
+    };
+  }
+
+  const clamped = clampOpeningOffset(room, o.wall, rawOffset, width);
+  const minClearance = opts.minClearance ?? 0;
+  if (
+    opts.preventOverlap !== false &&
+    hasOpeningOverlap(state, room, o.wall, clamped, width, o.id, minClearance)
+  ) {
+    return {
+      ok: false,
+      reason: 'overlap',
+      offset: o.offset,
+      cornerDistance: Math.max(0, len - width - o.offset),
+    };
+  }
+
+  o.offset = clamped;
+  return {
+    ok: true,
+    offset: clamped,
+    cornerDistance: Math.max(0, len - width - clamped),
+  };
+}
+
+export function setOpeningCornerDistance(state, openingId, rawCornerDistance, opts = {}) {
+  if (!state || !openingId) return { ok: false, reason: 'not-found' };
+  const hit = findOwner(state, openingId);
+  if (!hit || hit.kind !== 'opening') return { ok: false, reason: 'not-found' };
+
+  const width = hit.obj.width ?? OPENING_BY_ID[hit.obj.type]?.w ?? 0;
+  const len = wallLength(hit.room, hit.obj.wall);
+  const maxDist = Math.max(0, len - width);
+
+  if (typeof rawCornerDistance !== 'number' || !Number.isFinite(rawCornerDistance)) {
+    return {
+      ok: false,
+      reason: 'invalid-number',
+      offset: hit.obj.offset,
+      cornerDistance: Math.max(0, maxDist - hit.obj.offset),
+    };
+  }
+
+  const clampedCorner = clampOpeningOffset(hit.room, hit.obj.wall, rawCornerDistance, width);
+  const targetOffset = Math.max(0, maxDist - clampedCorner);
+  return setOpeningOffset(state, openingId, targetOffset, opts);
+}
+
 export function addOpening(state, room, type, wall, offset, props = {}) {
   room = ensureRoomCopy(state, room);
   const def = OPENING_BY_ID[type] || {};
+  const { preventOverlap = false, minClearance = 0, ...restProps } = props || {};
+  const width = restProps.width ?? def.w ?? 0;
+  const rawOffset = restProps.offset !== undefined ? restProps.offset : offset;
+  const clampedOffset = clampOpeningOffset(room, wall, rawOffset, width);
+  if (
+    preventOverlap &&
+    hasOpeningOverlap(state, room, wall, clampedOffset, width, null, minClearance)
+  ) {
+    return null;
+  }
   const o = {
     id: nid(state, 'o'),
     type,
     kind: def.kind,
     wall,
-    offset,
-    width: def.w,
+    offset: clampedOffset,
+    width,
     swing: 'in',
-    ...props,
+    ...restProps,
   };
+  o.offset = clampOpeningOffset(room, o.wall, o.offset, o.width);
   if (def.presetKey && !o.presetKey) o.presetKey = def.presetKey;
   if (def.frameMaterial && !o.frameMaterial) o.frameMaterial = def.frameMaterial;
   if (def.frameColor && !o.frameColor) o.frameColor = def.frameColor;
@@ -666,8 +826,7 @@ export function resizeRoom(room, x, y, w, h, state = null) {
   room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
   room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
-    const len = wallLength(room, o.wall);
-    o.offset = Math.max(0, Math.min(o.offset, len - o.width));
+    o.offset = clampOpeningOffset(room, o.wall, o.offset, o.width);
   }
 }
 
@@ -725,11 +884,12 @@ export function updateRoomPoints(room, points, state = null) {
   room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
   room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
   for (const o of room.openings) {
+    const clamped = clampOpeningOffset(room, o.wall, o.offset, o.width);
     const len = wallLength(room, o.wall);
     if (len >= o.width + 12) {
-      o.offset = Math.max(6, Math.min(o.offset, len - o.width - 6));
+      o.offset = Math.max(6, Math.min(clamped, len - o.width - 6));
     } else {
-      o.offset = Math.max(0, Math.min(o.offset, Math.max(0, len - o.width)));
+      o.offset = clamped;
     }
   }
   for (const it of room.items) {
@@ -1423,6 +1583,102 @@ export function formatDistanceInInches(inches, options = {}) {
   });
 }
 
+export function normalizeOpeningUnit(unit) {
+  if (!unit || typeof unit !== 'string') return 'ft-in';
+  const u = unit.trim().toLowerCase();
+  if (u === 'in' || u === 'inch' || u === 'inches') return 'in';
+  return 'ft-in';
+}
+
+export function formatOpeningOffset(inches, unit = 'ft-in') {
+  const mode = normalizeOpeningUnit(unit);
+  if (typeof inches !== 'number' || !Number.isFinite(inches)) {
+    return mode === 'ft-in' ? '0\' 0"' : '0"';
+  }
+  const clean = Math.round(inches * 100) / 100;
+  const sign = clean < 0 ? '-' : '';
+  const abs = Math.abs(clean);
+  if (mode === 'ft-in') {
+    let ft = Math.floor((abs + 1e-6) / 12);
+    let rem = Math.round((abs - ft * 12) * 100) / 100;
+    if (rem >= 12) {
+      ft += 1;
+      rem = 0;
+    }
+    const remStr = Number.isInteger(rem) ? String(rem) : String(Number(rem.toFixed(2)));
+    return `${sign}${ft}' ${remStr}"`;
+  }
+  const inStr = Number.isInteger(abs) ? String(abs) : String(Number(abs.toFixed(2)));
+  return `${sign}${inStr}"`;
+}
+
+function parseFractionalOrDecimal(raw) {
+  const s = raw.trim();
+  if (!s) return 0;
+  const mixed = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const den = parseFloat(mixed[3]);
+    if (den === 0) return null;
+    return parseFloat(mixed[1]) + parseFloat(mixed[2]) / den;
+  }
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (frac) {
+    const den = parseFloat(frac[2]);
+    if (den === 0) return null;
+    return parseFloat(frac[1]) / den;
+  }
+  const dec = s.match(/^(\d+(?:\.\d+)?|\.\d+)$/);
+  if (dec) {
+    return parseFloat(dec[1]);
+  }
+  return null;
+}
+
+export function parseOpeningOffset(input, unit = 'in') {
+  if (typeof input === 'number') {
+    return Number.isFinite(input) ? input : null;
+  }
+  if (input === null || input === undefined) return null;
+  let str = String(input).trim().toLowerCase();
+  if (!str) return null;
+
+  let sign = 1;
+  if (str.startsWith('-')) {
+    sign = -1;
+    str = str.slice(1).trim();
+  } else if (str.startsWith('+')) {
+    str = str.slice(1).trim();
+  }
+  if (!str) return null;
+
+  if (/'|ft|feet/.test(str)) {
+    const ftMatch = str.match(/^(\d+(?:\.\d+)?|\.\d+)\s*(?:'|feet|ft)\s*(?:-\s*)?(.*)$/);
+    if (!ftMatch) return null;
+    const feet = parseFloat(ftMatch[1]);
+    const rest = ftMatch[2].trim();
+    if (!rest) return sign * (feet * 12);
+    const strippedIn = rest.replace(/\s*(?:"|inches|inch|in)\s*$/, '').trim();
+    const inches = parseFractionalOrDecimal(strippedIn);
+    if (inches === null) return null;
+    return sign * (feet * 12 + inches);
+  }
+
+  if (/"|in|inch|inches/.test(str)) {
+    const strippedIn = str.replace(/\s*(?:"|inches|inch|in)\s*$/, '').trim();
+    const inches = parseFractionalOrDecimal(strippedIn);
+    if (inches === null) return null;
+    return sign * inches;
+  }
+
+  const plainVal = parseFractionalOrDecimal(str);
+  if (plainVal === null) return null;
+  const rawUnit = typeof unit === 'string' ? unit.trim().toLowerCase() : 'in';
+  if (rawUnit === 'ft' || rawUnit === 'feet') {
+    return sign * (plainVal * 12);
+  }
+  return sign * plainVal;
+}
+
 export function parseElevationInInches(str) {
   if (str === null || str === undefined) return null;
   str = String(str).trim().toLowerCase();
@@ -1632,13 +1888,12 @@ export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
     }
   }
   if (kind === 'opening') {
-    const len = wallLength(room, obj.wall);
     if (obj.wall === 'N' || obj.wall === 'S') {
       const localX = targetCenterX - room.x - obj.width / 2;
-      obj.offset = roundCoord(Math.max(0, Math.min(len - obj.width, localX)));
+      obj.offset = roundCoord(clampOpeningOffset(room, obj.wall, localX, obj.width));
     } else {
       const localY = targetCenterY - room.y - obj.width / 2;
-      obj.offset = roundCoord(Math.max(0, Math.min(len - obj.width, localY)));
+      obj.offset = roundCoord(clampOpeningOffset(room, obj.wall, localY, obj.width));
     }
   }
 }

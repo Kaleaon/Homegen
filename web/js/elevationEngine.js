@@ -606,43 +606,354 @@ function parseNoDataValue(raw) {
   return null;
 }
 
-function decodeUint8NormalizedStrip(arrayBuffer, stripOffset, total, baseMin, rangeElev) {
-  const src = new Uint8Array(arrayBuffer, stripOffset, total);
-  const data = new Float32Array(total);
-  const scale = rangeElev / 255;
-  let rawMin = 256;
-  let rawMax = -1;
-  for (let k = 0; k < total; k++) {
-    const raw = src[k];
-    if (raw < rawMin) rawMin = raw;
-    if (raw > rawMax) rawMax = raw;
-    data[k] = baseMin + raw * scale;
+function parseGeoTIFFSync(arrayBuffer, options) {
+  const byteLength = arrayBuffer.byteLength;
+  if (byteLength < 8) return null;
+
+  const view = new DataView(arrayBuffer);
+  const magic = view.getUint16(0, false);
+  if (magic !== 0x4949 && magic !== 0x4d4d) return null; // "II" or "MM"
+
+  const littleEndian = magic === 0x4949;
+  if (view.getUint16(2, littleEndian) !== 42) return null;
+
+  const firstIFD = view.getUint32(4, littleEndian);
+  if (firstIFD <= 0 || firstIFD >= byteLength - 2) return null;
+
+  const numEntries = view.getUint16(firstIFD, littleEndian);
+  let imgWidth = 0;
+  let imgHeight = 0;
+  let stripOffset = 0;
+  let bitsPerSample = 8;
+  let sampleFormat = 1;
+  let hasExplicitSampleFormat = false;
+  let modelPixelScale = null;
+  let modelTiepoint = null;
+  let modelTransformation = null;
+  let gdalNoData = null;
+
+  for (let i = 0; i < numEntries; i++) {
+    const entryOffset = firstIFD + 2 + i * 12;
+    if (entryOffset + 12 > byteLength) break;
+    const tag = view.getUint16(entryOffset, littleEndian);
+    const type = view.getUint16(entryOffset + 2, littleEndian);
+    const count = view.getUint32(entryOffset + 4, littleEndian);
+    const val = view.getUint32(entryOffset + 8, littleEndian);
+
+    if (tag === 256) imgWidth = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val;
+    else if (tag === 257)
+      imgHeight = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val;
+    else if (tag === 258)
+      bitsPerSample = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val & 0xffff;
+    else if (tag === 273)
+      stripOffset = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val;
+    else if (tag === 339) {
+      sampleFormat = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val & 0xffff;
+      hasExplicitSampleFormat = true;
+    } else if (tag === 33550 && type === 12) {
+      modelPixelScale = readDoubleArray(view, val, count, littleEndian);
+    } else if (tag === 33922 && type === 12) {
+      modelTiepoint = readDoubleArray(view, val, count, littleEndian);
+    } else if (tag === 34264 && type === 12) {
+      modelTransformation = readDoubleArray(view, val, count, littleEndian);
+    } else if (tag === 42113 && type === 2) {
+      const asciiNoData = readAsciiTag(view, entryOffset, count, littleEndian);
+      const parsedNoData = parseNoDataValue(asciiNoData);
+      if (parsedNoData !== null) {
+        gdalNoData = parsedNoData;
+      }
+    }
   }
-  const minE = rawMin <= rawMax ? baseMin + (rawMin / 255) * rangeElev : Infinity;
-  const maxE = rawMin <= rawMax ? baseMin + (rawMax / 255) * rangeElev : -Infinity;
-  return {
+
+  if (imgWidth <= 0 || imgHeight <= 0 || stripOffset <= 0) return null;
+
+  const total = imgWidth * imgHeight;
+  const bytesPerSample =
+    bitsPerSample === 64 ? 8 : bitsPerSample === 32 ? 4 : bitsPerSample === 16 ? 2 : 1;
+  if (stripOffset + total * bytesPerSample > byteLength) return null;
+
+  const data = new Float32Array(total);
+  let minE = Infinity;
+  let maxE = -Infinity;
+
+  const effectiveNoData =
+    options.noDataValue !== undefined ? parseNoDataValue(options.noDataValue) : gdalNoData;
+  const hasNumericNoData = effectiveNoData !== null && !Number.isNaN(effectiveNoData);
+
+  const isFloatSample =
+    sampleFormat === 3 ||
+    bytesPerSample === 8 ||
+    (!hasExplicitSampleFormat &&
+      bytesPerSample === 4 &&
+      hasNumericNoData &&
+      (!Number.isInteger(effectiveNoData) || Math.abs(effectiveNoData) > 2147483647));
+  const isSignedSample =
+    !isFloatSample &&
+    (sampleFormat === 2 ||
+      (!hasExplicitSampleFormat &&
+        hasNumericNoData &&
+        effectiveNoData < 0 &&
+        ((bytesPerSample === 2 && effectiveNoData >= -32768) ||
+          (bytesPerSample === 4 && effectiveNoData >= -2147483648) ||
+          (bytesPerSample === 1 && effectiveNoData >= -128))));
+  const isUnsignedNormalized = !isFloatSample && !isSignedSample;
+
+  const baseMin = options.minElevation ?? 0;
+  const rangeElev = (options.maxElevation ?? 10) - baseMin;
+  const maxUnsignedSample = bytesPerSample === 4 ? 4294967295 : bytesPerSample === 2 ? 65535 : 255;
+
+  const enableStandardSentinels = Boolean(
+    options.filterStandardSentinels || options.standardSentinels || options.detectStandardSentinels
+  );
+  const stdSentinelVal =
+    enableStandardSentinels && isUnsignedNormalized
+      ? bytesPerSample === 2
+        ? 65535
+        : bytesPerSample === 1
+          ? 255
+          : -1
+      : -1;
+
+  if (
+    bytesPerSample === 1 &&
+    isUnsignedNormalized &&
+    effectiveNoData === null &&
+    stdSentinelVal < 0
+  ) {
+    const samples = new Uint8Array(arrayBuffer, stripOffset, total);
+    const lut = new Float64Array(256);
+    for (let v = 0; v < 256; v++) {
+      lut[v] = baseMin + (v / 255) * rangeElev;
+    }
+    const zeroElev = lut[0];
+    if (zeroElev !== 0) {
+      data.fill(zeroElev);
+    }
+    let minRaw = 255;
+    let maxRaw = 0;
+    let k = 0;
+    const limit8 = total - 7;
+    for (; k < limit8; k += 8) {
+      const b0 = samples[k];
+      const b1 = samples[k + 1];
+      const b2 = samples[k + 2];
+      const b3 = samples[k + 3];
+      const b4 = samples[k + 4];
+      const b5 = samples[k + 5];
+      const b6 = samples[k + 6];
+      const b7 = samples[k + 7];
+      if ((b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7) === 0) {
+        if (0 < minRaw) minRaw = 0;
+        if (0 > maxRaw) maxRaw = 0;
+        continue;
+      }
+      data[k] = lut[b0];
+      data[k + 1] = lut[b1];
+      data[k + 2] = lut[b2];
+      data[k + 3] = lut[b3];
+      data[k + 4] = lut[b4];
+      data[k + 5] = lut[b5];
+      data[k + 6] = lut[b6];
+      data[k + 7] = lut[b7];
+      let lo = b0 < b1 ? b0 : b1;
+      if (b2 < lo) lo = b2;
+      if (b3 < lo) lo = b3;
+      if (b4 < lo) lo = b4;
+      if (b5 < lo) lo = b5;
+      if (b6 < lo) lo = b6;
+      if (b7 < lo) lo = b7;
+      if (lo < minRaw) minRaw = lo;
+      let hi = b0 > b1 ? b0 : b1;
+      if (b2 > hi) hi = b2;
+      if (b3 > hi) hi = b3;
+      if (b4 > hi) hi = b4;
+      if (b5 > hi) hi = b5;
+      if (b6 > hi) hi = b6;
+      if (b7 > hi) hi = b7;
+      if (hi > maxRaw) maxRaw = hi;
+    }
+    for (; k < total; k++) {
+      const b = samples[k];
+      if (b !== 0) data[k] = lut[b];
+      if (b < minRaw) minRaw = b;
+      if (b > maxRaw) maxRaw = b;
+    }
+    const eA = lut[minRaw];
+    const eB = lut[maxRaw];
+    minE = eA <= eB ? eA : eB;
+    maxE = eA <= eB ? eB : eA;
+  } else {
+    const noDataF32 = hasNumericNoData ? Math.fround(effectiveNoData) : 0;
+    const noDataTol = hasNumericNoData
+      ? (bytesPerSample === 8 ? 1e-9 : 1e-6) * Math.max(1, Math.abs(effectiveNoData))
+      : 0;
+
+    const byteStrip =
+      bytesPerSample === 1
+        ? isSignedSample
+          ? new Int8Array(arrayBuffer, stripOffset, total)
+          : new Uint8Array(arrayBuffer, stripOffset, total)
+        : null;
+
+    let voidMask = null;
+    for (let k = 0; k < total; k++) {
+      let rawVal;
+      if (byteStrip !== null) {
+        rawVal = byteStrip[k];
+      } else if (bytesPerSample === 8) {
+        rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
+      } else if (bytesPerSample === 4) {
+        if (isFloatSample) {
+          rawVal = view.getFloat32(stripOffset + k * 4, littleEndian);
+        } else if (isSignedSample) {
+          rawVal = view.getInt32(stripOffset + k * 4, littleEndian);
+        } else {
+          rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
+        }
+      } else {
+        rawVal = isSignedSample
+          ? view.getInt16(stripOffset + k * 2, littleEndian)
+          : view.getUint16(stripOffset + k * 2, littleEndian);
+      }
+
+      let isVoid = !Number.isFinite(rawVal);
+      if (!isVoid && hasNumericNoData) {
+        if (isFloatSample) {
+          isVoid =
+            rawVal === effectiveNoData ||
+            (bytesPerSample === 4 && rawVal === noDataF32) ||
+            Math.abs(rawVal - effectiveNoData) <= noDataTol;
+        } else {
+          isVoid = rawVal === effectiveNoData;
+        }
+      }
+      if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
+        isVoid = true;
+      }
+
+      if (isVoid) {
+        if (!voidMask) voidMask = new Uint8Array(total);
+        voidMask[k] = 1;
+        continue;
+      }
+
+      const elev = isUnsignedNormalized
+        ? baseMin + (rawVal / maxUnsignedSample) * rangeElev
+        : rawVal;
+      data[k] = elev;
+      if (elev < minE) minE = elev;
+      if (elev > maxE) maxE = elev;
+    }
+
+    if (minE === Infinity || maxE === -Infinity) {
+      minE = baseMin;
+      maxE = options.maxElevation ?? 10;
+    }
+
+    if (voidMask) {
+      const baselineElevation =
+        typeof options.noDataReplacement === 'number' && Number.isFinite(options.noDataReplacement)
+          ? options.noDataReplacement
+          : minE;
+      for (let k = 0; k < total; k++) {
+        if (voidMask[k]) {
+          data[k] = baselineElevation;
+        }
+      }
+    }
+  }
+
+  let computedBounds = null;
+  if (
+    modelTiepoint &&
+    modelTiepoint.length >= 6 &&
+    modelPixelScale &&
+    modelPixelScale.length >= 2
+  ) {
+    const scaleX = modelPixelScale[0];
+    const scaleY = modelPixelScale[1];
+    const tieI = modelTiepoint[0];
+    const tieJ = modelTiepoint[1];
+    const tieX = modelTiepoint[3];
+    const tieY = modelTiepoint[4];
+
+    if (
+      scaleX > 0 &&
+      scaleY > 0 &&
+      !isNaN(scaleX) &&
+      !isNaN(scaleY) &&
+      !isNaN(tieX) &&
+      !isNaN(tieY)
+    ) {
+      const xOrigin = tieX - tieI * scaleX;
+      const yOrigin = tieY + tieJ * scaleY;
+      computedBounds = {
+        minX: xOrigin,
+        maxX: xOrigin + imgWidth * scaleX,
+        minY: yOrigin - imgHeight * scaleY,
+        maxY: yOrigin,
+      };
+    }
+  } else if (modelTransformation && modelTransformation.length >= 16) {
+    const m = modelTransformation;
+    const x00 = m[3];
+    const y00 = m[7];
+    const xW0 = m[0] * imgWidth + m[3];
+    const yW0 = m[4] * imgWidth + m[7];
+    const x0H = m[1] * imgHeight + m[3];
+    const y0H = m[5] * imgHeight + m[7];
+    const xWH = m[0] * imgWidth + m[1] * imgHeight + m[3];
+    const yWH = m[4] * imgWidth + m[5] * imgHeight + m[7];
+
+    const minX = Math.min(x00, xW0, x0H, xWH);
+    const maxX = Math.max(x00, xW0, x0H, xWH);
+    const minY = Math.min(y00, yW0, y0H, yWH);
+    const maxY = Math.max(y00, yW0, y0H, yWH);
+
+    if (!isNaN(minX) && !isNaN(maxX) && !isNaN(minY) && !isNaN(maxY)) {
+      computedBounds = { minX, maxX, minY, maxY };
+    }
+  }
+
+  const opts = options || {};
+  return new ElevationGrid({
+    width: imgWidth,
+    height: imgHeight,
     data,
-    minE: Math.min(minE, maxE),
-    maxE: Math.max(minE, maxE),
-  };
+    minElevation: minE,
+    maxElevation: maxE,
+    bounds: opts.bounds ?? computedBounds ?? undefined,
+    contourInterval: opts.contourInterval ?? 1.0,
+    verticalScale: opts.verticalScale ?? 1.0,
+    elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
+  });
 }
 
 {
   const warmBuf = new ArrayBuffer(10240);
-  const warmBytes = new Uint8Array(warmBuf);
+  const warmView = new DataView(warmBuf);
+  warmView.setUint16(0, 0x4949, false);
+  warmView.setUint16(2, 42, true);
+  warmView.setUint32(4, 8, true);
+  warmView.setUint16(8, 3, true);
+  warmView.setUint16(10, 256, true);
+  warmView.setUint16(12, 4, true);
+  warmView.setUint32(14, 1, true);
+  warmView.setUint32(18, 100, true);
+  warmView.setUint16(22, 257, true);
+  warmView.setUint16(24, 4, true);
+  warmView.setUint32(26, 1, true);
+  warmView.setUint32(30, 100, true);
+  warmView.setUint16(34, 273, true);
+  warmView.setUint16(36, 4, true);
+  warmView.setUint32(38, 1, true);
+  warmView.setUint32(42, 64, true);
+  const warmBytes = new Uint8Array(warmBuf, 64, 10000);
   for (let i = 0; i < warmBytes.length; i++) {
     warmBytes[i] = (i * 37) & 255;
   }
   for (let w = 0; w < 3; w++) {
-    const res = decodeUint8NormalizedStrip(warmBuf, 64, 10000, -10, 20);
-    new ElevationGrid({
-      width: 100,
-      height: 100,
-      data: res.data,
-      minElevation: res.minE,
-      maxElevation: res.maxE,
-      bounds: { minX: 0, maxX: 100, minY: 0, maxY: 100 },
-    });
+    parseGeoTIFFSync(warmBuf, { minElevation: -10, maxElevation: 10 });
   }
 }
 
@@ -652,283 +963,8 @@ function decodeUint8NormalizedStrip(arrayBuffer, stripOffset, total, baseMin, ra
 export async function parseGeoTIFFWithFallback(arrayBuffer, options = {}) {
   const opts = options || {};
   try {
-    const view = new DataView(arrayBuffer);
-    if (arrayBuffer.byteLength >= 4) {
-      const magic = view.getUint16(0, false);
-      const isTIFF = magic === 0x4949 || magic === 0x4d4d; // "II" or "MM"
-      if (isTIFF) {
-        // Attempt simple uncompressed grayscale TIFF tag parsing if present
-        const littleEndian = magic === 0x4949;
-        const version = view.getUint16(2, littleEndian);
-        if (version === 42) {
-          const firstIFD = view.getUint32(4, littleEndian);
-          if (firstIFD > 0 && firstIFD < arrayBuffer.byteLength - 2) {
-            const numEntries = view.getUint16(firstIFD, littleEndian);
-            let imgWidth = 0,
-              imgHeight = 0,
-              stripOffset = 0,
-              bitsPerSample = 8,
-              sampleFormat = 1,
-              hasExplicitSampleFormat = false;
-            let modelPixelScale = null;
-            let modelTiepoint = null;
-            let modelTransformation = null;
-            let gdalNoData = null;
-
-            for (let i = 0; i < numEntries; i++) {
-              const entryOffset = firstIFD + 2 + i * 12;
-              if (entryOffset + 12 > arrayBuffer.byteLength) break;
-              const tag = view.getUint16(entryOffset, littleEndian);
-              const type = view.getUint16(entryOffset + 2, littleEndian);
-              const count = view.getUint32(entryOffset + 4, littleEndian);
-              const val = view.getUint32(entryOffset + 8, littleEndian);
-
-              if (tag === 256)
-                imgWidth = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val; // ImageWidth
-              else if (tag === 257)
-                imgHeight = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val; // ImageLength
-              else if (tag === 258)
-                bitsPerSample =
-                  !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val & 0xffff;
-              else if (tag === 273)
-                stripOffset = !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val; // StripOffsets
-              else if (tag === 339) {
-                sampleFormat =
-                  !littleEndian && type === 3 && val > 0xffff ? val >>> 16 : val & 0xffff;
-                hasExplicitSampleFormat = true;
-              } else if (tag === 33550 && type === 12) {
-                modelPixelScale = readDoubleArray(view, val, count, littleEndian);
-              } else if (tag === 33922 && type === 12) {
-                modelTiepoint = readDoubleArray(view, val, count, littleEndian);
-              } else if (tag === 34264 && type === 12) {
-                modelTransformation = readDoubleArray(view, val, count, littleEndian);
-              } else if (tag === 42113 && type === 2) {
-                const asciiNoData = readAsciiTag(view, entryOffset, count, littleEndian);
-                const parsedNoData = parseNoDataValue(asciiNoData);
-                if (parsedNoData !== null) {
-                  gdalNoData = parsedNoData;
-                }
-              }
-            }
-            if (imgWidth > 0 && imgHeight > 0 && stripOffset > 0) {
-              const total = imgWidth * imgHeight;
-              const bytesPerSample =
-                bitsPerSample === 64 ? 8 : bitsPerSample === 32 ? 4 : bitsPerSample === 16 ? 2 : 1;
-              if (stripOffset + total * bytesPerSample <= arrayBuffer.byteLength) {
-                const effectiveNoData =
-                  options.noDataValue !== undefined
-                    ? parseNoDataValue(options.noDataValue)
-                    : gdalNoData;
-                const hasNumericNoData = effectiveNoData !== null && !Number.isNaN(effectiveNoData);
-
-                const isFloatSample =
-                  sampleFormat === 3 ||
-                  bytesPerSample === 8 ||
-                  (!hasExplicitSampleFormat &&
-                    bytesPerSample === 4 &&
-                    hasNumericNoData &&
-                    (!Number.isInteger(effectiveNoData) || Math.abs(effectiveNoData) > 2147483647));
-                const isSignedSample =
-                  !isFloatSample &&
-                  (sampleFormat === 2 ||
-                    (!hasExplicitSampleFormat &&
-                      hasNumericNoData &&
-                      effectiveNoData < 0 &&
-                      ((bytesPerSample === 2 && effectiveNoData >= -32768) ||
-                        (bytesPerSample === 4 && effectiveNoData >= -2147483648) ||
-                        (bytesPerSample === 1 && effectiveNoData >= -128))));
-                const isUnsignedNormalized = !isFloatSample && !isSignedSample;
-
-                const baseMin = options.minElevation ?? 0;
-                const rangeElev = (options.maxElevation ?? 10) - baseMin;
-                const maxUnsignedSample =
-                  bytesPerSample === 4 ? 4294967295 : bytesPerSample === 2 ? 65535 : 255;
-
-                const noDataF32 = hasNumericNoData ? Math.fround(effectiveNoData) : 0;
-                const noDataTol = hasNumericNoData
-                  ? (bytesPerSample === 8 ? 1e-9 : 1e-6) * Math.max(1, Math.abs(effectiveNoData))
-                  : 0;
-
-                const enableStandardSentinels = Boolean(
-                  options.filterStandardSentinels ||
-                  options.standardSentinels ||
-                  options.detectStandardSentinels
-                );
-                const stdSentinelVal =
-                  enableStandardSentinels && isUnsignedNormalized
-                    ? bytesPerSample === 2
-                      ? 65535
-                      : bytesPerSample === 1
-                        ? 255
-                        : -1
-                    : -1;
-
-                let data;
-                let minE = Infinity;
-                let maxE = -Infinity;
-                let voidMask = null;
-                if (
-                  bytesPerSample === 1 &&
-                  !isSignedSample &&
-                  !hasNumericNoData &&
-                  stdSentinelVal < 0
-                ) {
-                  const decoded = decodeUint8NormalizedStrip(
-                    arrayBuffer,
-                    stripOffset,
-                    total,
-                    baseMin,
-                    rangeElev
-                  );
-                  data = decoded.data;
-                  minE = decoded.minE;
-                  maxE = decoded.maxE;
-                } else {
-                  const byteStrip =
-                    bytesPerSample === 1
-                      ? isSignedSample
-                        ? new Int8Array(arrayBuffer, stripOffset, total)
-                        : new Uint8Array(arrayBuffer, stripOffset, total)
-                      : null;
-
-                  data = new Float32Array(total);
-                  for (let k = 0; k < total; k++) {
-                    let rawVal = 0;
-                    if (byteStrip !== null) {
-                      rawVal = byteStrip[k];
-                    } else if (bytesPerSample === 8) {
-                      rawVal = view.getFloat64(stripOffset + k * 8, littleEndian);
-                    } else if (bytesPerSample === 4) {
-                      if (isFloatSample) {
-                        rawVal = view.getFloat32(stripOffset + k * 4, littleEndian);
-                      } else if (isSignedSample) {
-                        rawVal = view.getInt32(stripOffset + k * 4, littleEndian);
-                      } else {
-                        rawVal = view.getUint32(stripOffset + k * 4, littleEndian);
-                      }
-                    } else {
-                      rawVal = isSignedSample
-                        ? view.getInt16(stripOffset + k * 2, littleEndian)
-                        : view.getUint16(stripOffset + k * 2, littleEndian);
-                    }
-
-                    let isVoid = !Number.isFinite(rawVal);
-                    if (!isVoid && hasNumericNoData) {
-                      if (isFloatSample) {
-                        isVoid =
-                          rawVal === effectiveNoData ||
-                          (bytesPerSample === 4 && rawVal === noDataF32) ||
-                          Math.abs(rawVal - effectiveNoData) <= noDataTol;
-                      } else {
-                        isVoid = rawVal === effectiveNoData;
-                      }
-                    }
-                    if (!isVoid && stdSentinelVal >= 0 && rawVal === stdSentinelVal) {
-                      isVoid = true;
-                    }
-
-                    if (isVoid) {
-                      if (!voidMask) voidMask = new Uint8Array(total);
-                      voidMask[k] = 1;
-                      continue;
-                    }
-
-                    const elev = isUnsignedNormalized
-                      ? baseMin + (rawVal / maxUnsignedSample) * rangeElev
-                      : rawVal;
-                    data[k] = elev;
-                    if (elev < minE) minE = elev;
-                    if (elev > maxE) maxE = elev;
-                  }
-                }
-
-                if (minE === Infinity || maxE === -Infinity) {
-                  minE = baseMin;
-                  maxE = options.maxElevation ?? 10;
-                }
-
-                if (voidMask) {
-                  const baselineElevation =
-                    typeof options.noDataReplacement === 'number' &&
-                    Number.isFinite(options.noDataReplacement)
-                      ? options.noDataReplacement
-                      : minE;
-                  for (let k = 0; k < total; k++) {
-                    if (voidMask[k]) {
-                      data[k] = baselineElevation;
-                    }
-                  }
-                }
-
-                let computedBounds = null;
-                if (
-                  modelTiepoint &&
-                  modelTiepoint.length >= 6 &&
-                  modelPixelScale &&
-                  modelPixelScale.length >= 2
-                ) {
-                  const scaleX = modelPixelScale[0];
-                  const scaleY = modelPixelScale[1];
-                  const tieI = modelTiepoint[0];
-                  const tieJ = modelTiepoint[1];
-                  const tieX = modelTiepoint[3];
-                  const tieY = modelTiepoint[4];
-
-                  if (
-                    scaleX > 0 &&
-                    scaleY > 0 &&
-                    !isNaN(scaleX) &&
-                    !isNaN(scaleY) &&
-                    !isNaN(tieX) &&
-                    !isNaN(tieY)
-                  ) {
-                    const xOrigin = tieX - tieI * scaleX;
-                    const yOrigin = tieY + tieJ * scaleY;
-                    computedBounds = {
-                      minX: xOrigin,
-                      maxX: xOrigin + imgWidth * scaleX,
-                      minY: yOrigin - imgHeight * scaleY,
-                      maxY: yOrigin,
-                    };
-                  }
-                } else if (modelTransformation && modelTransformation.length >= 16) {
-                  const m = modelTransformation;
-                  const x00 = m[3];
-                  const y00 = m[7];
-                  const xW0 = m[0] * imgWidth + m[3];
-                  const yW0 = m[4] * imgWidth + m[7];
-                  const x0H = m[1] * imgHeight + m[3];
-                  const y0H = m[5] * imgHeight + m[7];
-                  const xWH = m[0] * imgWidth + m[1] * imgHeight + m[3];
-                  const yWH = m[4] * imgWidth + m[5] * imgHeight + m[7];
-
-                  const minX = Math.min(x00, xW0, x0H, xWH);
-                  const maxX = Math.max(x00, xW0, x0H, xWH);
-                  const minY = Math.min(y00, yW0, y0H, yWH);
-                  const maxY = Math.max(y00, yW0, y0H, yWH);
-
-                  if (!isNaN(minX) && !isNaN(maxX) && !isNaN(minY) && !isNaN(maxY)) {
-                    computedBounds = { minX, maxX, minY, maxY };
-                  }
-                }
-
-                return new ElevationGrid({
-                  width: imgWidth,
-                  height: imgHeight,
-                  data,
-                  minElevation: minE,
-                  maxElevation: maxE,
-                  bounds: opts.bounds ?? computedBounds ?? undefined,
-                  contourInterval: opts.contourInterval ?? 1.0,
-                  verticalScale: opts.verticalScale ?? 1.0,
-                  elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
-                });
-              }
-            }
-          }
-        }
-      }
-    }
+    const grid = parseGeoTIFFSync(arrayBuffer, opts);
+    if (grid) return grid;
   } catch {
     // Fall through to image fallback
   }

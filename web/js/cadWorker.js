@@ -325,6 +325,10 @@ export function handleCadWorkerMessage(e) {
         settings,
         snapModes: normalizedSnapModes,
         scale,
+        explicitAngleDegrees:
+          payload.explicitAngleDegrees !== undefined
+            ? payload.explicitAngleDegrees
+            : settings?.explicitAngleDegrees,
       });
 
       const guideLines = [];
@@ -346,11 +350,13 @@ export function handleCadWorkerMessage(e) {
             type: 'perpendicular',
           });
         } else if (res.snap.type === 'angle') {
-          guideLines.push({
-            start: anchor,
-            end: res.point,
-            type: 'angle',
-          });
+          if (!anchor || anchor.x !== res.point.x || anchor.y !== res.point.y) {
+            guideLines.push({
+              start: anchor,
+              end: res.point,
+              type: 'angle',
+            });
+          }
           if (res.snap.edgeIndex !== undefined) {
             const edge =
               edges.find((eItem) => eItem.index === res.snap.edgeIndex) ||
