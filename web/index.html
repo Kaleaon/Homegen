@@ -64,7 +64,7 @@
       <span id="bg-toolbar" hidden>
         <span class="toolbar-sep">|</span>
         <label class="toggle" for="bg-visible" title="Toggle blueprint visibility"><input type="checkbox" id="bg-visible" checked> Blueprint</label>
-        <label for="bg-opacity" title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+        <label for="bg-opacity" title="Blueprint opacity" class="bg-opacity-label">Opacity <input id="bg-opacity" type="range" min="0" max="1" step="0.05" value="0.5" aria-valuetext="50%"></label>
         <select id="bg-map-preset" title="Geospatial Map Provider Preset">
           <option value="">-- Map Preset --</option>
           <option value="openstreetmap">OpenStreetMap</option>
@@ -84,7 +84,7 @@
       <label for="o-walls">Walls <select id="o-walls"><option value="full">Full</option><option value="cut" selected>Cutaway</option><option value="hidden">Hidden</option></select></label>
       <label for="o-levels">Floors <select id="o-levels"><option value="all">All</option><option value="upto">This floor &amp; below</option></select></label>
       <label for="o-env">Sky <select id="o-env"></select></label>
-      <label for="o-sun">Sun <input id="o-sun" type="range" min="0" max="1" step="0.05" value="0.65"></label>
+      <label for="o-sun">Sun <input id="o-sun" type="range" min="0" max="1" step="0.05" value="0.65" aria-valuetext="65%"></label>
       <label class="toggle" for="o-ceil"><input type="checkbox" id="o-ceil"> Ceilings</label>
       <label class="toggle" for="o-hd" title="Streams free CC0 PBR textures from Poly Haven"><input type="checkbox" id="o-hd"> HD textures</label>
       <button id="o-eye" title="Stand in the selected room at eye height"><span aria-hidden="true">👁</span> Eye level</button>
@@ -644,7 +644,7 @@
           </div>
           <div class="row">
             <label for="stamp-opacity">Opacity</label>
-            <k-input id="stamp-opacity" type="range" min="0.1" max="1.0" step="0.05" value="0.9"></k-input>
+            <k-input id="stamp-opacity" type="range" min="0.1" max="1.0" step="0.05" value="0.9" aria-valuetext="90%"></k-input>
           </div>
         </div>
         <div class="stamp-preview-box">
@@ -689,7 +689,7 @@
       </div>
       <div class="row">
         <label for="wm-opacity">Opacity</label>
-        <k-input id="wm-opacity" type="range" min="0.05" max="0.8" step="0.05" value="0.2"></k-input>
+        <k-input id="wm-opacity" type="range" min="0.05" max="0.8" step="0.05" value="0.2" aria-valuetext="20%"></k-input>
       </div>
     </div>
 
