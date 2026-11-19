@@ -366,14 +366,14 @@
     <button value="close" aria-label="Close SVG export modal"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
-    <div class="row"><label for="e-sheet">Sheet Size</label><select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></select></div>
-    <div class="row"><label for="e-orient">Orientation</label><select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></select></div>
-    <div class="row"><label for="e-scale">Scale</label><select id="e-scale"><option value="fit" selected>Fit to Page</option><option value="1/4">1/4" = 1'-0" (1:48)</option><option value="1/8">1/8" = 1'-0" (1:96)</option><option value="1/2">1/2" = 1'-0" (1:24)</option></select></div>
-    <div class="row"><label for="e-level">Floor Level</label><select id="e-level"></select></div>
+    <div class="row"><label for="e-sheet">Sheet Size</label><k-select id="e-sheet"><option value="letter" selected>Letter (8.5" × 11")</option><option value="tabloid">Tabloid / 11x17 (11" × 17")</option></k-select></div>
+    <div class="row"><label for="e-orient">Orientation</label><k-select id="e-orient"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option></k-select></div>
+    <div class="row"><label for="e-scale">Scale</label><k-select id="e-scale"><option value="fit" selected>Fit to Page</option><option value="1/4">1/4" = 1'-0" (1:48)</option><option value="1/8">1/8" = 1'-0" (1:96)</option><option value="1/2">1/2" = 1'-0" (1:24)</option></k-select></div>
+    <div class="row"><label for="e-level">Floor Level</label><k-select id="e-level"></k-select></div>
     <div id="svg-preview" class="k-overlay-card"></div>
     <div class="btns">
-      <button id="e-download" class="primary">Download Vector SVG</button>
-      <button id="e-print" class="primary">Print / Save PDF</button>
+      <k-button id="e-download" primary>Download Vector SVG</k-button>
+      <k-button id="e-print" primary>Print / Save PDF</k-button>
     </div>
     <p class="note">For PDF prints: set page scale to 100% and enable background graphics in your browser's print dialog.</p>
   </div>
@@ -397,46 +397,46 @@
     </div>
     <div class="row">
       <label for="pdf-size">Sheet size</label>
-      <select id="pdf-size">
+      <k-select id="pdf-size">
         <option value="Letter" selected>ANSI A / Letter (8.5" × 11")</option>
         <option value="Tabloid">ANSI B / Tabloid (11" × 17")</option>
         <option value="ARCH_C">ARCH C (18" × 24")</option>
         <option value="ARCH_D">ARCH D (24" × 36")</option>
         <option value="A4">ISO A4 (210 × 297 mm)</option>
         <option value="A3">ISO A3 (297 × 420 mm)</option>
-      </select>
+      </k-select>
     </div>
     <div class="row">
       <label for="pdf-orientation">Orientation</label>
-      <select id="pdf-orientation">
+      <k-select id="pdf-orientation">
         <option value="landscape" selected>Landscape</option>
         <option value="portrait">Portrait</option>
-      </select>
+      </k-select>
     </div>
     <div class="row">
       <label for="pdf-scale">Architectural scale</label>
-      <select id="pdf-scale">
+      <k-select id="pdf-scale">
         <option value='1/4"=1&#39;0"' selected>1/4" = 1'-0" (1:48)</option>
         <option value='1/8"=1&#39;0"'>1/8" = 1'-0" (1:96)</option>
         <option value='1/2"=1&#39;0"'>1/2" = 1'-0" (1:24)</option>
         <option value="1:50">1:50 (Metric)</option>
         <option value="1:100">1:100 (Metric)</option>
         <option value="fit">Fit to Page</option>
-      </select>
+      </k-select>
     </div>
     <div class="row">
       <label for="pdf-level">Level / Floor</label>
-      <select id="pdf-level">
+      <k-select id="pdf-level">
         <option value="all" selected>All levels (Multi-page)</option>
         <option value="0">Level 1 (Ground)</option>
         <option value="1">Level 2</option>
-      </select>
+      </k-select>
     </div>
     <h3>Title block information</h3>
-    <div class="row"><label for="pdf-title">Project title</label><input id="pdf-title" value="My home"></div>
-    <div class="row"><label for="pdf-designer">Designer name</label><input id="pdf-designer" value="Homegen Designer"></div>
-    <div class="row"><label for="pdf-date">Date</label><input id="pdf-date" type="date"></div>
-    <div class="row"><label for="pdf-subtitle">Sheet title</label><input id="pdf-subtitle" value="FLOOR PLAN"></div>
+    <div class="row"><label for="pdf-title">Project title</label><k-input id="pdf-title" value="My home"></k-input></div>
+    <div class="row"><label for="pdf-designer">Designer name</label><k-input id="pdf-designer" value="Homegen Designer"></k-input></div>
+    <div class="row"><label for="pdf-date">Date</label><k-input id="pdf-date" type="date"></k-input></div>
+    <div class="row"><label for="pdf-subtitle">Sheet title</label><k-input id="pdf-subtitle" value="FLOOR PLAN"></k-input></div>
     <div class="row"><label for="pdf-notes">Notes / Remarks</label><textarea id="pdf-notes" rows="2" placeholder="Project notes or submission comments…"></textarea></div>
     <h3>Sheet contents</h3>
     <div class="row"><label class="toggle" for="pdf-tb"><input type="checkbox" id="pdf-tb" checked> Architectural title block <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
@@ -445,22 +445,22 @@
     <h3>Branding &amp; Approval Stamps</h3>
     <div class="row">
       <label for="pdf-branding-mode">Branding Source</label>
-      <select id="pdf-branding-mode">
+      <k-select id="pdf-branding-mode">
         <option value="project" selected>Use Project Branding (Embedded)</option>
         <option value="session">Custom Session Branding</option>
         <option value="none">Suppress All Branding</option>
-      </select>
+      </k-select>
     </div>
     <div id="pdf-session-branding-box" hidden>
-      <div class="row"><label for="pdf-session-stamp-title">Session Stamp Title</label><input id="pdf-session-stamp-title" value="APPROVED"></div>
-      <div class="row"><label for="pdf-session-watermark">Session Watermark</label><input id="pdf-session-watermark" placeholder="e.g. DRAFT"></div>
+      <div class="row"><label for="pdf-session-stamp-title">Session Stamp Title</label><k-input id="pdf-session-stamp-title" value="APPROVED"></k-input></div>
+      <div class="row"><label for="pdf-session-watermark">Session Watermark</label><k-input id="pdf-session-watermark" placeholder="e.g. DRAFT"></k-input></div>
     </div>
     <div class="row"><label class="toggle" for="pdf-inc-logo"><input type="checkbox" id="pdf-inc-logo" checked> Include Branding Logo <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label></div>
     <div class="row"><label class="toggle" for="pdf-inc-stamp"><input type="checkbox" id="pdf-inc-stamp" checked> Include Approval Stamp <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label></div>
     <div class="row"><label class="toggle" for="pdf-inc-watermark"><input type="checkbox" id="pdf-inc-watermark" checked> Include Diagonal Watermark <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label></div>
     <div class="btns">
-      <button id="pdf-cancel" type="button">Cancel</button>
-      <button id="pdf-generate" class="primary" type="button">Download PDF</button>
+      <k-button id="pdf-cancel" type="button">Cancel</k-button>
+      <k-button id="pdf-generate" primary type="button">Download PDF</k-button>
     </div>
   </div>
 </dialog>
@@ -489,8 +489,8 @@
     <h3>Pricing &amp; Cost Options</h3>
     <div class="row"><label class="toggle" for="csv-inc-pricing"><input type="checkbox" id="csv-inc-pricing" checked> Include Item Pricing &amp; Cost Summary</label></div>
     <div class="btns">
-      <button id="csv-cancel" type="button">Cancel</button>
-      <button id="csv-generate" class="primary" type="button">Generate CSV</button>
+      <k-button id="csv-cancel" type="button">Cancel</k-button>
+      <k-button id="csv-generate" primary type="button">Generate CSV</k-button>
     </div>
   </div>
 </dialog>
@@ -512,18 +512,18 @@
     </div>
     <div class="row">
       <label for="dxf-units" class="export-field-label">CAD Units <span class="plan-tier-badge plan-tier-plus" data-tier="plus">Plus</span></label>
-      <select id="dxf-units">
+      <k-select id="dxf-units">
         <option value="inches" selected>Inches (Standard 1:1 Scale)</option>
         <option value="meters">Meters (SI Metric Scale)</option>
-      </select>
+      </k-select>
     </div>
     <div class="row">
       <label for="dxf-level" class="export-field-label">Floor Level <span class="plan-tier-badge plan-tier-pro" data-tier="pro">Pro</span></label>
-      <select id="dxf-level"></select>
+      <k-select id="dxf-level"></k-select>
     </div>
     <div class="btns">
-      <button id="dxf-cancel" type="button">Cancel</button>
-      <button id="dxf-generate" class="primary" type="button">Download DXF</button>
+      <k-button id="dxf-cancel" type="button">Cancel</k-button>
+      <k-button id="dxf-generate" primary type="button">Download DXF</k-button>
     </div>
   </div>
 </dialog>
@@ -577,9 +577,9 @@
   </form>
   <div class="dlg-body">
     <div class="branding-tabs" role="tablist" aria-label="Branding Sections">
-      <button type="button" class="tab-btn on" data-bsection="stamp" role="tab" aria-selected="true">Approval Stamp</button>
-      <button type="button" class="tab-btn" data-bsection="logo" role="tab" aria-selected="false">Logo Asset</button>
-      <button type="button" class="tab-btn" data-bsection="watermark" role="tab" aria-selected="false">Diagonal Watermark</button>
+      <k-tab class="tab-btn on" active data-bsection="stamp" role="tab" aria-selected="true">Approval Stamp</k-tab>
+      <k-tab class="tab-btn" data-bsection="logo" role="tab" aria-selected="false">Logo Asset</k-tab>
+      <k-tab class="tab-btn" data-bsection="watermark" role="tab" aria-selected="false">Diagonal Watermark</k-tab>
     </div>
 
     <!-- Stamp Builder Section -->
@@ -592,50 +592,50 @@
           </div>
           <div class="row">
             <label for="stamp-shape">Frame shape</label>
-            <select id="stamp-shape">
+            <k-select id="stamp-shape">
               <option value="circle" selected>Circular Seal</option>
               <option value="rectangle">Rectangle Frame</option>
               <option value="double-rectangle">Double Rectangle</option>
               <option value="rounded-rectangle">Rounded Rectangle</option>
               <option value="badge">Octagonal Badge</option>
-            </select>
+            </k-select>
           </div>
           <div class="row">
             <label for="stamp-title">Primary title</label>
-            <input id="stamp-title" value="APPROVED" placeholder="e.g. APPROVED, REVIEWED, PASSED">
+            <k-input id="stamp-title" value="APPROVED" placeholder="e.g. APPROVED, REVIEWED, PASSED"></k-input>
           </div>
           <div class="row">
             <label for="stamp-subtitle">Subtitle line</label>
-            <input id="stamp-subtitle" value="ARCHITECTURAL PLAN" placeholder="e.g. ARCHITECTURAL PLAN, FINAL PERMIT">
+            <k-input id="stamp-subtitle" value="ARCHITECTURAL PLAN" placeholder="e.g. ARCHITECTURAL PLAN, FINAL PERMIT"></k-input>
           </div>
           <div class="row">
             <label for="stamp-license">License / ID</label>
-            <input id="stamp-license" placeholder="e.g. LIC #123456">
+            <k-input id="stamp-license" placeholder="e.g. LIC #123456"></k-input>
           </div>
           <div class="row">
             <label for="stamp-date">Date text</label>
-            <input id="stamp-date" placeholder="Leave blank for auto date">
+            <k-input id="stamp-date" placeholder="Leave blank for auto date"></k-input>
           </div>
           <div class="row">
             <label for="stamp-border-style">Border style</label>
-            <select id="stamp-border-style">
+            <k-select id="stamp-border-style">
               <option value="solid" selected>Solid</option>
               <option value="dashed">Dashed</option>
               <option value="double">Double Line</option>
               <option value="bold">Bold Thick</option>
-            </select>
+            </k-select>
           </div>
           <div class="row">
             <label for="stamp-border-color">Border color</label>
-            <input id="stamp-border-color" type="color" value="#d32f2f">
+            <k-input id="stamp-border-color" type="color" value="#d32f2f"></k-input>
           </div>
           <div class="row">
             <label for="stamp-text-color">Text color</label>
-            <input id="stamp-text-color" type="color" value="#d32f2f">
+            <k-input id="stamp-text-color" type="color" value="#d32f2f"></k-input>
           </div>
           <div class="row">
             <label for="stamp-opacity">Opacity</label>
-            <input id="stamp-opacity" type="range" min="0.1" max="1.0" step="0.05" value="0.9">
+            <k-input id="stamp-opacity" type="range" min="0.1" max="1.0" step="0.05" value="0.9"></k-input>
           </div>
         </div>
         <div class="stamp-preview-box">
@@ -653,14 +653,14 @@
       <p class="note">Logos persist inside <code>.homegen</code> project files (Max file size: 500KB).</p>
       <div class="row">
         <label for="logo-file">Upload Logo Image</label>
-        <input type="file" id="logo-file" accept="image/png, image/jpeg, image/webp">
+        <k-input type="file" id="logo-file" accept="image/png, image/jpeg, image/webp"></k-input>
       </div>
       <div id="logo-preview-box" class="logo-preview-box">
         <img id="logo-preview-img" alt="Branding Logo Preview" style="max-height:80px; display:none;">
         <span id="logo-none-msg">No logo embedded yet</span>
       </div>
       <div class="btns">
-        <button id="logo-clear-btn" type="button">Remove Logo</button>
+        <k-button id="logo-clear-btn" type="button">Remove Logo</k-button>
       </div>
     </div>
 
@@ -672,21 +672,21 @@
       </div>
       <div class="row">
         <label for="wm-text">Watermark text</label>
-        <input id="wm-text" placeholder="e.g. PRELIMINARY, CONFIDENTIAL, NOT FOR CONSTRUCTION">
+        <k-input id="wm-text" placeholder="e.g. PRELIMINARY, CONFIDENTIAL, NOT FOR CONSTRUCTION"></k-input>
       </div>
       <div class="row">
         <label for="wm-color">Text color</label>
-        <input id="wm-color" type="color" value="#9e9e9e">
+        <k-input id="wm-color" type="color" value="#9e9e9e"></k-input>
       </div>
       <div class="row">
         <label for="wm-opacity">Opacity</label>
-        <input id="wm-opacity" type="range" min="0.05" max="0.8" step="0.05" value="0.2">
+        <k-input id="wm-opacity" type="range" min="0.05" max="0.8" step="0.05" value="0.2"></k-input>
       </div>
     </div>
 
     <div class="btns" style="margin-top: 18px;">
-      <button id="branding-cancel" type="button">Cancel</button>
-      <button id="branding-save" class="primary" type="button">Apply &amp; Save Branding</button>
+      <k-button id="branding-cancel" type="button">Cancel</k-button>
+      <k-button id="branding-save" primary type="button">Apply &amp; Save Branding</k-button>
     </div>
   </div>
 </dialog>
@@ -734,11 +734,11 @@
       <p>Enter the known real-world distance between the two selected points:</p>
       <div class="row">
         <label for="calib-distance">Distance</label>
-        <input id="calib-distance" placeholder="e.g. 10 ft, 120 in, or 10' 6&quot;" required autofocus>
+        <k-input id="calib-distance" placeholder="e.g. 10 ft, 120 in, or 10' 6&quot;" required autofocus></k-input>
       </div>
       <div class="btns">
-        <button type="submit" id="calib-submit" class="primary">Apply Scale</button>
-        <button type="button" id="calib-cancel">Cancel</button>
+        <k-button type="submit" id="calib-submit" primary>Apply Scale</k-button>
+        <k-button type="button" id="calib-cancel">Cancel</k-button>
       </div>
     </div>
   </form>
@@ -771,7 +771,7 @@
     <p class="note" style="margin:0 0 12px">Enter room type, dimensions, and positioning coordinates without dragging.</p>
     <div class="row">
       <label for="room-dims-type">Room Type</label>
-      <select id="room-dims-type">
+      <k-select id="room-dims-type">
         <option value="living" selected>Living room</option>
         <option value="bedroom">Bedroom</option>
         <option value="kitchen">Kitchen</option>
@@ -783,27 +783,27 @@
         <option value="entry">Entry</option>
         <option value="closet">Closet</option>
         <option value="stairs">Stairs</option>
-      </select>
+      </k-select>
     </div>
     <div class="row">
       <label for="room-dims-width">Width (inches)</label>
-      <input id="room-dims-width" type="number" min="24" step="6" value="144" />
+      <k-input id="room-dims-width" type="number" min="24" step="6" value="144"></k-input>
     </div>
     <div class="row">
       <label for="room-dims-depth">Depth (inches)</label>
-      <input id="room-dims-depth" type="number" min="24" step="6" value="144" />
+      <k-input id="room-dims-depth" type="number" min="24" step="6" value="144"></k-input>
     </div>
     <div class="row">
       <label for="room-dims-x">Position X (inches)</label>
-      <input id="room-dims-x" type="number" step="6" value="0" />
+      <k-input id="room-dims-x" type="number" step="6" value="0"></k-input>
     </div>
     <div class="row">
       <label for="room-dims-y">Position Y (inches)</label>
-      <input id="room-dims-y" type="number" step="6" value="0" />
+      <k-input id="room-dims-y" type="number" step="6" value="0"></k-input>
     </div>
     <div class="btns" style="margin-top:16px">
-      <button id="btn-add-room-dims-submit" class="primary" type="button">Add Room</button>
-      <button id="btn-add-room-dims-cancel" class="secondary" type="button">Cancel</button>
+      <k-button id="btn-add-room-dims-submit" primary type="button">Add Room</k-button>
+      <k-button id="btn-add-room-dims-cancel" class="secondary" type="button">Cancel</k-button>
     </div>
   </div>
 </dialog>

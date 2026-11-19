@@ -4659,10 +4659,17 @@ let activeHistoryPopoverCleanup = null;
 export function trapFocus(containerEl, returnFocusEl) {
   if (!containerEl) return () => {};
   const focusableSelector =
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    'button, [href], input, select, textarea, k-button, k-input, k-select, k-tab, [tabindex]:not([tabindex="-1"])';
   const getVisibleFocusables = () =>
     Array.from(containerEl.querySelectorAll(focusableSelector)).filter((el) => {
-      if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
+      if (
+        el.disabled ||
+        el.hidden ||
+        el.hasAttribute?.('disabled') ||
+        el.hasAttribute?.('hidden')
+      ) {
+        return false;
+      }
       if (typeof el.closest === 'function') {
         const hiddenAncestor = el.closest('[hidden]');
         if (hiddenAncestor && hiddenAncestor !== containerEl) return false;
@@ -5546,6 +5553,7 @@ $('#export-pdf')?.addEventListener('click', (e) => {
         levelSelect.appendChild(opt);
       }
     }
+    levelSelect.value = 'all';
   }
   const sessionBox = $('#pdf-session-branding-box');
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
@@ -5695,6 +5703,7 @@ $('#export-dxf')?.addEventListener('click', (e) => {
           lvlSelect.innerHTML += `<option value="${i}">Level ${i + 1}</option>`;
         }
       }
+      lvlSelect.value = 'all';
     }
     initExportModalTierState(dlg);
     bindUpgradeTriggerLinks(dlg);
@@ -5825,12 +5834,24 @@ if (typeof document !== 'undefined') {
       document.querySelectorAll('.branding-tabs .tab-btn').forEach((b) => {
         const active = b === e.currentTarget;
         b.classList.toggle('on', active);
+        if (typeof b.active !== 'undefined') b.active = active;
+        else if (active) b.setAttribute('active', '');
+        else b.removeAttribute('active');
         b.setAttribute('aria-selected', active ? 'true' : 'false');
       });
       document.querySelectorAll('.bsection').forEach((s) => {
         s.hidden = s.id !== `bsection-${sec}`;
       });
     });
+  });
+
+  document.addEventListener?.('click', (e) => {
+    const lbl = e.target?.closest?.('label[for]');
+    if (!lbl || typeof document.getElementById !== 'function') return;
+    const target = document.getElementById(lbl.getAttribute('for'));
+    if (target && (target.tagName === 'K-INPUT' || target.tagName === 'K-SELECT')) {
+      target.focus();
+    }
   });
 
   [
