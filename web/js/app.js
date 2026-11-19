@@ -539,8 +539,29 @@ const roomAt = (p) =>
 function isElementInsideToast(toastEl, dismissBtn, node) {
   if (!node || !toastEl) return false;
   if (node === toastEl || (dismissBtn && node === dismissBtn)) return true;
+  if (toastEl._actionBtn && node === toastEl._actionBtn) return true;
   if (typeof toastEl.contains === 'function') return toastEl.contains(node);
+  if (Array.isArray(toastEl.children) && toastEl.children.includes(node)) return true;
   return false;
+}
+
+function removeToastActionBtn(t) {
+  if (!t) return;
+  const prevBtn =
+    t._actionBtn ||
+    (typeof t.querySelector === 'function' ? t.querySelector('.toast-action-btn') : null);
+  t._actionBtn = null;
+  if (!prevBtn) return;
+  if (typeof prevBtn.remove === 'function') {
+    prevBtn.remove();
+  } else if (prevBtn.parentNode && typeof prevBtn.parentNode.removeChild === 'function') {
+    prevBtn.parentNode.removeChild(prevBtn);
+  } else if (typeof t.removeChild === 'function') {
+    t.removeChild(prevBtn);
+  } else if (Array.isArray(t.children)) {
+    const idx = t.children.indexOf(prevBtn);
+    if (idx !== -1) t.children.splice(idx, 1);
+  }
 }
 
 function ensureToastElements(t) {
@@ -618,6 +639,7 @@ export function dismissToast({ restoreFocus = false } = {}) {
   const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
   const focusWasInside = isElementInsideToast(t, dismissBtn, activeEl);
 
+  removeToastActionBtn(t);
   t._toastHovered = false;
   t._toastFocused = false;
   if (t.style) t.style.display = 'none';
@@ -722,7 +744,7 @@ function bindToastListeners(t, dismissBtn) {
   }
 }
 
-export function toast(msg, err = false, ms = 4500) {
+export function toast(msg, err = false, ms = 4500, action = null) {
   const t = $('#toast');
   clearTimeout(toast.t);
   toast.t = null;
@@ -736,6 +758,7 @@ export function toast(msg, err = false, ms = 4500) {
     t._toastFocused = false;
   }
 
+  removeToastActionBtn(t);
   const { msgEl, dismissBtn } = ensureToastElements(t);
   bindToastListeners(t, dismissBtn);
 
@@ -767,6 +790,53 @@ export function toast(msg, err = false, ms = 4500) {
     t.textContent = msg;
   }
 
+  if (
+    action &&
+    action.label &&
+    typeof action.onClick === 'function' &&
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function' &&
+    typeof t.appendChild === 'function'
+  ) {
+    const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'toast-action-btn';
+    if (typeof actionBtn.setAttribute === 'function') {
+      actionBtn.setAttribute('type', 'button');
+      actionBtn.setAttribute('class', 'toast-action-btn');
+    }
+    actionBtn.textContent = action.label;
+    let clicked = false;
+    actionBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.();
+      if (clicked) return;
+      clicked = true;
+      dismissToast({ restoreFocus: false });
+      action.onClick();
+    });
+    actionBtn.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+    if (dismissBtn && typeof t.insertBefore === 'function') {
+      t.insertBefore(actionBtn, dismissBtn);
+    } else if (dismissBtn && Array.isArray(t.children)) {
+      const idx = t.children.indexOf(dismissBtn);
+      if (idx !== -1) {
+        actionBtn.parentNode = t;
+        t.children.splice(idx, 0, actionBtn);
+      } else {
+        t.appendChild(actionBtn);
+      }
+    } else {
+      t.appendChild(actionBtn);
+    }
+    t._actionBtn = actionBtn;
+  }
+
   if (t.style) t.style.display = 'flex';
 
   const effectiveMs = isErr ? 0 : Number(ms) || 0;
@@ -790,6 +860,11 @@ export function toast(msg, err = false, ms = 4500) {
     }, effectiveMs);
   }
 }
+
+const UNDO_TOAST_ACTION = {
+  label: 'Undo',
+  onClick: () => $('#undo')?.click(),
+};
 
 export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
@@ -2054,8 +2129,12 @@ export function renderInspector() {
     });
 
     $('#i-del-all')?.addEventListener('click', () => {
-      apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
-      select(null);
+      const count = selectedList.length;
+      const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${count} selected elements`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
     return;
   }
@@ -2432,8 +2511,12 @@ export function renderInspector() {
       applyExactRoomPosition('y', e.target.value, e.target)
     );
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, room.id), 'Delete Room');
-      select(null);
+      const label = getSelectionLabel(room.id) || room.name;
+      const r = apply((n) => M.removeById(n, room.id), 'Delete Room');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
 
     el.querySelectorAll('.i-nudge-btn').forEach((btn) => {
@@ -3146,8 +3229,12 @@ export function renderInspector() {
       $('#i-door-casing-d')?.addEventListener('change', updateDoorCasing);
     }
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, obj.id), 'Delete Element');
-      select(null);
+      const label = getSelectionLabel(obj.id) || def.name;
+      const r = apply((n) => M.removeById(n, obj.id), 'Delete Element');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
 
     const getOtherFloorItemPolygons = () => {
@@ -3280,6 +3367,9 @@ export function renderInspector() {
 
 function getSelectionLabel(id = selection) {
   if (!id) return '';
+  if (id instanceof Set) {
+    return id.size === 1 ? getSelectionLabel(Array.from(id)[0]) : `${id.size} selected elements`;
+  }
   const hit = M.findOwner(doc, id);
   if (!hit) return '';
   const { room, kind, obj } = hit;
@@ -4248,8 +4338,15 @@ canvas?.addEventListener('pointerdown', (e) => {
     case 'erase': {
       const id = pickAt(p);
       if (id) {
-        apply((n) => M.removeById(n, id), 'Erase Element');
-        if (selection === id) select(null);
+        const label = getSelectionLabel(id);
+        const r = apply((n) => M.removeById(n, id), 'Erase Element');
+        if (r.ok) {
+          if (isSelected(id)) {
+            selectionSet.delete(id);
+            select(selectionSet.size > 0 ? Array.from(selectionSet) : null);
+          }
+          toast(`Deleted ${label || 'element'}`, false, 4500, UNDO_TOAST_ACTION);
+        }
       }
       break;
     }
@@ -5456,8 +5553,13 @@ $('#undo')?.addEventListener('click', () => {
     doc = s;
     persist();
     selection = null;
+    selectionSet.clear();
     autoFixDiffs = [];
     hoveredDiffIndex = null;
+    const t = $('#toast');
+    if (t && typeof t.querySelector === 'function' && t.querySelector('.toast-action-btn')) {
+      dismissToast({ restoreFocus: false });
+    }
     refresh();
   }
 });
@@ -6942,9 +7044,11 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
       const selectedList = getSelectionList();
       if (selectedList.length > 0) {
         const label = getSelectionLabel();
-        apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
-        select(null);
-        toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
+        const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
+        if (r.ok) {
+          select(null);
+          toast(`Deleted ${label || 'selected element(s)'}`, false, 4500, UNDO_TOAST_ACTION);
+        }
       }
     } else if (!singleKeyDisabled && !hasCmdModifier) {
       if (lk === 'r') rotateSelected();
