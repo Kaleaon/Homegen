@@ -207,4 +207,16 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(res.isValid).toBe(true);
     expect(res.dimensionText).toBe('12\' 0" × 11\' 0"');
   });
+
+  test('fmtLenInches and fmtDimensionText render simplified 1/16" fractions and handle carry-over', () => {
+    expect(fmtLenInches(0)).toBe('0\' 0"');
+    expect(fmtLenInches(144)).toBe('12\' 0"');
+    expect(fmtLenInches(126.5)).toBe('10\' 6 1/2"');
+    expect(fmtLenInches(120.0625)).toBe('10\' 1/16"');
+    expect(fmtLenInches(6.125)).toBe('6 1/8"');
+    expect(fmtLenInches(0.0625)).toBe('1/16"');
+    expect(fmtLenInches(5.99)).toBe('6"');
+    expect(fmtLenInches(143.99)).toBe('12\' 0"');
+    expect(fmtDimensionText(126.5, 102.125)).toBe('10\' 6 1/2" × 8\' 6 1/8"');
+  });
 });

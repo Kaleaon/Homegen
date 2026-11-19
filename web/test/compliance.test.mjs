@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as m from '../js/model.js';
 import { evaluate, CODE_MAP, getRuleCategory } from '../js/codes.js';
 import { renderViolationItem } from '../js/app.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test('CODE_MAP maps regulatory codes and rules to plain-language categories', () => {
   assert.equal(CODE_MAP['IRC R304.1'], 'Minimum Room Area');
@@ -85,4 +90,28 @@ test('renderViolationItem defaults gracefully to Design Guidance for unmapped or
     /<span class="ref" title="CUSTOM 100">CUSTOM 100<\/span>/,
     'Secondary citation should render with tooltip'
   );
+});
+
+test('compliance drawer markup and stylesheet rules bind directly to Ktheme status tokens', () => {
+  const appJs = fs.readFileSync(path.join(__dirname, '../js/app.js'), 'utf8');
+  const srcCss = fs.readFileSync(path.join(__dirname, '../css/src/style.css'), 'utf8');
+
+  assert.ok(
+    appJs.includes('border-color:var(--ktheme-success)'),
+    'Compliant empty-violation list item binds to --ktheme-success'
+  );
+  assert.ok(
+    appJs.includes('border-color:var(--ktheme-text-muted)'),
+    'Empty plan compliance list item binds to --ktheme-text-muted'
+  );
+  assert.ok(
+    !appJs.includes('border-color:var(--ok)') && !appJs.includes('border-color:var(--muted)'),
+    'renderCompliance does not use legacy --ok or --muted inline variables'
+  );
+
+  assert.match(srcCss, /\.chip\s*\{[^}]*background:\s*var\(--ktheme-critical\)/);
+  assert.match(srcCss, /\.chip\.ok\s*\{[^}]*background:\s*var\(--ktheme-success\)/);
+  assert.match(srcCss, /\.chip\.mid\s*\{[^}]*background:\s*var\(--ktheme-warning\)/);
+  assert.match(srcCss, /\.v-item-btn\s*\{[^}]*border-left:\s*3px solid var\(--ktheme-critical\)/);
+  assert.match(srcCss, /\.v-item-btn\.warn\s*\{[^}]*border-left-color:\s*var\(--ktheme-warning\)/);
 });

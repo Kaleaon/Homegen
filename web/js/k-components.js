@@ -234,6 +234,7 @@ export class KInput extends BaseElement {
       'accept',
       'aria-label',
       'aria-labelledby',
+      'aria-valuetext',
     ];
   }
 
@@ -379,6 +380,7 @@ export class KInput extends BaseElement {
       'accept',
       'aria-label',
       'aria-labelledby',
+      'aria-valuetext',
     ];
     for (const a of attrs) {
       if (this.hasAttribute(a)) {

@@ -38,7 +38,8 @@ export function formatCSVRow(fields) {
 }
 
 /**
- * Formats dimension in inches to feet-and-inches string (e.g. 144 -> 12', 150 -> 12' 6").
+ * Formats dimension in inches to feet-and-inches string with 1/16" precision
+ * (e.g. 144 -> 12', 150 -> 12' 6", 126.5 -> 10' 6 1/2", 6.125 -> 6 1/8").
  *
  * @param {number} inches Dimension in inches.
  * @returns {string} Formatted feet-and-inches string.
