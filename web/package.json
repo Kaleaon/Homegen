@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run build && npm run lint:css && node --test",
+    "test": "npm run build && npm run lint:css && node --test --test-concurrency=2",
     "start": "node serve.mjs",
     "build": "node scripts/build-css.mjs",
     "build:css": "node scripts/build-css.mjs",
