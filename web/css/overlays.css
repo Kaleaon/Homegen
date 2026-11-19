@@ -382,8 +382,7 @@
 }
 
 /* 8. Interactive List Item Buttons */
-.diff-item-btn,
-.v-item-btn {
+.diff-item-btn {
   display: flex;
   width: 100%;
   text-align: left;
@@ -397,9 +396,28 @@
   box-sizing: border-box;
 }
 
+.v-item-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--ktheme-bg);
+  border: none;
+  border-left: 3px solid var(--ktheme-critical);
+  padding: 6px 8px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--radius-xs, 4px);
+  box-sizing: border-box;
+}
+
+.v-item-btn.warn {
+  border-left-color: var(--ktheme-warning);
+}
+
 .diff-item-btn:focus-visible,
 .v-item-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ktheme-accent, var(--accent));
   outline-offset: 2px;
 }
 

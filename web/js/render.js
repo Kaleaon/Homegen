@@ -1110,9 +1110,12 @@ function drawComplianceScene(ctx, complianceScene, view) {
     const d = node.data;
     ctx.save();
     ctx.fillStyle =
-      d.fillColor || (d.isColliding ? 'rgba(232, 64, 64, 0.25)' : 'rgba(42, 127, 255, 0.12)');
+      d.fillColor ||
+      (d.isColliding ? getToken('--ktheme-critical-muted') : getToken('--ktheme-accent-muted'));
     ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.strokeStyle = d.borderColor || (d.isColliding ? '#e84040' : '#2a7fff');
+    ctx.strokeStyle =
+      d.borderColor ||
+      (d.isColliding ? getToken('--ktheme-critical') : getToken('--ktheme-accent'));
     ctx.lineWidth = 1.5 / view.scale;
     if (d.isColliding) {
       ctx.setLineDash([4 / view.scale, 2 / view.scale]);
@@ -1128,7 +1131,7 @@ function drawComplianceScene(ctx, complianceScene, view) {
     const d = node.data;
     ctx.save();
     ctx.strokeStyle =
-      d.severity === 'error' ? 'rgba(211, 51, 51, 0.85)' : 'rgba(217, 119, 6, 0.85)';
+      d.severity === 'error' ? getToken('--ktheme-critical') : getToken('--ktheme-warning');
     ctx.lineWidth = 2 / view.scale;
     ctx.setLineDash([5 / view.scale, 3 / view.scale]);
     ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
@@ -1137,13 +1140,13 @@ function drawComplianceScene(ctx, complianceScene, view) {
       const fb = d.fixButtonBounds;
       const fs = Math.max(7, Math.min(10, 9 / view.scale));
       ctx.setLineDash([]);
-      ctx.fillStyle = getToken('--ktheme-accent', '#2563eb');
+      ctx.fillStyle = getToken('--ktheme-accent');
       ctx.beginPath();
       ctx.roundRect
         ? ctx.roundRect(fb.x, fb.y, fb.w, fb.h, 4 / view.scale)
         : ctx.rect(fb.x, fb.y, fb.w, fb.h);
       ctx.fill();
-      ctx.fillStyle = getToken('--ktheme-on-primary', '#ffffff');
+      ctx.fillStyle = getToken('--ktheme-on-primary');
       ctx.font = `600 ${fs}px ${getToken('--font-family-sans', 'sans-serif')}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -1157,10 +1160,13 @@ function drawComplianceScene(ctx, complianceScene, view) {
     if (node.type !== 'egressReach') continue;
     const d = node.data;
     const b = node.bounds;
+    const statusColor = d.isEgressCompliant
+      ? getToken('--ktheme-success')
+      : getToken('--ktheme-critical');
     ctx.save();
     // Dotted reach line from window anchor to badge
     if (b.anchorX !== undefined && b.anchorY !== undefined) {
-      ctx.strokeStyle = d.isEgressCompliant ? '#2f8f5b' : '#c43b3b';
+      ctx.strokeStyle = statusColor;
       ctx.lineWidth = 1 / view.scale;
       ctx.setLineDash([2 / view.scale, 2 / view.scale]);
       ctx.beginPath();
@@ -1174,13 +1180,13 @@ function drawComplianceScene(ctx, complianceScene, view) {
     const textWidth = ctx.measureText(d.badgeText).width + 8;
     const badgeW = Math.max(b.w, textWidth);
     const badgeH = fs * 1.8;
-    ctx.fillStyle = d.isEgressCompliant ? 'rgba(47, 143, 91, 0.9)' : 'rgba(196, 59, 59, 0.9)';
+    ctx.fillStyle = statusColor;
     ctx.beginPath();
     ctx.roundRect
       ? ctx.roundRect(b.x + b.w / 2 - badgeW / 2, b.y + b.h / 2 - badgeH / 2, badgeW, badgeH, 4)
       : ctx.rect(b.x + b.w / 2 - badgeW / 2, b.y + b.h / 2 - badgeH / 2, badgeW, badgeH);
     ctx.fill();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = getToken('--ktheme-on-error');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(d.badgeText, b.x + b.w / 2, b.y + b.h / 2);
@@ -1194,8 +1200,9 @@ function drawComplianceScene(ctx, complianceScene, view) {
       const d = node.data;
       ctx.save();
       const sz = (d.isSelected ? 10 : 8) / view.scale;
-      ctx.fillStyle = d.color || (d.isValid ? '#ffffff' : '#f87171');
-      ctx.strokeStyle = d.isValid ? '#2a7fff' : '#dc2626';
+      ctx.fillStyle =
+        d.color || (d.isValid ? getToken('--ktheme-on-primary') : getToken('--ktheme-critical'));
+      ctx.strokeStyle = d.isValid ? getToken('--ktheme-info') : getToken('--ktheme-critical');
       ctx.lineWidth = (d.isValid ? 1.5 : 2.5) / view.scale;
       ctx.beginPath();
       ctx.rect(b.x - sz / 2, b.y - sz / 2, sz, sz);
@@ -1203,7 +1210,7 @@ function drawComplianceScene(ctx, complianceScene, view) {
       ctx.stroke();
 
       if (!d.isValid) {
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+        ctx.strokeStyle = getToken('--ktheme-critical-muted');
         ctx.lineWidth = 3 / view.scale;
         ctx.beginPath();
         ctx.arc(b.x, b.y, sz * 0.9, 0, Math.PI * 2);
@@ -1218,13 +1225,13 @@ function drawComplianceScene(ctx, complianceScene, view) {
       ctx.font = `600 ${fs}px ${getToken('--font-family-sans', 'sans-serif')}`;
       const label = d.dimensionText;
       const tw = ctx.measureText(label).width + 10;
-      ctx.fillStyle = d.isValid ? 'rgba(30, 41, 59, 0.85)' : 'rgba(220, 38, 38, 0.9)';
+      ctx.fillStyle = d.isValid ? getToken('--ktheme-bg-elevated') : getToken('--ktheme-critical');
       ctx.beginPath();
       ctx.roundRect
         ? ctx.roundRect(b.x - tw / 2, b.y - fs, tw, fs * 1.8, 3)
         : ctx.rect(b.x - tw / 2, b.y - fs, tw, fs * 1.8);
       ctx.fill();
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = getToken('--ktheme-on-error');
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, b.x, b.y - fs * 0.1);
@@ -1232,16 +1239,16 @@ function drawComplianceScene(ctx, complianceScene, view) {
       if (!d.isValid && Array.isArray(d.violations) && d.violations.length > 0) {
         const warnText = d.violations.join(', ');
         const wfs = Math.max(7, Math.min(10, 9 / view.scale));
-        ctx.font = `600 ${wfs}px sans-serif`;
+        ctx.font = `600 ${wfs}px ${getToken('--font-family-sans', 'sans-serif')}`;
         const wtw = ctx.measureText(warnText).width + 12;
         const wY = b.y + fs * 1.2;
-        ctx.fillStyle = 'rgba(220, 38, 38, 0.95)';
+        ctx.fillStyle = getToken('--ktheme-critical');
         ctx.beginPath();
         ctx.roundRect
           ? ctx.roundRect(b.x - wtw / 2, wY - wfs * 0.8, wtw, wfs * 1.6, 3)
           : ctx.rect(b.x - wtw / 2, wY - wfs * 0.8, wtw, wfs * 1.6);
         ctx.fill();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = getToken('--ktheme-on-error');
         ctx.fillText(warnText, b.x, wY);
       }
       ctx.restore();
@@ -1255,18 +1262,22 @@ function drawComplianceScene(ctx, complianceScene, view) {
     const d = node.data;
     if (!b) continue;
 
+    const haloColor = d.haloColor || getToken('--ktheme-critical');
+    const fillColor = d.fillColor || getToken('--ktheme-critical-muted');
+    const badgeInk = getToken('--ktheme-on-error');
+
     ctx.save();
-    // 1. Red Conflict Halo Fill & Dashed Outline
-    ctx.fillStyle = d.fillColor || 'rgba(232, 64, 64, 0.22)';
+    // 1. Conflict Halo Fill & Dashed Outline
+    ctx.fillStyle = fillColor;
     ctx.fillRect(b.x, b.y, b.w, b.h);
 
-    ctx.strokeStyle = d.haloColor || '#e84040';
+    ctx.strokeStyle = haloColor;
     ctx.lineWidth = 2.5 / view.scale;
     ctx.setLineDash([6 / view.scale, 3 / view.scale]);
     ctx.strokeRect(b.x, b.y, b.w, b.h);
 
     // Outer glow halo ring
-    ctx.strokeStyle = 'rgba(232, 64, 64, 0.35)';
+    ctx.strokeStyle = getToken('--ktheme-critical-muted');
     ctx.lineWidth = 6 / view.scale;
     ctx.setLineDash([]);
     ctx.strokeRect(
@@ -1279,14 +1290,14 @@ function drawComplianceScene(ctx, complianceScene, view) {
     // 2. Rejection Callout Warning Badge
     const msg = d.message || 'Placement Violation';
     const fs = Math.max(8, Math.min(11, 10 / view.scale));
-    ctx.font = `600 ${fs}px sans-serif`;
+    ctx.font = `600 ${fs}px ${getToken('--font-family-sans', 'sans-serif')}`;
     const tw = ctx.measureText(msg).width + 16;
     const badgeW = Math.max(60, tw);
     const badgeH = fs * 1.9;
     const badgeX = b.x + b.w / 2 - badgeW / 2;
     const badgeY = b.y - badgeH - 6 / view.scale;
 
-    ctx.fillStyle = 'rgba(220, 38, 38, 0.95)';
+    ctx.fillStyle = haloColor;
     ctx.beginPath();
     if (ctx.roundRect) {
       ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4 / view.scale);
@@ -1295,11 +1306,11 @@ function drawComplianceScene(ctx, complianceScene, view) {
     }
     ctx.fill();
 
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = badgeInk;
     ctx.lineWidth = 1 / view.scale;
     ctx.stroke();
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = badgeInk;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(msg, b.x + b.w / 2, badgeY + badgeH / 2);
