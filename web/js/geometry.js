@@ -1237,11 +1237,34 @@ export function intersectInterval(intervals, [s0, s1]) {
   return out;
 }
 
-/** Footprint rect of a floor item (rotations are multiples of 90). */
+/** Footprint rect of a floor item (supports arbitrary rotation and scale). */
 export function footprint(item, def) {
-  const swap = item.rot % 180 !== 0;
-  const w = swap ? def.d : def.w;
-  const d = swap ? def.w : def.d;
+  const sx =
+    typeof item.scale === 'number' && Number.isFinite(item.scale)
+      ? item.scale
+      : Number.isFinite(item.scale?.x)
+        ? item.scale.x
+        : 1;
+  const sy =
+    typeof item.scale === 'number' && Number.isFinite(item.scale)
+      ? item.scale
+      : Number.isFinite(item.scale?.y)
+        ? item.scale.y
+        : sx;
+  const rot = (((item.rot || 0) % 360) + 360) % 360;
+  const w0 = def.w * sx;
+  const d0 = def.d * sy;
+  if (rot % 90 === 0) {
+    const swap = rot % 180 !== 0;
+    const w = swap ? d0 : w0;
+    const d = swap ? w0 : d0;
+    return { x: item.x - w / 2, y: item.y - d / 2, w, h: d };
+  }
+  const rad = (rot * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const w = w0 * cos + d0 * sin;
+  const d = w0 * sin + d0 * cos;
   return { x: item.x - w / 2, y: item.y - d / 2, w, h: d };
 }
 
