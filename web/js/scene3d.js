@@ -42,6 +42,7 @@ import { buildWindow3DMesh } from './windowBuilder.js';
 import { buildDoor3DMesh } from './doorBuilder.js';
 import { getTextureUrl } from './textureStore.js';
 import { getWallUV } from './model.js';
+import { normalizeElevationUnit } from './elevationEngine.js';
 import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
 import {
@@ -1540,9 +1541,35 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             );
           } else if (def && def.mount === 'ceiling') {
             itemNode.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
+            const sc =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.x)
+                  ? it.scale.x
+                  : 1;
+            itemNode.scale.set(sc, sc, sc);
           } else if (itemNode) {
             itemNode.position.set(it.x * S, e * S, it.y * S);
             itemNode.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+            const sx =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.x)
+                  ? it.scale.x
+                  : 1;
+            const sy =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.z)
+                  ? it.scale.z
+                  : sx;
+            const sz =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.y)
+                  ? it.scale.y
+                  : sx;
+            itemNode.scale.set(sx, sy, sz);
           }
         }
       }
@@ -1603,15 +1630,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const halfW = worldWidth / 2;
       const halfH = worldDepth / 2;
 
+      const verticalScale = grid.verticalScale ?? 1.0;
+      const unitToFeet = normalizeElevationUnit(grid.elevationUnit) === 'ft' ? 1.0 : 3.28084;
+
       for (let i = 0; i < vertCount; i++) {
         const lx = posAttr.getX(i);
         const ly = posAttr.getY(i);
         const u = (lx + halfW) / worldWidth;
         const v = (halfH - ly) / worldDepth;
 
-        let elev = grid.getElevationAt(u, v) * (grid.verticalScale ?? 1.0);
-        // Convert elevation in meters to 3D feet
-        const elevFeet = elev * 3.28084;
+        const elev = grid.getElevationAt(u, v);
+        const elevFeet = elev * verticalScale * unitToFeet;
         posAttr.setZ(i, elevFeet);
       }
       posAttr.needsUpdate = true;
@@ -2231,6 +2260,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
         })
       );
       m.position.set(it.x * S, (e + room.ceiling - 0.75) * S, it.y * S);
+      const sc =
+        typeof it.scale === 'number' && Number.isFinite(it.scale)
+          ? it.scale
+          : Number.isFinite(it.scale?.x)
+            ? it.scale.x
+            : 1;
+      if (sc !== 1) m.scale.set(sc, sc, sc);
       return m;
     }
     const w = def.w;
@@ -2344,6 +2380,25 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     }
     g.position.set(it.x * S, e * S, it.y * S);
     g.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+    const sx =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.x)
+          ? it.scale.x
+          : 1;
+    const sy =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.z)
+          ? it.scale.z
+          : sx;
+    const sz =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.y)
+          ? it.scale.y
+          : sx;
+    if (sx !== 1 || sy !== 1 || sz !== 1) g.scale.set(sx, sy, sz);
     return g;
   }
 

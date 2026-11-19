@@ -136,6 +136,118 @@ export class InteractionLayer {
     return this.transformGizmo.scale3D(entity, pointerPoint3D, context);
   }
 
+  setEntityPosition(entity, positionOrX, yOrContext = {}, maybeContext = {}) {
+    if (!entity) throw new Error('setEntityPosition: entity is required');
+    if (arguments.length < 2 || (positionOrX === null && arguments.length < 3)) {
+      throw new Error('setEntityPosition: position is required');
+    }
+
+    let result;
+    let context;
+    if (positionOrX !== null && typeof positionOrX === 'object') {
+      context = yOrContext || {};
+      result = this.transformGizmo.setExactPosition(entity, positionOrX);
+    } else {
+      context = maybeContext || {};
+      result = this.transformGizmo.setExactPosition(entity, positionOrX, yOrContext);
+    }
+
+    const basePos =
+      entity.position ||
+      (typeof entity.x === 'number' && Number.isFinite(entity.x)
+        ? { x: entity.x, y: Number.isFinite(entity.y) ? entity.y : 0 }
+        : { x: 0, y: 0 });
+
+    if (context.existingPolygons && entity.polygon) {
+      const offset = {
+        x: result.position.x - (Number.isFinite(basePos.x) ? basePos.x : 0),
+        y: result.position.y - (Number.isFinite(basePos.y) ? basePos.y : 0),
+      };
+      const movedPolygon = entity.polygon.map((p) => ({
+        x: p.x + offset.x,
+        y: p.y + offset.y,
+      }));
+      const validation = validatePlacement(movedPolygon, context.existingPolygons);
+      result.placementFeedback = createPlacementFeedback(movedPolygon, validation);
+    }
+
+    return result;
+  }
+
+  setEntityRotation(entity, angleDegrees, context = {}) {
+    if (!entity) throw new Error('setEntityRotation: entity is required');
+    const safeContext = context || {};
+    const result = this.transformGizmo.setExactRotation(entity, angleDegrees, safeContext);
+
+    if (safeContext.existingPolygons && entity.polygon) {
+      const basePos =
+        entity.position ||
+        (typeof entity.x === 'number' && Number.isFinite(entity.x)
+          ? { x: entity.x, y: Number.isFinite(entity.y) ? entity.y : 0 }
+          : { x: 0, y: 0 });
+      const prevRad = Number.isFinite(entity.rotation)
+        ? entity.rotation
+        : Number.isFinite(entity.rot)
+          ? (entity.rot * Math.PI) / 180
+          : 0;
+      const deltaRad = result.rotation - prevRad;
+      const cos = Math.cos(deltaRad);
+      const sin = Math.sin(deltaRad);
+      const cx = Number.isFinite(basePos.x) ? basePos.x : 0;
+      const cy = Number.isFinite(basePos.y) ? basePos.y : 0;
+      const rotatedPolygon = entity.polygon.map((p) => {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        return {
+          x: cx + dx * cos - dy * sin,
+          y: cy + dx * sin + dy * cos,
+        };
+      });
+      const validation = validatePlacement(rotatedPolygon, safeContext.existingPolygons);
+      result.placementFeedback = createPlacementFeedback(rotatedPolygon, validation);
+    }
+
+    return result;
+  }
+
+  setEntityScale(entity, scaleInput, context = {}) {
+    if (!entity) throw new Error('setEntityScale: entity is required');
+    const safeContext = context || {};
+    const result = this.transformGizmo.setExactScale(entity, scaleInput);
+
+    if (safeContext.existingPolygons && entity.polygon) {
+      const basePos =
+        entity.position ||
+        (typeof entity.x === 'number' && Number.isFinite(entity.x)
+          ? { x: entity.x, y: Number.isFinite(entity.y) ? entity.y : 0 }
+          : { x: 0, y: 0 });
+      const prevScaleX =
+        typeof entity.scale === 'number' && Number.isFinite(entity.scale)
+          ? entity.scale
+          : Number.isFinite(entity.scale?.x)
+            ? entity.scale.x
+            : 1;
+      const prevScaleY =
+        typeof entity.scale === 'number' && Number.isFinite(entity.scale)
+          ? entity.scale
+          : Number.isFinite(entity.scale?.y)
+            ? entity.scale.y
+            : prevScaleX;
+      const factorX = result.scale.x / (prevScaleX || 1);
+      const factorY = result.scale.y / (prevScaleY || 1);
+      const cx = Number.isFinite(basePos.x) ? basePos.x : 0;
+      const cy = Number.isFinite(basePos.y) ? basePos.y : 0;
+      const scaledPolygon = entity.polygon.map((p) => ({
+        x: cx + (p.x - cx) * factorX,
+        y: cy + (p.y - cy) * factorY,
+      }));
+      const validation = validatePlacement(scaledPolygon, safeContext.existingPolygons);
+      result.placementFeedback = createPlacementFeedback(scaledPolygon, validation);
+    }
+
+    return result;
+  }
+
   addRoomCorner(rawPoint, context = {}) {
     if (!rawPoint) throw new Error('addRoomCorner: rawPoint is required');
     if (!context) throw new Error('addRoomCorner: context is required');

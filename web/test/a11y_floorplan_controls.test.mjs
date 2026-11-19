@@ -15,12 +15,12 @@ const appJsContent = readFileSync(appJsPath, 'utf8');
 
 test('index.html includes direct dimension input dialog and toolbar buttons', () => {
   assert.match(htmlContent, /<dialog id="dlg-add-room-dims"/);
-  assert.match(htmlContent, /<select id="room-dims-type">/);
-  assert.match(htmlContent, /<input id="room-dims-width"/);
-  assert.match(htmlContent, /<input id="room-dims-depth"/);
-  assert.match(htmlContent, /<input id="room-dims-x"/);
-  assert.match(htmlContent, /<input id="room-dims-y"/);
-  assert.match(htmlContent, /<button id="btn-add-room-dims-submit"/);
+  assert.match(htmlContent, /<k-select id="room-dims-type">/);
+  assert.match(htmlContent, /<k-input id="room-dims-width"/);
+  assert.match(htmlContent, /<k-input id="room-dims-depth"/);
+  assert.match(htmlContent, /<k-input id="room-dims-x"/);
+  assert.match(htmlContent, /<k-input id="room-dims-y"/);
+  assert.match(htmlContent, /<k-button id="btn-add-room-dims-submit"/);
   assert.match(htmlContent, /<button id="btn-open-add-room-dims"/);
   assert.match(htmlContent, /<button id="btn-close-room"/);
 });
