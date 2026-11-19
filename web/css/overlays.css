@@ -206,7 +206,7 @@
   margin-bottom: 16px;
 }
 
-.branding-tabs .tab-btn {
+.branding-tabs button.tab-btn {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm, 6px);
@@ -217,11 +217,19 @@
   font-size: 13px;
 }
 
-.branding-tabs .tab-btn.on,
-.branding-tabs .tab-btn[aria-selected='true'] {
+.branding-tabs button.tab-btn.on,
+.branding-tabs button.tab-btn[aria-selected='true'] {
   background: var(--ktheme-accent-muted, rgba(129, 140, 248, 0.15));
   border-color: var(--ktheme-accent);
   color: var(--ktheme-text);
+}
+
+.branding-tabs k-tab.tab-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-weight: 500;
+  font-size: 13px;
 }
 
 .stamp-builder-grid {
@@ -636,7 +644,79 @@
   }
 }
 
-/* 11. Parametric Curve Drafting HUD & Inspector Controls */
+/* 11. Empty-State Blueprint Canvas Dropzone Overlay */
+.blueprint-dropzone {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  pointer-events: none;
+  max-width: calc(100% - var(--space-8));
+}
+
+.blueprint-dropzone[hidden] {
+  display: none !important;
+}
+
+.blueprint-dropzone__card {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--overlay-bg);
+  border: 1.5px dashed var(--overlay-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--overlay-shadow);
+  color: var(--overlay-color);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  opacity: 0.92;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.blueprint-dropzone.drag-over .blueprint-dropzone__card {
+  border-color: var(--ktheme-accent);
+  background: var(--ktheme-accent-muted);
+  transform: scale(1.02);
+  opacity: 1;
+}
+
+.blueprint-dropzone__icon {
+  font-size: var(--font-size-lg);
+  line-height: 1;
+}
+
+.blueprint-dropzone__text {
+  font-size: var(--font-size-sm);
+  color: var(--ktheme-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blueprint-dropzone.drag-over .blueprint-dropzone__text {
+  color: var(--overlay-color);
+  font-weight: var(--font-weight-medium);
+}
+
+#blueprint-dropzone-btn {
+  pointer-events: auto;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-3);
+}
+
+.blueprint-dropzone.drag-over #blueprint-dropzone-btn {
+  pointer-events: none;
+}
+
+/* 12. Parametric Curve Drafting HUD & Inspector Controls */
 .k-overlay-hud[hidden],
 .curve-drafting-hud[hidden],
 .curve-input-error[hidden] {

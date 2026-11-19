@@ -218,6 +218,12 @@ export function initView3D({
     plan.hidden = next === '3d';
     v3.hidden = next !== '3d';
     $('#bar3d').hidden = next !== '3d';
+    const dropzone = $('#blueprint-dropzone');
+    if (dropzone) {
+      const bg = getDoc?.()?.background;
+      const hasBg = Boolean(bg && (bg.dataUrl || bg.presetKey));
+      dropzone.hidden = next === '3d' || hasBg;
+    }
     const hud = $('#walkthrough-hud');
     if (hud) hud.hidden = next !== '3d' || api?.getCameraMode() !== 'walk';
     updateCoordOverlayVisibility();

@@ -15,7 +15,12 @@ import {
   isValidGridIncrement,
   SNAP_TOGGLE_DEFINITIONS,
 } from './uiSnapToggles.mjs';
-import { getSnappedPoint, snapAngle } from './snapping.mjs';
+import {
+  getSnappedPoint,
+  snapAngle,
+  EdgeSpatialIndex,
+  createEdgeSpatialIndex,
+} from './snapping.mjs';
 import {
   getSnappedPoint3D,
   distance3D,
@@ -69,6 +74,8 @@ export {
   SNAP_TOGGLE_DEFINITIONS,
   getSnappedPoint,
   snapAngle,
+  EdgeSpatialIndex,
+  createEdgeSpatialIndex,
   getSnappedPoint3D,
   distance3D,
   closestPointOnSegment3D,

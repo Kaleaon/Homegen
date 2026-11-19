@@ -76,10 +76,11 @@ test('Inspector and 3D UI wire direct numerical coordinate and rotation controls
     'i-pos-y',
     'i-pos-z',
     'i-rot-deg',
-    'i-item-x',
-    'i-item-y',
+    'i-item-pos-x',
+    'i-item-pos-y',
     'i-item-z',
     'i-item-rot',
+    'i-item-scale',
   ]) {
     assert.match(appJsContent, new RegExp(`id="${id}"`));
   }

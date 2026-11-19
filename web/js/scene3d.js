@@ -1548,10 +1548,36 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const ceilZ = Number.isFinite(it.z) ? it.z : room.ceiling - 0.75;
             itemNode.position.set(it.x * S, (e + ceilZ) * S, it.y * S);
             itemNode.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+            const sc =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.x)
+                  ? it.scale.x
+                  : 1;
+            itemNode.scale.set(sc, sc, sc);
           } else if (itemNode) {
             const floorZ = Number.isFinite(it.z) ? it.z : 0;
             itemNode.position.set(it.x * S, (e + floorZ) * S, it.y * S);
             itemNode.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+            const sx =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.x)
+                  ? it.scale.x
+                  : 1;
+            const sy =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.z)
+                  ? it.scale.z
+                  : sx;
+            const sz =
+              typeof it.scale === 'number' && Number.isFinite(it.scale)
+                ? it.scale
+                : Number.isFinite(it.scale?.y)
+                  ? it.scale.y
+                  : sx;
+            itemNode.scale.set(sx, sy, sz);
           }
         }
       }
@@ -2583,6 +2609,13 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const ceilZ = Number.isFinite(it.z) ? it.z : room.ceiling - 0.75;
       m.position.set(it.x * S, (e + ceilZ) * S, it.y * S);
       m.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+      const sc =
+        typeof it.scale === 'number' && Number.isFinite(it.scale)
+          ? it.scale
+          : Number.isFinite(it.scale?.x)
+            ? it.scale.x
+            : 1;
+      if (sc !== 1) m.scale.set(sc, sc, sc);
       return m;
     }
     const w = def.w;
@@ -2697,6 +2730,25 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     const floorZ = Number.isFinite(it.z) ? it.z : 0;
     g.position.set(it.x * S, (e + floorZ) * S, it.y * S);
     g.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
+    const sx =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.x)
+          ? it.scale.x
+          : 1;
+    const sy =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.z)
+          ? it.scale.z
+          : sx;
+    const sz =
+      typeof it.scale === 'number' && Number.isFinite(it.scale)
+        ? it.scale
+        : Number.isFinite(it.scale?.y)
+          ? it.scale.y
+          : sx;
+    if (sx !== 1 || sy !== 1 || sz !== 1) g.scale.set(sx, sy, sz);
     return g;
   }
 
