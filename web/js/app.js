@@ -5023,6 +5023,149 @@ export function trapFocus(containerEl, returnFocusEl) {
   };
 }
 
+let activeConfirmSession = null;
+
+export function confirmDialog(options = {}) {
+  const opts = typeof options === 'string' ? { message: options } : options || {};
+  const title = opts.title || 'Confirm Action';
+  const message = opts.message || '';
+  const confirmLabel = opts.confirmText || opts.confirmLabel || 'Confirm';
+  const cancelLabel = opts.cancelText || opts.cancelLabel || 'Cancel';
+  const danger = Boolean(opts.danger);
+
+  const dlg = $('#dlg-confirm');
+  const titleEl = $('#dlg-confirm-title');
+  const msgEl = $('#dlg-confirm-msg');
+  const okBtn = $('#dlg-confirm-ok');
+  const cancelBtn = $('#dlg-confirm-cancel');
+  const closeBtn = $('#dlg-confirm-close');
+
+  if (!dlg || typeof dlg.showModal !== 'function' || !okBtn || !cancelBtn) {
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return Promise.resolve(Boolean(window.confirm(message)));
+    }
+    return Promise.resolve(false);
+  }
+
+  let preservedReturnFocusEl = null;
+  const wasSessionActive = Boolean(activeConfirmSession);
+  if (activeConfirmSession) {
+    preservedReturnFocusEl = activeConfirmSession.returnFocusEl;
+    activeConfirmSession.supersede();
+  }
+
+  const candidateReturnFocus =
+    opts.returnFocusEl !== undefined
+      ? opts.returnFocusEl
+      : preservedReturnFocusEl || (typeof document !== 'undefined' ? document.activeElement : null);
+  const returnFocusEl =
+    candidateReturnFocus && typeof candidateReturnFocus.focus === 'function'
+      ? candidateReturnFocus
+      : null;
+
+  if (titleEl) titleEl.textContent = title;
+  if (msgEl) msgEl.textContent = message;
+  okBtn.textContent = confirmLabel;
+  cancelBtn.textContent = cancelLabel;
+  if (okBtn.classList) {
+    okBtn.classList.toggle('danger', danger);
+    okBtn.classList.toggle('primary', !danger);
+  }
+
+  const isDialogOpen =
+    wasSessionActive ||
+    Boolean(dlg.open || (typeof dlg.hasAttribute === 'function' && dlg.hasAttribute('open')));
+  if (!isDialogOpen) {
+    dlg.showModal();
+  }
+
+  const cleanupFocus = trapFocus(dlg, returnFocusEl);
+  const initialTarget = opts.initialFocus === 'confirm' ? okBtn : cancelBtn;
+  if (initialTarget && typeof initialTarget.focus === 'function') {
+    initialTarget.focus();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    function detachListeners() {
+      okBtn.removeEventListener?.('click', onConfirm);
+      cancelBtn.removeEventListener?.('click', onCancel);
+      closeBtn?.removeEventListener?.('click', onCloseClick);
+      dlg.removeEventListener?.('cancel', onDialogCancel);
+      dlg.removeEventListener?.('close', onDialogClose);
+      dlg.removeEventListener?.('keydown', onDialogKeyDown);
+    }
+
+    function settle(result, alreadyClosed = false) {
+      if (settled) return;
+      settled = true;
+      if (activeConfirmSession === session) {
+        activeConfirmSession = null;
+      }
+      detachListeners();
+      if (!alreadyClosed && typeof dlg.close === 'function') {
+        dlg.close();
+      }
+      cleanupFocus();
+      resolve(result);
+    }
+
+    function supersede() {
+      if (settled) return;
+      settled = true;
+      if (activeConfirmSession === session) {
+        activeConfirmSession = null;
+      }
+      detachListeners();
+      cleanupFocus();
+      resolve(false);
+    }
+
+    function onConfirm(e) {
+      e?.preventDefault?.();
+      settle(true);
+    }
+
+    function onCancel(e) {
+      e?.preventDefault?.();
+      settle(false);
+    }
+
+    function onCloseClick(e) {
+      e?.preventDefault?.();
+      settle(false);
+    }
+
+    function onDialogCancel(e) {
+      e?.preventDefault?.();
+      settle(false);
+    }
+
+    function onDialogClose() {
+      settle(false, true);
+    }
+
+    function onDialogKeyDown(e) {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        settle(false);
+      }
+    }
+
+    const session = { settle, supersede, returnFocusEl };
+    activeConfirmSession = session;
+
+    okBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    if (closeBtn) closeBtn.addEventListener('click', onCloseClick);
+    dlg.addEventListener('cancel', onDialogCancel);
+    dlg.addEventListener('close', onDialogClose);
+    dlg.addEventListener('keydown', onDialogKeyDown);
+  });
+}
+
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
   const countEl = $('#diff-count');
@@ -5192,13 +5335,19 @@ function openTemplatePicker(triggerEl = null) {
   }
 }
 
-function selectTemplate(templateId) {
+async function selectTemplate(templateId) {
   const template = TEMPLATE_BY_ID(templateId);
-  if (!template) return;
+  if (!template) return false;
 
   if (doc.rooms.length > 0) {
-    if (!confirm('Start a new project? Unsaved changes in your active plan will be replaced.')) {
-      return;
+    const confirmed = await confirmDialog({
+      title: 'Replace Active Plan?',
+      message: 'Start a new project? Unsaved changes in your active plan will be replaced.',
+      confirmLabel: 'Replace Plan',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) {
+      return false;
     }
   }
 
@@ -5207,6 +5356,7 @@ function selectTemplate(templateId) {
   fit();
   $('#dlg-templates')?.close();
   toast(`Loaded ${template.title} starter template.`);
+  return true;
 }
 
 if (typeof document !== 'undefined') {
@@ -6584,6 +6734,15 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     )
       return;
 
+    const confirmDlg = $('#dlg-confirm');
+    if (confirmDlg && (confirmDlg.open || confirmDlg.hasAttribute?.('open'))) {
+      if (lk === 'escape') {
+        e.preventDefault?.();
+        confirmDlg.close?.();
+      }
+      return;
+    }
+
     const singleKeyDisabled = isSingleKeyShortcutDisabled();
     const hasCmdModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
 
@@ -6977,13 +7136,23 @@ $('#bg-calibrate-btn')?.addEventListener('click', () => {
   calibPoints = [];
   setTool({ kind: 'calibrate' });
 });
-$('#bg-remove-btn')?.addEventListener('click', () => {
-  if (confirm('Remove blueprint image?')) {
+$('#bg-remove-btn')?.addEventListener('click', async () => {
+  const confirmed = await confirmDialog({
+    title: 'Remove Blueprint?',
+    message: 'Remove blueprint image?',
+    confirmLabel: 'Remove Blueprint',
+    cancelLabel: 'Cancel',
+    danger: true,
+  });
+  if (confirmed) {
     doc.background = null;
     hist.push(doc, 'Remove Blueprint');
     persist();
     setTool({ kind: 'select' });
     refresh();
+    if ($('#bg-toolbar')?.hidden) {
+      document.querySelector('[data-tool="select"]')?.focus?.();
+    }
     toast('Blueprint removed.');
   }
 });
@@ -7832,6 +8001,7 @@ if (typeof window !== 'undefined')
     filterShortcuts,
     renderCommandList,
     trapFocus,
+    confirmDialog,
     toggleHistoryPopover,
     parseElevationRaster,
     computeContoursAsync,

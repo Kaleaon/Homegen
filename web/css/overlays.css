@@ -844,3 +844,31 @@
   line-height: 1.35;
   flex-basis: 100%;
 }
+
+/* 13. Reusable Confirmation Modal Overlay Styles */
+#dlg-confirm.k-overlay-dialog {
+  width: min(440px, 94vw);
+}
+
+#dlg-confirm .confirm-msg {
+  margin: var(--space-1, 4px) 0 var(--space-4, 16px);
+  font-size: var(--font-size-md, 14px);
+  line-height: var(--line-height-normal, 1.5);
+  color: var(--overlay-color);
+}
+
+#dlg-confirm .confirm-btns {
+  justify-content: flex-end;
+  gap: var(--space-2, 8px);
+  margin-top: var(--space-4, 16px);
+}
+
+#dlg-confirm button.danger {
+  background: var(--ktheme-critical, var(--err));
+  color: var(--ktheme-on-error, var(--ktheme-on-primary));
+  border-color: var(--ktheme-critical, var(--err));
+}
+
+#dlg-confirm button.danger:hover {
+  opacity: 0.92;
+}
