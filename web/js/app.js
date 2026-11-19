@@ -51,6 +51,8 @@ import {
   parseElevationRaster,
   computeContoursAsync,
   ElevationGrid,
+  sanitizeSlopePercent,
+  sanitizeSlopeDirection,
   normalizeElevationUnit,
 } from './elevationEngine.js';
 import {
@@ -77,11 +79,17 @@ import {
   resolveDoorStyle,
   resolveWallAssembly,
 } from './presetRegistry.js';
-import { initView3D } from './ui3d.js';
+import {
+  initView3D,
+  RANGE_VALUE_FORMATTERS,
+  formatRangeValueText,
+  updateRangeAriaValueText,
+} from './ui3d.js';
 import {
   isSingleKeyShortcutDisabled as readSingleKeyShortcutDisabled,
   writeSingleKeyShortcutDisabled,
 } from './shortcutPrefs.js';
+export { RANGE_VALUE_FORMATTERS, formatRangeValueText, updateRangeAriaValueText };
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
@@ -95,9 +103,9 @@ import { generateBOMCSV } from './bomExporter.js';
 import { exportDXF } from './dxfExporter.js';
 import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
+import { getToken } from './kthemeTokens.js';
 import { ComplianceManager } from './complianceClient.js';
 import { SnappingBridge } from './snapping-bridge.js';
-import { getToken } from './kthemeTokens.js';
 import {
   GISBridge,
   projectGeoJSON,
@@ -187,7 +195,15 @@ complianceManager.onReport((rep) => {
   redraw();
 });
 let hoveredViolation = null;
-const complianceScene = new ComplianceOverlayScene();
+const complianceScene = new ComplianceOverlayScene({
+  canvas,
+  onRedraw: () => {
+    if (!canvas || !ctx || (typeof canvas.isConnected === 'boolean' && !canvas.isConnected)) {
+      return;
+    }
+    redraw();
+  },
+});
 let view = { scale: 1.6, ox: 40, oy: 40 };
 let tool = { kind: 'select' }; // select | erase | room{type} | opening{type} | item{type} | wall{id} | floor{id} | roomkit{id} | furnkit{id}
 let tab = 'build';
@@ -523,8 +539,29 @@ const roomAt = (p) =>
 function isElementInsideToast(toastEl, dismissBtn, node) {
   if (!node || !toastEl) return false;
   if (node === toastEl || (dismissBtn && node === dismissBtn)) return true;
+  if (toastEl._actionBtn && node === toastEl._actionBtn) return true;
   if (typeof toastEl.contains === 'function') return toastEl.contains(node);
+  if (Array.isArray(toastEl.children) && toastEl.children.includes(node)) return true;
   return false;
+}
+
+function removeToastActionBtn(t) {
+  if (!t) return;
+  const prevBtn =
+    t._actionBtn ||
+    (typeof t.querySelector === 'function' ? t.querySelector('.toast-action-btn') : null);
+  t._actionBtn = null;
+  if (!prevBtn) return;
+  if (typeof prevBtn.remove === 'function') {
+    prevBtn.remove();
+  } else if (prevBtn.parentNode && typeof prevBtn.parentNode.removeChild === 'function') {
+    prevBtn.parentNode.removeChild(prevBtn);
+  } else if (typeof t.removeChild === 'function') {
+    t.removeChild(prevBtn);
+  } else if (Array.isArray(t.children)) {
+    const idx = t.children.indexOf(prevBtn);
+    if (idx !== -1) t.children.splice(idx, 1);
+  }
 }
 
 function ensureToastElements(t) {
@@ -602,6 +639,7 @@ export function dismissToast({ restoreFocus = false } = {}) {
   const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
   const focusWasInside = isElementInsideToast(t, dismissBtn, activeEl);
 
+  removeToastActionBtn(t);
   t._toastHovered = false;
   t._toastFocused = false;
   if (t.style) t.style.display = 'none';
@@ -706,7 +744,7 @@ function bindToastListeners(t, dismissBtn) {
   }
 }
 
-export function toast(msg, err = false, ms = 4500) {
+export function toast(msg, err = false, ms = 4500, action = null) {
   const t = $('#toast');
   clearTimeout(toast.t);
   toast.t = null;
@@ -720,6 +758,7 @@ export function toast(msg, err = false, ms = 4500) {
     t._toastFocused = false;
   }
 
+  removeToastActionBtn(t);
   const { msgEl, dismissBtn } = ensureToastElements(t);
   bindToastListeners(t, dismissBtn);
 
@@ -751,6 +790,53 @@ export function toast(msg, err = false, ms = 4500) {
     t.textContent = msg;
   }
 
+  if (
+    action &&
+    action.label &&
+    typeof action.onClick === 'function' &&
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function' &&
+    typeof t.appendChild === 'function'
+  ) {
+    const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'toast-action-btn';
+    if (typeof actionBtn.setAttribute === 'function') {
+      actionBtn.setAttribute('type', 'button');
+      actionBtn.setAttribute('class', 'toast-action-btn');
+    }
+    actionBtn.textContent = action.label;
+    let clicked = false;
+    actionBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.();
+      if (clicked) return;
+      clicked = true;
+      dismissToast({ restoreFocus: false });
+      action.onClick();
+    });
+    actionBtn.addEventListener('keydown', (e) => {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        dismissToast({ restoreFocus: true });
+      }
+    });
+    if (dismissBtn && typeof t.insertBefore === 'function') {
+      t.insertBefore(actionBtn, dismissBtn);
+    } else if (dismissBtn && Array.isArray(t.children)) {
+      const idx = t.children.indexOf(dismissBtn);
+      if (idx !== -1) {
+        actionBtn.parentNode = t;
+        t.children.splice(idx, 0, actionBtn);
+      } else {
+        t.appendChild(actionBtn);
+      }
+    } else {
+      t.appendChild(actionBtn);
+    }
+    t._actionBtn = actionBtn;
+  }
+
   if (t.style) t.style.display = 'flex';
 
   const effectiveMs = isErr ? 0 : Number(ms) || 0;
@@ -774,6 +860,11 @@ export function toast(msg, err = false, ms = 4500) {
     }, effectiveMs);
   }
 }
+
+const UNDO_TOAST_ACTION = {
+  label: 'Undo',
+  onClick: () => $('#undo')?.click(),
+};
 
 export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
@@ -1052,7 +1143,10 @@ export function renderBgToolbar() {
     const vis = $('#bg-visible');
     if (vis) vis.checked = bg.visible !== false;
     const op = $('#bg-opacity');
-    if (op) op.value = bg.opacity ?? 0.5;
+    if (op) {
+      op.value = bg.opacity ?? 0.5;
+      updateRangeAriaValueText(op, 'percent');
+    }
     const mapSelect = $('#bg-map-preset');
     if (mapSelect) mapSelect.value = bg.presetKey || '';
     const gisMapSelect = $('#gis-map-preset');
@@ -1451,7 +1545,7 @@ function redraw() {
     preview,
     freshViolations: preview?.fresh || [],
   });
-  if (ctx) {
+  if (ctx && canvas) {
     draw(ctx, { ...state, rooms: state.rooms.filter((r) => (r.level || 0) === curLevel) }, view, {
       dpr,
       gridSettings: interaction.gridSettings,
@@ -1505,7 +1599,7 @@ export function drawOverlay(c, _state) {
     for (const id of errRooms) {
       const r = roomOf(doc, id);
       c.save();
-      c.strokeStyle = 'rgba(196,59,59,.65)';
+      c.strokeStyle = getToken('--ktheme-critical');
       c.lineWidth = 2 / view.scale;
       c.setLineDash([6 / view.scale, 4 / view.scale]);
       c.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
@@ -1804,7 +1898,7 @@ function renderCompliance() {
       : `<span class="chip">${errs.length} issue${errs.length === 1 ? '' : 's'}</span>`;
   el.innerHTML = `<h3>Building code</h3><div class="score">${status}<span class="note" style="margin:0">${doc.rooms.length} rooms · ${sqft.toFixed(0)} sq ft</span></div>
     <div class="btns"><button id="fix" class="primary" ${errs.some((v) => v.fixable) ? '' : 'disabled'}>Fix automatically</button></div>
-    <ul class="v">${[...errs, ...warns].map(renderViolationItem).join('') || (doc.rooms.length ? '<li style="border-color:var(--ok);cursor:default">No issues found.</li>' : '<li style="border-color:var(--muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
+    <ul class="v">${[...errs, ...warns].map(renderViolationItem).join('') || (doc.rooms.length ? '<li style="border-color:var(--ktheme-success);cursor:default">No issues found.</li>' : '<li style="border-color:var(--ktheme-text-muted);cursor:default">Place a room kit from the Kits tab to begin. Every edit is checked as you go.</li>')}</ul>
     <p class="note">Rules follow the 2021 IRC and NEC residential provisions plus marked “Practice” items. Hard rules (overlaps, room sizes, blocked doors, fixture clearances) reject the edit; everything else is auto-fixed. This is a design aid — your local authority having jurisdiction has the final say.</p>`;
   $('#fix')?.addEventListener('click', () => {
     const r = apply(() => {}, { quiet: true });
@@ -2035,8 +2129,12 @@ export function renderInspector() {
     });
 
     $('#i-del-all')?.addEventListener('click', () => {
-      apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
-      select(null);
+      const count = selectedList.length;
+      const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${count} selected elements`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
     return;
   }
@@ -2101,9 +2199,9 @@ export function renderInspector() {
           )
           .join('')}</select>`
       )}
-      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
-      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
-      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="text" value="${esc(fmtLen(room.w))}">`)}
+      ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="text" value="${esc(fmtLen(room.h))}">`)}
+      ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="text" value="${esc(fmtLen(room.ceiling))}">`)}
       ${formRow('i-pos-x', 'Position X (in)', `<input id="i-pos-x" type="number" step="any" value="${formatNumericInput(room.x)}">`)}
       ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="any" value="${formatNumericInput(room.y)}">`)}
       <div class="curve-inspector-group">
@@ -2202,35 +2300,35 @@ export function renderInspector() {
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-scale-u-range" style="font-size:0.8rem;font-weight:600">Scale U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range">
+            <input id="i-uv-scale-u-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleU}" style="flex:1" aria-label="Scale U range" aria-valuetext="${formatRangeValueText(uv.scaleU, 'multiplier')}">
             <input id="i-uv-scale-u-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleU}" style="width:55px;font-size:0.8rem" aria-label="Scale U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-scale-v-range" style="font-size:0.8rem;font-weight:600">Scale V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range">
+            <input id="i-uv-scale-v-range" type="range" min="0.1" max="10" step="0.1" value="${uv.scaleV}" style="flex:1" aria-label="Scale V range" aria-valuetext="${formatRangeValueText(uv.scaleV, 'multiplier')}">
             <input id="i-uv-scale-v-num" type="number" step="0.1" min="0.05" max="50" value="${uv.scaleV}" style="width:55px;font-size:0.8rem" aria-label="Scale V numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-rot-range" style="font-size:0.8rem;font-weight:600">Rotation (°)</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range">
+            <input id="i-uv-rot-range" type="range" min="0" max="360" step="1" value="${uv.rotation}" style="flex:1" aria-label="Rotation range" aria-valuetext="${formatRangeValueText(uv.rotation, 'degrees')}">
             <input id="i-uv-rot-num" type="number" step="1" min="0" max="360" value="${uv.rotation}" style="width:55px;font-size:0.8rem" aria-label="Rotation numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-off-u-range" style="font-size:0.8rem;font-weight:600">Offset U</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range">
+            <input id="i-uv-off-u-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetU}" style="flex:1" aria-label="Offset U range" aria-valuetext="${formatRangeValueText(uv.offsetU, 'offset')}">
             <input id="i-uv-off-u-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetU}" style="width:55px;font-size:0.8rem" aria-label="Offset U numeric">
           </div>
         </div>
         <div class="row" style="margin-bottom:6px">
           <label for="i-uv-off-v-range" style="font-size:0.8rem;font-weight:600">Offset V</label>
           <div style="display:flex;gap:6px;align-items:center;flex:1">
-            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range">
+            <input id="i-uv-off-v-range" type="range" min="-2" max="2" step="0.05" value="${uv.offsetV}" style="flex:1" aria-label="Offset V range" aria-valuetext="${formatRangeValueText(uv.offsetV, 'offset')}">
             <input id="i-uv-off-v-num" type="number" step="0.05" min="-10" max="10" value="${uv.offsetV}" style="width:55px;font-size:0.8rem" aria-label="Offset V numeric">
           </div>
         </div>
@@ -2336,27 +2434,40 @@ export function renderInspector() {
         M.resizeRoom(r, r.x, r.y, clamped.w, clamped.h);
       }, 'Change Room Type')
     );
-    $('#i-w').addEventListener('change', (e) =>
+    $('#i-w').addEventListener('change', (e) => {
+      const targetW = M.parseDistanceInInches(e.target.value, { defaultUnit: 'ft' });
+      if (targetW === null || targetW <= 0) {
+        renderInspector();
+        return;
+      }
       apply((n) => {
         const r = roomOf(n, room.id);
-        const targetW = snap(e.target.value * 12);
         const clampedW = clampRoomWidth(r, targetW, r.h);
         M.resizeRoom(r, r.x, r.y, clampedW, r.h);
-      }, 'Resize Room Width')
-    );
-    $('#i-h').addEventListener('change', (e) =>
+      }, 'Resize Room Width');
+    });
+    $('#i-h').addEventListener('change', (e) => {
+      const targetH = M.parseDistanceInInches(e.target.value, { defaultUnit: 'ft' });
+      if (targetH === null || targetH <= 0) {
+        renderInspector();
+        return;
+      }
       apply((n) => {
         const r = roomOf(n, room.id);
-        const targetH = snap(e.target.value * 12);
         const clampedH = clampRoomDepth(r, targetH, r.w);
         M.resizeRoom(r, r.x, r.y, r.w, clampedH);
-      }, 'Resize Room Depth')
-    );
-    $('#i-ceil').addEventListener('change', (e) =>
+      }, 'Resize Room Depth');
+    });
+    $('#i-ceil').addEventListener('change', (e) => {
+      const targetCeil = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      if (targetCeil === null || targetCeil <= 0) {
+        renderInspector();
+        return;
+      }
       apply((n) => {
-        roomOf(n, room.id).ceiling = Number(e.target.value);
-      }, 'Change Ceiling Height')
-    );
+        roomOf(n, room.id).ceiling = targetCeil;
+      }, 'Change Ceiling Height');
+    });
     const applyExactRoomPosition = (axis, rawValue, inputEl) => {
       const existingPolygons = levelRooms()
         .filter((r) => r.id !== room.id)
@@ -2400,8 +2511,12 @@ export function renderInspector() {
       applyExactRoomPosition('y', e.target.value, e.target)
     );
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, room.id), 'Delete Room');
-      select(null);
+      const label = getSelectionLabel(room.id) || room.name;
+      const r = apply((n) => M.removeById(n, room.id), 'Delete Room');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
 
     el.querySelectorAll('.i-nudge-btn').forEach((btn) => {
@@ -2616,25 +2731,36 @@ export function renderInspector() {
       win.__scene3d?.render?.();
     };
 
-    const bindPair = (rangeId, numId) => {
+    const bindPair = (rangeId, numId, formatType) => {
       const rangeEl = $(rangeId);
       const numEl = $(numId);
       if (!rangeEl || !numEl) return;
-      rangeEl.addEventListener('input', (e) => {
+      updateRangeAriaValueText(rangeEl, formatType);
+      const syncFromRange = (e) => {
         numEl.value = e.target.value;
+        updateRangeAriaValueText(rangeEl, formatType);
         updateUV();
+      };
+      rangeEl.addEventListener('input', syncFromRange);
+      rangeEl.addEventListener('change', syncFromRange);
+      numEl.addEventListener('input', (e) => {
+        if (e.target.value !== '' && !Number.isNaN(Number(e.target.value))) {
+          rangeEl.value = e.target.value;
+          updateRangeAriaValueText(rangeEl, formatType);
+        }
       });
       numEl.addEventListener('change', (e) => {
         rangeEl.value = e.target.value;
+        updateRangeAriaValueText(rangeEl, formatType);
         updateUV();
       });
     };
 
-    bindPair('#i-uv-scale-u-range', '#i-uv-scale-u-num');
-    bindPair('#i-uv-scale-v-range', '#i-uv-scale-v-num');
-    bindPair('#i-uv-rot-range', '#i-uv-rot-num');
-    bindPair('#i-uv-off-u-range', '#i-uv-off-u-num');
-    bindPair('#i-uv-off-v-range', '#i-uv-off-v-num');
+    bindPair('#i-uv-scale-u-range', '#i-uv-scale-u-num', 'multiplier');
+    bindPair('#i-uv-scale-v-range', '#i-uv-scale-v-num', 'multiplier');
+    bindPair('#i-uv-rot-range', '#i-uv-rot-num', 'degrees');
+    bindPair('#i-uv-off-u-range', '#i-uv-off-u-num', 'offset');
+    bindPair('#i-uv-off-v-range', '#i-uv-off-v-num', 'offset');
 
     $('#i-uv-reset')?.addEventListener('click', () => {
       const scope = $('#i-uv-scope')?.value || 'single';
@@ -3028,8 +3154,16 @@ export function renderInspector() {
       $('#i-win-mull-rows')?.addEventListener('change', updateMullions);
 
       const updateCasing = () => {
-        const width = parseFloat($('#i-win-casing-w')?.value || 2.0);
-        const depth = parseFloat($('#i-win-casing-d')?.value || 0.75);
+        const parsedW = M.parseDistanceInInches($('#i-win-casing-w')?.value ?? '2.0', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const parsedD = M.parseDistanceInInches($('#i-win-casing-d')?.value ?? '0.75', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const width = parsedW ?? 2.0;
+        const depth = parsedD ?? 0.75;
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.casing = { ...(target.casing || {}), width, depth };
@@ -3076,8 +3210,16 @@ export function renderInspector() {
         }, 'Update Door Style')
       );
       const updateDoorCasing = () => {
-        const width = parseFloat($('#i-door-casing-w')?.value || 2.0);
-        const depth = parseFloat($('#i-door-casing-d')?.value || 0.75);
+        const parsedW = M.parseDistanceInInches($('#i-door-casing-w')?.value ?? '2.0', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const parsedD = M.parseDistanceInInches($('#i-door-casing-d')?.value ?? '0.75', {
+          defaultUnit: 'in',
+          allowZero: true,
+        });
+        const width = parsedW ?? 2.0;
+        const depth = parsedD ?? 0.75;
         apply((n) => {
           const target = M.findOwner(n, obj.id)?.obj;
           if (target) target.casing = { ...(target.casing || {}), width, depth };
@@ -3087,8 +3229,12 @@ export function renderInspector() {
       $('#i-door-casing-d')?.addEventListener('change', updateDoorCasing);
     }
     $('#i-del').addEventListener('click', () => {
-      apply((n) => M.removeById(n, obj.id), 'Delete Element');
-      select(null);
+      const label = getSelectionLabel(obj.id) || def.name;
+      const r = apply((n) => M.removeById(n, obj.id), 'Delete Element');
+      if (r.ok) {
+        select(null);
+        toast(`Deleted ${label}`, false, 4500, UNDO_TOAST_ACTION);
+      }
     });
 
     const getOtherFloorItemPolygons = () => {
@@ -3221,6 +3367,9 @@ export function renderInspector() {
 
 function getSelectionLabel(id = selection) {
   if (!id) return '';
+  if (id instanceof Set) {
+    return id.size === 1 ? getSelectionLabel(Array.from(id)[0]) : `${id.size} selected elements`;
+  }
   const hit = M.findOwner(doc, id);
   if (!hit) return '';
   const { room, kind, obj } = hit;
@@ -3487,20 +3636,24 @@ function renderLevelManagerRows() {
       lvl.name = e.target.value;
     });
     tr.querySelector('.lvl-elevation').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.elevation = isNaN(v) ? 0 : v;
+      const v = M.parseDistanceInInches(e.target.value, {
+        defaultUnit: 'in',
+        allowZero: true,
+        allowNegative: true,
+      });
+      lvl.elevation = v === null ? 0 : v;
     });
     tr.querySelector('.lvl-story').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.storyHeight = isNaN(v) ? M.DEFAULT_STORY_HEIGHT : v;
+      const v = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      lvl.storyHeight = v === null ? M.DEFAULT_STORY_HEIGHT : v;
     });
     tr.querySelector('.lvl-ceiling').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.ceilingHeight = isNaN(v) ? M.DEFAULT_CEILING_HEIGHT : v;
+      const v = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      lvl.ceilingHeight = v === null ? M.DEFAULT_CEILING_HEIGHT : v;
     });
     tr.querySelector('.lvl-slab').addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      lvl.slabThickness = isNaN(v) ? M.DEFAULT_SLAB_THICKNESS : v;
+      const v = M.parseDistanceInInches(e.target.value, { defaultUnit: 'in' });
+      lvl.slabThickness = v === null ? M.DEFAULT_SLAB_THICKNESS : v;
     });
     tr.querySelector('.lvl-sub').addEventListener('change', (e) => {
       lvl.subterranean = e.target.checked;
@@ -3661,6 +3814,46 @@ function card(label, sub, on, attrs, swatch) {
   return `<k-card class="card ${on ? 'on' : ''}" ${on ? 'active selected' : ''} ${attrs}>${swatch ? `<div class="sw" style="${swatch}"></div>` : ''}<span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</k-card>`;
 }
 
+const CATALOG_ANNOUNCE_DEBOUNCE_MS = 300;
+let catalogAnnounceTimer = null;
+
+function getCatalogStatusAnnouncer() {
+  if (typeof document === 'undefined') return null;
+  if (typeof document.getElementById === 'function') {
+    const byId = document.getElementById('catalog-status-announcer');
+    if (byId) return byId;
+  }
+  return $('#catalog-status-announcer');
+}
+
+export function clearCatalogAnnouncement() {
+  if (catalogAnnounceTimer) {
+    clearTimeout(catalogAnnounceTimer);
+    catalogAnnounceTimer = null;
+  }
+  const announcer = getCatalogStatusAnnouncer();
+  if (announcer) {
+    announcer.textContent = '';
+  }
+}
+
+export function announceCatalogResults(count, delayMs = CATALOG_ANNOUNCE_DEBOUNCE_MS) {
+  if (catalogAnnounceTimer) {
+    clearTimeout(catalogAnnounceTimer);
+    catalogAnnounceTimer = null;
+  }
+  catalogAnnounceTimer = setTimeout(() => {
+    catalogAnnounceTimer = null;
+    const announcer = getCatalogStatusAnnouncer();
+    if (!announcer) return;
+    const n = Number.isFinite(Number(count)) ? Math.max(0, Math.trunc(Number(count))) : 0;
+    const msg = `${n} furniture ${n === 1 ? 'item' : 'items'} found`;
+    if (announcer.textContent !== msg) {
+      announcer.textContent = msg;
+    }
+  }, delayMs);
+}
+
 export function getCatalogFilters() {
   return {
     query: catalogSearchQuery,
@@ -3729,6 +3922,9 @@ export function renderCatalogPanel(items = ITEMS) {
 }
 
 export function renderPalette() {
+  if (tab !== 'buy') {
+    clearCatalogAnnouncement();
+  }
   const p = $('#palette');
   if (p) p.setAttribute('aria-labelledby', `tab-${tab}`);
   if (!p) return;
@@ -3789,7 +3985,9 @@ export function renderPalette() {
         .join('') +
       '</div>';
   } else if (tab === 'buy') {
-    h += renderCatalogPanel();
+    const filtered = filterItems(ITEMS, getCatalogFilters());
+    announceCatalogResults(filtered.length);
+    h += renderCatalogPanel(ITEMS);
   } else if (tab === 'paint') {
     h += `<div class="row" style="margin:8px 0 12px"><label for="paint-scope" style="width:auto;margin-right:6px;font-weight:600">Target scope</label><select id="paint-scope" style="flex:1"><option value="single" ${paintScope === 'single' ? 'selected' : ''}>Single wall / room</option><option value="room" ${paintScope === 'room' ? 'selected' : ''}>Room (all walls)</option><option value="level" ${paintScope === 'level' ? 'selected' : ''}>Level (this floor)</option><option value="plan" ${paintScope === 'plan' ? 'selected' : ''}>Plan (entire project)</option></select></div>`;
     h +=
@@ -4140,8 +4338,15 @@ canvas?.addEventListener('pointerdown', (e) => {
     case 'erase': {
       const id = pickAt(p);
       if (id) {
-        apply((n) => M.removeById(n, id), 'Erase Element');
-        if (selection === id) select(null);
+        const label = getSelectionLabel(id);
+        const r = apply((n) => M.removeById(n, id), 'Erase Element');
+        if (r.ok) {
+          if (isSelected(id)) {
+            selectionSet.delete(id);
+            select(selectionSet.size > 0 ? Array.from(selectionSet) : null);
+          }
+          toast(`Deleted ${label || 'element'}`, false, 4500, UNDO_TOAST_ACTION);
+        }
       }
       break;
     }
@@ -4548,12 +4753,29 @@ function setupAddRoomDimsModal() {
 
   btnSubmit?.addEventListener('click', () => {
     const type = $('#room-dims-type')?.value || 'living';
-    const w = parseFloat($('#room-dims-width')?.value || '144');
-    const h = parseFloat($('#room-dims-depth')?.value || '144');
-    const x = parseFloat($('#room-dims-x')?.value || '0');
-    const y = parseFloat($('#room-dims-y')?.value || '0');
+    const rawW = $('#room-dims-width')?.value;
+    const rawH = $('#room-dims-depth')?.value;
+    const rawX = $('#room-dims-x')?.value;
+    const rawY = $('#room-dims-y')?.value;
 
-    if (isNaN(w) || w <= 0 || isNaN(h) || h <= 0) {
+    const w = M.parseDistanceInInches(rawW !== undefined && rawW !== '' ? rawW : '144', {
+      defaultUnit: 'in',
+    });
+    const h = M.parseDistanceInInches(rawH !== undefined && rawH !== '' ? rawH : '144', {
+      defaultUnit: 'in',
+    });
+    const x = M.parseDistanceInInches(rawX !== undefined && rawX !== '' ? rawX : '0', {
+      defaultUnit: 'in',
+      allowZero: true,
+      allowNegative: true,
+    });
+    const y = M.parseDistanceInInches(rawY !== undefined && rawY !== '' ? rawY : '0', {
+      defaultUnit: 'in',
+      allowZero: true,
+      allowNegative: true,
+    });
+
+    if (w === null || w <= 0 || h === null || h <= 0 || x === null || y === null) {
       toast('Please enter valid room dimensions (width and depth > 0).', true);
       return;
     }
@@ -4562,7 +4784,7 @@ function setupAddRoomDimsModal() {
     if (r.ok) {
       const typeName = ROOM_TYPES[type]?.name || type;
       announceToLiveRegion(
-        `${typeName} room added at (${x}", ${y}") with dimensions ${w}" × ${h}".`
+        `${typeName} room added at (${fmtLen(x)}, ${fmtLen(y)}) with dimensions ${fmtLen(w)} × ${fmtLen(h)}.`
       );
       closeAddRoomDimsModal();
     }
@@ -4978,6 +5200,149 @@ export function trapFocus(containerEl, returnFocusEl) {
   };
 }
 
+let activeConfirmSession = null;
+
+export function confirmDialog(options = {}) {
+  const opts = typeof options === 'string' ? { message: options } : options || {};
+  const title = opts.title || 'Confirm Action';
+  const message = opts.message || '';
+  const confirmLabel = opts.confirmText || opts.confirmLabel || 'Confirm';
+  const cancelLabel = opts.cancelText || opts.cancelLabel || 'Cancel';
+  const danger = Boolean(opts.danger);
+
+  const dlg = $('#dlg-confirm');
+  const titleEl = $('#dlg-confirm-title');
+  const msgEl = $('#dlg-confirm-msg');
+  const okBtn = $('#dlg-confirm-ok');
+  const cancelBtn = $('#dlg-confirm-cancel');
+  const closeBtn = $('#dlg-confirm-close');
+
+  if (!dlg || typeof dlg.showModal !== 'function' || !okBtn || !cancelBtn) {
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return Promise.resolve(Boolean(window.confirm(message)));
+    }
+    return Promise.resolve(false);
+  }
+
+  let preservedReturnFocusEl = null;
+  const wasSessionActive = Boolean(activeConfirmSession);
+  if (activeConfirmSession) {
+    preservedReturnFocusEl = activeConfirmSession.returnFocusEl;
+    activeConfirmSession.supersede();
+  }
+
+  const candidateReturnFocus =
+    opts.returnFocusEl !== undefined
+      ? opts.returnFocusEl
+      : preservedReturnFocusEl || (typeof document !== 'undefined' ? document.activeElement : null);
+  const returnFocusEl =
+    candidateReturnFocus && typeof candidateReturnFocus.focus === 'function'
+      ? candidateReturnFocus
+      : null;
+
+  if (titleEl) titleEl.textContent = title;
+  if (msgEl) msgEl.textContent = message;
+  okBtn.textContent = confirmLabel;
+  cancelBtn.textContent = cancelLabel;
+  if (okBtn.classList) {
+    okBtn.classList.toggle('danger', danger);
+    okBtn.classList.toggle('primary', !danger);
+  }
+
+  const isDialogOpen =
+    wasSessionActive ||
+    Boolean(dlg.open || (typeof dlg.hasAttribute === 'function' && dlg.hasAttribute('open')));
+  if (!isDialogOpen) {
+    dlg.showModal();
+  }
+
+  const cleanupFocus = trapFocus(dlg, returnFocusEl);
+  const initialTarget = opts.initialFocus === 'confirm' ? okBtn : cancelBtn;
+  if (initialTarget && typeof initialTarget.focus === 'function') {
+    initialTarget.focus();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    function detachListeners() {
+      okBtn.removeEventListener?.('click', onConfirm);
+      cancelBtn.removeEventListener?.('click', onCancel);
+      closeBtn?.removeEventListener?.('click', onCloseClick);
+      dlg.removeEventListener?.('cancel', onDialogCancel);
+      dlg.removeEventListener?.('close', onDialogClose);
+      dlg.removeEventListener?.('keydown', onDialogKeyDown);
+    }
+
+    function settle(result, alreadyClosed = false) {
+      if (settled) return;
+      settled = true;
+      if (activeConfirmSession === session) {
+        activeConfirmSession = null;
+      }
+      detachListeners();
+      if (!alreadyClosed && typeof dlg.close === 'function') {
+        dlg.close();
+      }
+      cleanupFocus();
+      resolve(result);
+    }
+
+    function supersede() {
+      if (settled) return;
+      settled = true;
+      if (activeConfirmSession === session) {
+        activeConfirmSession = null;
+      }
+      detachListeners();
+      cleanupFocus();
+      resolve(false);
+    }
+
+    function onConfirm(e) {
+      e?.preventDefault?.();
+      settle(true);
+    }
+
+    function onCancel(e) {
+      e?.preventDefault?.();
+      settle(false);
+    }
+
+    function onCloseClick(e) {
+      e?.preventDefault?.();
+      settle(false);
+    }
+
+    function onDialogCancel(e) {
+      e?.preventDefault?.();
+      settle(false);
+    }
+
+    function onDialogClose() {
+      settle(false, true);
+    }
+
+    function onDialogKeyDown(e) {
+      if (e?.key === 'Escape') {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        settle(false);
+      }
+    }
+
+    const session = { settle, supersede, returnFocusEl };
+    activeConfirmSession = session;
+
+    okBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    if (closeBtn) closeBtn.addEventListener('click', onCloseClick);
+    dlg.addEventListener('cancel', onDialogCancel);
+    dlg.addEventListener('close', onDialogClose);
+    dlg.addEventListener('keydown', onDialogKeyDown);
+  });
+}
+
 function renderDiffDrawer() {
   const drawer = $('#diff-drawer');
   const countEl = $('#diff-count');
@@ -5147,13 +5512,19 @@ function openTemplatePicker(triggerEl = null) {
   }
 }
 
-function selectTemplate(templateId) {
+async function selectTemplate(templateId) {
   const template = TEMPLATE_BY_ID(templateId);
-  if (!template) return;
+  if (!template) return false;
 
   if (doc.rooms.length > 0) {
-    if (!confirm('Start a new project? Unsaved changes in your active plan will be replaced.')) {
-      return;
+    const confirmed = await confirmDialog({
+      title: 'Replace Active Plan?',
+      message: 'Start a new project? Unsaved changes in your active plan will be replaced.',
+      confirmLabel: 'Replace Plan',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) {
+      return false;
     }
   }
 
@@ -5162,6 +5533,7 @@ function selectTemplate(templateId) {
   fit();
   $('#dlg-templates')?.close();
   toast(`Loaded ${template.title} starter template.`);
+  return true;
 }
 
 if (typeof document !== 'undefined') {
@@ -5181,8 +5553,13 @@ $('#undo')?.addEventListener('click', () => {
     doc = s;
     persist();
     selection = null;
+    selectionSet.clear();
     autoFixDiffs = [];
     hoveredDiffIndex = null;
+    const t = $('#toast');
+    if (t && typeof t.querySelector === 'function' && t.querySelector('.toast-action-btn')) {
+      dismissToast({ restoreFocus: false });
+    }
     refresh();
   }
 });
@@ -5359,11 +5736,15 @@ function syncElevationDialog(grid) {
   const unitEl = $('#elevation-unit');
   const intervalEl = $('#elevation-contour-interval');
   const scaleEl = $('#elevation-vertical-scale');
+  const slopeEl = $('#elevation-slope-percent');
+  const dirEl = $('#elevation-slope-direction');
   const visibleEl = $('#elevation-visible');
 
   if (unitEl) unitEl.value = unit;
   if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
   if (scaleEl) scaleEl.value = String(grid?.verticalScale ?? 1.0);
+  if (slopeEl) slopeEl.value = String(sanitizeSlopePercent(grid?.targetSlopePercent ?? 0));
+  if (dirEl) dirEl.value = String(sanitizeSlopeDirection(grid?.slopeDirectionDeg ?? 0));
   if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
   updateElevationIntervalLabel(unit);
 }
@@ -5372,10 +5753,16 @@ $('#elevation-unit')?.addEventListener('change', (e) => {
   updateElevationIntervalLabel(e.target.value);
 });
 
-$('#import-elevation')?.addEventListener('click', () => {
+$('#import-elevation')?.addEventListener('click', (e) => {
   if (doc.elevationGrid) {
     syncElevationDialog(doc.elevationGrid);
-    $('#dlg-elevation')?.showModal();
+    const dlg = $('#dlg-elevation');
+    if (dlg) {
+      const returnFocusEl = e?.currentTarget || document.activeElement;
+      dlg.showModal();
+      const cleanup = trapFocus(dlg, returnFocusEl);
+      dlg.addEventListener('close', () => cleanup(), { once: true });
+    }
   } else {
     $('#elevation-file')?.click();
   }
@@ -5428,18 +5815,40 @@ $('#elevation-file')?.addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-$('#btn-apply-elevation')?.addEventListener('click', async () => {
+export async function applyElevationSettings() {
   if (!doc.elevationGrid) return;
-  const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
-  const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
-  const unit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
-  const visible = $('#elevation-visible')?.checked !== false;
+  const intervalEl = $('#elevation-contour-interval');
+  const scaleEl = $('#elevation-vertical-scale');
+  const unitEl = $('#elevation-unit');
+  const slopeEl = $('#elevation-slope-percent');
+  const dirEl = $('#elevation-slope-direction');
+  const visEl = $('#elevation-visible');
+
+  const rawInterval = parseFloat(intervalEl?.value ?? '');
+  const interval = Number.isFinite(rawInterval) ? Math.max(0.1, Math.min(50, rawInterval)) : 1.0;
+  const rawScale = parseFloat(scaleEl?.value ?? '');
+  const scale = Number.isFinite(rawScale) ? Math.max(0.1, Math.min(10, rawScale)) : 1.0;
+  const unit = normalizeElevationUnit(unitEl?.value || 'm');
+  const slopePercent = sanitizeSlopePercent(slopeEl?.value ?? '');
+  const directionDegrees = sanitizeSlopeDirection(dirEl?.value ?? '');
+  const visible = visEl?.checked !== false;
+
+  if (unitEl) unitEl.value = unit;
+  if (intervalEl) intervalEl.value = String(interval);
+  if (scaleEl) scaleEl.value = String(scale);
+  if (slopeEl) slopeEl.value = String(slopePercent);
+  if (dirEl) dirEl.value = String(directionDegrees);
 
   doc.elevationGrid.contourInterval = interval;
   doc.elevationGrid.verticalScale = scale;
   doc.elevationGrid.elevationUnit = unit;
   doc.elevationGrid.visible = visible;
   updateElevationIntervalLabel(unit);
+  doc.elevationGrid.applyGradedSlope({
+    slopePercent,
+    directionDegrees,
+    unitScale: unit === 'ft' ? 1 / 12 : 0.0254,
+  });
 
   doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
   window.__scene3d?.update();
@@ -5447,6 +5856,10 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
   persist();
   $('#dlg-elevation')?.close();
   toast('Updated elevation terrain settings.');
+}
+
+$('#btn-apply-elevation')?.addEventListener('click', () => {
+  applyElevationSettings();
 });
 
 $('#btn-clear-elevation')?.addEventListener('click', () => {
@@ -6012,13 +6425,19 @@ function openBrandingDialog() {
   if ($('#stamp-border-style')) $('#stamp-border-style').value = st.borderStyle || 'solid';
   if ($('#stamp-border-color')) $('#stamp-border-color').value = st.borderColor || '#d32f2f';
   if ($('#stamp-text-color')) $('#stamp-text-color').value = st.textColor || '#d32f2f';
-  if ($('#stamp-opacity')) $('#stamp-opacity').value = st.opacity ?? 0.9;
+  if ($('#stamp-opacity')) {
+    $('#stamp-opacity').value = st.opacity ?? 0.9;
+    updateRangeAriaValueText($('#stamp-opacity'), 'percent');
+  }
 
   const wm = workingBranding.watermark || {};
   if ($('#wm-enabled')) $('#wm-enabled').checked = wm.enabled !== false;
   if ($('#wm-text')) $('#wm-text').value = wm.text ?? '';
   if ($('#wm-color')) $('#wm-color').value = wm.color || '#9e9e9e';
-  if ($('#wm-opacity')) $('#wm-opacity').value = wm.opacity ?? 0.2;
+  if ($('#wm-opacity')) {
+    $('#wm-opacity').value = wm.opacity ?? 0.2;
+    updateRangeAriaValueText($('#wm-opacity'), 'percent');
+  }
 
   updateLogoPreviewUI();
   updateStampPreview();
@@ -6043,6 +6462,7 @@ function syncWorkingStampFromInputs() {
     textColor: $('#stamp-text-color')?.value || '#d32f2f',
     opacity: parseFloat($('#stamp-opacity')?.value ?? '0.9'),
   };
+  updateRangeAriaValueText($('#stamp-opacity'), 'percent');
   updateStampPreview();
 }
 
@@ -6055,6 +6475,7 @@ function syncWorkingWatermarkFromInputs() {
     fontSize: 24,
     angle: -45,
   };
+  updateRangeAriaValueText($('#wm-opacity'), 'percent');
 }
 
 if (typeof document !== 'undefined') {
@@ -6106,6 +6527,8 @@ if (typeof document !== 'undefined') {
     $(selector)?.addEventListener('input', syncWorkingWatermarkFromInputs);
     $(selector)?.addEventListener('change', syncWorkingWatermarkFromInputs);
   });
+  updateRangeAriaValueText($('#stamp-opacity'), 'percent');
+  updateRangeAriaValueText($('#wm-opacity'), 'percent');
 
   $('#logo-file')?.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -6198,7 +6621,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ------------------------------------------------------------- GIS Subsystem Helpers
-export const SAMPLE_MUNICIPAL_GIS = {
+const SAMPLE_MUNICIPAL_GIS = {
   type: 'FeatureCollection',
   crs: { properties: { name: 'EPSG:4326' } },
   features: [
@@ -6264,7 +6687,7 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
-export function openGISDialog() {
+function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
   const gisCrsSelect = $('#gis-crs');
@@ -6322,7 +6745,7 @@ function renderGISSegments() {
   });
 }
 
-export { renderGISSegments };
+export { SAMPLE_MUNICIPAL_GIS, openGISDialog, renderGISSegments };
 
 $('#report')?.addEventListener('click', () =>
   download(
@@ -6461,6 +6884,7 @@ export function switchTab(targetBtn, shouldFocus = false) {
   if (palette && targetBtn.id) {
     palette.setAttribute('aria-labelledby', targetBtn.id);
   }
+  clearCatalogAnnouncement();
   renderPalette();
   if (shouldFocus) {
     targetBtn.focus();
@@ -6538,6 +6962,15 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     )
       return;
 
+    const confirmDlg = $('#dlg-confirm');
+    if (confirmDlg && (confirmDlg.open || confirmDlg.hasAttribute?.('open'))) {
+      if (lk === 'escape') {
+        e.preventDefault?.();
+        confirmDlg.close?.();
+      }
+      return;
+    }
+
     const singleKeyDisabled = isSingleKeyShortcutDisabled();
     const hasCmdModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
 
@@ -6611,9 +7044,11 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
       const selectedList = getSelectionList();
       if (selectedList.length > 0) {
         const label = getSelectionLabel();
-        apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
-        select(null);
-        toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
+        const r = apply((n) => M.removeSet(n, selectedList), 'Delete Selection');
+        if (r.ok) {
+          select(null);
+          toast(`Deleted ${label || 'selected element(s)'}`, false, 4500, UNDO_TOAST_ACTION);
+        }
       }
     } else if (!singleKeyDisabled && !hasCmdModifier) {
       if (lk === 'r') rotateSelected();
@@ -6911,13 +7346,18 @@ $('#bg-visible')?.addEventListener('change', (e) => {
     redraw();
   }
 });
+updateRangeAriaValueText($('#bg-opacity'), 'percent');
 $('#bg-opacity')?.addEventListener('input', (e) => {
+  updateRangeAriaValueText(e.target, 'percent');
   if (doc.background) {
     doc.background.opacity = parseFloat(e.target.value);
     hist.push(doc, 'Change Blueprint Opacity');
     persist();
     redraw();
   }
+});
+$('#bg-opacity')?.addEventListener('change', (e) => {
+  updateRangeAriaValueText(e.target, 'percent');
 });
 $('#bg-lock-btn')?.addEventListener('click', () => {
   if (doc.background) {
@@ -6931,13 +7371,23 @@ $('#bg-calibrate-btn')?.addEventListener('click', () => {
   calibPoints = [];
   setTool({ kind: 'calibrate' });
 });
-$('#bg-remove-btn')?.addEventListener('click', () => {
-  if (confirm('Remove blueprint image?')) {
+$('#bg-remove-btn')?.addEventListener('click', async () => {
+  const confirmed = await confirmDialog({
+    title: 'Remove Blueprint?',
+    message: 'Remove blueprint image?',
+    confirmLabel: 'Remove Blueprint',
+    cancelLabel: 'Cancel',
+    danger: true,
+  });
+  if (confirmed) {
     doc.background = null;
     hist.push(doc, 'Remove Blueprint');
     persist();
     setTool({ kind: 'select' });
     refresh();
+    if ($('#bg-toolbar')?.hidden) {
+      document.querySelector('[data-tool="select"]')?.focus?.();
+    }
     toast('Blueprint removed.');
   }
 });
@@ -7786,10 +8236,12 @@ if (typeof window !== 'undefined')
     filterShortcuts,
     renderCommandList,
     trapFocus,
+    confirmDialog,
     toggleHistoryPopover,
     parseElevationRaster,
     computeContoursAsync,
     ElevationGrid,
+    applyElevationSettings,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
@@ -7813,8 +8265,11 @@ if (typeof window !== 'undefined')
     initExportModalTierState,
     openPlanUpgradePrompt,
     bindUpgradeTriggerLinks,
+    announceCatalogResults,
+    clearCatalogAnnouncement,
     renderCatalogPanel,
     renderPalette,
+    switchTab,
     getCatalogFilters,
     setCatalogFilters,
     resetCatalogFilters,

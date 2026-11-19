@@ -95,31 +95,34 @@ test('updateView3dA11yTree updates fallback description for orbit and walkthroug
 
   const state = {
     rooms: [
-      { id: 'r1', name: 'Kitchen', level: 0 },
-      { id: 'r2', name: 'Bedroom', level: 0 },
+      { id: 'r1', name: 'Kitchen', level: 0, w: 120, h: 144, floor: 'floor_tile_gray' },
+      { id: 'r2', name: 'Bedroom', level: 0, w: 144, h: 144, floor: 'floor_carpet_gray' },
     ],
   };
 
   // Orbit view
   updateView3dA11yTree(state, 0, 'orbit');
   const container = document.getElementById('view3d-fallback-summary');
-  assert.equal(
-    container.textContent,
-    '3D Viewport in Orbit View mode. Rendering Level 1 with 2 room(s) and standard scene lighting.'
+  assert.match(
+    container.innerHTML,
+    /<p>3D Viewport in Orbit View mode\. Rendering Level 1 with 2 room\(s\) and standard scene lighting\.<\/p>/
   );
+  assert.match(container.innerHTML, /<strong>Kitchen<\/strong>: 10 ft by 12 ft \(8 ft ceiling\)\./);
+  assert.match(container.innerHTML, /Finishes: Gray tile floor/);
+  assert.match(container.innerHTML, /<strong>Bedroom<\/strong>: 12 ft by 12 ft \(8 ft ceiling\)\./);
 
   // Walkthrough mode
   updateView3dA11yTree(state, 0, 'walkthrough');
-  assert.equal(
-    container.textContent,
-    '3D Viewport in First-Person Walkthrough mode. Rendering Level 1 with 2 room(s) and standard scene lighting.'
+  assert.match(
+    container.innerHTML,
+    /<p>3D Viewport in First-Person Walkthrough mode\. Rendering Level 1 with 2 room\(s\) and standard scene lighting\.<\/p>/
   );
 
   // Walk mode
   updateView3dA11yTree(state, 0, 'walk');
-  assert.equal(
-    container.textContent,
-    '3D Viewport in First-Person Walkthrough mode. Rendering Level 1 with 2 room(s) and standard scene lighting.'
+  assert.match(
+    container.innerHTML,
+    /<p>3D Viewport in First-Person Walkthrough mode\. Rendering Level 1 with 2 room\(s\) and standard scene lighting\.<\/p>/
   );
 });
 

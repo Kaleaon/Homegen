@@ -69,6 +69,8 @@ export const SCALE_OPTIONS = {
   fit: { label: 'Fit to Page', fit: true, ratioStr: 'Fit to Page' },
 };
 
+export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
+
 function formatOriginCoordinates(origin) {
   if (!origin) return '';
 
@@ -761,7 +763,7 @@ function drawRoomLabelVector(pdf, room, transform) {
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(6.5);
   pdf.setTextColor('#555555');
-  const sub = `${formatFractionalInches(ir.w)} × ${formatFractionalInches(ir.h)} · ${area.toFixed(0)} sq ft`;
+  const sub = `${fmtLen(ir.w)} × ${fmtLen(ir.h)} · ${area.toFixed(0)} sq ft`;
   pdf.text(sub, cx, cy + 6, { align: 'center' });
 }
 
@@ -1034,7 +1036,7 @@ function drawRoomSchedulePages(pdf, docState, opts) {
       room.name,
       typeDef.name,
       `Level ${(room.level || 0) + 1}`,
-      `${formatFractionalInches(ir.w)} × ${formatFractionalInches(ir.h)}`,
+      `${fmtLen(ir.w)} × ${fmtLen(ir.h)}`,
       `${area.toFixed(0)} sq ft`,
     ];
 

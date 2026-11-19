@@ -466,6 +466,8 @@ test('canvas drag-and-drop blueprint upload, drag-over overlay outline, and non-
 
   // 6. Removing blueprint restores empty-state dropzone
   bgRemoveBtn.click();
+  getEl('dlg-confirm-ok').click();
+  await new Promise((r) => setTimeout(r, 0));
   assert.equal(homegen.doc.background, null, 'Removing blueprint clears doc.background');
   assert.equal(
     dropzone.hidden,
