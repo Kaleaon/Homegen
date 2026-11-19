@@ -1647,24 +1647,26 @@ export function getBounds(state, id) {
   return null;
 }
 
+function roundCoord(value) {
+  if (!Number.isFinite(value)) return 0;
+  const rounded = Math.round(value * 1e10) / 1e10;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
-    const newX = targetCenterX - obj.w / 2;
-    const newY = targetCenterY - obj.h / 2;
-    moveRoom(obj, newX, newY);
+    const newX = roundCoord(targetCenterX - obj.w / 2);
+    const newY = roundCoord(targetCenterY - obj.h / 2);
+    moveRoom(obj, newX, newY, state);
     return;
   }
   if (kind === 'item') {
     const def = ITEM_BY_ID[obj.type] || {};
     if (def.mount === 'floor' || def.mount === 'ceiling') {
-      obj.x = targetCenterX;
-      obj.y = targetCenterY;
-      const targetRoom = roomAtOnLevel(
-        state,
-        { x: targetCenterX, y: targetCenterY },
-        room.level || 0
-      );
+      obj.x = roundCoord(targetCenterX);
+      obj.y = roundCoord(targetCenterY);
+      const targetRoom = roomAtOnLevel(state, { x: obj.x, y: obj.y }, room.level || 0);
       if (targetRoom && targetRoom.id !== room.id) {
         room.items = room.items.filter((i) => i.id !== obj.id);
         targetRoom.items.push(obj);
@@ -1673,20 +1675,20 @@ export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
       const len = wallLength(room, obj.wall);
       if (obj.wall === 'N' || obj.wall === 'S') {
         const localX = targetCenterX - room.x;
-        obj.offset = Math.max(8, Math.min(len - 8, localX));
+        obj.offset = roundCoord(Math.max(8, Math.min(len - 8, localX)));
       } else {
         const localY = targetCenterY - room.y;
-        obj.offset = Math.max(8, Math.min(len - 8, localY));
+        obj.offset = roundCoord(Math.max(8, Math.min(len - 8, localY)));
       }
     }
   }
   if (kind === 'opening') {
     if (obj.wall === 'N' || obj.wall === 'S') {
       const localX = targetCenterX - room.x - obj.width / 2;
-      obj.offset = clampOpeningOffset(room, obj.wall, localX, obj.width);
+      obj.offset = roundCoord(clampOpeningOffset(room, obj.wall, localX, obj.width));
     } else {
       const localY = targetCenterY - room.y - obj.width / 2;
-      obj.offset = clampOpeningOffset(room, obj.wall, localY, obj.width);
+      obj.offset = roundCoord(clampOpeningOffset(room, obj.wall, localY, obj.width));
     }
   }
 }

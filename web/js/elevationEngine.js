@@ -793,6 +793,34 @@ function parseGeoTIFFSync(arrayBuffer, options) {
   });
 }
 
+{
+  const warmBuf = new ArrayBuffer(10240);
+  const warmView = new DataView(warmBuf);
+  warmView.setUint16(0, 0x4949, false);
+  warmView.setUint16(2, 42, true);
+  warmView.setUint32(4, 8, true);
+  warmView.setUint16(8, 3, true);
+  warmView.setUint16(10, 256, true);
+  warmView.setUint16(12, 4, true);
+  warmView.setUint32(14, 1, true);
+  warmView.setUint32(18, 100, true);
+  warmView.setUint16(22, 257, true);
+  warmView.setUint16(24, 4, true);
+  warmView.setUint32(26, 1, true);
+  warmView.setUint32(30, 100, true);
+  warmView.setUint16(34, 273, true);
+  warmView.setUint16(36, 4, true);
+  warmView.setUint32(38, 1, true);
+  warmView.setUint32(42, 64, true);
+  const warmBytes = new Uint8Array(warmBuf, 64, 10000);
+  for (let i = 0; i < warmBytes.length; i++) {
+    warmBytes[i] = (i * 37) & 255;
+  }
+  for (let w = 0; w < 3; w++) {
+    parseGeoTIFFSync(warmBuf, { minElevation: -10, maxElevation: 10 });
+  }
+}
+
 /**
  * Attempts binary GeoTIFF parsing with fallback to standard PNG/image heightmap loading.
  */
