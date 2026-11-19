@@ -1542,3 +1542,156 @@ k-button.on .snap-badge {
 .snap-increment-input[aria-invalid='true'] {
   --ktheme-border: var(--ktheme-critical);
 }
+
+/* Render Credit Quota Badges */
+.quota-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--ktheme-border);
+  background: var(--ktheme-bg);
+  color: var(--ktheme-text);
+  font-size: var(--font-size-sm);
+  line-height: 1.2;
+}
+
+.quota-badge[data-quota-state='low'] {
+  border-color: var(--ktheme-warning);
+}
+
+.quota-badge[data-quota-state='exhausted'] {
+  border-color: var(--ktheme-critical);
+}
+
+.quota-badge-icon {
+  font-size: var(--font-size-sm);
+  line-height: 1;
+}
+
+.quota-badge-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quota-badge[data-quota-state='low'] .quota-badge-count {
+  color: var(--ktheme-warning);
+}
+
+.quota-badge[data-quota-state='exhausted'] .quota-badge-count {
+  color: var(--ktheme-critical);
+}
+
+.quota-badge-queue {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--ktheme-bg-surface);
+  border: 1px solid var(--ktheme-border);
+  color: var(--ktheme-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.quota-badge-queue[hidden],
+.photo-quota-upgrade[hidden] {
+  display: none !important;
+}
+
+.quota-upgrade-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--ktheme-accent);
+  background: var(--ktheme-accent);
+  color: var(--ktheme-on-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.quota-upgrade-btn.upgraded {
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  border-color: var(--ktheme-success);
+}
+
+.quota-upgrade-btn.quota-upgrade-urgent {
+  background: var(--ktheme-warning);
+  color: var(--ktheme-on-secondary);
+  border-color: var(--ktheme-warning);
+}
+
+.quota-badge[data-quota-state='exhausted'] .quota-upgrade-btn.quota-upgrade-urgent {
+  background: var(--ktheme-critical);
+  color: var(--ktheme-on-primary);
+  border-color: var(--ktheme-critical);
+}
+
+.photo-quota-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+}
+
+.photo-quota-main {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quota-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--ktheme-bg-surface);
+  border: 1px solid var(--ktheme-border);
+  color: var(--ktheme-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.quota-tier-badge.upgraded {
+  background: var(--ktheme-success);
+  border-color: var(--ktheme-success);
+  color: var(--ktheme-on-primary);
+}
+
+.photo-quota-upgrade {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.quota-upgrade-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--ktheme-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
