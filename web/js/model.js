@@ -4,6 +4,9 @@ import {
   GRID,
   EPS,
   WALLS,
+  LEGACY_WALL_NAMES,
+  resolveWallIndex,
+  getWallBulge as geomGetWallBulge,
   snap,
   wallSeg,
   wallLength,
@@ -520,6 +523,22 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
     openings: [],
     items: [],
   };
+  if (opts.bulges) {
+    if (Array.isArray(opts.bulges)) {
+      if (points.length === 4) {
+        room.bulges = {
+          N: Number(opts.bulges[0]) || 0,
+          E: Number(opts.bulges[1]) || 0,
+          S: Number(opts.bulges[2]) || 0,
+          W: Number(opts.bulges[3]) || 0,
+        };
+      } else {
+        room.bulges = opts.bulges.map((b) => Number(b) || 0);
+      }
+    } else if (typeof opts.bulges === 'object') {
+      room.bulges = { ...opts.bulges };
+    }
+  }
   state.rooms.push(room);
   return room;
 }
@@ -708,6 +727,44 @@ export function placeRoomKit(state, kitId, x, y, level = 0) {
 }
 
 // ---- persistence ----
+export function getWallBulge(room, wall) {
+  return geomGetWallBulge(room, wall);
+}
+
+export function setWallBulge(room, wall, bulge, state = null) {
+  if (!room || wall === undefined || wall === null) return 0;
+  if (state) room = ensureRoomCopy(state, room);
+  const pts = getRoomPoints(room);
+  const idx = resolveWallIndex(wall) % pts.length;
+  const cleanBulge = !Number.isFinite(bulge) || Math.abs(bulge) < 1e-12 ? 0 : bulge;
+
+  if (Array.isArray(room.bulges)) {
+    const next = Array.from({ length: pts.length }, (_, i) => Number(room.bulges[i]) || 0);
+    next[idx] = cleanBulge;
+    room.bulges = next;
+  } else if (pts.length === 4) {
+    const wallKey = LEGACY_WALL_NAMES[idx];
+    room.bulges = {
+      N: geomGetWallBulge(room, 'N'),
+      E: geomGetWallBulge(room, 'E'),
+      S: geomGetWallBulge(room, 'S'),
+      W: geomGetWallBulge(room, 'W'),
+      ...(room.bulges && typeof room.bulges === 'object' ? room.bulges : {}),
+      [wallKey]: cleanBulge,
+    };
+  } else {
+    const next = Array.from({ length: pts.length }, (_, i) => geomGetWallBulge(room, i));
+    next[idx] = cleanBulge;
+    room.bulges = next;
+  }
+
+  const rawPts = room.points || room.corners || room.vertices;
+  if (Array.isArray(rawPts) && rawPts[idx] && typeof rawPts[idx].bulge === 'number') {
+    rawPts[idx] = { ...rawPts[idx], bulge: cleanBulge };
+  }
+  return cleanBulge;
+}
+
 export function getWallUV(room, wall) {
   if (!room || !wall) return { ...DEFAULT_UV_TRANSFORM };
   room.wallUV ||= {};
@@ -1336,24 +1393,26 @@ export function getBounds(state, id) {
   return null;
 }
 
+function roundCoord(value) {
+  if (!Number.isFinite(value)) return 0;
+  const rounded = Math.round(value * 1e10) / 1e10;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
-    const newX = targetCenterX - obj.w / 2;
-    const newY = targetCenterY - obj.h / 2;
-    moveRoom(obj, newX, newY);
+    const newX = roundCoord(targetCenterX - obj.w / 2);
+    const newY = roundCoord(targetCenterY - obj.h / 2);
+    moveRoom(obj, newX, newY, state);
     return;
   }
   if (kind === 'item') {
     const def = ITEM_BY_ID[obj.type] || {};
     if (def.mount === 'floor' || def.mount === 'ceiling') {
-      obj.x = targetCenterX;
-      obj.y = targetCenterY;
-      const targetRoom = roomAtOnLevel(
-        state,
-        { x: targetCenterX, y: targetCenterY },
-        room.level || 0
-      );
+      obj.x = roundCoord(targetCenterX);
+      obj.y = roundCoord(targetCenterY);
+      const targetRoom = roomAtOnLevel(state, { x: obj.x, y: obj.y }, room.level || 0);
       if (targetRoom && targetRoom.id !== room.id) {
         room.items = room.items.filter((i) => i.id !== obj.id);
         targetRoom.items.push(obj);
@@ -1362,10 +1421,10 @@ export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
       const len = wallLength(room, obj.wall);
       if (obj.wall === 'N' || obj.wall === 'S') {
         const localX = targetCenterX - room.x;
-        obj.offset = Math.max(8, Math.min(len - 8, localX));
+        obj.offset = roundCoord(Math.max(8, Math.min(len - 8, localX)));
       } else {
         const localY = targetCenterY - room.y;
-        obj.offset = Math.max(8, Math.min(len - 8, localY));
+        obj.offset = roundCoord(Math.max(8, Math.min(len - 8, localY)));
       }
     }
   }
@@ -1373,10 +1432,10 @@ export function setItemPosition(state, hit, targetCenterX, targetCenterY) {
     const len = wallLength(room, obj.wall);
     if (obj.wall === 'N' || obj.wall === 'S') {
       const localX = targetCenterX - room.x - obj.width / 2;
-      obj.offset = Math.max(0, Math.min(len - obj.width, localX));
+      obj.offset = roundCoord(Math.max(0, Math.min(len - obj.width, localX)));
     } else {
       const localY = targetCenterY - room.y - obj.width / 2;
-      obj.offset = Math.max(0, Math.min(len - obj.width, localY));
+      obj.offset = roundCoord(Math.max(0, Math.min(len - obj.width, localY)));
     }
   }
 }

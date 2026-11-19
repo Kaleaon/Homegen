@@ -15,6 +15,13 @@ import {
   reproject,
   getRoomPoints,
   getRoomBoundingBox,
+  getWallEdgeSegment,
+  tessellateArc,
+  sagittaFromBulge,
+  bulgeFromSagitta,
+  radiusFromBulge,
+  bulgeFromRadius,
+  parseCurveHudInput,
   polygonArea,
   parseWorldfile,
   solveAffineTransform,
@@ -40,7 +47,12 @@ import {
 import * as M from './model.js';
 import { saveTextureBlob } from './textureStore.js';
 import { exportProjectZip, importProjectZip } from './archive.js';
-import { parseElevationRaster, computeContoursAsync, ElevationGrid } from './elevationEngine.js';
+import {
+  parseElevationRaster,
+  computeContoursAsync,
+  ElevationGrid,
+  normalizeElevationUnit,
+} from './elevationEngine.js';
 import {
   evaluate,
   blockingIds,
@@ -66,6 +78,10 @@ import {
   resolveWallAssembly,
 } from './presetRegistry.js';
 import { initView3D } from './ui3d.js';
+import {
+  isSingleKeyShortcutDisabled as readSingleKeyShortcutDisabled,
+  writeSingleKeyShortcutDisabled,
+} from './shortcutPrefs.js';
 import { exportSVG } from './svg.js';
 import {
   InteractionLayer,
@@ -81,6 +97,7 @@ import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { ComplianceManager } from './complianceClient.js';
 import { SnappingBridge } from './snapping-bridge.js';
+import { getToken } from './kthemeTokens.js';
 import {
   GISBridge,
   projectGeoJSON,
@@ -103,10 +120,39 @@ import {
 
 const onboardingTour = new OnboardingTour();
 
-const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : null);
+const $ = (s) =>
+  typeof document !== 'undefined' && typeof document.querySelector === 'function'
+    ? document.querySelector(s)
+    : null;
 const canvas = typeof document !== 'undefined' ? $('#plan') : null;
 const ctx = canvas ? canvas.getContext('2d') : null;
 const STORE = 'homegen.plan.v1';
+
+export const SINGLE_KEY_SHORTCUTS_KEY = 'homegen_disable_single_key_shortcuts';
+
+export function isSingleKeyShortcutDisabled() {
+  return readSingleKeyShortcutDisabled();
+}
+
+function syncShortcutToggleUI(disabled) {
+  const toggleEl = $('#disable-single-key-shortcuts');
+  if (toggleEl) {
+    toggleEl.checked = disabled;
+    toggleEl.setAttribute?.('aria-checked', String(disabled));
+  }
+}
+
+export function setSingleKeyShortcutDisabled(disabled) {
+  const next = writeSingleKeyShortcutDisabled(disabled);
+  if (next && typeof window !== 'undefined' && window.__scene3d?.walkKeys) {
+    window.__scene3d.walkKeys.forward = false;
+    window.__scene3d.walkKeys.backward = false;
+    window.__scene3d.walkKeys.left = false;
+    window.__scene3d.walkKeys.right = false;
+  }
+  syncShortcutToggleUI(next);
+  return next;
+}
 
 const interaction = new InteractionLayer({
   gridSettings: {
@@ -170,11 +216,268 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+let isCanvasDragOver = false;
+let canvasDragDepth = 0;
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
 let distSpacingInput = '';
 let distSpacingType = 'center';
+let activeDraftCurveEdge = null;
+let draftConcavitySign = 1;
+let inspectorConcavitySign = 1;
+
+function formatCurveNumber(val, decimals = 2) {
+  if (!Number.isFinite(val)) return '';
+  const rounded = Number(val.toFixed(decimals));
+  return Object.is(rounded, -0) ? '0' : String(rounded);
+}
+
+function formatCurveRadiusDisplay(chordLen, bulge) {
+  if (!bulge || Math.abs(bulge) < 1e-9 || !Number.isFinite(chordLen) || chordLen <= 1e-9) {
+    return '';
+  }
+  const r = radiusFromBulge(chordLen, bulge);
+  return Number.isFinite(r) ? formatCurveNumber(r, 2) : '';
+}
+
+function getDraftCurveSegments() {
+  const pts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (!pts || pts.length === 0) return [];
+  const segments = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const start = pts[i];
+    const end = pts[i + 1];
+    const chordLen = Math.hypot(end.x - start.x, end.y - start.y);
+    segments.push({
+      key: String(i),
+      edgeIndex: i,
+      label: `Wall ${i + 1} (${i + 1}→${i + 2})`,
+      start,
+      end,
+      chordLen,
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(i) : 0,
+    });
+  }
+  if (pts.length >= 3) {
+    const closeIdx = pts.length - 1;
+    const start = pts[closeIdx];
+    const end = pts[0];
+    segments.push({
+      key: `close:${closeIdx}`,
+      edgeIndex: closeIdx,
+      label: `Closing (${pts.length}→1)`,
+      start,
+      end,
+      chordLen: Math.hypot(end.x - start.x, end.y - start.y),
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(closeIdx) : 0,
+    });
+  } else {
+    const activeIdx = pts.length - 1;
+    const start = pts[activeIdx];
+    const end = hover || { x: start.x + 120, y: start.y };
+    const rawChord = Math.hypot(end.x - start.x, end.y - start.y);
+    segments.push({
+      key: `preview:${activeIdx}`,
+      edgeIndex: activeIdx,
+      label: `Active (${pts.length}→Next)`,
+      start,
+      end,
+      chordLen: rawChord > 1e-6 ? rawChord : 120,
+      bulge: interaction.getEdgeBulge ? interaction.getEdgeBulge(activeIdx) : 0,
+    });
+  }
+  return segments;
+}
+
+function setCurveErrorUI(errEl, inputEls, message) {
+  if (!errEl) return;
+  if (message) {
+    errEl.textContent = message;
+    errEl.hidden = false;
+  } else {
+    errEl.textContent = '';
+    errEl.hidden = true;
+    inputEls.forEach((el) => el?.removeAttribute('aria-invalid'));
+  }
+}
+
+function syncDraftingCurveHud(options = {}) {
+  const hud = $('#curve-drafting-hud');
+  if (!hud) return;
+  const pts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+  if (tool.kind !== 'room' || !pts || pts.length === 0) {
+    hud.hidden = true;
+    activeDraftCurveEdge = null;
+    return;
+  }
+  hud.hidden = false;
+  const segments = getDraftCurveSegments();
+  if (!segments.length) return;
+
+  const edgeSel = $('#hud-curve-edge');
+  const radiusEl = $('#hud-curve-radius');
+  const sagittaEl = $('#hud-curve-sagitta');
+  const bulgeEl = $('#hud-curve-bulge');
+  const chordEl = $('#hud-curve-chord');
+  const errEl = $('#hud-curve-error');
+
+  let selectedSeg =
+    activeDraftCurveEdge !== null
+      ? segments.find((s) => s.edgeIndex === activeDraftCurveEdge)
+      : null;
+  if (!selectedSeg) {
+    selectedSeg = pts.length >= 2 ? segments[pts.length - 2] : segments[0];
+    activeDraftCurveEdge = selectedSeg.edgeIndex;
+  }
+
+  if (edgeSel && document.activeElement !== edgeSel) {
+    edgeSel.innerHTML = segments
+      .map((s) => {
+        const mark = Math.abs(s.bulge) > 1e-9 ? ' ⌒' : '';
+        return `<option value="${s.edgeIndex}" ${s.edgeIndex === selectedSeg.edgeIndex ? 'selected' : ''}>${esc(s.label)}${mark}</option>`;
+      })
+      .join('');
+  }
+
+  if (chordEl) {
+    chordEl.textContent = `Chord: ${formatCurveNumber(selectedSeg.chordLen, 1)}"`;
+  }
+
+  const preserveField = options.preserveField || null;
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (radiusEl && preserveField !== 'radius' && activeEl !== radiusEl) {
+    radiusEl.value = formatCurveRadiusDisplay(selectedSeg.chordLen, selectedSeg.bulge);
+  }
+  if (sagittaEl && preserveField !== 'sagitta' && activeEl !== sagittaEl) {
+    sagittaEl.value = formatCurveNumber(
+      sagittaFromBulge(selectedSeg.chordLen, selectedSeg.bulge),
+      2
+    );
+  }
+  if (bulgeEl && preserveField !== 'bulge' && activeEl !== bulgeEl) {
+    bulgeEl.value = formatCurveNumber(selectedSeg.bulge, 4);
+  }
+  if (!options.keepError) {
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+  }
+}
+
+function setupDraftingCurveHud() {
+  const edgeSel = $('#hud-curve-edge');
+  const radiusEl = $('#hud-curve-radius');
+  const sagittaEl = $('#hud-curve-sagitta');
+  const bulgeEl = $('#hud-curve-bulge');
+  const invertBtn = $('#hud-curve-invert');
+  const resetBtn = $('#hud-curve-reset');
+  const errEl = $('#hud-curve-error');
+
+  if (!edgeSel || !radiusEl || !sagittaEl || !bulgeEl) return;
+
+  edgeSel.addEventListener('change', (e) => {
+    activeDraftCurveEdge = parseInt(e.target.value, 10) || 0;
+    const curB = interaction.getEdgeBulge(activeDraftCurveEdge);
+    if (curB !== 0) draftConcavitySign = curB < 0 ? -1 : 1;
+    syncDraftingCurveHud();
+    redraw();
+  });
+
+  const handleHudFieldInput = (field, inputEl, commitNormalize = false) => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    const seg = segments.find((s) => s.edgeIndex === edgeIdx) || {
+      edgeIndex: edgeIdx,
+      chordLen: 120,
+      bulge: interaction.getEdgeBulge(edgeIdx),
+    };
+    const signHint = seg.bulge !== 0 ? seg.bulge : draftConcavitySign < 0 ? -1e-6 : 0;
+    const res = parseCurveHudInput(field, inputEl.value, seg.chordLen, signHint);
+
+    if (!res.ok) {
+      inputEl.setAttribute('aria-invalid', 'true');
+      setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], res.error);
+      return;
+    }
+
+    inputEl.removeAttribute('aria-invalid');
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    if (res.bulge !== 0) {
+      draftConcavitySign = res.bulge < 0 ? -1 : 1;
+    }
+    interaction.setEdgeBulge(edgeIdx, res.bulge);
+
+    if (commitNormalize) {
+      radiusEl.value = formatCurveRadiusDisplay(seg.chordLen, res.bulge);
+      sagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, res.bulge), 2);
+      bulgeEl.value = formatCurveNumber(res.bulge, 4);
+    } else {
+      syncDraftingCurveHud({ preserveField: field });
+    }
+    redraw();
+  };
+
+  radiusEl.addEventListener('input', () => handleHudFieldInput('radius', radiusEl, false));
+  radiusEl.addEventListener('change', () => handleHudFieldInput('radius', radiusEl, true));
+  sagittaEl.addEventListener('input', () => handleHudFieldInput('sagitta', sagittaEl, false));
+  sagittaEl.addEventListener('change', () => handleHudFieldInput('sagitta', sagittaEl, true));
+  bulgeEl.addEventListener('input', () => handleHudFieldInput('bulge', bulgeEl, false));
+  bulgeEl.addEventListener('change', () => handleHudFieldInput('bulge', bulgeEl, true));
+
+  invertBtn?.addEventListener('click', () => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    const cur = interaction.getEdgeBulge(edgeIdx);
+    draftConcavitySign = cur !== 0 ? (cur > 0 ? -1 : 1) : -draftConcavitySign;
+    if (cur !== 0) {
+      interaction.setEdgeBulge(edgeIdx, -cur);
+    }
+    const seg = segments.find((s) => s.edgeIndex === edgeIdx);
+    const nextB = interaction.getEdgeBulge(edgeIdx);
+    if (seg) {
+      radiusEl.value = formatCurveRadiusDisplay(seg.chordLen, nextB);
+      sagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, nextB), 2);
+      bulgeEl.value = formatCurveNumber(nextB, 4);
+    }
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    redraw();
+  });
+
+  resetBtn?.addEventListener('click', () => {
+    const segments = getDraftCurveSegments();
+    const edgeIdx =
+      activeDraftCurveEdge !== null ? activeDraftCurveEdge : segments[0]?.edgeIndex || 0;
+    draftConcavitySign = 1;
+    interaction.setEdgeBulge(edgeIdx, 0);
+    radiusEl.value = '';
+    sagittaEl.value = '0';
+    bulgeEl.value = '0';
+    setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
+    redraw();
+  });
+}
+
+const ALLOWED_BLUEPRINT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+  'image/svg+xml',
+]);
+const ALLOWED_BLUEPRINT_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i;
+
+export function isValidBlueprintImageFile(file) {
+  if (!file || typeof file !== 'object') return false;
+  const type = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (type) {
+    return ALLOWED_BLUEPRINT_MIME_TYPES.has(type);
+  }
+  const name = typeof file.name === 'string' ? file.name.trim() : '';
+  return ALLOWED_BLUEPRINT_EXT_RE.test(name);
+}
 
 const snappingBridge = new SnappingBridge({
   canvas,
@@ -188,7 +491,7 @@ const snappingBridge = new SnappingBridge({
   },
 });
 
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
   document.querySelectorAll('[data-view]').forEach((b) => {
     b.addEventListener('click', () => {
       if (b.dataset.view === '3d') {
@@ -476,11 +779,15 @@ export const ZOOM_ANNOUNCE_DEBOUNCE_MS = 300;
 let liveRegionTimeout = null;
 let zoomAnnounceTimeout = null;
 let a11yDebounceTimer = null;
-function announceToLiveRegion(msg) {
+export function announceToLiveRegion(msg) {
   const live3dEl = $('#view3d-a11y-live');
   if (live3dEl) live3dEl.textContent = msg;
   const liveEl = $('#plan-fallback-summary');
   if (!liveEl) return;
+  if (a11yDebounceTimer) {
+    clearTimeout(a11yDebounceTimer);
+    a11yDebounceTimer = null;
+  }
   if (liveRegionTimeout) clearTimeout(liveRegionTimeout);
   liveRegionTimeout = setTimeout(() => {
     if (a11yDebounceTimer) {
@@ -514,6 +821,13 @@ export function announceZoom(scale) {
     }
     liveEl.textContent = `Zoom level: ${Math.round((scale / 1.6) * 100)}%`;
   }, ZOOM_ANNOUNCE_DEBOUNCE_MS);
+}
+
+export function formatNumericInput(value, maxDecimals = 4) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '0';
+  const factor = 10 ** maxDecimals;
+  const rounded = Math.round((value + Number.EPSILON) * factor) / factor;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
 function persist() {
@@ -719,8 +1033,18 @@ export function renderSnapToggles() {
   bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
+function renderBlueprintDropzone(bg = doc.background) {
+  const dropzone = $('#blueprint-dropzone');
+  if (!dropzone) return;
+  const hasBg = Boolean(bg && (bg.dataUrl || bg.presetKey));
+  const is3D = Boolean(canvas && canvas.hidden);
+  dropzone.hidden = hasBg || is3D;
+  dropzone.classList?.toggle('drag-over', Boolean(isCanvasDragOver));
+}
+
 export function renderBgToolbar() {
   const bg = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : doc.background;
+  renderBlueprintDropzone(bg);
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
   if (bg && (bg.dataUrl || bg.presetKey)) {
@@ -822,7 +1146,7 @@ function refresh() {
   renderInspector();
   renderBgToolbar();
   renderDiffDrawer();
-  window.__scene3d?.update();
+  if (typeof window !== 'undefined') window.__scene3d?.update();
   const undoBtn = $('#undo');
   if (undoBtn) {
     undoBtn.disabled = !hist.canUndo();
@@ -836,17 +1160,18 @@ function refresh() {
     redoBtn.title = label ? `Redo ${label} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   }
   renderHistoryTimeline();
-  const planNameInput = $('#plan-name');
-  if (planNameInput) planNameInput.value = doc.name;
+  const planNameEl = $('#plan-name');
+  if (planNameEl) planNameEl.value = doc.name;
   const zoomLabelEl = $('#zoom-label');
   if (zoomLabelEl) zoomLabelEl.textContent = `${Math.round((view.scale / 1.6) * 100)}%`;
   redraw();
 }
 
-function apply(mutate, opts = {}) {
+export function apply(mutate, opts = {}) {
   const options = typeof opts === 'string' ? { label: opts } : opts;
   const { quiet = false, label = 'Action' } = options;
-  const r = commit(doc, mutate, { autoFix: $('#auto').checked });
+  const autoEl = $('#auto');
+  const r = commit(doc, mutate, { autoFix: autoEl ? autoEl.checked : false });
   if (!r.ok) {
     toast(
       `Blocked by building code:\n• ${[...new Set(r.reasons.map((v) => v.msg))].slice(0, 4).join('\n• ')}`,
@@ -1106,8 +1431,12 @@ export function updatePlanA11yTree(state, curLevel = 0) {
 }
 
 function redraw() {
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const state = preview ? preview.next : doc;
+  if (!ctx) {
+    updatePlanA11yTree(state, curLevel);
+    return;
+  }
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   const rep = preview ? complianceManager.getLatestReport() || evaluate(preview.next) : report;
   const bad = new Set([
     ...badIds(rep),
@@ -1140,7 +1469,29 @@ function redraw() {
   updatePlanA11yTree(state, curLevel);
 }
 
-function drawOverlay(c, _state) {
+export function drawOverlay(c, _state) {
+  if (isCanvasDragOver && c) {
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    const cw = (c.canvas?.width || 800) / dpr;
+    const ch = (c.canvas?.height || 600) / dpr;
+    const scale = view.scale || 1;
+    const inset = 14 / scale;
+    const rx = -view.ox / scale + inset;
+    const ry = -view.oy / scale + inset;
+    const rw = Math.max(0, cw / scale - inset * 2);
+    const rh = Math.max(0, ch / scale - inset * 2);
+    if (rw > 0 && rh > 0) {
+      c.save();
+      c.fillStyle = 'rgba(59, 130, 246, 0.08)';
+      c.strokeStyle = getToken('--ktheme-accent', '#2f6f5e');
+      c.lineWidth = 3 / scale;
+      c.setLineDash([8 / scale, 6 / scale]);
+      c.fillRect(rx, ry, rw, rh);
+      c.strokeRect(rx, ry, rw, rh);
+      c.restore();
+    }
+  }
+
   // highlight rooms with blocking-free but open compliance errors with a subtle marker
   for (const v of report.violations) {
     if (v.severity !== 'error' || !v.roomId || preview) continue;
@@ -1202,12 +1553,53 @@ function drawOverlay(c, _state) {
     c.beginPath();
     c.moveTo(sequentialPts[0].x, sequentialPts[0].y);
     for (let i = 1; i < sequentialPts.length; i++) {
-      c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+      const segBulge = interaction.getEdgeBulge ? interaction.getEdgeBulge(i - 1) : 0;
+      if (Math.abs(segBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[i - 1], sequentialPts[i], segBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(sequentialPts[i].x, sequentialPts[i].y);
+      }
     }
     if (hover) {
-      c.lineTo(hover.x, hover.y);
+      const lastIdx = sequentialPts.length - 1;
+      const previewBulge =
+        sequentialPts.length < 3 && interaction.getEdgeBulge
+          ? interaction.getEdgeBulge(lastIdx)
+          : 0;
+      if (Math.abs(previewBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[lastIdx], hover, previewBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(hover.x, hover.y);
+      }
     }
     c.stroke();
+
+    if (sequentialPts.length >= 3) {
+      const closeIdx = sequentialPts.length - 1;
+      const closeBulge = interaction.getEdgeBulge ? interaction.getEdgeBulge(closeIdx) : 0;
+      c.save();
+      c.setLineDash([5 / view.scale, 4 / view.scale]);
+      c.globalAlpha = 0.75;
+      c.beginPath();
+      c.moveTo(sequentialPts[closeIdx].x, sequentialPts[closeIdx].y);
+      if (Math.abs(closeBulge) > 1e-9) {
+        const arcPts = tessellateArc(sequentialPts[closeIdx], sequentialPts[0], closeBulge, 24);
+        for (let k = 1; k < arcPts.length; k++) {
+          c.lineTo(arcPts[k].x, arcPts[k].y);
+        }
+      } else {
+        c.lineTo(sequentialPts[0].x, sequentialPts[0].y);
+      }
+      c.stroke();
+      c.restore();
+    }
+
     for (const pt of sequentialPts) {
       c.beginPath();
       c.arc(pt.x, pt.y, 4 / view.scale, 0, Math.PI * 2);
@@ -1401,6 +1793,7 @@ export function renderViolationItem(v) {
 // ------------------------------------------------------------- compliance + inspector panels
 function renderCompliance() {
   const el = $('#compliance');
+  if (!el) return;
   const errs = report.violations.filter((v) => v.severity === 'error');
   const warns = report.violations.filter((v) => v.severity !== 'error');
   const sqft = doc.rooms.reduce((a, r) => a + floorAreaSqFt(r), 0);
@@ -1455,7 +1848,7 @@ function focus(id) {
   redraw();
 }
 
-function select(target, { toggle = false, append = false } = {}) {
+export function select(target, { toggle = false, append = false } = {}) {
   if (!target) {
     if (!toggle && !append) selectionSet.clear();
   } else if (typeof target === 'string') {
@@ -1492,7 +1885,11 @@ function select(target, { toggle = false, append = false } = {}) {
   redraw();
 }
 
-function renderInspector() {
+export function getDoc() {
+  return doc;
+}
+
+export function renderInspector() {
   const el = $('#inspector');
   if (!el) return;
   const selectedList = getSelectionList();
@@ -1653,10 +2050,11 @@ function renderInspector() {
   }
   const { room, kind, obj } = hit;
   if (kind === 'room') {
-    if (!window.__activeUVWall) window.__activeUVWall = 'N';
-    if (!window.__activeAssemblyScope) window.__activeAssemblyScope = 'single';
-    const activeWall = window.__activeUVWall;
-    const activeAssemblyScope = window.__activeAssemblyScope;
+    const win = typeof window !== 'undefined' ? window : globalThis;
+    if (!win.__activeUVWall) win.__activeUVWall = 'N';
+    if (!win.__activeAssemblyScope) win.__activeAssemblyScope = 'single';
+    const activeWall = win.__activeUVWall;
+    const activeAssemblyScope = win.__activeAssemblyScope;
     const uv = M.getWallUV(room, activeWall);
     const wallFinishId = room.walls?.[activeWall] || 'paint_white';
     let activeExtFinId = room.cladding || room.exteriorCladding;
@@ -1677,6 +2075,20 @@ function renderInspector() {
         ? `Custom Texture (${wallFinishId.slice(0, 10)})`
         : wallFinishId;
 
+    const roomPts = getRoomPoints(room);
+    const curveWallKeys =
+      roomPts.length === 4 ? ['N', 'E', 'S', 'W'] : roomPts.map((_, idx) => String(idx));
+    if (!win.__activeCurveWall || !curveWallKeys.includes(String(win.__activeCurveWall))) {
+      const firstCurved = curveWallKeys.find((wk) => Math.abs(M.getWallBulge(room, wk)) > 1e-9);
+      win.__activeCurveWall = firstCurved || curveWallKeys[0];
+    }
+    const activeCurveWall = win.__activeCurveWall;
+    const curveSeg = getWallEdgeSegment(room, activeCurveWall);
+    const curBulge = curveSeg.bulge;
+    const curChord = curveSeg.chordLen;
+    const curSagitta = sagittaFromBulge(curChord, curBulge);
+    const curRadiusStr = formatCurveRadiusDisplay(curChord, curBulge);
+
     el.innerHTML = `<h3>${esc(room.name)}</h3>
       ${formRow('i-name', 'Name', `<input id="i-name" value="${esc(room.name)}">`)}
       ${formRow(
@@ -1692,16 +2104,59 @@ function renderInspector() {
       ${formRow('i-w', 'Width (ft)', `<input id="i-w" type="number" step="0.5" min="${(clampRoomWidth(room, 0) / 12).toFixed(2)}" value="${(room.w / 12).toFixed(1)}">`)}
       ${formRow('i-h', 'Depth (ft)', `<input id="i-h" type="number" step="0.5" min="${(clampRoomDepth(room, 0) / 12).toFixed(2)}" value="${(room.h / 12).toFixed(1)}">`)}
       ${formRow('i-ceil', 'Ceiling (in)', `<input id="i-ceil" type="number" step="2" value="${room.ceiling}">`)}
+      ${formRow('i-pos-x', 'Position X (in)', `<input id="i-pos-x" type="number" step="any" value="${formatNumericInput(room.x)}">`)}
+      ${formRow('i-pos-y', 'Position Y (in)', `<input id="i-pos-y" type="number" step="any" value="${formatNumericInput(room.y)}">`)}
+      <div class="curve-inspector-group">
+        <div class="curve-inspector-head">
+          <h4>Parametric Wall Curve</h4>
+          <span id="i-curve-chord" class="curve-chord-badge">Chord: ${formatCurveNumber(curChord, 1)}"</span>
+        </div>
+        ${formRow(
+          'i-curve-wall',
+          'Wall Segment',
+          `<select id="i-curve-wall">${curveWallKeys
+            .map((wk, idx) => {
+              const wb = M.getWallBulge(room, wk);
+              const tag = Math.abs(wb) > 1e-9 ? ' ⌒' : '';
+              const label =
+                roomPts.length === 4
+                  ? `${{ N: 'North (N)', E: 'East (E)', S: 'South (S)', W: 'West (W)' }[wk]}${tag}`
+                  : `Wall ${idx + 1}${tag}`;
+              return `<option value="${wk}" ${String(wk) === String(activeCurveWall) ? 'selected' : ''}>${label}</option>`;
+            })
+            .join('')}</select>`
+        )}
+        ${formRow(
+          'i-curve-radius',
+          'Arc Radius (in)',
+          `<input id="i-curve-radius" type="text" inputmode="decimal" placeholder="∞ (Linear)" value="${esc(curRadiusStr)}" autocomplete="off">`
+        )}
+        ${formRow(
+          'i-curve-sagitta',
+          'Sagitta (in)',
+          `<input id="i-curve-sagitta" type="number" step="0.5" value="${formatCurveNumber(curSagitta, 2)}">`
+        )}
+        ${formRow(
+          'i-curve-bulge',
+          'Bulge Factor',
+          `<input id="i-curve-bulge" type="number" step="0.05" value="${formatCurveNumber(curBulge, 4)}">`
+        )}
+        <div class="btns curve-inspector-actions">
+          <button type="button" id="i-curve-invert" title="Invert curve concavity">⇄ Invert Concavity</button>
+          <button type="button" id="i-curve-reset" title="Reset wall to linear (zero bulge)">Linear Wall</button>
+        </div>
+        <div id="i-curve-error" class="curve-input-error" role="alert" aria-live="assertive" hidden></div>
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
-        <div style="font-size:0.75rem;margin-bottom:2px">Position X (${room.x}")</div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position X (${formatNumericInput(room.x)}")</div>
         <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-6" style="flex:1;padding:3px">-6"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="-1" style="flex:1;padding:3px">-1"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="1" style="flex:1;padding:3px">+1"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-x" data-step="6" style="flex:1;padding:3px">+6"</button>
         </div>
-        <div style="font-size:0.75rem;margin-bottom:2px">Position Y (${room.y}")</div>
+        <div style="font-size:0.75rem;margin-bottom:2px">Position Y (${formatNumericInput(room.y)}")</div>
         <div class="row" style="margin-bottom:6px;display:flex;gap:4px">
           <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-6" style="flex:1;padding:3px">-6"</button>
           <button type="button" class="i-nudge-btn" data-target="pos-y" data-step="-1" style="flex:1;padding:3px">-1"</button>
@@ -1902,6 +2357,48 @@ function renderInspector() {
         roomOf(n, room.id).ceiling = Number(e.target.value);
       }, 'Change Ceiling Height')
     );
+    const applyExactRoomPosition = (axis, rawValue, inputEl) => {
+      const existingPolygons = levelRooms()
+        .filter((r) => r.id !== room.id)
+        .map((r) => roomToPolygon(r));
+      const entity = {
+        id: room.id,
+        position: { x: room.x, y: room.y },
+        polygon: roomToPolygon(room),
+      };
+      const rawX = axis === 'x' ? rawValue : room.x;
+      const rawY = axis === 'y' ? rawValue : room.y;
+      const posRes = interaction.setEntityPosition(
+        entity,
+        { x: rawX, y: rawY },
+        { existingPolygons }
+      );
+      const nextX = posRes.position.x;
+      const nextY = posRes.position.y;
+      if (nextX === room.x && nextY === room.y) {
+        if (inputEl) inputEl.value = formatNumericInput(axis === 'x' ? room.x : room.y);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, room.id);
+        if (targetHit) {
+          M.setItemPosition(n, targetHit, nextX + targetHit.obj.w / 2, nextY + targetHit.obj.h / 2);
+        }
+      }, 'Set Room Position');
+      if (r.ok) {
+        announceToLiveRegion(
+          `${room.name} position set to X ${formatNumericInput(nextX)}", Y ${formatNumericInput(nextY)}".`
+        );
+      } else {
+        renderInspector();
+      }
+    };
+    $('#i-pos-x')?.addEventListener('change', (e) =>
+      applyExactRoomPosition('x', e.target.value, e.target)
+    );
+    $('#i-pos-y')?.addEventListener('change', (e) =>
+      applyExactRoomPosition('y', e.target.value, e.target)
+    );
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, room.id), 'Delete Room');
       select(null);
@@ -1948,8 +2445,121 @@ function renderInspector() {
     });
 
     $('#i-uv-wall')?.addEventListener('change', (e) => {
-      window.__activeUVWall = e.target.value;
+      win.__activeUVWall = e.target.value;
       renderInspector();
+    });
+
+    const iCurveWallEl = $('#i-curve-wall');
+    const iCurveRadiusEl = $('#i-curve-radius');
+    const iCurveSagittaEl = $('#i-curve-sagitta');
+    const iCurveBulgeEl = $('#i-curve-bulge');
+    const iCurveErrEl = $('#i-curve-error');
+
+    iCurveWallEl?.addEventListener('change', (e) => {
+      win.__activeCurveWall = e.target.value;
+      const wb = M.getWallBulge(roomOf(doc, room.id), win.__activeCurveWall);
+      if (wb !== 0) inspectorConcavitySign = wb < 0 ? -1 : 1;
+      renderInspector();
+      redraw();
+    });
+
+    const handleInspectorCurveEdit = (field, inputEl, commitChange = false) => {
+      const latestRoom = roomOf(doc, room.id);
+      if (!latestRoom) return;
+      const wallId = win.__activeCurveWall || activeCurveWall;
+      const seg = getWallEdgeSegment(latestRoom, wallId);
+      const signHint = seg.bulge !== 0 ? seg.bulge : inspectorConcavitySign < 0 ? -1e-6 : 0;
+      const res = parseCurveHudInput(field, inputEl.value, seg.chordLen, signHint);
+
+      if (!res.ok) {
+        inputEl.setAttribute('aria-invalid', 'true');
+        setCurveErrorUI(iCurveErrEl, [iCurveRadiusEl, iCurveSagittaEl, iCurveBulgeEl], res.error);
+        preview = null;
+        redraw();
+        return;
+      }
+
+      inputEl.removeAttribute('aria-invalid');
+      setCurveErrorUI(iCurveErrEl, [iCurveRadiusEl, iCurveSagittaEl, iCurveBulgeEl], null);
+      if (res.bulge !== 0) {
+        inspectorConcavitySign = res.bulge < 0 ? -1 : 1;
+      }
+
+      if (commitChange) {
+        preview = null;
+        apply(
+          (n) => {
+            const r = roomOf(n, room.id);
+            M.setWallBulge(r, wallId, res.bulge, n);
+          },
+          { quiet: true, label: 'Update Wall Curve' }
+        );
+      } else {
+        if (iCurveRadiusEl && field !== 'radius') {
+          iCurveRadiusEl.value = formatCurveRadiusDisplay(seg.chordLen, res.bulge);
+        }
+        if (iCurveSagittaEl && field !== 'sagitta') {
+          iCurveSagittaEl.value = formatCurveNumber(sagittaFromBulge(seg.chordLen, res.bulge), 2);
+        }
+        if (iCurveBulgeEl && field !== 'bulge') {
+          iCurveBulgeEl.value = formatCurveNumber(res.bulge, 4);
+        }
+        preview = tryPreview((n) => {
+          const r = roomOf(n, room.id);
+          M.setWallBulge(r, wallId, res.bulge, n);
+        });
+        redraw();
+      }
+    };
+
+    iCurveRadiusEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('radius', iCurveRadiusEl, false)
+    );
+    iCurveRadiusEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('radius', iCurveRadiusEl, true)
+    );
+    iCurveSagittaEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('sagitta', iCurveSagittaEl, false)
+    );
+    iCurveSagittaEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('sagitta', iCurveSagittaEl, true)
+    );
+    iCurveBulgeEl?.addEventListener('input', () =>
+      handleInspectorCurveEdit('bulge', iCurveBulgeEl, false)
+    );
+    iCurveBulgeEl?.addEventListener('change', () =>
+      handleInspectorCurveEdit('bulge', iCurveBulgeEl, true)
+    );
+
+    $('#i-curve-invert')?.addEventListener('click', () => {
+      const latestRoom = roomOf(doc, room.id);
+      if (!latestRoom) return;
+      const wallId = win.__activeCurveWall || activeCurveWall;
+      const wb = M.getWallBulge(latestRoom, wallId);
+      inspectorConcavitySign = wb !== 0 ? (wb > 0 ? -1 : 1) : -inspectorConcavitySign;
+      if (wb !== 0) {
+        preview = null;
+        apply(
+          (n) => {
+            const r = roomOf(n, room.id);
+            M.setWallBulge(r, wallId, -wb, n);
+          },
+          { quiet: true, label: 'Invert Wall Curve' }
+        );
+      }
+    });
+
+    $('#i-curve-reset')?.addEventListener('click', () => {
+      const wallId = win.__activeCurveWall || activeCurveWall;
+      inspectorConcavitySign = 1;
+      preview = null;
+      apply(
+        (n) => {
+          const r = roomOf(n, room.id);
+          M.setWallBulge(r, wallId, 0, n);
+        },
+        { quiet: true, label: 'Reset Wall Curve' }
+      );
     });
 
     $('#i-custom-tex-btn')?.addEventListener('click', () => {
@@ -1964,12 +2574,12 @@ function renderInspector() {
         await saveTextureBlob(texId, file, { name: file.name, mimeType: file.type });
         apply((n) => {
           const r = roomOf(n, room.id);
-          if (r) r.walls[window.__activeUVWall || 'N'] = texId;
+          if (r) r.walls[win.__activeUVWall || 'N'] = texId;
         }, 'Upload Wall Texture');
         toast(`Uploaded custom texture: ${file.name}`);
         renderInspector();
         redraw();
-        window.__scene3d?.render?.();
+        win.__scene3d?.render?.();
       } catch (err) {
         toast(`Failed to save texture: ${err.message}`, true);
       }
@@ -1997,13 +2607,13 @@ function renderInspector() {
           M.applyWallUV(
             n,
             { scaleU, scaleV, rotation, offsetU, offsetV },
-            { scope, room: r, wall: window.__activeUVWall || 'N', level: r?.level || 0 }
+            { scope, room: r, wall: win.__activeUVWall || 'N', level: r?.level || 0 }
           );
         },
         { quiet: true, label: 'Update Wall UV' }
       );
       redraw();
-      window.__scene3d?.render?.();
+      win.__scene3d?.render?.();
     };
 
     const bindPair = (rangeId, numId) => {
@@ -2033,13 +2643,13 @@ function renderInspector() {
         M.applyWallUV(n, M.DEFAULT_UV_TRANSFORM, {
           scope,
           room: r,
-          wall: window.__activeUVWall || 'N',
+          wall: win.__activeUVWall || 'N',
           level: r?.level || 0,
         });
       }, 'Reset Wall UV');
       renderInspector();
       redraw();
-      window.__scene3d?.render?.();
+      win.__scene3d?.render?.();
     });
 
     const readAssemblyInputs = () => {
@@ -2070,8 +2680,8 @@ function renderInspector() {
 
     const commitAssemblyUpdate = () => {
       const { clamped, scope } = readAssemblyInputs();
-      window.__activeAssemblyScope = scope;
-      const targetWall = window.__activeUVWall || 'N';
+      win.__activeAssemblyScope = scope;
+      const targetWall = win.__activeUVWall || 'N';
       apply((n) => {
         const r = roomOf(n, room.id);
         M.applyWallAssemblyOverrides(n, clamped, {
@@ -2095,11 +2705,11 @@ function renderInspector() {
       );
       const totalInches = fmtInches(updatedAssembly.totalThickness);
       redraw();
-      window.__scene3d?.update?.();
-      window.__scene3d?.render?.();
+      win.__scene3d?.update?.();
+      win.__scene3d?.render?.();
       const msg = `${updatedRoom.name} ${targetWall} wall assembly updated to ${totalInches} inches total thickness.`;
       announceToLiveRegion(msg);
-      window.__scene3d?.announce3DStateChange?.(msg);
+      win.__scene3d?.announce3DStateChange?.(msg);
     };
 
     ['#i-wa-gypsum', '#i-wa-stud', '#i-wa-sheathing', '#i-wa-airgap', '#i-wa-cladding'].forEach(
@@ -2112,13 +2722,13 @@ function renderInspector() {
     );
 
     $('#i-wa-scope')?.addEventListener('change', (e) => {
-      window.__activeAssemblyScope = e.target.value || 'single';
+      win.__activeAssemblyScope = e.target.value || 'single';
     });
 
     $('#i-wa-reset')?.addEventListener('click', () => {
       const scope = $('#i-wa-scope')?.value || 'single';
-      window.__activeAssemblyScope = scope;
-      const targetWall = window.__activeUVWall || 'N';
+      win.__activeAssemblyScope = scope;
+      const targetWall = win.__activeUVWall || 'N';
       apply((n) => {
         const r = roomOf(n, room.id);
         M.applyWallAssemblyOverrides(n, null, {
@@ -2139,11 +2749,11 @@ function renderInspector() {
       const totalInches = fmtInches(defaultAssembly.totalThickness);
       renderInspector();
       redraw();
-      window.__scene3d?.update?.();
-      window.__scene3d?.render?.();
+      win.__scene3d?.update?.();
+      win.__scene3d?.render?.();
       const msg = `${updatedRoom.name} ${targetWall} wall assembly reset to default ${totalInches} inches total thickness.`;
       announceToLiveRegion(msg);
-      window.__scene3d?.announce3DStateChange?.(msg);
+      win.__scene3d?.announce3DStateChange?.(msg);
     });
 
     const handleBuildingPresetApply = (scope) => {
@@ -2175,11 +2785,59 @@ function renderInspector() {
     const doorStyle = kind === 'opening' && def.kind === 'door' ? resolveDoorStyle(obj) : null;
     const winPresets = getWindowPresets();
     const doorPresets = getDoorPresets();
+    const elemBounds = M.getBounds(doc, obj.id);
+    const posX =
+      kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+        ? obj.x
+        : (elemBounds?.cx ?? 0);
+    const posY =
+      kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+        ? obj.y
+        : (elemBounds?.cy ?? 0);
+    const itemRotDeg = kind === 'item' ? (obj.rot ?? 0) : 0;
+    const itemScaleVal =
+      kind === 'item'
+        ? typeof obj.scale === 'number' && Number.isFinite(obj.scale)
+          ? obj.scale
+          : Number.isFinite(obj.scale?.x)
+            ? obj.scale.x
+            : 1
+        : 1;
 
     el.innerHTML = `<h3>${esc(def.name)}</h3><p class="note" style="margin:0 0 6px">in ${esc(room.name)}</p><div class="btns">
       ${kind === 'item' && def.mount === 'floor' ? '<button id="i-rot">Rotate 90° (R)</button>' : ''}
       ${kind === 'opening' && def.kind === 'door' ? '<button id="i-swing">Flip swing</button>' : ''}
       <button id="i-del">Delete</button></div>
+      <div class="exact-transform-group" style="margin-top:10px">
+        ${formRow(
+          'i-item-pos-x',
+          'Position X (in)',
+          `<input id="i-item-pos-x" type="number" step="any" value="${formatNumericInput(posX)}">`
+        )}
+        ${formRow(
+          'i-item-pos-y',
+          'Position Y (in)',
+          `<input id="i-item-pos-y" type="number" step="any" value="${formatNumericInput(posY)}">`
+        )}
+        ${
+          kind === 'item' && def.mount !== 'wall'
+            ? formRow(
+                'i-item-rot',
+                'Angle (°)',
+                `<input id="i-item-rot" type="number" step="1" min="-360" max="360" value="${formatNumericInput(itemRotDeg)}">`
+              )
+            : ''
+        }
+        ${
+          kind === 'item'
+            ? formRow(
+                'i-item-scale',
+                'Scale',
+                `<input id="i-item-scale" type="number" step="0.05" min="0.05" value="${formatNumericInput(itemScaleVal)}">`
+              )
+            : ''
+        }
+      </div>
       <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.03);border:1px solid var(--border,#ddd);border-radius:6px">
         <h4 style="margin:0 0 6px;font-size:0.85rem;font-weight:600">Single-Pointer Step Nudge</h4>
         <div style="font-size:0.75rem;margin-bottom:2px">Position X</div>
@@ -2431,6 +3089,123 @@ function renderInspector() {
     $('#i-del').addEventListener('click', () => {
       apply((n) => M.removeById(n, obj.id), 'Delete Element');
       select(null);
+    });
+
+    const getOtherFloorItemPolygons = () => {
+      const polygons = [];
+      for (const rm of levelRooms()) {
+        for (const other of rm.items) {
+          if (other.id === obj.id) continue;
+          const oDef = ITEM_BY_ID[other.type];
+          if (oDef && oDef.mount === 'floor' && !oDef.flat) {
+            polygons.push(itemToPolygon(other, oDef));
+          }
+        }
+      }
+      return polygons;
+    };
+
+    const applyExactElementPosition = (axis, rawValue, inputEl) => {
+      const existingPolygons = kind === 'item' ? getOtherFloorItemPolygons() : [];
+      const entity = {
+        id: obj.id,
+        position: { x: posX, y: posY },
+        polygon: kind === 'item' && def.mount === 'floor' ? itemToPolygon(obj, def) : undefined,
+      };
+      const rawX = axis === 'x' ? rawValue : posX;
+      const rawY = axis === 'y' ? rawValue : posY;
+      const posRes = interaction.setEntityPosition(
+        entity,
+        { x: rawX, y: rawY },
+        { existingPolygons }
+      );
+      const nextX = posRes.position.x;
+      const nextY = posRes.position.y;
+      if (nextX === posX && nextY === posY) {
+        if (inputEl) inputEl.value = formatNumericInput(axis === 'x' ? posX : posY);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, obj.id);
+        if (targetHit) {
+          M.setItemPosition(n, targetHit, nextX, nextY);
+        }
+      }, 'Set Element Position');
+      if (r.ok) {
+        const updatedHit = M.findOwner(doc, obj.id);
+        const updatedBounds = M.getBounds(doc, obj.id);
+        const finalX =
+          updatedHit?.kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+            ? updatedHit.obj.x
+            : (updatedBounds?.cx ?? nextX);
+        const finalY =
+          updatedHit?.kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
+            ? updatedHit.obj.y
+            : (updatedBounds?.cy ?? nextY);
+        announceToLiveRegion(
+          `${def.name} position set to X ${formatNumericInput(finalX)}", Y ${formatNumericInput(finalY)}".`
+        );
+      } else {
+        renderInspector();
+      }
+    };
+
+    $('#i-item-pos-x')?.addEventListener('change', (e) =>
+      applyExactElementPosition('x', e.target.value, e.target)
+    );
+    $('#i-item-pos-y')?.addEventListener('change', (e) =>
+      applyExactElementPosition('y', e.target.value, e.target)
+    );
+
+    $('#i-item-rot')?.addEventListener('change', (e) => {
+      const existingPolygons = getOtherFloorItemPolygons();
+      const entity = {
+        id: obj.id,
+        position: { x: posX, y: posY },
+        rot: itemRotDeg,
+        rotation: (itemRotDeg * Math.PI) / 180,
+        polygon: def.mount === 'floor' ? itemToPolygon(obj, def) : undefined,
+      };
+      const rotRes = interaction.setEntityRotation(entity, e.target.value, { existingPolygons });
+      const nextRot = rotRes.rotationDegrees;
+      if (nextRot === itemRotDeg) {
+        e.target.value = formatNumericInput(itemRotDeg);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, obj.id);
+        if (targetHit) targetHit.obj.rot = nextRot;
+      }, 'Set Item Rotation');
+      if (r.ok) {
+        announceToLiveRegion(`${def.name} rotated to ${formatNumericInput(nextRot)} degrees.`);
+      } else {
+        renderInspector();
+      }
+    });
+
+    $('#i-item-scale')?.addEventListener('change', (e) => {
+      const existingPolygons = getOtherFloorItemPolygons();
+      const entity = {
+        id: obj.id,
+        position: { x: posX, y: posY },
+        scale: { x: itemScaleVal, y: itemScaleVal, z: itemScaleVal },
+        polygon: def.mount === 'floor' ? itemToPolygon(obj, def) : undefined,
+      };
+      const scaleRes = interaction.setEntityScale(entity, e.target.value, { existingPolygons });
+      const nextScale = scaleRes.scale.x;
+      if (nextScale === itemScaleVal) {
+        e.target.value = formatNumericInput(itemScaleVal);
+        return;
+      }
+      const r = apply((n) => {
+        const targetHit = M.findOwner(n, obj.id);
+        if (targetHit) targetHit.obj.scale = nextScale;
+      }, 'Set Item Scale');
+      if (r.ok) {
+        announceToLiveRegion(`${def.name} scaled to ${formatNumericInput(nextScale)}x.`);
+      } else {
+        renderInspector();
+      }
     });
 
     el.querySelectorAll('.i-item-nudge-btn').forEach((btn) => {
@@ -3235,10 +4010,17 @@ const HINTS = {
 };
 
 function setTool(t) {
+  const prevKind = tool?.kind;
   tool = t;
   preview = null;
   drag = null;
   if (t.kind !== 'calibrate') calibPoints = [];
+  if (t.kind !== 'room' && prevKind === 'room') {
+    if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+    const btnClose = $('#btn-close-room');
+    if (btnClose) btnClose.hidden = true;
+  }
+  syncDraftingCurveHud();
   document
     .querySelectorAll('#toolbar [data-tool]')
     .forEach((b) => b.classList.toggle('on', b.dataset.tool === t.kind));
@@ -3342,7 +4124,21 @@ canvas?.addEventListener('pointerdown', (e) => {
         break;
       }
       if (!isSelected(id)) {
+        const preHit = M.findOwner(doc, id);
+        if (preHit && preHit.kind === 'room') {
+          const nw = nearestWall(p, 18, preHit.room);
+          if (nw) window.__activeCurveWall = nw.wall;
+        }
         select(id);
+      } else {
+        const preHit = M.findOwner(doc, id);
+        if (preHit && preHit.kind === 'room') {
+          const nw = nearestWall(p, 18, preHit.room);
+          if (nw && window.__activeCurveWall !== nw.wall) {
+            window.__activeCurveWall = nw.wall;
+            renderInspector();
+          }
+        }
       }
       const hit = M.findOwner(doc, id);
       if (hit.kind === 'item') {
@@ -3663,6 +4459,9 @@ canvas?.addEventListener('pointermove', (e) => {
     return;
   }
   updatePreview();
+  if (tool.kind === 'room' && interaction.getCornerCount && interaction.getCornerCount() > 0) {
+    syncDraftingCurveHud({ keepError: true });
+  }
 
   // Hover violation tooltip detection
   if (p) {
@@ -3714,9 +4513,12 @@ function handleCloseRoom() {
     toast('At least 3 corners are required to close a room.', true);
     return;
   }
-  const closeRes = interaction.closeRoom({ existingRooms: levelRooms() });
+  const closeRes = interaction.closeRoom({
+    existingRooms: levelRooms().map(roomToPolygon),
+  });
   if (closeRes.ok && closeRes.room?.corners) {
     const pts = closeRes.room.corners;
+    const roomBulges = closeRes.room.bulges;
     const minX = Math.min(...pts.map((pt) => pt.x));
     const maxX = Math.max(...pts.map((pt) => pt.x));
     const minY = Math.min(...pts.map((pt) => pt.y));
@@ -3725,16 +4527,29 @@ function handleCloseRoom() {
     const h = Math.max(24, maxY - minY);
     const x = minX;
     const y = minY;
-    const r = apply((n) => M.addRoom(n, x, y, w, h, 'living', { level: curLevel }), 'Close Room');
+    const roomType = tool.kind === 'room' && tool.type ? tool.type : 'living';
+    let createdId = null;
+    const r = apply((n) => {
+      const created = M.addRoom(n, x, y, w, h, roomType, {
+        level: curLevel,
+        points: pts,
+        bulges: roomBulges,
+      });
+      createdId = created.id;
+    }, 'Close Room');
     if (r.ok) {
       announceToLiveRegion(
-        `Living room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
+        `${ROOM_TYPES[roomType]?.name || 'Living'} room closed and created at (${Math.round(x)}", ${Math.round(y)}") with dimensions ${Math.round(w)}" × ${Math.round(h)}".`
       );
       interaction.resetRoomDrawing();
+      activeDraftCurveEdge = null;
+      draftConcavitySign = 1;
+      syncDraftingCurveHud();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
       if (hint) hint.textContent = '';
+      if (createdId) select(createdId);
       redraw();
     }
   } else {
@@ -3851,8 +4666,13 @@ canvas?.addEventListener('pointerup', () => {
       if (!r.ok) select(null);
     } else {
       const p = hover || { x: d.x0, y: d.y0 };
-      interaction.addRoomCorner(p, { existingRooms: levelRooms() });
+      interaction.addRoomCorner(p, {
+        edges: extractRoomEdges(levelRooms()),
+        existingRooms: levelRooms().map(roomToPolygon),
+      });
       const count = interaction.getCornerCount();
+      activeDraftCurveEdge = count >= 2 ? count - 2 : 0;
+      syncDraftingCurveHud();
       const hint = $('#tool-hint');
       if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
       const btnClose = $('#btn-close-room');
@@ -3977,6 +4797,87 @@ canvas?.addEventListener(
   { passive: false }
 );
 
+function isFileDragEvent(e) {
+  const dt = e?.dataTransfer;
+  if (!dt) return true;
+  if (dt.files && dt.files.length > 0) return true;
+  if (dt.types && typeof dt.types.length === 'number' && dt.types.length > 0) {
+    return Array.from(dt.types).includes('Files');
+  }
+  return true;
+}
+
+function handleCanvasDragEnter(e) {
+  if (!isFileDragEvent(e)) return;
+  e.preventDefault();
+  canvasDragDepth++;
+  if (!isCanvasDragOver) {
+    isCanvasDragOver = true;
+    renderBlueprintDropzone();
+    redraw();
+  }
+}
+
+function handleCanvasDragOver(e) {
+  if (!isFileDragEvent(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy';
+  }
+  if (!isCanvasDragOver) {
+    isCanvasDragOver = true;
+    renderBlueprintDropzone();
+    redraw();
+  }
+}
+
+function handleCanvasDragLeave(e) {
+  e.preventDefault();
+  canvasDragDepth = Math.max(0, canvasDragDepth - 1);
+  if (canvasDragDepth === 0 && isCanvasDragOver) {
+    isCanvasDragOver = false;
+    renderBlueprintDropzone();
+    redraw();
+  }
+}
+
+function handleCanvasDrop(e) {
+  e.preventDefault();
+  canvasDragDepth = 0;
+  isCanvasDragOver = false;
+  drag = null;
+  preview = null;
+  renderBlueprintDropzone();
+
+  const files = e?.dataTransfer?.files;
+  if (!files || files.length === 0) {
+    redraw();
+    return;
+  }
+
+  const file = files[0];
+  if (!isValidBlueprintImageFile(file)) {
+    const msg = 'Unsupported file type. Please drop a PNG, JPG, or WebP blueprint image.';
+    toast(msg, true);
+    announceToLiveRegion(msg);
+    redraw();
+    return;
+  }
+
+  const importer =
+    typeof window !== 'undefined' && typeof window.__homegen?.handleBlueprintImport === 'function'
+      ? window.__homegen.handleBlueprintImport
+      : handleBlueprintImport;
+  importer(file);
+}
+
+for (const dropTarget of [canvas, $('#blueprint-dropzone')]) {
+  dropTarget?.addEventListener('dragenter', handleCanvasDragEnter);
+  dropTarget?.addEventListener('dragover', handleCanvasDragOver);
+  dropTarget?.addEventListener('dragleave', handleCanvasDragLeave);
+  dropTarget?.addEventListener('drop', handleCanvasDrop);
+}
+
 export function zoomAt(mx, my, f) {
   const ns = Math.max(0.4, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
@@ -4011,11 +4912,12 @@ export function fit() {
 }
 
 // ------------------------------------------------------------- toolbar / keyboard / file
-function setDoc(next, label) {
+export function setDoc(next, label) {
   doc = next;
   hist.push(doc, label);
   persist();
   curLevel = 0;
+  selectionSet.clear();
   selection = null;
   autoFixDiffs = [];
   hoveredDiffIndex = null;
@@ -4034,10 +4936,17 @@ let activeHistoryPopoverCleanup = null;
 export function trapFocus(containerEl, returnFocusEl) {
   if (!containerEl) return () => {};
   const focusableSelector =
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    'button, [href], input, select, textarea, k-button, k-input, k-select, k-tab, [tabindex]:not([tabindex="-1"])';
   const getVisibleFocusables = () =>
     Array.from(containerEl.querySelectorAll(focusableSelector)).filter((el) => {
-      if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
+      if (
+        el.disabled ||
+        el.hidden ||
+        el.hasAttribute?.('disabled') ||
+        el.hasAttribute?.('hidden')
+      ) {
+        return false;
+      }
       if (typeof el.closest === 'function') {
         const hiddenAncestor = el.closest('[hidden]');
         if (hiddenAncestor && hiddenAncestor !== containerEl) return false;
@@ -4483,8 +5392,34 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
 }
 
 $('#load')?.addEventListener('click', () => $('#file').click());
+function updateElevationIntervalLabel(unit) {
+  const lbl = $('#elevation-contour-interval-label');
+  if (lbl) {
+    lbl.textContent = `Contour Interval (${normalizeElevationUnit(unit)})`;
+  }
+}
+
+function syncElevationDialog(grid) {
+  const unit = normalizeElevationUnit(grid?.elevationUnit);
+  const unitEl = $('#elevation-unit');
+  const intervalEl = $('#elevation-contour-interval');
+  const scaleEl = $('#elevation-vertical-scale');
+  const visibleEl = $('#elevation-visible');
+
+  if (unitEl) unitEl.value = unit;
+  if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
+  if (scaleEl) scaleEl.value = String(grid?.verticalScale ?? 1.0);
+  if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
+  updateElevationIntervalLabel(unit);
+}
+
+$('#elevation-unit')?.addEventListener('change', (e) => {
+  updateElevationIntervalLabel(e.target.value);
+});
+
 $('#import-elevation')?.addEventListener('click', () => {
   if (doc.elevationGrid) {
+    syncElevationDialog(doc.elevationGrid);
     $('#dlg-elevation')?.showModal();
   } else {
     $('#elevation-file')?.click();
@@ -4523,11 +5458,14 @@ $('#elevation-file')?.addEventListener('change', async (e) => {
       inputData = c;
     }
 
-    const grid = await parseElevationRaster(inputData);
+    const selectedUnit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
+    const grid = await parseElevationRaster(inputData, { elevationUnit: selectedUnit });
     doc.elevationGrid = grid;
     doc._cachedContours = await computeContoursAsync(grid);
+    syncElevationDialog(grid);
     window.__scene3d?.update();
     redraw();
+    persist();
     toast(`Imported terrain elevation grid (${grid.width}x${grid.height}).`);
   } catch (err) {
     toast(`Failed to import elevation data: ${err.message}`, true);
@@ -4539,15 +5477,19 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
   if (!doc.elevationGrid) return;
   const interval = parseFloat($('#elevation-contour-interval')?.value || '1.0');
   const scale = parseFloat($('#elevation-vertical-scale')?.value || '1.0');
+  const unit = normalizeElevationUnit($('#elevation-unit')?.value || 'm');
   const visible = $('#elevation-visible')?.checked !== false;
 
   doc.elevationGrid.contourInterval = interval;
   doc.elevationGrid.verticalScale = scale;
+  doc.elevationGrid.elevationUnit = unit;
   doc.elevationGrid.visible = visible;
+  updateElevationIntervalLabel(unit);
 
   doc._cachedContours = await computeContoursAsync(doc.elevationGrid);
   window.__scene3d?.update();
   redraw();
+  persist();
   $('#dlg-elevation')?.close();
   toast('Updated elevation terrain settings.');
 });
@@ -4555,8 +5497,10 @@ $('#btn-apply-elevation')?.addEventListener('click', async () => {
 $('#btn-clear-elevation')?.addEventListener('click', () => {
   doc.elevationGrid = null;
   doc._cachedContours = null;
+  syncElevationDialog(null);
   window.__scene3d?.update();
   redraw();
+  persist();
   $('#dlg-elevation')?.close();
   toast('Cleared terrain elevation data.');
 });
@@ -4886,6 +5830,7 @@ $('#export-pdf')?.addEventListener('click', (e) => {
         levelSelect.appendChild(opt);
       }
     }
+    levelSelect.value = 'all';
   }
   const sessionBox = $('#pdf-session-branding-box');
   if (sessionBox) sessionBox.hidden = $('#pdf-branding-mode')?.value !== 'session';
@@ -5035,6 +5980,7 @@ $('#export-dxf')?.addEventListener('click', (e) => {
           lvlSelect.innerHTML += `<option value="${i}">Level ${i + 1}</option>`;
         }
       }
+      lvlSelect.value = 'all';
     }
     initExportModalTierState(dlg);
     bindUpgradeTriggerLinks(dlg);
@@ -5165,12 +6111,24 @@ if (typeof document !== 'undefined') {
       document.querySelectorAll('.branding-tabs .tab-btn').forEach((b) => {
         const active = b === e.currentTarget;
         b.classList.toggle('on', active);
+        if (typeof b.active !== 'undefined') b.active = active;
+        else if (active) b.setAttribute('active', '');
+        else b.removeAttribute('active');
         b.setAttribute('aria-selected', active ? 'true' : 'false');
       });
       document.querySelectorAll('.bsection').forEach((s) => {
         s.hidden = s.id !== `bsection-${sec}`;
       });
     });
+  });
+
+  document.addEventListener?.('click', (e) => {
+    const lbl = e.target?.closest?.('label[for]');
+    if (!lbl || typeof document.getElementById !== 'function') return;
+    const target = document.getElementById(lbl.getAttribute('for'));
+    if (target && (target.tagName === 'K-INPUT' || target.tagName === 'K-SELECT')) {
+      target.focus();
+    }
   });
 
   [
@@ -5410,6 +6368,7 @@ function renderGISSegments() {
     input.addEventListener('change', handleSetbackChange);
   });
 }
+
 $('#report')?.addEventListener('click', () =>
   download(
     `${doc.name.replace(/\W+/g, '_') || 'plan'}-code-report.md`,
@@ -5588,10 +6547,11 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   }
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   initCommandPaletteUI();
   initShortcutOverlayUI();
   setupAddRoomDimsModal();
+  setupDraftingCurveHud();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
   window.addEventListener('keydown', (e) => {
@@ -5624,13 +6584,18 @@ if (typeof window !== 'undefined') {
     )
       return;
 
-    if (k === '?') {
-      e.preventDefault();
-      const shortcutDlg = $('#shortcut-overlay');
-      if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
-        closeShortcutOverlay();
-      } else {
-        openShortcutOverlay();
+    const singleKeyDisabled = isSingleKeyShortcutDisabled();
+    const hasCmdModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
+
+    if (k === '?' && !hasCmdModifier) {
+      if (!singleKeyDisabled) {
+        e.preventDefault();
+        const shortcutDlg = $('#shortcut-overlay');
+        if (shortcutDlg && (shortcutDlg.open || shortcutDlg.hasAttribute('open'))) {
+          closeShortcutOverlay();
+        } else {
+          openShortcutOverlay();
+        }
       }
       return;
     }
@@ -5659,8 +6624,7 @@ if (typeof window !== 'undefined') {
     } else if ((e.ctrlKey || e.metaKey) && lk === 'y') {
       e.preventDefault();
       $('#redo').click();
-    } else if (lk === 'r') rotateSelected();
-    else if (lk === 'escape') {
+    } else if (lk === 'escape') {
       const historyPopover = $('#history-popover');
       const hasOpenHistory = Boolean(historyPopover && !historyPopover.hidden);
       if (toast._state?.active && !selection && tool.kind === 'select' && !hasOpenHistory) {
@@ -5669,6 +6633,9 @@ if (typeof window !== 'undefined') {
         return;
       }
       if (interaction.resetRoomDrawing) interaction.resetRoomDrawing();
+      activeDraftCurveEdge = null;
+      draftConcavitySign = 1;
+      syncDraftingCurveHud();
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = true;
       const hint = $('#tool-hint');
@@ -5694,11 +6661,14 @@ if (typeof window !== 'undefined') {
         select(null);
         toast(`Deleted ${label || 'selected element(s)'}`, false, 2000);
       }
-    } else if (lk === 'v') setTool({ kind: 'select' });
-    else if (lk === 'x') setTool({ kind: 'erase' });
-    else if (lk === 'i') setTool({ kind: 'eyedropper' });
-    else if (k === '+' || k === '=') $('#zoom-in')?.click();
-    else if (k === '-') $('#zoom-out')?.click();
+    } else if (!singleKeyDisabled && !hasCmdModifier) {
+      if (lk === 'r') rotateSelected();
+      else if (lk === 'v') setTool({ kind: 'select' });
+      else if (lk === 'x') setTool({ kind: 'erase' });
+      else if (lk === 'i') setTool({ kind: 'eyedropper' });
+      else if (k === '+' || k === '=') $('#zoom-in')?.click();
+      else if (k === '-') $('#zoom-out')?.click();
+    }
   });
 
   window.addEventListener('resize', resize);
@@ -5974,6 +6944,7 @@ $('#gis-map-preset')?.addEventListener('change', (e) => {
 });
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
+$('#blueprint-dropzone-btn')?.addEventListener('click', () => $('#blueprint-file')?.click());
 $('#blueprint-file')?.addEventListener('change', (e) => {
   handleBlueprintImport(e.target.files[0]);
   e.target.value = '';
@@ -6596,6 +7567,7 @@ export function filterShortcuts(query = '') {
 export function openShortcutOverlay() {
   const dlg = $('#shortcut-overlay');
   if (!dlg) return;
+  syncShortcutToggleUI(isSingleKeyShortcutDisabled());
   const searchInput =
     $('#shortcut-search') ||
     (typeof dlg.querySelector === 'function' ? dlg.querySelector('#shortcut-search') : null);
@@ -6761,6 +7733,14 @@ function initCommandPaletteUI() {
 }
 
 function initShortcutOverlayUI() {
+  const toggleEl = $('#disable-single-key-shortcuts');
+  if (toggleEl) {
+    syncShortcutToggleUI(isSingleKeyShortcutDisabled());
+    toggleEl.addEventListener?.('change', (e) => {
+      const next = Boolean(e?.target ? e.target.checked : toggleEl.checked);
+      setSingleKeyShortcutDisabled(next);
+    });
+  }
   const dlg = $('#shortcut-overlay');
   const searchInput =
     $('#shortcut-search') ||
@@ -6788,8 +7768,13 @@ if (typeof window !== 'undefined')
     dismissToast,
     setLevel,
     formRow,
+    formatNumericInput,
+    renderInspector,
     get doc() {
       return doc;
+    },
+    get tool() {
+      return tool;
     },
     get report() {
       return report;
@@ -6808,11 +7793,22 @@ if (typeof window !== 'undefined')
     moveSelectedSpatial,
     getSpatialElements,
     interaction,
+    syncDraftingCurveHud,
+    parseCurveHudInput,
+    bulgeFromRadius,
+    radiusFromBulge,
+    bulgeFromSagitta,
+    sagittaFromBulge,
     renderSnapToggles,
     generatePDF,
     applyCalibration,
     apply3PointCalibration,
     handleBlueprintImport,
+    isValidBlueprintImageFile,
+    drawOverlay,
+    get isCanvasDragOver() {
+      return isCanvasDragOver;
+    },
     solveAffineTransform,
     parseWorldfile,
     computeGeoBounds,
@@ -6830,6 +7826,9 @@ if (typeof window !== 'undefined')
     closeCommandPalette,
     openShortcutOverlay,
     closeShortcutOverlay,
+    SINGLE_KEY_SHORTCUTS_KEY,
+    isSingleKeyShortcutDisabled,
+    setSingleKeyShortcutDisabled,
     filterShortcuts,
     renderCommandList,
     trapFocus,

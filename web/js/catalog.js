@@ -130,7 +130,18 @@ export function openingMetrics(def) {
     const operable = def.glass ? (def.w / 2 - 2) * (def.h - 4) : 0;
     return { glaze, operable, clearW: def.glass ? def.w / 2 - 2 : def.clear, clearH: def.h - 2 };
   }
-  const glaze = def.w * def.h;
+  const fw = 1.6;
+  const mw = 0.75;
+  const innerW = Math.max(0, (def.w || 0) - 2 * fw);
+  const innerH = Math.max(0, (def.h || 0) - 2 * fw);
+  const railArea = def.style === 'hung' ? innerW * fw : def.style === 'slider' ? innerH * fw : 0;
+  const cols = Math.max(1, Number(def.mullions?.cols) || 1);
+  const rows = Math.max(1, Number(def.mullions?.rows) || 1);
+  const mullionW = Math.min(innerW, (cols - 1) * mw);
+  const mullionH = Math.min(innerH, (rows - 1) * mw);
+  const mullionArea = mullionW * innerH + mullionH * innerW - mullionW * mullionH;
+  const netGlaze = innerW * innerH - railArea - mullionArea;
+  const glaze = Math.max(0, netGlaze);
   let clearW;
   let clearH;
   switch (def.style) {
