@@ -4,7 +4,8 @@ import { getToken as defaultGetToken } from '../../web/js/kthemeTokens.js';
 import { formatFractionalInches } from '../../web/js/dimensionFormatter.js';
 
 /**
- * Format length in inches to feet/inches string (e.g. 144 -> 12' 0").
+ * Format length in inches to architectural feet/inches string with 1/16" precision
+ * (e.g. 144 -> 12' 0", 126.5 -> 10' 6 1/2", 6.125 -> 6 1/8").
  */
 export function fmtLenInches(inches) {
   return formatFractionalInches(inches, { includeZeroInches: true });

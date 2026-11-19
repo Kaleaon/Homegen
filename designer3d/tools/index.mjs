@@ -1,7 +1,12 @@
 import { InteractionLayer } from './interactionLayer.mjs';
 import { createGridSettings, DEFAULT_GRID_SETTINGS, quantize } from './gridSettings.mjs';
 import { SNAP_MODES, SnapModeState } from './snapModes.mjs';
-import { TransformGizmo } from './transformGizmos.mjs';
+import {
+  TransformGizmo,
+  parseCoordinateInput,
+  normalizeRotationDegrees,
+  clampPositionToBounds,
+} from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback } from './collision.mjs';
 import {
@@ -60,6 +65,9 @@ export {
   SNAP_MODES,
   SnapModeState,
   TransformGizmo,
+  parseCoordinateInput,
+  normalizeRotationDegrees,
+  clampPositionToBounds,
   RoomDrawingTool,
   validatePlacement,
   createPlacementFeedback,
