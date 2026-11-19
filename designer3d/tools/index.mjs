@@ -1,4 +1,9 @@
-import { InteractionLayer } from './interactionLayer.mjs';
+import {
+  InteractionLayer,
+  parseExplicitLengthInches,
+  computeVectorAngle,
+  computeVertexFromAngle,
+} from './interactionLayer.mjs';
 import { createGridSettings, DEFAULT_GRID_SETTINGS, quantize } from './gridSettings.mjs';
 import { SNAP_MODES, SnapModeState } from './snapModes.mjs';
 import {
@@ -59,6 +64,9 @@ import {
 
 export {
   InteractionLayer,
+  parseExplicitLengthInches,
+  computeVectorAngle,
+  computeVertexFromAngle,
   createGridSettings,
   DEFAULT_GRID_SETTINGS,
   quantize,

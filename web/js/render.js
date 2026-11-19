@@ -308,7 +308,7 @@ export function draw(ctx, state, view, opts = {}) {
   if (opts.selection) drawSelection(ctx, state, opts.selection, view);
   if (opts.autoFixDiffs && opts.autoFixDiffs.length)
     drawDiffHighlights(ctx, state, opts.autoFixDiffs, view, opts);
-  if (opts.complianceScene) drawComplianceScene(ctx, opts.complianceScene, view);
+  if (opts.complianceScene) drawComplianceScene(ctx, opts.complianceScene, view, opts);
   if (opts.snapResult) drawSnapGuides(ctx, opts.snapResult, view);
   else if (opts.snappingBridge?.getActiveSnap())
     drawSnapGuides(ctx, opts.snappingBridge.getActiveSnap(), view);
@@ -1033,7 +1033,7 @@ export function drawSpatialReferenceOverlay(ctx, state, view, opts = {}) {
   if (typeof ctx.restore === 'function') ctx.restore();
 }
 
-function drawComplianceScene(ctx, complianceScene, view) {
+function drawComplianceScene(ctx, complianceScene, view, opts = {}) {
   if (!complianceScene) return;
   const nodes = complianceScene.getNodes();
 
@@ -1219,7 +1219,35 @@ function drawComplianceScene(ctx, complianceScene, view) {
         ctx.stroke();
       }
       ctx.restore();
+    } else if (node.type === 'wallDimensionLabel') {
+      if (opts.activeHudNodeId && opts.activeHudNodeId === node.id) continue;
+      const d = node.data;
+      ctx.save();
+      const fs = Math.max(8, Math.min(11, 10 / view.scale));
+      ctx.font = `600 ${fs}px ${getToken('--font-family-mono', 'monospace')}`;
+      const label = d.dimensionText;
+      const tw = ctx.measureText(label).width + 10 / view.scale;
+      const boxH = fs * 1.75;
+      const mx = d.midX ?? node.bounds.x + node.bounds.w / 2;
+      const my = d.midY ?? node.bounds.y + node.bounds.h / 2;
+      ctx.fillStyle = d.isValid ? getToken('--ktheme-bg-elevated') : getToken('--ktheme-critical');
+      ctx.strokeStyle = d.isValid ? getToken('--ktheme-accent') : getToken('--ktheme-critical');
+      ctx.lineWidth = 1.2 / view.scale;
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(mx - tw / 2, my - boxH / 2, tw, boxH, 3 / view.scale);
+      } else {
+        ctx.rect(mx - tw / 2, my - boxH / 2, tw, boxH);
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = getToken('--ktheme-on-error');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, mx, my);
+      ctx.restore();
     } else if (node.type === 'dimensionLabel') {
+      if (opts.activeHudNodeId && opts.activeHudNodeId === node.id) continue;
       const b = node.bounds;
       const d = node.data;
       ctx.save();

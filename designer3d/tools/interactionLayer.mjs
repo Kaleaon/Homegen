@@ -4,12 +4,19 @@ import { TransformGizmo, clampPositionToBounds } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
 import { validatePlacement, createPlacementFeedback, invalidateBoundingBox } from './collision.mjs';
 import {
+  parseExplicitLengthInches,
+  computeVectorAngle,
+  computeVertexFromAngle,
+} from './math2d.mjs';
+import {
   getConstraintHandles,
   resizeRoomWithConstraints,
   validateRoomDimensions,
   fmtDimensionText,
   fmtAngleDegrees,
 } from './constraintHandles.mjs';
+
+export { parseExplicitLengthInches, computeVectorAngle, computeVertexFromAngle };
 
 export class InteractionLayer {
   constructor(options = {}) {
@@ -143,6 +150,20 @@ export class InteractionLayer {
     if (!entity) throw new Error('scaleEntity3D: entity is required');
     if (!pointerPoint3D) throw new Error('scaleEntity3D: pointerPoint3D is required');
     return this.transformGizmo.scale3D(entity, pointerPoint3D, context);
+  }
+
+  parseExplicitLengthInches(input) {
+    return parseExplicitLengthInches(input);
+  }
+
+  computeVectorAngle(anchor, targetPoint) {
+    if (!anchor) throw new Error('computeVectorAngle: anchor is required');
+    if (!targetPoint) throw new Error('computeVectorAngle: targetPoint is required');
+    return computeVectorAngle(anchor, targetPoint);
+  }
+
+  computeVertexFromAngle(anchor, angleRadians, lengthInches) {
+    return computeVertexFromAngle(anchor, angleRadians, lengthInches);
   }
 
   setEntityPosition(entity, positionOrX, yOrContext = {}, maybeContext = {}) {
@@ -280,10 +301,24 @@ export class InteractionLayer {
     return this.roomTool.addCorner(rawPoint, context);
   }
 
-  previewRoom(rawPoint, context = {}) {
+  addRoomCornerWithLength(rawPoint, explicitLength, context = {}) {
+    if (!rawPoint) throw new Error('addRoomCornerWithLength: rawPoint is required');
+    if (!context) throw new Error('addRoomCornerWithLength: context is required');
+    return this.roomTool.addCornerWithLength(rawPoint, explicitLength, context);
+  }
+
+  previewRoom(rawPoint, lengthOrContext = {}, maybeContext = {}) {
     if (!rawPoint) throw new Error('previewRoom: rawPoint is required');
-    if (!context) throw new Error('previewRoom: context is required');
-    return this.roomTool.preview(rawPoint, context);
+    if (
+      typeof lengthOrContext === 'number' ||
+      typeof lengthOrContext === 'string' ||
+      lengthOrContext === null
+    ) {
+      if (!maybeContext) throw new Error('previewRoom: context is required');
+      return this.roomTool.preview(rawPoint, lengthOrContext, maybeContext);
+    }
+    if (!lengthOrContext) throw new Error('previewRoom: context is required');
+    return this.roomTool.preview(rawPoint, lengthOrContext);
   }
 
   closeRoom(context = {}) {

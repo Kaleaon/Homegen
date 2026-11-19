@@ -1098,3 +1098,173 @@
   opacity: 0.6;
   padding: 0 2px;
 }
+
+/* 16. Floating Wall Length HUD Input Overlay */
+.wall-length-hud {
+  position: absolute;
+  z-index: 18;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.wall-length-hud[hidden] {
+  display: none !important;
+}
+
+.wall-length-hud__row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--overlay-bg-hud);
+  border: 1.5px solid var(--ktheme-accent);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--overlay-shadow);
+  padding: 3px 6px;
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+}
+
+.wall-length-hud.is-passive {
+  pointer-events: none;
+}
+
+.wall-length-hud.is-passive .wall-length-hud__row {
+  border-color: var(--overlay-border);
+}
+
+.wall-length-hud.is-invalid .wall-length-hud__row {
+  border-color: var(--ktheme-critical);
+}
+
+.wall-length-hud__input {
+  width: 82px;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm, 12px);
+  font-weight: 600;
+  text-align: center;
+}
+
+.wall-length-hud__input:focus-visible {
+  outline: 2px solid var(--ktheme-accent);
+  outline-offset: 1px;
+}
+
+.wall-length-hud.is-invalid .wall-length-hud__input:focus-visible {
+  outline-color: var(--ktheme-critical);
+}
+
+.wall-length-hud__hint {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 11px);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-bg-elevated, rgba(255, 255, 255, 0.1));
+  color: var(--overlay-color);
+  user-select: none;
+}
+
+.wall-length-hud__error {
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-critical);
+  color: var(--ktheme-on-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  text-align: center;
+  box-shadow: var(--overlay-shadow);
+}
+
+.wall-length-hud__error[hidden] {
+  display: none !important;
+}
+
+/* 17. Inspector Per-Wall Segment Length Editor */
+.wall-segment-editor {
+  margin-top: 10px;
+  padding: 8px;
+  background: var(--ktheme-bg-muted, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-sm);
+}
+
+.wall-segment-editor__title {
+  margin: 0 0 6px;
+  font-size: var(--font-size-sm, 13px);
+  font-weight: 600;
+  color: var(--ktheme-text);
+}
+
+.wall-segment-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs, 12px);
+}
+
+.wall-segment-table th {
+  text-align: left;
+  padding: 4px;
+  font-weight: 600;
+  color: var(--ktheme-text-muted);
+  border-bottom: 1px solid var(--overlay-border);
+}
+
+.wall-segment-table td {
+  padding: 4px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--overlay-border);
+}
+
+.wall-segment-table__fmt {
+  font-family: var(--font-family-mono);
+  color: var(--ktheme-text-muted);
+  white-space: nowrap;
+}
+
+.i-wall-len-input {
+  width: 78px;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 2px 6px;
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-bg-surface);
+  color: var(--ktheme-text);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 12px);
+}
+
+.i-wall-len-input:focus-visible {
+  outline: 2px solid var(--ktheme-accent);
+  outline-offset: 1px;
+}
+
+.i-wall-len-input.is-invalid {
+  border-color: var(--ktheme-critical);
+}
+
+.wall-segment-editor__error {
+  margin-top: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-critical);
+  color: var(--ktheme-on-primary);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+}
+
+.wall-segment-editor__error[hidden] {
+  display: none !important;
+}
