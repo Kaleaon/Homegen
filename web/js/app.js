@@ -65,7 +65,15 @@ import {
   clampRoomDepth,
   clampRoomDimensions,
 } from './codes.js';
-import { draw, drawItem, handles, fmtLen } from './render.js';
+import {
+  draw,
+  drawItem,
+  handles,
+  fmtLen,
+  computeOpeningOffsetHUD,
+  drawOpeningOffsetHUD,
+  hitTestOpeningHUD,
+} from './render.js';
 import { patternFor, clearPatternCache } from './patterns.js';
 import {
   registerCustomWallFinish,
@@ -100,6 +108,8 @@ import {
   parseCoordinateInput,
   normalizeRotationDegrees,
   buildGridSettingsViewModel,
+  parseExplicitAngleDegrees,
+  fmtAngleDegrees,
 } from '../../designer3d/tools/index.mjs';
 import { generatePDF } from './pdfEngine.js';
 import { generateBOMCSV } from './bomExporter.js';
@@ -173,12 +183,14 @@ const interaction = new InteractionLayer({
     edgeThreshold: 14,
     midpointThreshold: 14,
     perpendicularThreshold: 14,
+    explicitAngleDegrees: null,
   },
   snapModes: {
     grid: true,
     edge: true,
     midpoint: false,
     perpendicular: false,
+    angle: true,
   },
 });
 
@@ -235,11 +247,15 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+let activeHandleIndex = 0;
 let isCanvasDragOver = false;
 let canvasDragDepth = 0;
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
+let openingUnitMode = M.normalizeOpeningUnit(doc?.settings?.openingUnits || 'ft-in');
+let hoveredOpeningHudSide = null;
+let activeHudEdit = null;
 let distSpacingInput = '';
 let distSpacingType = 'center';
 let activeDraftCurveEdge = null;
@@ -505,7 +521,8 @@ const snappingBridge = new SnappingBridge({
   toWorld: (e) => toWorld(e),
   view,
   getViewScale: () => view.scale,
-  onSnap: () => {
+  onSnap: (snapState) => {
+    updateWallAngleHudReadout(snapState);
     redraw();
   },
 });
@@ -514,6 +531,7 @@ if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'fun
   document.querySelectorAll('[data-view]').forEach((b) => {
     b.addEventListener('click', () => {
       if (b.dataset.view === '3d') {
+        closeOpeningHudEditor();
         snappingBridge.detach();
       } else {
         snappingBridge.attach(canvas);
@@ -1059,6 +1077,190 @@ function persist() {
   }
 }
 
+export function getOpeningUnitMode() {
+  return M.normalizeOpeningUnit(doc?.settings?.openingUnits || openingUnitMode || 'ft-in');
+}
+
+export function setOpeningUnitMode(nextUnit) {
+  const normalized = M.normalizeOpeningUnit(nextUnit);
+  openingUnitMode = normalized;
+  doc.settings ||= {};
+  doc.settings.openingUnits = normalized;
+  persist();
+  const unitBtn = $('#opening-hud-unit-btn');
+  if (unitBtn) {
+    unitBtn.textContent = normalized === 'in' ? 'in"' : 'ft\' in"';
+  }
+  renderInspector();
+  redraw();
+  return normalized;
+}
+
+export function commitOpeningOffsetInput(openingId, rawValue, side = 'offset') {
+  const hit = M.findOwner(doc, openingId);
+  if (!hit || hit.kind !== 'opening') {
+    return { ok: false, reason: 'not-found' };
+  }
+  const unit = getOpeningUnitMode();
+  const parsed = M.parseOpeningOffset(rawValue, unit);
+  if (parsed === null) {
+    toast('Enter a valid offset distance (e.g. 3\' 6" or 42").', true, 2800);
+    renderInspector();
+    redraw();
+    return { ok: false, reason: 'invalid-number' };
+  }
+
+  const { room, obj } = hit;
+  const width = obj.width ?? OPENING_BY_ID[obj.type]?.w ?? 0;
+  const len = wallLength(room, obj.wall);
+  const maxOffset = Math.max(0, len - width);
+  const clampedInput = M.clampOpeningOffset(room, obj.wall, parsed, width);
+  const targetOffset = side === 'corner' ? Math.max(0, maxOffset - clampedInput) : clampedInput;
+
+  if (M.hasOpeningOverlap(doc, room, obj.wall, targetOffset, width, obj.id, 0)) {
+    toast('Cannot place opening there: overlaps another opening on this wall.', true, 3200);
+    renderInspector();
+    redraw();
+    return { ok: false, reason: 'overlap' };
+  }
+
+  const actionLabel =
+    side === 'corner' ? 'Update Opening Corner Distance' : 'Update Opening Offset';
+  const res = apply((n) => {
+    M.setOpeningOffset(n, openingId, targetOffset);
+  }, actionLabel);
+
+  if (!res.ok) {
+    renderInspector();
+    redraw();
+    return { ok: false, reason: 'blocked', report: res };
+  }
+
+  const updatedHit = M.findOwner(doc, openingId);
+  const finalOffset = updatedHit?.obj?.offset ?? targetOffset;
+  const finalCorner = updatedHit
+    ? M.getOpeningCornerDistance(updatedHit.room, updatedHit.obj)
+    : Math.max(0, maxOffset - finalOffset);
+
+  announceToLiveRegion(
+    `Opening offset set to ${M.formatOpeningOffset(finalOffset, unit)} (corner distance ${M.formatOpeningOffset(finalCorner, unit)}).`
+  );
+  return { ok: true, offset: finalOffset, cornerDistance: finalCorner };
+}
+
+function syncOpeningHudPosition() {
+  if (!activeHudEdit) return;
+  const hudEl = $('#opening-offset-hud');
+  if (!hudEl) return;
+  const levelState = { ...doc, rooms: levelRooms() };
+  const hud = computeOpeningOffsetHUD(levelState, selection, view, {
+    openingUnits: getOpeningUnitMode(),
+  });
+  if (!hud || hud.opening.id !== activeHudEdit.openingId) {
+    activeHudEdit = null;
+    hudEl.hidden = true;
+    return;
+  }
+  const lbl = activeHudEdit.side === 'corner' ? hud.cornerLabel : hud.offsetLabel;
+  const stageRect = $('#stage')?.getBoundingClientRect?.();
+  const canvasRect = canvas?.getBoundingClientRect?.();
+  const offsetX = stageRect && canvasRect ? canvasRect.left - stageRect.left : 0;
+  const offsetY = stageRect && canvasRect ? canvasRect.top - stageRect.top : 0;
+
+  let left = offsetX + lbl.screenCenter.x;
+  let top = offsetY + lbl.screenCenter.y;
+  if (stageRect && stageRect.width > 0 && stageRect.height > 0) {
+    left = Math.max(135, Math.min(stageRect.width - 135, left));
+    top = Math.max(58, Math.min(stageRect.height - 28, top));
+  }
+  if (hudEl.style) {
+    hudEl.style.left = `${Math.round(left)}px`;
+    hudEl.style.top = `${Math.round(top)}px`;
+  }
+}
+
+export function openOpeningHudEditor(openingId, side = 'offset') {
+  const hudEl = $('#opening-offset-hud');
+  const inputEl = $('#opening-hud-input');
+  const labelEl = $('#opening-hud-label');
+  const unitBtn = $('#opening-hud-unit-btn');
+  const hit = M.findOwner(doc, openingId);
+  if (!hit || hit.kind !== 'opening' || !hudEl || !inputEl) return false;
+
+  activeHudEdit = { openingId, side };
+  const unit = getOpeningUnitMode();
+  const currentVal =
+    side === 'corner'
+      ? M.getOpeningCornerDistance(hit.room, hit.obj)
+      : M.clampOpeningOffset(hit.room, hit.obj.wall, hit.obj.offset, hit.obj.width);
+
+  if (labelEl) labelEl.textContent = side === 'corner' ? 'Corner Distance' : 'Wall Offset';
+  if (unitBtn) unitBtn.textContent = unit === 'in' ? 'in"' : 'ft\' in"';
+  inputEl.value = M.formatOpeningOffset(currentVal, unit);
+  hudEl.hidden = false;
+  syncOpeningHudPosition();
+  redraw();
+  inputEl.focus?.();
+  inputEl.select?.();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      if (activeHudEdit && activeHudEdit.openingId === openingId) {
+        inputEl.focus?.();
+        inputEl.select?.();
+      }
+    });
+  }
+  return true;
+}
+
+export function closeOpeningHudEditor({ restoreFocus = false } = {}) {
+  const wasOpen = Boolean(activeHudEdit);
+  activeHudEdit = null;
+  const hudEl = $('#opening-offset-hud');
+  if (hudEl) hudEl.hidden = true;
+  if (wasOpen) redraw();
+  if (restoreFocus && canvas?.focus) canvas.focus();
+}
+
+function initOpeningHudUI() {
+  const hudEl = $('#opening-offset-hud');
+  if (!hudEl) return;
+
+  hudEl.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!activeHudEdit) return;
+    const { openingId, side } = activeHudEdit;
+    const rawVal = $('#opening-hud-input')?.value ?? '';
+    closeOpeningHudEditor({ restoreFocus: true });
+    commitOpeningOffsetInput(openingId, rawVal, side);
+  });
+
+  $('#opening-hud-cancel-btn')?.addEventListener('click', () => {
+    closeOpeningHudEditor({ restoreFocus: true });
+  });
+
+  $('#opening-hud-unit-btn')?.addEventListener('click', () => {
+    const prevUnit = getOpeningUnitMode();
+    const nextUnit = prevUnit === 'in' ? 'ft-in' : 'in';
+    const inputEl = $('#opening-hud-input');
+    const parsed = inputEl ? M.parseOpeningOffset(inputEl.value, prevUnit) : null;
+    setOpeningUnitMode(nextUnit);
+    if (inputEl && parsed !== null) {
+      inputEl.value = M.formatOpeningOffset(Math.max(0, parsed), nextUnit);
+      inputEl.focus?.();
+      inputEl.select?.();
+    }
+  });
+
+  hudEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeOpeningHudEditor({ restoreFocus: true });
+    }
+  });
+}
+
 function is3DViewActive() {
   if (view3d && typeof view3d.isThree === 'function' && view3d.isThree()) {
     return true;
@@ -1370,6 +1572,7 @@ function refresh() {
   renderInspector();
   renderBgToolbar();
   renderDiffDrawer();
+  updateWallAngleHud();
   if (typeof window !== 'undefined') window.__scene3d?.update();
   view3d?.syncOverlay?.();
   const undoBtn = $('#undo');
@@ -1685,12 +1888,16 @@ function redraw() {
       bad,
       selection,
       hover,
+      openingUnits: getOpeningUnitMode(),
+      hoveredOpeningHudSide,
+      activeOpeningHudSide: activeHudEdit?.side || null,
       under: curLevel > 0 ? state.rooms.filter((r) => (r.level || 0) === curLevel - 1) : [],
       autoFixDiffs: preview ? [] : autoFixDiffs,
       hoveredDiffIndex,
       overlay: (c) => drawOverlay(c, state),
     });
   }
+  if (activeHudEdit) syncOpeningHudPosition();
   updatePlanA11yTree(state, curLevel);
 }
 
@@ -1789,18 +1996,20 @@ export function drawOverlay(c, _state) {
       }
     }
     if (hover) {
+      const activeSnap = snappingBridge.getActiveSnap();
+      const previewTip = preview?.feedback?.point || activeSnap?.point || hover;
       const lastIdx = sequentialPts.length - 1;
       const previewBulge =
         sequentialPts.length < 3 && interaction.getEdgeBulge
           ? interaction.getEdgeBulge(lastIdx)
           : 0;
       if (Math.abs(previewBulge) > 1e-9) {
-        const arcPts = tessellateArc(sequentialPts[lastIdx], hover, previewBulge, 24);
+        const arcPts = tessellateArc(sequentialPts[lastIdx], previewTip, previewBulge, 24);
         for (let k = 1; k < arcPts.length; k++) {
           c.lineTo(arcPts[k].x, arcPts[k].y);
         }
       } else {
-        c.lineTo(hover.x, hover.y);
+        c.lineTo(previewTip.x, previewTip.y);
       }
     }
     c.stroke();
@@ -1884,7 +2093,7 @@ export function drawOverlay(c, _state) {
     const nw = nearestWall(targetP) || nearestWall(hover);
     if (nw) {
       const def = OPENING_BY_ID[tool.id];
-      const offset = Math.max(0, nw.t - def.w / 2);
+      const offset = M.clampOpeningOffset(nw.room, nw.wall, nw.t - def.w / 2, def.w);
       const a = wallPoint(nw.room, nw.wall, offset, 0);
       const b = wallPoint(nw.room, nw.wall, offset + def.w, 0);
       c.save();
@@ -2106,7 +2315,12 @@ export function select(target, { toggle = false, append = false } = {}) {
         ? Array.from(selectionSet)[0]
         : new Set(selectionSet);
 
+  if (activeHudEdit && selection !== activeHudEdit.openingId) {
+    closeOpeningHudEditor();
+  }
+
   renderInspector();
+  updateWallAngleHud();
   redraw();
   view3d?.syncSelection?.(typeof selection === 'string' ? selection : null);
 }
@@ -3093,6 +3307,12 @@ export function renderInspector() {
     const doorStyle = kind === 'opening' && def.kind === 'door' ? resolveDoorStyle(obj) : null;
     const winPresets = getWindowPresets();
     const doorPresets = getDoorPresets();
+    const openUnit = kind === 'opening' ? getOpeningUnitMode() : 'ft-in';
+    const openWallLen = kind === 'opening' ? wallLength(room, obj.wall) : 0;
+    const openMaxOffset = kind === 'opening' ? Math.max(0, openWallLen - obj.width) : 0;
+    const openClampedOffset =
+      kind === 'opening' ? M.clampOpeningOffset(room, obj.wall, obj.offset, obj.width) : 0;
+    const openCornerDist = kind === 'opening' ? M.getOpeningCornerDistance(room, obj) : 0;
     const elemBounds = M.getBounds(doc, obj.id);
     const posX =
       kind === 'item' && (def.mount === 'floor' || def.mount === 'ceiling')
@@ -3184,7 +3404,7 @@ export function renderInspector() {
       </div>
       ${
         kind === 'opening'
-          ? formRow(
+          ? `${formRow(
               'i-otype',
               'Style',
               `<select id="i-otype">${OPENINGS.filter((o) => o.kind === def.kind)
@@ -3193,7 +3413,25 @@ export function renderInspector() {
                     `<option value="${o.id}" ${o.id === obj.type ? 'selected' : ''}>${o.name}</option>`
                 )
                 .join('')}</select>`
-            )
+            )}
+            <hr style="margin:14px 0 10px;border:none;border-top:1px solid var(--border,#ccc)">
+            <h4 style="margin:0 0 8px;font-size:0.9rem;font-weight:600">Wall Placement &amp; Offset</h4>
+            ${formRow(
+              'i-open-units',
+              'Offset Units',
+              `<select id="i-open-units"><option value="ft-in" ${openUnit === 'ft-in' ? 'selected' : ''}>Feet &amp; Inches (ft&#39; in&quot;)</option><option value="in" ${openUnit === 'in' ? 'selected' : ''}>Inches (in&quot;)</option></select>`
+            )}
+            ${formRow(
+              'i-open-offset',
+              'Wall Offset',
+              `<input id="i-open-offset" type="text" inputmode="decimal" data-min="0" data-max="${openMaxOffset}" value="${esc(M.formatOpeningOffset(openClampedOffset, openUnit))}">`
+            )}
+            ${formRow(
+              'i-open-corner',
+              'Corner Distance',
+              `<input id="i-open-corner" type="text" inputmode="decimal" data-min="0" data-max="${openMaxOffset}" value="${esc(M.formatOpeningOffset(openCornerDist, openUnit))}">`
+            )}
+            <p class="note" style="margin:4px 0 8px">${esc(obj.wall)} wall (${esc(M.formatOpeningOffset(openWallLen, openUnit))}) · max offset ${esc(M.formatOpeningOffset(openMaxOffset, openUnit))}</p>`
           : ''
       }
       ${
@@ -3318,12 +3556,25 @@ export function renderInspector() {
     );
     $('#i-otype')?.addEventListener('change', (e) =>
       apply((n) => {
-        const o = M.findOwner(n, obj.id).obj;
+        const ownerHit = M.findOwner(n, obj.id);
+        const o = ownerHit.obj;
         const nd = OPENING_BY_ID[e.target.value];
         o.type = nd.id;
         o.width = nd.w;
+        o.offset = M.clampOpeningOffset(ownerHit.room, o.wall, o.offset, o.width);
       }, 'Change Opening Type')
     );
+    if (kind === 'opening') {
+      $('#i-open-units')?.addEventListener('change', (e) => {
+        setOpeningUnitMode(e.target.value);
+      });
+      $('#i-open-offset')?.addEventListener('change', (e) => {
+        commitOpeningOffsetInput(obj.id, e.target.value, 'offset');
+      });
+      $('#i-open-corner')?.addEventListener('change', (e) => {
+        commitOpeningOffsetInput(obj.id, e.target.value, 'corner');
+      });
+    }
     if (kind === 'opening' && def.kind === 'window') {
       $('#i-win-preset')?.addEventListener('change', (e) =>
         apply((n) => {
@@ -3785,11 +4036,10 @@ function moveSelectedSpatial(dx, dy, customStep = null) {
     const def = OPENING_BY_ID[obj.type];
     const step = customStep ?? 6;
     const deltaOffset = (dx !== 0 ? dx : dy) * step;
-    const newOffset = Math.max(0, obj.offset + deltaOffset);
+    const newOffset = M.clampOpeningOffset(room, obj.wall, obj.offset + deltaOffset, obj.width);
     const r = apply((n) => {
-      const o = M.findOwner(n, selection).obj;
-      o.offset = newOffset;
-    });
+      M.setOpeningOffset(n, selection, newOffset);
+    }, 'Move Opening');
     if (r.ok) {
       toast(`Moved ${def.name} along ${obj.wall} wall in ${room.name}`, false, 1800);
       announceToLiveRegion(
@@ -3871,6 +4121,8 @@ function setLevel(l, redo = true) {
   const minL = getMinLevel();
   const maxL = getMaxLevel();
   curLevel = Math.max(minL, Math.min(maxL, l));
+  closeOpeningHudEditor();
+  selectionSet.clear();
   selection = null;
   preview = null;
   autoFixDiffs = [];
@@ -4466,6 +4718,7 @@ function setTool(t) {
   if ($('#tool-hint')) $('#tool-hint').textContent = HINTS[t.kind] || '';
   if (canvas) canvas.style.cursor = t.kind === 'select' ? 'default' : 'crosshair';
   renderPalette();
+  updateWallAngleHud();
   redraw();
 }
 
@@ -4473,6 +4726,25 @@ function setTool(t) {
 function updatePreview() {
   preview = null;
   if (!hover || drag?.kind === 'pan') return;
+  if (tool.kind === 'room') {
+    const seqPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+    if (seqPts.length > 0) {
+      const anchor = seqPts[seqPts.length - 1];
+      const snapRes = snappingBridge.computeSnap(hover, anchor);
+      const edges = extractRoomEdges(levelRooms());
+      const roomPv = interaction.previewRoom(hover, {
+        edges,
+        existingRooms: levelRooms().map(roomToPolygon),
+        scale: view.scale,
+        explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      });
+      if (roomPv) {
+        preview = { next: doc, ok: !roomPv.invalid, fresh: [], feedback: roomPv };
+      }
+      updateWallAngleHudReadout(snapRes);
+    }
+    return;
+  }
   if (tool.kind === 'item') {
     const pl = placeItem(tool.id, hover);
     if (pl) {
@@ -4485,7 +4757,7 @@ function updatePreview() {
     const nw = nearestWall(targetP);
     if (nw) {
       const def = OPENING_BY_ID[tool.id];
-      const offset = Math.max(0, nw.t - def.w / 2);
+      const offset = M.clampOpeningOffset(nw.room, nw.wall, nw.t - def.w / 2, def.w);
       preview = tryPreview((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, offset));
     }
   } else if (tool.kind === 'roomkit') {
@@ -4498,14 +4770,28 @@ function updatePreview() {
 }
 
 canvas?.addEventListener('pointerdown', (e) => {
-  canvas.setPointerCapture(e.pointerId);
   const p = toWorld(e);
   hover = p;
+  if (e.button === 0 && !e.altKey && selection) {
+    const hudHit = hitTestOpeningHUD({ ...doc, rooms: levelRooms() }, selection, p, view, {
+      openingUnits: getOpeningUnitMode(),
+    });
+    if (hudHit) {
+      e.preventDefault();
+      e.stopPropagation();
+      openOpeningHudEditor(hudHit.openingId, hudHit.side);
+      return;
+    }
+  }
+  canvas.setPointerCapture(e.pointerId);
   if (e.button === 1 || e.button === 2 || e.altKey) {
     drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
     return;
   }
   if (e.button === 0 && !e.altKey) {
+    if (activeHudEdit) {
+      closeOpeningHudEditor();
+    }
     const hitNode = complianceScene.hitTest(p, view);
     if (hitNode && hitNode.type === 'violation' && hitNode.data?.fixButtonBounds) {
       const v = hitNode.data.violation;
@@ -4598,6 +4884,10 @@ canvas?.addEventListener('pointerdown', (e) => {
         const hs = handles(r).findIndex(
           ([hx, hy]) => Math.hypot(hx - p.x, hy - p.y) < 8 / view.scale + 2
         );
+        if (hs >= 0) {
+          activeHandleIndex = hs;
+          updateWallAngleHud();
+        }
         drag =
           hs >= 0
             ? { kind: 'resize', id, corner: hs, moved: false }
@@ -4670,7 +4960,7 @@ canvas?.addEventListener('pointerdown', (e) => {
         break;
       }
       const def = OPENING_BY_ID[tool.id];
-      const offset = Math.max(0, nw.t - def.w / 2);
+      const offset = M.clampOpeningOffset(nw.room, nw.wall, nw.t - def.w / 2, def.w);
       apply((n) => M.addOpening(n, roomOf(n, nw.room.id), tool.id, nw.wall, offset), 'Add Opening');
       break;
     }
@@ -4823,7 +5113,7 @@ canvas?.addEventListener('pointermove', (e) => {
       const { room, obj } = M.findOwner(doc, drag.id);
       const nw = nearestWall(targetP, 40, room);
       if (nw) {
-        const offset = Math.max(0, nw.t - obj.width / 2);
+        const offset = M.clampOpeningOffset(room, nw.wall, nw.t - obj.width / 2, obj.width);
         drag.target = { wall: nw.wall, offset };
         preview = tryPreview((n) => {
           const o = M.findOwner(n, drag.id).obj;
@@ -4858,6 +5148,8 @@ canvas?.addEventListener('pointermove', (e) => {
       const otherRooms = levelRooms().filter((rm) => rm.id !== r.id);
 
       const snapRes = snappingBridge.computeSnap(p, anchor, otherRooms);
+      activeHandleIndex = cornerIdx;
+      updateWallAngleHudReadout(snapRes);
 
       const newPt = snapRes.point;
       const newPts = pts.map((pt, i) => (i === cornerIdx ? { x: newPt.x, y: newPt.y } : { ...pt }));
@@ -4907,6 +5199,17 @@ canvas?.addEventListener('pointermove', (e) => {
   updatePreview();
   if (tool.kind === 'room' && interaction.getCornerCount && interaction.getCornerCount() > 0) {
     syncDraftingCurveHud({ keepError: true });
+  }
+
+  const hudHoverHit =
+    selection && p
+      ? hitTestOpeningHUD({ ...doc, rooms: levelRooms() }, selection, p, view, {
+          openingUnits: getOpeningUnitMode(),
+        })
+      : null;
+  hoveredOpeningHudSide = hudHoverHit ? hudHoverHit.side : null;
+  if (canvas && tool.kind === 'select') {
+    canvas.style.cursor = hudHoverHit ? 'pointer' : 'default';
   }
 
   // Hover violation tooltip detection
@@ -4973,7 +5276,7 @@ function handleCloseRoom() {
     const h = Math.max(24, maxY - minY);
     const x = minX;
     const y = minY;
-    const roomType = tool.kind === 'room' && tool.type ? tool.type : 'living';
+    const roomType = tool.kind === 'room' && tool.type ? tool.type : tool.type || 'living';
     let createdId = null;
     const r = apply((n) => {
       const created = M.addRoom(n, x, y, w, h, roomType, {
@@ -5005,6 +5308,251 @@ function handleCloseRoom() {
     );
     announceToLiveRegion('Invalid room placement.');
   }
+}
+
+function getSelectedSingleRoom() {
+  const selectedList = getSelectionList();
+  if (selectedList.length !== 1) return null;
+  const hit = M.findOwner(doc, selectedList[0]);
+  if (!hit || hit.kind !== 'room') return null;
+  return hit.room;
+}
+
+function getCornerIncomingAngleDegrees(pts, cornerIndex) {
+  if (!Array.isArray(pts) || pts.length < 2) return 0;
+  const idx = ((cornerIndex % pts.length) + pts.length) % pts.length;
+  const prevIdx = (idx - 1 + pts.length) % pts.length;
+  const dx = pts[idx].x - pts[prevIdx].x;
+  const dy = pts[idx].y - pts[prevIdx].y;
+  if (dx === 0 && dy === 0) return 0;
+  const deg = Number(((Math.atan2(dy, dx) * 180) / Math.PI).toFixed(2));
+  return Object.is(deg, -0) ? 0 : deg;
+}
+
+function updateWallAngleHudReadout(snapState = snappingBridge?.getActiveSnap()) {
+  const readout = $('#hud-wall-angle-readout');
+  if (!readout) return;
+  const explicitDeg = snappingBridge.getExplicitAngleDegrees();
+  if (explicitDeg !== null) {
+    readout.textContent = fmtAngleDegrees(explicitDeg);
+    return;
+  }
+  if (
+    snapState &&
+    typeof snapState.angleDegrees === 'number' &&
+    Number.isFinite(snapState.angleDegrees)
+  ) {
+    readout.textContent = fmtAngleDegrees(snapState.angleDegrees);
+    return;
+  }
+  readout.textContent = 'Auto';
+}
+
+function updateWallAngleHud() {
+  const hud = $('#wall-angle-hud');
+  if (!hud) return;
+
+  const view3dCanvas = $('#view3d');
+  const in3D = Boolean(view3dCanvas && !view3dCanvas.hidden);
+  const selectedRoom = getSelectedSingleRoom();
+  const isDrawingRoom = tool.kind === 'room';
+  const isEditingRoomHandles = Boolean(selectedRoom) || drag?.kind === 'resize';
+
+  if (in3D || (!isDrawingRoom && !isEditingRoomHandles)) {
+    hud.hidden = true;
+    return;
+  }
+
+  hud.hidden = false;
+
+  const angleInput = $('#hud-wall-angle');
+  const explicitDeg = snappingBridge.getExplicitAngleDegrees();
+  if (angleInput && document.activeElement !== angleInput) {
+    angleInput.value = explicitDeg !== null ? String(explicitDeg) : '';
+  }
+  updateWallAngleHudReadout();
+
+  const handleGroup = $('#hud-handle-group');
+  const handleSelect = $('#hud-handle-select');
+  const handleAngleInput = $('#hud-handle-angle');
+
+  if (!handleGroup) return;
+
+  const targetRoom = drag?.kind === 'resize' ? roomOf(doc, drag.id) : selectedRoom;
+
+  if (!targetRoom || isDrawingRoom) {
+    handleGroup.hidden = true;
+    return;
+  }
+
+  handleGroup.hidden = false;
+  const pts = getRoomPoints(targetRoom);
+  if (!pts.length) return;
+
+  if (activeHandleIndex < 0 || activeHandleIndex >= pts.length) {
+    activeHandleIndex = 0;
+  }
+
+  if (handleSelect) {
+    const cornerNames4 = ['1 (Top-Left)', '2 (Top-Right)', '3 (Bottom-Right)', '4 (Bottom-Left)'];
+    const optionsHtml = pts
+      .map((_, i) => {
+        const label = pts.length === 4 ? cornerNames4[i] : `Vertex ${i + 1}`;
+        return `<option value="${i}"${i === activeHandleIndex ? ' selected' : ''}>${label}</option>`;
+      })
+      .join('');
+    if (handleSelect.innerHTML !== optionsHtml) {
+      handleSelect.innerHTML = optionsHtml;
+    }
+    handleSelect.value = String(activeHandleIndex);
+  }
+
+  if (handleAngleInput && document.activeElement !== handleAngleInput) {
+    const currentDeg = getCornerIncomingAngleDegrees(pts, activeHandleIndex);
+    handleAngleInput.value = String(currentDeg);
+  }
+}
+
+function setExplicitWallAngleFromHud(rawValue) {
+  const parsed = snappingBridge.setExplicitAngleDegrees(rawValue);
+  interaction.setGridSettings({ explicitAngleDegrees: parsed });
+  if (hover) {
+    const seqPts = interaction.getRoomPoints ? interaction.getRoomPoints() : [];
+    const anchor = seqPts.length > 0 ? seqPts[seqPts.length - 1] : hover;
+    snappingBridge.computeSnap(hover, anchor);
+    updatePreview();
+  } else {
+    updateWallAngleHudReadout();
+  }
+  redraw();
+  return parsed;
+}
+
+function applyConstraintHandleAngleFromHud() {
+  const targetRoom = getSelectedSingleRoom();
+  if (!targetRoom) return false;
+
+  const rawValue = $('#hud-handle-angle')?.value ?? '';
+  const parsedAngle = parseExplicitAngleDegrees(rawValue);
+  if (parsedAngle === null) {
+    toast('Enter a valid numeric angle in degrees.', true);
+    updateWallAngleHud();
+    return false;
+  }
+
+  const pts = getRoomPoints(targetRoom);
+  if (pts.length < 3) return false;
+
+  const cornerIdx = ((activeHandleIndex % pts.length) + pts.length) % pts.length;
+  const prevIdx = (cornerIdx - 1 + pts.length) % pts.length;
+  const anchor = pts[prevIdx];
+  const currentCorner = pts[cornerIdx];
+  const wallLen = Math.hypot(currentCorner.x - anchor.x, currentCorner.y - anchor.y);
+
+  let projectedCorner;
+  if (!Number.isFinite(wallLen) || wallLen === 0) {
+    projectedCorner = { x: anchor.x, y: anchor.y };
+  } else {
+    const rad = (parsedAngle * Math.PI) / 180;
+    projectedCorner = {
+      x: anchor.x + wallLen * Math.cos(rad),
+      y: anchor.y + wallLen * Math.sin(rad),
+    };
+  }
+
+  const updatedPts = pts.map((pt, idx) =>
+    idx === cornerIdx ? projectedCorner : { x: pt.x, y: pt.y }
+  );
+
+  if (polygonArea(updatedPts) <= 10) {
+    toast('Resulting room polygon area is too small or degenerate.', true);
+    return false;
+  }
+
+  const res = apply(
+    (n) => {
+      const rm = roomOf(n, targetRoom.id);
+      M.updateRoomPoints(rm, updatedPts, n);
+      for (const it of rm.items || []) {
+        if (it.wall !== undefined && typeof it.offset === 'number') {
+          const wLen = wallLength(rm, it.wall);
+          if (wLen > 16) {
+            it.offset = Math.max(8, Math.min(it.offset, wLen - 8));
+          }
+        }
+      }
+    },
+    `Set Corner ${cornerIdx + 1} Angle to ${fmtAngleDegrees(parsedAngle)}`
+  );
+  if (res.ok) {
+    announceToLiveRegion(
+      `Updated corner ${cornerIdx + 1} wall angle to ${fmtAngleDegrees(parsedAngle)}.`
+    );
+    updateWallAngleHud();
+  }
+  return res.ok;
+}
+
+function setupWallAngleHud() {
+  const angleInput = $('#hud-wall-angle');
+  const clearBtn = $('#hud-wall-angle-clear');
+  const handleSelect = $('#hud-handle-select');
+  const handleAngleInput = $('#hud-handle-angle');
+  const handleApplyBtn = $('#hud-handle-angle-apply');
+
+  angleInput?.addEventListener('input', (e) => {
+    setExplicitWallAngleFromHud(e.target.value);
+  });
+
+  angleInput?.addEventListener('change', (e) => {
+    setExplicitWallAngleFromHud(e.target.value);
+  });
+
+  angleInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      angleInput.value = '';
+      setExplicitWallAngleFromHud(null);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      setExplicitWallAngleFromHud(angleInput.value);
+      canvas?.focus();
+    }
+  });
+
+  clearBtn?.addEventListener('click', () => {
+    if (angleInput) angleInput.value = '';
+    setExplicitWallAngleFromHud(null);
+  });
+
+  handleSelect?.addEventListener('change', (e) => {
+    activeHandleIndex = Number.parseInt(e.target.value, 10) || 0;
+    updateWallAngleHud();
+    redraw();
+  });
+
+  handleAngleInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyConstraintHandleAngleFromHud();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      updateWallAngleHud();
+      canvas?.focus();
+    }
+  });
+
+  handleApplyBtn?.addEventListener('click', () => {
+    applyConstraintHandleAngleFromHud();
+  });
+
+  document.querySelectorAll('#toolbar [data-view]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setTimeout(() => updateWallAngleHud(), 0);
+    });
+  });
+
+  updateWallAngleHud();
 }
 
 function openAddRoomDimsModal() {
@@ -5129,10 +5677,13 @@ canvas?.addEventListener('pointerup', () => {
       if (!r.ok) select(null);
     } else {
       const p = hover || { x: d.x0, y: d.y0 };
-      interaction.addRoomCorner(p, {
+      const cornerRes = interaction.addRoomCorner(p, {
         edges: extractRoomEdges(levelRooms()),
         existingRooms: levelRooms().map(roomToPolygon),
+        scale: view.scale,
+        explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
       });
+      const placedPt = cornerRes?.corner || p;
       const count = interaction.getCornerCount();
       activeDraftCurveEdge = count >= 2 ? count - 2 : 0;
       syncDraftingCurveHud();
@@ -5140,7 +5691,9 @@ canvas?.addEventListener('pointerup', () => {
       if (hint) hint.textContent = `Corner ${count} placed. Tap next corner or click Close Room.`;
       const btnClose = $('#btn-close-room');
       if (btnClose) btnClose.hidden = !interaction.canCloseRoom();
-      announceToLiveRegion(`Placed corner ${count} at (${Math.round(p.x)}", ${Math.round(p.y)}").`);
+      announceToLiveRegion(
+        `Placed corner ${count} at (${Math.round(placedPt.x)}", ${Math.round(placedPt.y)}").`
+      );
       redraw();
     }
     refresh();
@@ -5203,6 +5756,7 @@ canvas?.addEventListener('pointerup', () => {
 canvas?.addEventListener('pointerleave', () => {
   hover = null;
   preview = null;
+  hoveredOpeningHudSide = null;
   redraw();
 });
 export function parseRoomDimensionsInput(input) {
@@ -5376,7 +5930,9 @@ export function fit() {
 
 // ------------------------------------------------------------- toolbar / keyboard / file
 export function setDoc(next, label) {
+  closeOpeningHudEditor();
   doc = next;
+  openingUnitMode = M.normalizeOpeningUnit(doc?.settings?.openingUnits || openingUnitMode);
   hist.push(doc, label);
   persist();
   curLevel = 0;
@@ -5836,8 +6392,11 @@ if (typeof document !== 'undefined') {
 $('#undo')?.addEventListener('click', () => {
   const s = hist.undo();
   if (s) {
+    closeOpeningHudEditor();
     doc = s;
+    openingUnitMode = M.normalizeOpeningUnit(doc?.settings?.openingUnits || openingUnitMode);
     persist();
+    selectionSet.clear();
     selection = null;
     selectionSet.clear();
     autoFixDiffs = [];
@@ -5852,8 +6411,11 @@ $('#undo')?.addEventListener('click', () => {
 $('#redo')?.addEventListener('click', () => {
   const s = hist.redo();
   if (s) {
+    closeOpeningHudEditor();
     doc = s;
+    openingUnitMode = M.normalizeOpeningUnit(doc?.settings?.openingUnits || openingUnitMode);
     persist();
+    selectionSet.clear();
     selection = null;
     autoFixDiffs = [];
     hoveredDiffIndex = null;
@@ -7213,8 +7775,10 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   initCommandPaletteUI();
+  initOpeningHudUI();
   initShortcutOverlayUI();
   setupAddRoomDimsModal();
+  setupWallAngleHud();
   setupDraftingCurveHud();
   $('#btn-close-room')?.addEventListener('click', handleCloseRoom);
 
@@ -8465,9 +9029,6 @@ function initShortcutOverlayUI() {
 if (typeof window !== 'undefined')
   window.__homegen = {
     view3d,
-    get view() {
-      return view;
-    },
     announceZoom,
     zoomAt,
     fit,
@@ -8479,6 +9040,9 @@ if (typeof window !== 'undefined')
     renderInspector,
     get doc() {
       return doc;
+    },
+    get view() {
+      return { ...view };
     },
     get tool() {
       return tool;
@@ -8507,6 +9071,10 @@ if (typeof window !== 'undefined')
     bulgeFromSagitta,
     sagittaFromBulge,
     renderSnapToggles,
+    snappingBridge,
+    setExplicitWallAngleFromHud,
+    applyConstraintHandleAngleFromHud,
+    updateWallAngleHud,
     generatePDF,
     applyCalibration,
     apply3PointCalibration,
@@ -8562,6 +9130,7 @@ if (typeof window !== 'undefined')
     setGISSegmentSetback,
     openGISDialog,
     closeGISDialog,
+    renderGISSegments,
     SAMPLE_MUNICIPAL_GIS,
     PLAN_TIER_RANKS,
     getCurrentPlanTier,
@@ -8570,6 +9139,14 @@ if (typeof window !== 'undefined')
     bindUpgradeTriggerLinks,
     bindHeaderQuotaBadge,
     defaultRateLimiter,
+    getOpeningUnitMode,
+    setOpeningUnitMode,
+    commitOpeningOffsetInput,
+    openOpeningHudEditor,
+    closeOpeningHudEditor,
+    computeOpeningOffsetHUD,
+    drawOpeningOffsetHUD,
+    hitTestOpeningHUD,
     announceCatalogResults,
     clearCatalogAnnouncement,
     renderCatalogPanel,

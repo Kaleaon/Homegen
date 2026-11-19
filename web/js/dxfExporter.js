@@ -17,100 +17,91 @@ import { computeMarchingSquares } from './elevationEngine.js';
  * Stitches marching squares disconnected line segments into continuous polyline chains.
  */
 function stitchSegmentsToPolylines(lines) {
-  if (!lines || lines.length === 0) return [];
-  const n = lines.length;
-  const used = new Uint8Array(n);
-  const INV_EPS = 1e4;
+  const n = lines ? lines.length : 0;
+  if (n === 0) return [];
 
+  const EPS_SQ = 1e-8;
+  const INV_CELL = 10000;
   const grid = new Map();
-  const addEndpoint = (x, y, idx) => {
-    const gx = Math.floor(x * INV_EPS);
-    const gy = Math.floor(y * INV_EPS);
-    let col = grid.get(gx);
-    if (!col) {
-      col = new Map();
-      grid.set(gx, col);
+
+  const addEndpoint = (x, y, ref) => {
+    const cx = Math.floor(x * INV_CELL);
+    const cy = Math.floor(y * INV_CELL);
+    let row = grid.get(cx);
+    if (!row) {
+      row = new Map();
+      grid.set(cx, row);
     }
-    let bucket = col.get(gy);
+    let bucket = row.get(cy);
     if (!bucket) {
       bucket = [];
-      col.set(gy, bucket);
+      row.set(cy, bucket);
     }
-    if (bucket[bucket.length - 1] !== idx) {
-      bucket.push(idx);
-    }
+    bucket.push(ref);
   };
 
   for (let i = 0; i < n; i++) {
-    const l = lines[i];
-    addEndpoint(l.x1, l.y1, i);
-    addEndpoint(l.x2, l.y2, i);
+    const seg = lines[i];
+    addEndpoint(seg.x1, seg.y1, i * 2);
+    addEndpoint(seg.x2, seg.y2, i * 2 + 1);
   }
 
-  const findLowestMatch = (px, py) => {
-    const gx = Math.floor(px * INV_EPS);
-    const gy = Math.floor(py * INV_EPS);
-    let bestIdx = -1;
+  const used = new Uint8Array(n);
+  const findNext = (x, y) => {
+    const cx = Math.floor(x * INV_CELL);
+    const cy = Math.floor(y * INV_CELL);
     for (let dx = -1; dx <= 1; dx++) {
-      const col = grid.get(gx + dx);
-      if (!col) continue;
+      const row = grid.get(cx + dx);
+      if (!row) continue;
       for (let dy = -1; dy <= 1; dy++) {
-        const bucket = col.get(gy + dy);
+        const bucket = row.get(cy + dy);
         if (!bucket) continue;
-        for (let b = 0; b < bucket.length; b++) {
-          const idx = bucket[b];
+        for (let k = 0; k < bucket.length; k++) {
+          const ref = bucket[k];
+          const idx = ref >>> 1;
           if (used[idx]) continue;
-          if (bestIdx !== -1 && idx >= bestIdx) break;
           const seg = lines[idx];
-          if (
-            Math.hypot(px - seg.x1, py - seg.y1) < 1e-4 ||
-            Math.hypot(px - seg.x2, py - seg.y2) < 1e-4
-          ) {
-            bestIdx = idx;
-            break;
+          const isEnd2 = (ref & 1) === 1;
+          const sx = isEnd2 ? seg.x2 : seg.x1;
+          const sy = isEnd2 ? seg.y2 : seg.y1;
+          const ddx = x - sx;
+          const ddy = y - sy;
+          if (ddx * ddx + ddy * ddy < EPS_SQ) {
+            used[idx] = 1;
+            return isEnd2 ? { x: seg.x1, y: seg.y1 } : { x: seg.x2, y: seg.y2 };
           }
         }
       }
     }
-    return bestIdx;
+    return null;
   };
 
   const polylines = [];
-  for (let seedIdx = n - 1; seedIdx >= 0; seedIdx--) {
-    if (used[seedIdx]) continue;
-    used[seedIdx] = 1;
-    const first = lines[seedIdx];
+
+  for (let startIdx = n - 1; startIdx >= 0; startIdx--) {
+    if (used[startIdx]) continue;
+    used[startIdx] = 1;
+    const first = lines[startIdx];
     const headPts = [];
     const tailPts = [
       { x: first.x1, y: first.y1 },
       { x: first.x2, y: first.y2 },
     ];
 
+    let tail = tailPts[1];
     for (;;) {
-      const head = headPts.length > 0 ? headPts[headPts.length - 1] : tailPts[0];
-      const tail = tailPts[tailPts.length - 1];
+      const next = findNext(tail.x, tail.y);
+      if (!next) break;
+      tailPts.push(next);
+      tail = next;
+    }
 
-      const tailIdx = findLowestMatch(tail.x, tail.y);
-      const headIdx = findLowestMatch(head.x, head.y);
-      if (tailIdx === -1 && headIdx === -1) break;
-
-      if (tailIdx !== -1 && (headIdx === -1 || tailIdx <= headIdx)) {
-        const seg = lines[tailIdx];
-        used[tailIdx] = 1;
-        if (Math.hypot(tail.x - seg.x1, tail.y - seg.y1) < 1e-4) {
-          tailPts.push({ x: seg.x2, y: seg.y2 });
-        } else {
-          tailPts.push({ x: seg.x1, y: seg.y1 });
-        }
-      } else {
-        const seg = lines[headIdx];
-        used[headIdx] = 1;
-        if (Math.hypot(head.x - seg.x2, head.y - seg.y2) < 1e-4) {
-          headPts.push({ x: seg.x1, y: seg.y1 });
-        } else {
-          headPts.push({ x: seg.x2, y: seg.y2 });
-        }
-      }
+    let head = tailPts[0];
+    for (;;) {
+      const prev = findNext(head.x, head.y);
+      if (!prev) break;
+      headPts.push(prev);
+      head = prev;
     }
 
     let pts;
@@ -123,9 +114,11 @@ function stitchSegmentsToPolylines(lines) {
 
     let isClosed = false;
     if (pts.length > 2) {
-      const head = pts[0];
-      const tail = pts[pts.length - 1];
-      if (Math.hypot(head.x - tail.x, head.y - tail.y) < 1e-4) {
+      const h = pts[0];
+      const t = pts[pts.length - 1];
+      const ddx = h.x - t.x;
+      const ddy = h.y - t.y;
+      if (ddx * ddx + ddy * ddy < EPS_SQ) {
         isClosed = true;
         pts.pop();
       }

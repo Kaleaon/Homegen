@@ -11,6 +11,9 @@ export function createGridSettings(overrides = {}) {
   const settings = { ...DEFAULT_GRID_SETTINGS, ...overrides };
 
   for (const [name, value] of Object.entries(settings)) {
+    if (name === 'explicitAngleDegrees') {
+      continue;
+    }
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
       throw new Error(
         `Invalid grid setting '${name}': expected a finite positive number, got '${value}'.`

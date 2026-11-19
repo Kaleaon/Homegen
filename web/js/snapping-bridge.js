@@ -1,4 +1,9 @@
-import { getSnappedPoint, createEdgeSpatialIndex } from '../../designer3d/tools/index.mjs';
+import {
+  getSnappedPoint,
+  parseExplicitAngleDegrees,
+  fmtAngleDegrees,
+  createEdgeSpatialIndex,
+} from '../../designer3d/tools/index.mjs';
 import { extractRoomEdges } from './geometry.js';
 import { globalCadWorkerClient } from './cadWorkerClient.js';
 
@@ -184,6 +189,7 @@ export class SnappingBridge {
     this.scale = options.scale !== undefined ? options.scale : null;
     this.onSnap = options.onSnap || null;
     this.workerClient = options.workerClient || globalCadWorkerClient;
+    this.explicitAngleDegrees = parseExplicitAngleDegrees(options.explicitAngleDegrees);
     this.activeSnap = null;
     this.attached = false;
 
@@ -255,6 +261,7 @@ export class SnappingBridge {
       !Object.is(prev.scale, scale) ||
       !Object.is(prev.unitSize, settings?.unitSize) ||
       !Object.is(prev.angleSnapDegrees, settings?.angleSnapDegrees) ||
+      !Object.is(prev.explicitAngleDegrees, settings?.explicitAngleDegrees) ||
       !Object.is(prev.magneticThreshold, settings?.magneticThreshold) ||
       !Object.is(prev.edgeThreshold, settings?.edgeThreshold) ||
       !Object.is(prev.midpointThreshold, settings?.midpointThreshold) ||
@@ -273,6 +280,7 @@ export class SnappingBridge {
       scale,
       unitSize: settings?.unitSize,
       angleSnapDegrees: settings?.angleSnapDegrees,
+      explicitAngleDegrees: settings?.explicitAngleDegrees,
       magneticThreshold: settings?.magneticThreshold,
       edgeThreshold: settings?.edgeThreshold,
       midpointThreshold: settings?.midpointThreshold,
@@ -313,6 +321,34 @@ export class SnappingBridge {
 
   setInteraction(interaction) {
     this.interaction = interaction;
+    if (
+      this.explicitAngleDegrees !== null &&
+      this.interaction &&
+      typeof this.interaction.setGridSettings === 'function'
+    ) {
+      this.interaction.setGridSettings({ explicitAngleDegrees: this.explicitAngleDegrees });
+    }
+  }
+
+  setExplicitAngleDegrees(value) {
+    this.explicitAngleDegrees = parseExplicitAngleDegrees(value);
+    if (this.interaction && typeof this.interaction.setGridSettings === 'function') {
+      this.interaction.setGridSettings({ explicitAngleDegrees: this.explicitAngleDegrees });
+    } else if (this.interaction && this.interaction.gridSettings) {
+      this.interaction.gridSettings = {
+        ...this.interaction.gridSettings,
+        explicitAngleDegrees: this.explicitAngleDegrees,
+      };
+    }
+    return this.explicitAngleDegrees;
+  }
+
+  getExplicitAngleDegrees() {
+    return this.explicitAngleDegrees;
+  }
+
+  clearExplicitAngleDegrees() {
+    return this.setExplicitAngleDegrees(null);
   }
 
   setGetRooms(getRooms) {
@@ -419,7 +455,13 @@ export class SnappingBridge {
    * Computes snapping for a world point and anchor point.
    * Immediately updates optimistic preview state and dispatches async calculation to Worker.
    */
-  computeSnap(point, anchor = point, roomsOverride = null, scaleOverride = null) {
+  computeSnap(
+    point,
+    anchor = point,
+    roomsOverride = null,
+    scaleOverride = null,
+    explicitAngleOverride = undefined
+  ) {
     if (!point) return null;
 
     const hasOverride = roomsOverride !== null && roomsOverride !== undefined;
@@ -435,23 +477,85 @@ export class SnappingBridge {
     const scale =
       scaleOverride !== null && scaleOverride !== undefined ? scaleOverride : this.getScale();
 
+    const rawExplicit =
+      explicitAngleOverride !== undefined
+        ? explicitAngleOverride
+        : this.explicitAngleDegrees !== null && this.explicitAngleDegrees !== undefined
+          ? this.explicitAngleDegrees
+          : settings?.explicitAngleDegrees;
+    const explicitAngle = parseExplicitAngleDegrees(rawExplicit);
+
     const unitSize = (settings && settings.unitSize) || 6;
     const gridPoint = {
       x: Math.round(point.x / unitSize) * unitSize,
       y: Math.round(point.y / unitSize) * unitSize,
     };
 
+    const computeAngleMeta = (finalPt, snapObj) => {
+      let angleDegrees = null;
+      if (explicitAngle !== null) {
+        angleDegrees = explicitAngle;
+      } else if (
+        snapObj &&
+        typeof snapObj.angleDegrees === 'number' &&
+        Number.isFinite(snapObj.angleDegrees)
+      ) {
+        angleDegrees = snapObj.angleDegrees;
+      } else if (anchor && (finalPt.x !== anchor.x || finalPt.y !== anchor.y)) {
+        const rawDeg = Number(
+          ((Math.atan2(finalPt.y - anchor.y, finalPt.x - anchor.x) * 180) / Math.PI).toFixed(2)
+        );
+        angleDegrees = Object.is(rawDeg, -0) ? 0 : rawDeg;
+      }
+      return {
+        angleDegrees,
+        angleText: angleDegrees !== null ? fmtAngleDegrees(angleDegrees) : null,
+        explicitAngleDegrees: explicitAngle,
+      };
+    };
+
     if (!settings || !snapModes) {
+      let fallbackPoint = gridPoint;
+      let fallbackSnap = { type: 'grid', point: gridPoint };
+      const fallbackGuides = [];
+      if (explicitAngle !== null && anchor) {
+        const dist = Math.hypot(point.x - anchor.x, point.y - anchor.y);
+        if (!Number.isFinite(dist) || dist === 0) {
+          fallbackPoint = { x: anchor.x, y: anchor.y };
+        } else {
+          const rad = (explicitAngle * Math.PI) / 180;
+          fallbackPoint = {
+            x: anchor.x + dist * Math.cos(rad),
+            y: anchor.y + dist * Math.sin(rad),
+          };
+          fallbackGuides.push({ start: anchor, end: fallbackPoint, type: 'angle' });
+        }
+        fallbackSnap = {
+          type: 'angle',
+          point: fallbackPoint,
+          angleDegrees: explicitAngle,
+          explicit: true,
+        };
+      }
       this.activeSnap = {
-        point: gridPoint,
+        point: fallbackPoint,
         rawPoint: point,
         anchor,
-        snap: { type: 'grid', point: gridPoint },
-        guideLines: [],
-        indicator: gridPoint,
+        snap: fallbackSnap,
+        guideLines: fallbackGuides,
+        indicator: fallbackPoint,
+        ...computeAngleMeta(fallbackPoint, fallbackSnap),
       };
+      if (typeof this.onSnap === 'function') {
+        this.onSnap(this.activeSnap);
+      }
       return this.activeSnap;
     }
+
+    const effectiveSettings = {
+      ...settings,
+      explicitAngleDegrees: explicitAngle,
+    };
 
     // Direct synchronous calculation for immediate feedback
     const res = getSnappedPoint({
@@ -459,9 +563,10 @@ export class SnappingBridge {
       anchor,
       edges,
       spatialIndex,
-      settings,
+      settings: effectiveSettings,
       snapModes,
       scale,
+      explicitAngleDegrees: explicitAngle,
     });
 
     const guideLines = [];
@@ -482,11 +587,13 @@ export class SnappingBridge {
           type: 'perpendicular',
         });
       } else if (res.snap.type === 'angle') {
-        guideLines.push({
-          start: anchor,
-          end: res.point,
-          type: 'angle',
-        });
+        if (!anchor || anchor.x !== res.point.x || anchor.y !== res.point.y) {
+          guideLines.push({
+            start: anchor,
+            end: res.point,
+            type: 'angle',
+          });
+        }
         if (res.snap.edgeIndex !== undefined) {
           const edge = resolveEdgeByIndex(edges, res.snap.edgeIndex);
           if (edge) {
@@ -500,10 +607,16 @@ export class SnappingBridge {
       }
     }
 
+    const isZeroLengthExplicit =
+      explicitAngle !== null && anchor && point.x === anchor.x && point.y === anchor.y;
     const hasMagneticSnap = Boolean(res.snap && res.snap.type !== 'grid');
-    const finalPoint = hasMagneticSnap ? res.point : gridPoint;
-    const finalSnap = hasMagneticSnap ? res.snap : { type: 'grid', point: gridPoint };
-    const finalIndicator = hasMagneticSnap ? res.point : gridPoint;
+    const finalPoint = isZeroLengthExplicit
+      ? { x: anchor.x, y: anchor.y }
+      : hasMagneticSnap
+        ? res.point
+        : gridPoint;
+    const finalSnap = hasMagneticSnap ? res.snap : { type: 'grid', point: finalPoint };
+    const finalIndicator = finalPoint;
 
     this.activeSnap = {
       point: finalPoint,
@@ -512,23 +625,49 @@ export class SnappingBridge {
       snap: finalSnap,
       guideLines,
       indicator: finalIndicator,
+      ...computeAngleMeta(finalPoint, finalSnap),
     };
 
     // Sync scene diff on invalidation/config changes and dispatch off-thread async worker calculation
     if (this.workerClient) {
-      if (this._shouldSyncWorker(edges, settings, snapModes, scale)) {
-        this.workerClient.syncSceneDiff({ rooms, edges, settings, snapModes, scale });
-        this._recordWorkerSync(edges, settings, snapModes, scale);
+      if (this._shouldSyncWorker(edges, effectiveSettings, snapModes, scale)) {
+        this.workerClient.syncSceneDiff({
+          rooms,
+          edges,
+          settings: effectiveSettings,
+          snapModes,
+          scale,
+        });
+        this._recordWorkerSync(edges, effectiveSettings, snapModes, scale);
       }
       this.workerClient
-        .computeSnapAsync(point, anchor, { rooms, edges, settings, snapModes, scale })
+        .computeSnapAsync(point, anchor, {
+          rooms,
+          edges,
+          settings: effectiveSettings,
+          snapModes,
+          scale,
+          explicitAngleDegrees: explicitAngle,
+        })
         .then((asyncRes) => {
+          const latestExplicit = parseExplicitAngleDegrees(
+            this.explicitAngleDegrees !== null && this.explicitAngleDegrees !== undefined
+              ? this.explicitAngleDegrees
+              : this.interaction?.gridSettings?.explicitAngleDegrees
+          );
+          if (latestExplicit !== explicitAngle) {
+            return;
+          }
           if (asyncRes && asyncRes.point) {
             const asyncHasMagnetic = Boolean(asyncRes.snap && asyncRes.snap.type !== 'grid');
-            const asyncPoint = asyncHasMagnetic ? asyncRes.point : gridPoint;
+            const asyncPoint = isZeroLengthExplicit
+              ? { x: anchor.x, y: anchor.y }
+              : asyncHasMagnetic
+                ? asyncRes.point
+                : gridPoint;
             const asyncSnap = asyncHasMagnetic
               ? { ...asyncRes.snap }
-              : { type: 'grid', point: gridPoint };
+              : { type: 'grid', point: asyncPoint };
             if (
               asyncHasMagnetic &&
               asyncSnap.type === 'angle' &&
@@ -538,7 +677,7 @@ export class SnappingBridge {
             ) {
               asyncSnap.angleDegrees = finalSnap.angleDegrees;
             }
-            const asyncIndicator = asyncHasMagnetic ? asyncRes.point : gridPoint;
+            const asyncIndicator = asyncPoint;
             const asyncGuides =
               Array.isArray(asyncRes.guideLines) && asyncRes.guideLines.length > 0
                 ? asyncRes.guideLines
@@ -552,6 +691,7 @@ export class SnappingBridge {
               snap: asyncSnap,
               guideLines: asyncGuides,
               indicator: asyncIndicator,
+              ...computeAngleMeta(asyncPoint, asyncSnap),
             };
             if (typeof this.onSnap === 'function') {
               this.onSnap(this.activeSnap);

@@ -734,6 +734,49 @@
   pointer-events: none;
 }
 
+/* 11b. Opening Offset Canvas HUD Editor */
+.opening-offset-hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-md);
+  gap: 6px;
+  padding: 6px 10px;
+  z-index: 16;
+  font-family: var(--font-family-sans);
+}
+
+.opening-offset-hud[hidden] {
+  display: none !important;
+}
+
+.opening-hud-label {
+  font-size: var(--font-size-xs, 12px);
+  font-weight: 600;
+  color: var(--ktheme-text);
+  white-space: nowrap;
+}
+
+.opening-hud-input {
+  width: 82px;
+  padding: 3px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--ktheme-accent);
+  background: var(--overlay-bg);
+  color: var(--overlay-color);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm, 13px);
+}
+
+.opening-hud-unit-btn,
+.opening-hud-cancel-btn {
+  padding: 3px 7px;
+  border-radius: var(--radius-xs);
+  font-size: var(--font-size-xs, 12px);
+  cursor: pointer;
+}
+
 /* 12. Parametric Curve Drafting HUD & Inspector Controls */
 .k-overlay-hud[hidden],
 .curve-drafting-hud[hidden],
@@ -963,4 +1006,95 @@
 .coord3d-input:focus-visible {
   outline: 2px solid var(--ktheme-accent);
   outline-offset: 1px;
+}
+
+/* 15. Wall Angle Drafting & Constraint Handle HUD */
+.wall-angle-hud {
+  top: 52px;
+  gap: 10px;
+  padding: 6px 14px;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm, 12px);
+  flex-wrap: wrap;
+}
+
+.wall-angle-hud[hidden],
+.wall-angle-hud-group[hidden] {
+  display: none !important;
+}
+
+.wall-angle-hud-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wall-angle-hud-label {
+  color: var(--overlay-color);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wall-angle-hud-input {
+  width: 84px;
+  padding: 3px 6px;
+  background: var(--overlay-bg);
+  color: var(--overlay-color);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm, 12px);
+}
+
+.wall-angle-hud-select {
+  padding: 3px 6px;
+  background: var(--overlay-bg);
+  color: var(--overlay-color);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm, 12px);
+}
+
+.wall-angle-hud-input:focus-visible,
+.wall-angle-hud-select:focus-visible,
+.wall-angle-hud-btn:focus-visible {
+  outline: 2px solid var(--ktheme-accent);
+  outline-offset: 1px;
+}
+
+.wall-angle-hud-readout {
+  min-width: 44px;
+  padding: 2px 6px;
+  text-align: center;
+  border-radius: var(--radius-xs);
+  background: var(--ktheme-bg-elevated, var(--ktheme-bg-surface));
+  color: var(--ktheme-accent);
+  font-family: var(--font-family-mono);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wall-angle-hud-btn {
+  padding: 3px 8px;
+  background: var(--overlay-bg);
+  color: var(--overlay-color);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm, 12px);
+  font-weight: 500;
+}
+
+.wall-angle-hud-btn.primary {
+  background: var(--ktheme-accent);
+  color: var(--ktheme-on-primary);
+  border-color: var(--ktheme-accent);
+}
+
+.wall-angle-hud-sep {
+  color: var(--ktheme-text-muted);
+  opacity: 0.6;
+  padding: 0 2px;
 }
