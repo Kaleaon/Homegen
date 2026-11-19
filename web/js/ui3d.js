@@ -137,6 +137,58 @@ export function bindPhotorealQuotaBadge(
   };
 }
 
+export const RANGE_VALUE_FORMATTERS = {
+  percent(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '0%';
+    return `${Math.round(num * 100)}%`;
+  },
+  degrees(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '0°';
+    const rounded = Math.round(num * 10) / 10;
+    return `${rounded}°`;
+  },
+  multiplier(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '1x';
+    const rounded = Number(num.toFixed(2));
+    return `${rounded}x`;
+  },
+  offset(val) {
+    const num = Number(val);
+    if (Number.isNaN(num)) return '0 tiles';
+    const rounded = Number(num.toFixed(2));
+    if (rounded === 0) return '0 tiles';
+    const sign = rounded > 0 ? '+' : '';
+    const unit = Math.abs(rounded) === 1 ? 'tile' : 'tiles';
+    return `${sign}${rounded} ${unit}`;
+  },
+};
+
+export function formatRangeValueText(value, formatter = 'percent') {
+  if (typeof formatter === 'function') {
+    return String(formatter(Number(value)));
+  }
+  const fn = RANGE_VALUE_FORMATTERS[formatter] || RANGE_VALUE_FORMATTERS.percent;
+  return fn(value);
+}
+
+export function updateRangeAriaValueText(el, formatter = 'percent', explicitValue = undefined) {
+  if (!el) return '';
+  const rawValue = explicitValue !== undefined ? explicitValue : el.value;
+  const formatted = formatRangeValueText(rawValue, formatter);
+  if (typeof el.setAttribute === 'function') {
+    el.setAttribute('aria-valuetext', formatted);
+  } else {
+    el['aria-valuetext'] = formatted;
+  }
+  if ('ariaValueText' in el || typeof el.setAttribute !== 'function') {
+    el.ariaValueText = formatted;
+  }
+  return formatted;
+}
+
 function escHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -174,6 +226,9 @@ export function initView3D({
   getDoc,
   getLevel,
   getSelectedRoomId,
+  getSelectionId,
+  onSelectEntity,
+  onTransformCommit,
   toast,
   setLevel,
   interaction,
@@ -188,6 +243,41 @@ export function initView3D({
   let abort = null;
   const plan = $('#plan');
   const v3 = $('#view3d');
+  const coordOverlay = $('#coord3d-overlay');
+  const coordTarget = $('#coord3d-target');
+  const coordSnap = $('#coord3d-snap');
+  const coordX = $('#coord3d-x');
+  const coordY = $('#coord3d-y');
+  const coordZ = $('#coord3d-z');
+  const coordRot = $('#coord3d-rot');
+
+  const isBlankOrInvalid = (raw) =>
+    raw === null || raw === undefined || String(raw).trim() === '' || !Number.isFinite(Number(raw));
+
+  function updateCoordOverlayVisibility() {
+    if (!coordOverlay) return;
+    const camMode = api ? api.getCameraMode() : 'orbit';
+    coordOverlay.hidden = mode !== '3d' || camMode === 'walk';
+  }
+
+  function syncCoordOverlay() {
+    if (!coordOverlay) return;
+    updateCoordOverlayVisibility();
+    const tf = api?.getSelectedTransform?.() || null;
+    const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+    if (tf) {
+      if (coordOverlay.dataset) coordOverlay.dataset.state = 'selected';
+      if (coordTarget) coordTarget.textContent = tf.label || 'Selected';
+      if (coordSnap) coordSnap.hidden = true;
+      if (coordX && activeEl !== coordX) coordX.value = String(tf.x);
+      if (coordY && activeEl !== coordY) coordY.value = String(tf.y);
+      if (coordZ && activeEl !== coordZ) coordZ.value = String(tf.z);
+      if (coordRot && activeEl !== coordRot) coordRot.value = String(tf.rot);
+    } else {
+      if (coordOverlay.dataset) coordOverlay.dataset.state = 'cursor';
+      if (coordTarget) coordTarget.textContent = 'Cursor';
+    }
+  }
 
   async function ensure() {
     if (api) return api;
@@ -204,6 +294,18 @@ export function initView3D({
       },
       onCameraModeChange: (camMode) => {
         updateModeUI(camMode);
+      },
+      onSelectionChange: (ent) => {
+        syncCoordOverlay();
+        if (ent && ent.type === 'item') {
+          onSelectEntity?.(ent.id);
+        } else if (ent && ent.type === 'room') {
+          onSelectEntity?.(ent.id);
+        }
+      },
+      onTransformChange: (ent) => {
+        syncCoordOverlay();
+        onTransformCommit?.(ent);
       },
       onWalkHeightChange: () => {
         syncWalkthroughHUD();
@@ -264,6 +366,7 @@ export function initView3D({
     if (hud) {
       hud.hidden = camMode !== 'walk' || mode !== '3d';
     }
+    updateCoordOverlayVisibility();
     if (camMode === 'walk') {
       syncWalkthroughHUD();
     }
@@ -295,6 +398,7 @@ export function initView3D({
     }
     const hud = $('#walkthrough-hud');
     if (hud) hud.hidden = next !== '3d' || api?.getCameraMode() !== 'walk';
+    updateCoordOverlayVisibility();
     if (next === '3d') syncWalkthroughHUD();
 
     const is3d = next === '3d';
@@ -319,8 +423,16 @@ export function initView3D({
     };
     setControlDisabled($('#snap-trigger'));
     document.querySelectorAll('.snap-toggle-btn').forEach(setControlDisabled);
-    if (is3d) api.show();
-    else api?.hide();
+    if (is3d) {
+      api.show();
+      const selId = getSelectionId?.();
+      if (selId) {
+        api.select3DEntity(selId, { silent: true });
+      }
+      syncCoordOverlay();
+    } else {
+      api?.hide();
+    }
   }
   document
     .querySelectorAll('[data-view]')
@@ -337,7 +449,16 @@ export function initView3D({
     if (e.target.checked) toast('Streaming free CC0 textures from Poly Haven…', false, 2500);
   });
   $('#o-env').addEventListener('change', (e) => api.setEnv(e.target.value));
-  $('#o-sun').addEventListener('input', (e) => api.setOption('sun', Number(e.target.value)));
+  const oSun = $('#o-sun');
+  if (oSun) {
+    updateRangeAriaValueText(oSun, 'percent');
+    const handleSunChange = (e) => {
+      updateRangeAriaValueText(e.target, 'percent');
+      api?.setOption('sun', Number(e.target.value));
+    };
+    oSun.addEventListener('input', handleSunChange);
+    oSun.addEventListener('change', handleSunChange);
+  }
   $('#o-reset').addEventListener('click', () => {
     api?.resetCamera();
     toast('Reset 3D camera view', false, 2000);
@@ -412,6 +533,38 @@ export function initView3D({
   let isDraggingMouse = false;
   let lastMouseX = 0;
   let lastMouseY = 0;
+  let orbitPointerDown = null;
+
+  v3.addEventListener('pointerdown', (e) => {
+    if (!api || mode !== '3d' || api.getCameraMode() === 'walk' || e.button !== 0) {
+      orbitPointerDown = null;
+      return;
+    }
+    orbitPointerDown = { x: e.clientX, y: e.clientY };
+  });
+
+  v3.addEventListener('pointerup', (e) => {
+    if (!orbitPointerDown || !api || mode !== '3d' || api.getCameraMode() === 'walk') {
+      orbitPointerDown = null;
+      return;
+    }
+    const moved = Math.hypot(e.clientX - orbitPointerDown.x, e.clientY - orbitPointerDown.y);
+    orbitPointerDown = null;
+    if (moved > 5) return;
+
+    const rayHit = api.raycastPointer(e.clientX, e.clientY);
+    const ud = rayHit?.userData;
+    if (ud && (ud.entityType === 'item' || ud.roomId)) {
+      const targetId = ud.entityType === 'item' ? ud.id : ud.roomId;
+      const ent = api.select3DEntity(targetId, { silent: true });
+      syncCoordOverlay();
+      if (ent) onSelectEntity?.(ent.id);
+    } else if (!ud && api.getSelected3DEntity()) {
+      api.clear3DSelection({ silent: true });
+      syncCoordOverlay();
+      onSelectEntity?.(null);
+    }
+  });
 
   v3.addEventListener('pointermove', (e) => {
     if (!api || mode !== '3d') return;
@@ -423,6 +576,7 @@ export function initView3D({
     const rayHit = api.raycastPointer(e.clientX, e.clientY);
     if (!rayHit) {
       api.clearSnapOverlay3D();
+      if (coordSnap) coordSnap.hidden = true;
       return;
     }
 
@@ -442,11 +596,125 @@ export function initView3D({
     });
 
     api.setSnapOverlay3D(snapRes);
+
+    if (coordOverlay && !coordOverlay.hidden) {
+      const hasSel = Boolean(api.getSelected3DEntity());
+      if (coordSnap) {
+        if (!hasSel && snapRes.snap?.type) {
+          coordSnap.textContent = snapRes.snap.type.toUpperCase();
+          coordSnap.hidden = false;
+        } else {
+          coordSnap.hidden = true;
+        }
+      }
+      const focusInsideOverlay =
+        typeof coordOverlay.contains === 'function'
+          ? coordOverlay.contains(document.activeElement)
+          : false;
+      if (!hasSel && !focusInsideOverlay) {
+        if (coordOverlay.dataset) coordOverlay.dataset.state = 'cursor';
+        if (coordTarget) coordTarget.textContent = 'Cursor';
+        if (coordX) coordX.value = String(Math.round(snapRes.point.x * 10) / 10);
+        if (coordY) coordY.value = String(Math.round(snapRes.point.z * 10) / 10);
+        if (coordZ) coordZ.value = String(Math.round(snapRes.point.y * 10) / 10);
+        if (coordRot) {
+          coordRot.value = String(Math.round((snapRes.orientation?.yaw ?? 0) * 10) / 10);
+        }
+      }
+    }
   });
 
   v3.addEventListener('pointerleave', () => {
     if (api) api.clearSnapOverlay3D();
+    if (coordSnap) coordSnap.hidden = true;
   });
+
+  function ensureOverlaySelection() {
+    if (!api) return null;
+    let tf = api.getSelectedTransform();
+    if (!tf) {
+      const selId = getSelectionId?.();
+      if (selId) {
+        api.select3DEntity(selId, { silent: true });
+        tf = api.getSelectedTransform();
+      }
+    }
+    return tf;
+  }
+
+  function handleOverlayPositionCommit(e) {
+    if (!api) return;
+    const cur = ensureOverlaySelection();
+    if (!cur) {
+      if (e?.target) e.target.value = '0';
+      return;
+    }
+    if (e?.target && isBlankOrInvalid(e.target.value)) {
+      if (coordX) coordX.value = String(cur.x);
+      if (coordY) coordY.value = String(cur.y);
+      if (coordZ) coordZ.value = String(cur.z);
+      return;
+    }
+    const updated = api.setSelectedPosition({
+      x: coordX ? coordX.value : cur.x,
+      y: coordY ? coordY.value : cur.y,
+      z: coordZ ? coordZ.value : cur.z,
+    });
+    if (updated) {
+      if (coordX) coordX.value = String(updated.x);
+      if (coordY) coordY.value = String(updated.y);
+      if (coordZ) coordZ.value = String(updated.z);
+    }
+  }
+
+  function handleOverlayRotationCommit(e) {
+    if (!api) return;
+    const cur = ensureOverlaySelection();
+    if (!cur) {
+      if (e?.target) e.target.value = '0';
+      return;
+    }
+    if (e?.target && isBlankOrInvalid(e.target.value)) {
+      if (coordRot) coordRot.value = String(cur.rot);
+      return;
+    }
+    const updated = api.setSelectedRotation(coordRot ? coordRot.value : cur.rot);
+    if (updated) {
+      if (coordX) coordX.value = String(updated.x);
+      if (coordY) coordY.value = String(updated.y);
+      if (coordZ) coordZ.value = String(updated.z);
+      if (coordRot) coordRot.value = String(updated.rot);
+    }
+  }
+
+  [coordX, coordY, coordZ].forEach((inputEl) => {
+    if (!inputEl) return;
+    inputEl.addEventListener('change', handleOverlayPositionCommit);
+    inputEl.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        const cur = api?.getSelectedTransform?.();
+        if (cur) {
+          if (coordX) coordX.value = String(cur.x);
+          if (coordY) coordY.value = String(cur.y);
+          if (coordZ) coordZ.value = String(cur.z);
+        }
+        inputEl.blur();
+      }
+    });
+  });
+
+  if (coordRot) {
+    coordRot.addEventListener('change', handleOverlayRotationCommit);
+    coordRot.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        const cur = api?.getSelectedTransform?.();
+        if (cur) coordRot.value = String(cur.rot);
+        coordRot.blur();
+      }
+    });
+  }
 
   v3.addEventListener('mousedown', (e) => {
     if (!api || mode !== '3d' || api.getCameraMode() !== 'walk') return;
@@ -1062,5 +1330,12 @@ export function initView3D({
     syncWalkthroughHUD,
     openQuotaUpgrade,
     updateQuotaBadge: () => photoQuota.update(),
+    syncSelection(id) {
+      if (!api) return;
+      if (id) api.select3DEntity(id, { silent: true });
+      else api.clear3DSelection({ silent: true });
+      syncCoordOverlay();
+    },
+    syncOverlay: syncCoordOverlay,
   };
 }
