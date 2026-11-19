@@ -93,6 +93,13 @@
     </div>
     <canvas id="plan" tabindex="0" role="region" aria-label="2D floor plan" aria-describedby="plan-fallback-summary"></canvas>
     <div id="plan-fallback-summary" class="sr-only" aria-live="polite"></div>
+    <div id="blueprint-dropzone" class="blueprint-dropzone" role="region" aria-label="Blueprint upload dropzone">
+      <div class="blueprint-dropzone__card">
+        <span class="blueprint-dropzone__icon" aria-hidden="true">📐</span>
+        <span class="blueprint-dropzone__text">Drop a blueprint image (PNG, JPG, WebP) onto the canvas to trace</span>
+        <button type="button" id="blueprint-dropzone-btn" class="primary k-target-min-size">Choose Blueprint…</button>
+      </div>
+    </div>
     <canvas id="view3d" tabindex="0" role="region" aria-label="3D viewport" aria-describedby="view3d-fallback-summary" hidden></canvas>
     <div id="view3d-fallback-summary" class="sr-only" aria-live="polite"></div>
     <div id="view3d-a11y-live" class="sr-only" aria-live="polite"></div>

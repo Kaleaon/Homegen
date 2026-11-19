@@ -97,6 +97,7 @@ import { renderStampCanvas } from './stampEngine.js';
 import { ComplianceOverlayScene } from './complianceOverlay.js';
 import { ComplianceManager } from './complianceClient.js';
 import { SnappingBridge } from './snapping-bridge.js';
+import { getToken } from './kthemeTokens.js';
 import {
   GISBridge,
   projectGeoJSON,
@@ -215,6 +216,8 @@ let curLevel = 0;
 let autoFixDiffs = [];
 let hoveredDiffIndex = null;
 let calibPoints = [];
+let isCanvasDragOver = false;
+let canvasDragDepth = 0;
 let catalogSearchQuery = '';
 let catalogMaxWidth = '';
 let catalogMaxDepth = '';
@@ -453,6 +456,27 @@ function setupDraftingCurveHud() {
     setCurveErrorUI(errEl, [radiusEl, sagittaEl, bulgeEl], null);
     redraw();
   });
+}
+
+const ALLOWED_BLUEPRINT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+  'image/svg+xml',
+]);
+const ALLOWED_BLUEPRINT_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i;
+
+export function isValidBlueprintImageFile(file) {
+  if (!file || typeof file !== 'object') return false;
+  const type = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (type) {
+    return ALLOWED_BLUEPRINT_MIME_TYPES.has(type);
+  }
+  const name = typeof file.name === 'string' ? file.name.trim() : '';
+  return ALLOWED_BLUEPRINT_EXT_RE.test(name);
 }
 
 const snappingBridge = new SnappingBridge({
@@ -998,8 +1022,18 @@ export function renderSnapToggles() {
   bindIncrementInput('#snap-angle-degrees', 'angleSnapDegrees', gridVm.onAngleSnapDegreesChange);
 }
 
+function renderBlueprintDropzone(bg = doc.background) {
+  const dropzone = $('#blueprint-dropzone');
+  if (!dropzone) return;
+  const hasBg = Boolean(bg && (bg.dataUrl || bg.presetKey));
+  const is3D = Boolean(canvas && canvas.hidden);
+  dropzone.hidden = hasBg || is3D;
+  dropzone.classList?.toggle('drag-over', Boolean(isCanvasDragOver));
+}
+
 export function renderBgToolbar() {
-  const bg = arguments.length > 0 ? arguments[0] : doc.background;
+  const bg = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : doc.background;
+  renderBlueprintDropzone(bg);
   const bgBar = $('#bg-toolbar');
   if (!bgBar) return;
   if (bg && (bg.dataUrl || bg.presetKey)) {
@@ -1419,7 +1453,29 @@ function redraw() {
   updatePlanA11yTree(state, curLevel);
 }
 
-function drawOverlay(c, _state) {
+export function drawOverlay(c, _state) {
+  if (isCanvasDragOver && c) {
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    const cw = (c.canvas?.width || 800) / dpr;
+    const ch = (c.canvas?.height || 600) / dpr;
+    const scale = view.scale || 1;
+    const inset = 14 / scale;
+    const rx = -view.ox / scale + inset;
+    const ry = -view.oy / scale + inset;
+    const rw = Math.max(0, cw / scale - inset * 2);
+    const rh = Math.max(0, ch / scale - inset * 2);
+    if (rw > 0 && rh > 0) {
+      c.save();
+      c.fillStyle = 'rgba(59, 130, 246, 0.08)';
+      c.strokeStyle = getToken('--ktheme-accent', '#2f6f5e');
+      c.lineWidth = 3 / scale;
+      c.setLineDash([8 / scale, 6 / scale]);
+      c.fillRect(rx, ry, rw, rh);
+      c.strokeRect(rx, ry, rw, rh);
+      c.restore();
+    }
+  }
+
   // highlight rooms with blocking-free but open compliance errors with a subtle marker
   for (const v of report.violations) {
     if (v.severity !== 'error' || !v.roomId || preview) continue;
@@ -4465,6 +4521,87 @@ canvas?.addEventListener(
   { passive: false }
 );
 
+function isFileDragEvent(e) {
+  const dt = e?.dataTransfer;
+  if (!dt) return true;
+  if (dt.files && dt.files.length > 0) return true;
+  if (dt.types && typeof dt.types.length === 'number' && dt.types.length > 0) {
+    return Array.from(dt.types).includes('Files');
+  }
+  return true;
+}
+
+function handleCanvasDragEnter(e) {
+  if (!isFileDragEvent(e)) return;
+  e.preventDefault();
+  canvasDragDepth++;
+  if (!isCanvasDragOver) {
+    isCanvasDragOver = true;
+    renderBlueprintDropzone();
+    redraw();
+  }
+}
+
+function handleCanvasDragOver(e) {
+  if (!isFileDragEvent(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy';
+  }
+  if (!isCanvasDragOver) {
+    isCanvasDragOver = true;
+    renderBlueprintDropzone();
+    redraw();
+  }
+}
+
+function handleCanvasDragLeave(e) {
+  e.preventDefault();
+  canvasDragDepth = Math.max(0, canvasDragDepth - 1);
+  if (canvasDragDepth === 0 && isCanvasDragOver) {
+    isCanvasDragOver = false;
+    renderBlueprintDropzone();
+    redraw();
+  }
+}
+
+function handleCanvasDrop(e) {
+  e.preventDefault();
+  canvasDragDepth = 0;
+  isCanvasDragOver = false;
+  drag = null;
+  preview = null;
+  renderBlueprintDropzone();
+
+  const files = e?.dataTransfer?.files;
+  if (!files || files.length === 0) {
+    redraw();
+    return;
+  }
+
+  const file = files[0];
+  if (!isValidBlueprintImageFile(file)) {
+    const msg = 'Unsupported file type. Please drop a PNG, JPG, or WebP blueprint image.';
+    toast(msg, true);
+    announceToLiveRegion(msg);
+    redraw();
+    return;
+  }
+
+  const importer =
+    typeof window !== 'undefined' && typeof window.__homegen?.handleBlueprintImport === 'function'
+      ? window.__homegen.handleBlueprintImport
+      : handleBlueprintImport;
+  importer(file);
+}
+
+for (const dropTarget of [canvas, $('#blueprint-dropzone')]) {
+  dropTarget?.addEventListener('dragenter', handleCanvasDragEnter);
+  dropTarget?.addEventListener('dragover', handleCanvasDragOver);
+  dropTarget?.addEventListener('dragleave', handleCanvasDragLeave);
+  dropTarget?.addEventListener('drop', handleCanvasDrop);
+}
+
 export function zoomAt(mx, my, f) {
   const ns = Math.max(0.4, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
@@ -6508,6 +6645,7 @@ $('#gis-map-preset')?.addEventListener('change', (e) => {
 });
 
 $('#import-blueprint')?.addEventListener('click', () => $('#blueprint-file')?.click());
+$('#blueprint-dropzone-btn')?.addEventListener('click', () => $('#blueprint-file')?.click());
 $('#blueprint-file')?.addEventListener('change', (e) => {
   handleBlueprintImport(e.target.files[0]);
   e.target.value = '';
@@ -7365,6 +7503,11 @@ if (typeof window !== 'undefined')
     applyCalibration,
     apply3PointCalibration,
     handleBlueprintImport,
+    isValidBlueprintImageFile,
+    drawOverlay,
+    get isCanvasDragOver() {
+      return isCanvasDragOver;
+    },
     solveAffineTransform,
     parseWorldfile,
     computeGeoBounds,
