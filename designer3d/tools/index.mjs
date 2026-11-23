@@ -13,7 +13,12 @@ import {
   clampPositionToBounds,
 } from './transformGizmos.mjs';
 import { RoomDrawingTool } from './roomDrawingTool.mjs';
-import { validatePlacement, createPlacementFeedback } from './collision.mjs';
+import {
+  validatePlacement,
+  createPlacementFeedback,
+  polygonsOverlapOpenInterior,
+  tessellateRoomPolygon,
+} from './collision.mjs';
 import {
   buildToggleViewModel,
   buildGridSettingsViewModel,
@@ -79,6 +84,8 @@ export {
   RoomDrawingTool,
   validatePlacement,
   createPlacementFeedback,
+  polygonsOverlapOpenInterior,
+  tessellateRoomPolygon,
   buildToggleViewModel,
   buildGridSettingsViewModel,
   isValidGridIncrement,

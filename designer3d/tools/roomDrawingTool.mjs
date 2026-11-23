@@ -16,7 +16,9 @@ function normalizeRoomPolygons(existingRooms = []) {
     .map((room) => {
       if (Array.isArray(room)) return room;
       const pts = room?.points || room?.corners || room?.vertices;
-      if (Array.isArray(pts) && pts.length >= 3) return pts;
+      if (Array.isArray(pts) && pts.length >= 3) {
+        return room?.bulges ? { points: pts, bulges: room.bulges } : pts;
+      }
       if (
         room &&
         typeof room.x === 'number' &&
@@ -24,12 +26,13 @@ function normalizeRoomPolygons(existingRooms = []) {
         typeof room.w === 'number' &&
         typeof room.h === 'number'
       ) {
-        return [
+        const rectPts = [
           { x: room.x, y: room.y },
           { x: room.x + room.w, y: room.y },
           { x: room.x + room.w, y: room.y + room.h },
           { x: room.x, y: room.y + room.h },
         ];
+        return room.bulges ? { points: rectPts, bulges: room.bulges } : rectPts;
       }
       return null;
     })
@@ -78,13 +81,36 @@ function hasOpenPolylineConflict(existingPoints, candidatePoint, magneticThresho
   return false;
 }
 
-function evaluateCandidateConstraints(existingPoints, targetPoint, settings, context = {}) {
+function evaluateCandidateConstraints(
+  existingPoints,
+  targetPoint,
+  settings,
+  context = {},
+  existingBulges = []
+) {
   const minClearSpan =
     typeof context.minLength === 'number' ? context.minLength : DEFAULT_MIN_CLEAR_SPAN_INCHES;
   const existingPolygons = normalizeRoomPolygons(context.existingRooms || []);
   const violations = [];
 
   if (existingPoints.length === 0) {
+    if (existingPolygons.length > 0) {
+      const startPlacement = validatePlacement([targetPoint], existingPolygons, {
+        tolerance: context.tolerance,
+      });
+      if (!startPlacement.valid) {
+        return {
+          valid: false,
+          violations: ['Wall placement overlaps an existing room.'],
+          reasons: {
+            overlaps: startPlacement.reasons.overlaps || [],
+            selfIntersecting: false,
+            clearSpan: false,
+          },
+          candidate: [targetPoint],
+        };
+      }
+    }
     return {
       valid: true,
       violations: [],
@@ -115,10 +141,25 @@ function evaluateCandidateConstraints(existingPoints, targetPoint, settings, con
 
   const candidate = [...existingPoints, targetPoint];
   const polygonToCheck = closingToStart ? [...existingPoints] : candidate;
+  const activeEdgeIdx = existingPoints.length - 1;
+  const activeBulge =
+    context.bulge !== undefined ? context.bulge : existingBulges[activeEdgeIdx] || 0;
   let placement = { valid: true, reasons: { overlaps: [], selfIntersecting: false } };
 
   if (polygonToCheck.length >= 3) {
-    placement = validatePlacement(polygonToCheck, existingPolygons);
+    const candidateBulges = [];
+    for (let i = 0; i < polygonToCheck.length; i += 1) {
+      if (i === activeEdgeIdx) {
+        candidateBulges.push(activeBulge);
+      } else {
+        candidateBulges.push(existingBulges[i] || 0);
+      }
+    }
+    placement = validatePlacement(polygonToCheck, existingPolygons, {
+      candidateBulges,
+      candidateClosed: true,
+      tolerance: context.tolerance,
+    });
     const xs = polygonToCheck.map((p) => p.x);
     const ys = polygonToCheck.map((p) => p.y);
     const spanW = Math.max(...xs) - Math.min(...xs);
@@ -136,7 +177,11 @@ function evaluateCandidateConstraints(existingPoints, targetPoint, settings, con
       }
     }
   } else if (existingPolygons.length > 0) {
-    placement = validatePlacement(candidate, existingPolygons);
+    placement = validatePlacement(candidate, existingPolygons, {
+      candidateBulges: [activeBulge],
+      candidateClosed: false,
+      tolerance: context.tolerance,
+    });
   }
 
   const selfIntersecting = Boolean(openSelfIntersect || placement.reasons.selfIntersecting);
@@ -324,7 +369,8 @@ export class RoomDrawingTool {
       this.points,
       resolved.targetPoint,
       this.settings,
-      context
+      context,
+      this.bulges
     );
     const feedback = createPlacementFeedback(
       check.candidate,
@@ -397,25 +443,7 @@ export class RoomDrawingTool {
     const hasExplicitOverride = explicitLength !== undefined;
     const resolved = this._resolveTargetPoint(rawPoint, explicitLength, context);
     const existingPolygons = normalizeRoomPolygons(context.existingRooms || []);
-
-    let validation;
-    let violations = [];
-    if (hasExplicitOverride) {
-      const check = evaluateCandidateConstraints(
-        this.points,
-        resolved.targetPoint,
-        this.settings,
-        context
-      );
-      validation = { valid: check.valid, reasons: check.reasons };
-      violations = check.violations;
-    } else {
-      const candidate = [...this.points, resolved.targetPoint];
-      validation = validatePlacement(candidate, existingPolygons);
-    }
-
     const candidate = [...this.points, resolved.targetPoint];
-    const feedback = createPlacementFeedback(candidate, validation, context);
 
     const previewBulges = [];
     for (let i = 0; i < candidate.length - 1; i += 1) {
@@ -425,6 +453,38 @@ export class RoomDrawingTool {
         previewBulges.push(this.bulges[i] || 0);
       }
     }
+
+    let validation;
+    let violations = [];
+    if (hasExplicitOverride) {
+      const check = evaluateCandidateConstraints(
+        this.points,
+        resolved.targetPoint,
+        this.settings,
+        context,
+        this.bulges
+      );
+      validation = { valid: check.valid, reasons: check.reasons };
+      violations = check.violations;
+    } else {
+      const closingToStart =
+        this.points.length >= 3 &&
+        distance(resolved.targetPoint, this.points[0]) <= (this.settings?.magneticThreshold || 0);
+      const polyToValidate = closingToStart ? [...this.points] : candidate;
+      const isClosed = polyToValidate.length >= 3;
+      const candidateBulges = isClosed
+        ? closingToStart
+          ? [...previewBulges]
+          : [...previewBulges, 0]
+        : previewBulges;
+      validation = validatePlacement(polyToValidate, existingPolygons, {
+        candidateBulges,
+        candidateClosed: isClosed,
+        tolerance: context.tolerance,
+      });
+    }
+
+    const feedback = createPlacementFeedback(candidate, validation, context);
 
     return {
       ...feedback,
@@ -451,9 +511,19 @@ export class RoomDrawingTool {
     const closeEnough = distance(first, last) <= this.settings.magneticThreshold;
 
     const closedPoints = closeEnough ? [...this.points.slice(0, -1)] : [...this.points];
+    const finalBulges = [];
+    for (let i = 0; i < closedPoints.length; i += 1) {
+      finalBulges.push(this.bulges[i] || 0);
+    }
+
     const validation = validatePlacement(
       closedPoints,
-      normalizeRoomPolygons(context.existingRooms || [])
+      normalizeRoomPolygons(context.existingRooms || []),
+      {
+        candidateBulges: finalBulges,
+        candidateClosed: true,
+        tolerance: context.tolerance,
+      }
     );
 
     if (!validation.valid) {
@@ -461,11 +531,6 @@ export class RoomDrawingTool {
         ok: false,
         feedback: createPlacementFeedback(closedPoints, validation, context),
       };
-    }
-
-    const finalBulges = [];
-    for (let i = 0; i < closedPoints.length; i += 1) {
-      finalBulges.push(this.bulges[i] || 0);
     }
 
     const room = {

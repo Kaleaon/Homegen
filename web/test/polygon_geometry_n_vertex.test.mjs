@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, createRoom, addItem, addOpening } from '../js/model.js';
-import { evaluate } from '../js/codes.js';
+import { evaluate, commit } from '../js/codes.js';
 import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
-import { getRoomClearSpan, polygonCentroid, getRoomWallKeys } from '../js/geometry.js';
+import {
+  getRoomClearSpan,
+  polygonCentroid,
+  getRoomWallKeys,
+  roomsOverlap,
+} from '../js/geometry.js';
 import { getConstraintHandles } from '../../designer3d/tools/constraintHandles.mjs';
 
 test('AC1: Habitable non-rectangular rooms with narrow sections under 7 feet fail IRC R304.2 compliance evaluation', () => {
@@ -168,4 +173,65 @@ test('AC5: Spatial overlay dimension badges display true clear dimensions and ce
     dimNode.data.dimensionText.includes('clear'),
     'Dimension badge text should display clear span notation'
   );
+});
+
+test('AC6: roomsOverlap and commit accept detached and flush rooms inside concave L-shaped notches and reject genuine overlaps', () => {
+  const baseState = newState();
+  const lPts = [
+    { x: 0, y: 0 },
+    { x: 240, y: 0 },
+    { x: 240, y: 120 },
+    { x: 120, y: 120 },
+    { x: 120, y: 240 },
+    { x: 0, y: 240 },
+  ];
+  const initRes = commit(baseState, (n) => {
+    createRoom(n, 'bedroom', 0, 0, 240, 240, { points: lPts });
+  });
+  assert.equal(initRes.ok, true, initRes.reasons?.map((r) => r.msg).join('; '));
+
+  const lRoom = initRes.state.rooms[0];
+
+  // 1. Detached room inside exterior notch [120..240] x [120..240]
+  const detachedBath = { x: 132, y: 132, w: 96, h: 96 };
+  assert.equal(roomsOverlap(lRoom, detachedBath), false);
+  const detachedCommit = commit(initRes.state, (n) => {
+    createRoom(n, 'bathroom', 132, 132, 96, 96);
+  });
+  assert.equal(detachedCommit.ok, true, detachedCommit.reasons?.map((r) => r.msg).join('; '));
+
+  // 2. Flush room sharing both inner notch walls (x = 120 and y = 120)
+  const flushBath = { x: 120, y: 120, w: 120, h: 120 };
+  assert.equal(roomsOverlap(lRoom, flushBath), false);
+  const flushCommit = commit(initRes.state, (n) => {
+    createRoom(n, 'bathroom', 120, 120, 120, 120);
+  });
+  assert.equal(flushCommit.ok, true, flushCommit.reasons?.map((r) => r.msg).join('; '));
+
+  // 3. Also test top-left exterior notch orientation where notch walls face West/North
+  const nwNotchL = {
+    points: [
+      { x: 120, y: 0 },
+      { x: 240, y: 0 },
+      { x: 240, y: 240 },
+      { x: 0, y: 240 },
+      { x: 0, y: 120 },
+      { x: 120, y: 120 },
+    ],
+  };
+  assert.equal(roomsOverlap(nwNotchL, { x: 0, y: 0, w: 120, h: 120 }), false);
+
+  // 4. Cross-shaped interior overlap (no vertex of either rect lies inside the other)
+  const horizBar = { x: 0, y: 60, w: 240, h: 96 };
+  const vertBar = { x: 72, y: 0, w: 96, h: 240 };
+  assert.equal(roomsOverlap(horizBar, vertBar), true);
+
+  // 5. Partial interior overlap into L-shaped room body
+  const partialOverlap = { x: 108, y: 108, w: 120, h: 120 };
+  assert.equal(roomsOverlap(lRoom, partialOverlap), true);
+  const overlapCommit = commit(initRes.state, (n) => {
+    createRoom(n, 'bathroom', 108, 108, 120, 120);
+  });
+  assert.equal(overlapCommit.ok, false);
+  assert.ok(overlapCommit.reasons.some((r) => r.rule === 'overlap'));
 });
