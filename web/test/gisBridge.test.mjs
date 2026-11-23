@@ -687,3 +687,397 @@ test('MultiPolygon edge cases: empty coordinates and rings with fewer than 3 ver
   assert.equal(mixedRes.layers.filter((l) => l.type === 'gisLotLine').length, 1);
   assert.equal(mixedRes.layers.filter((l) => l.type === 'gisSetbackBuffer').length, 1);
 });
+
+test('True ground-scale projection: reproject and projectGeoJSON agree within 0.1 in on SAMPLE_MUNICIPAL_GIS at 6928.38 x 6573.99 in', async () => {
+  const { reproject, worldfileToAffineMatrix } = await import('../js/geometry.js');
+  const { SAMPLE_MUNICIPAL_GIS, exportGeoJSON } = await import('../js/app.js');
+  const { buildStudio } = await import('../js/templates.js');
+  const { draw, drawSpatialReferenceOverlay } = await import('../js/render.js');
+
+  const projected = projectGeoJSON(SAMPLE_MUNICIPAL_GIS);
+  assert.equal(projected.features.length, 2);
+  for (const feat of projected.features) {
+    assert.equal(feat.type, 'Feature');
+    assert.ok(
+      feat.geometry && Array.isArray(feat.geometry.coordinates),
+      'Retains canonical .geometry'
+    );
+  }
+
+  const lotBounds = getBounds(projected.features[0].points);
+  const lotWidth = lotBounds.maxX - lotBounds.minX;
+  const lotHeight = lotBounds.maxY - lotBounds.minY;
+
+  assert.ok(
+    Math.abs(lotWidth - 6928.38) < 0.1,
+    `projectGeoJSON width (${lotWidth.toFixed(2)}) must match 6928.38 in within 0.1 in`
+  );
+  assert.ok(
+    Math.abs(lotHeight - 6573.99) < 0.1,
+    `projectGeoJSON height (${lotHeight.toFixed(2)}) must match 6573.99 in within 0.1 in`
+  );
+
+  // Direct reproject on SAMPLE_MUNICIPAL_GIS agrees within 0.1 in
+  const reprojectedFC = reproject(SAMPLE_MUNICIPAL_GIS, 'EPSG:4326', {
+    epsg: 'PLAN',
+    origin: projected.origin,
+  });
+  const reprojLotCoords = reprojectedFC.features[0].geometry.coordinates[0];
+  const rxs = reprojLotCoords.map((c) => c[0]);
+  const rys = reprojLotCoords.map((c) => c[1]);
+  const reprojWidth = Math.max(...rxs) - Math.min(...rxs);
+  const reprojHeight = Math.max(...rys) - Math.min(...rys);
+
+  assert.ok(
+    Math.abs(reprojWidth - lotWidth) < 0.1 && Math.abs(reprojHeight - lotHeight) < 0.1,
+    `reproject (${reprojWidth.toFixed(2)}x${reprojHeight.toFixed(2)}) and projectGeoJSON (${lotWidth.toFixed(2)}x${lotHeight.toFixed(2)}) must agree within 0.1 in`
+  );
+
+  // Rooms drafted at (0, 0) in Studio template evaluate with 0 false setback violations inside true-scale parcel
+  const studioState = buildStudio();
+  const bridge = new GISBridge();
+  studioState.site = bridge.importGeoJSON(SAMPLE_MUNICIPAL_GIS);
+  const report = evaluate(studioState);
+  const setbackViolations = report.violations.filter((v) => v.rule === 'setback-clearance');
+  assert.equal(
+    setbackViolations.length,
+    0,
+    'True-scale parcel must produce 0 false setback violations'
+  );
+
+  // Worldfile anchored to same parcel origin aligns cleanly with true ground scale
+  // 1 pixel = 0.0254 m in UTM EPSG:32610 => 1.0 inch per pixel in PLAN
+  const utmOrigin = reproject(
+    [projected.origin.longitude, projected.origin.latitude],
+    'EPSG:4326',
+    'EPSG:32610'
+  );
+  const utmWld = [0.0254, 0, 0, -0.0254, utmOrigin[0], utmOrigin[1]];
+  const aff = worldfileToAffineMatrix(utmWld, 'EPSG:32610', {
+    epsg: 'PLAN',
+    origin: projected.origin,
+  });
+  assert.ok(Math.abs(aff[0] - 1) < 1e-4, 'Worldfile X scale (0.0254m) equals 1 plan inch/px');
+  assert.ok(Math.abs(aff[3] - 1) < 1e-4, 'Worldfile Y scale (-0.0254m) equals +1 plan inch/px');
+  assert.ok(
+    Math.abs(aff[4]) < 1e-4 && Math.abs(aff[5]) < 1e-4,
+    'Worldfile at parcel origin maps to (0,0)'
+  );
+
+  // Verify Spatial Reference ruler ticks use custom origin without error
+  const tickLabels = [];
+  const mockCtx = {
+    canvas: { width: 800, height: 600 },
+    save() {},
+    restore() {},
+    setTransform() {},
+    setLineDash() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    arc() {},
+    fillRect() {},
+    strokeRect() {},
+    measureText: (t) => ({ width: String(t).length * 6 }),
+    fillText: (t) => tickLabels.push(String(t)),
+  };
+  studioState.crs.epsg = 'EPSG:3857';
+  studioState.crs.origin = projected.origin;
+  drawSpatialReferenceOverlay(mockCtx, studioState, { ox: 400, oy: 300, scale: 0.08 });
+  assert.ok(
+    tickLabels.some((t) => t.includes('CRS: EPSG:3857')),
+    'Ruler spatial badge reflects EPSG:3857 at parcel scale'
+  );
+
+  // MultiLineString projection, open polyline rendering, and GeoJSON export
+  const mlsGeoJSON = {
+    type: 'FeatureCollection',
+    crs: { properties: { name: 'EPSG:4326' } },
+    features: [
+      ...SAMPLE_MUNICIPAL_GIS.features.slice(0, 1),
+      {
+        type: 'Feature',
+        id: 'utility-mls',
+        properties: { name: 'Dual Utility Corridor', layer: 'easement' },
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [
+            [
+              [-122.4192, 37.7746],
+              [-122.4184, 37.7746],
+              [-122.4178, 37.7742],
+            ],
+            [
+              [-122.4191, 37.7739],
+              [-122.4176, 37.7739],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
+  const mlsSite = bridge.importGeoJSON(mlsGeoJSON);
+  const easementLayers = mlsSite.layers.filter((l) => l.type === 'gisEasement');
+  assert.equal(
+    easementLayers.length,
+    2,
+    'MultiLineString with 2 lines must emit 2 gisEasement layers'
+  );
+  assert.equal(
+    easementLayers[0].closed,
+    false,
+    'MultiLineString easement layer must be marked open'
+  );
+  assert.equal(
+    easementLayers[1].closed,
+    false,
+    'MultiLineString easement layer must be marked open'
+  );
+
+  // Verify open gisEasement layers do NOT call closePath() in render.js
+  let easementCloseCalls = 0;
+  let inPurpleDash = false;
+  const renderCtx = new Proxy(
+    {
+      canvas: { width: 800, height: 600 },
+      set strokeStyle(v) {
+        inPurpleDash = v === '#7e22ce';
+      },
+      get strokeStyle() {
+        return inPurpleDash ? '#7e22ce' : '#000';
+      },
+      closePath() {
+        if (inPurpleDash) easementCloseCalls++;
+      },
+      measureText: () => ({ width: 20 }),
+    },
+    {
+      get(target, prop) {
+        return prop in target ? target[prop] : () => {};
+      },
+    }
+  );
+  const mlsState = newState();
+  mlsState.site = mlsSite;
+  const overlayScene = new ComplianceOverlayScene();
+  overlayScene.update(mlsState, { violations: [] }, { curLevel: 0 });
+  draw(renderCtx, mlsState, { ox: 400, oy: 300, scale: 0.08 }, { complianceScene: overlayScene });
+  assert.equal(easementCloseCalls, 0, 'Open MultiLineString easements must not call closePath()');
+
+  // Verify GeoJSON export preserves MultiLineString without dropped polylines
+  const exportedGeo = exportGeoJSON(mlsState, 'EPSG:32610');
+  const exportedMls = exportedGeo.features.find((f) => f.id === 'utility-mls');
+  assert.ok(exportedMls, 'Exported GeoJSON must include MultiLineString feature');
+  assert.equal(exportedMls.geometry.type, 'MultiLineString');
+  assert.equal(exportedMls.geometry.coordinates.length, 2);
+  assert.equal(exportedMls.geometry.coordinates[0].length, 3);
+  assert.equal(exportedMls.geometry.coordinates[1].length, 2);
+});
+
+test('loadGISSubsystem, #gis-crs switching, setback preservation, and fit() down to 0.02', async () => {
+  const prevDocument = globalThis.document;
+  const prevWindow = globalThis.window;
+  const prevNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+  const listeners = {};
+  const els = {};
+  const makeEl = (id) => {
+    if (!els[id]) {
+      els[id] = {
+        id,
+        width: 800,
+        height: 600,
+        value: id === 'gis-crs' ? 'EPSG:4326' : '',
+        style: {},
+        dataset: {},
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+        querySelector: (s) => makeEl(s.replace(/^#/, '')),
+        querySelectorAll: () => [],
+        appendChild() {},
+        removeChild() {},
+        addEventListener(type, fn) {
+          listeners[`${id}:${type}`] ||= [];
+          listeners[`${id}:${type}`].push(fn);
+        },
+        removeEventListener() {},
+        getAttribute: () => null,
+        setAttribute() {},
+        removeAttribute() {},
+        hasAttribute: () => false,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+        getContext: () =>
+          new Proxy(
+            {
+              canvas: { width: 800, height: 600 },
+              measureText: () => ({ width: 10 }),
+              createPattern: () => ({}),
+              createLinearGradient: () => ({ addColorStop() {} }),
+              createRadialGradient: () => ({ addColorStop() {} }),
+            },
+            { get: (target, prop) => (prop in target ? target[prop] : () => {}) }
+          ),
+      };
+    }
+    return els[id];
+  };
+
+  globalThis.document = {
+    activeElement: makeEl('body'),
+    body: makeEl('body'),
+    documentElement: makeEl('html'),
+    getElementById: (id) => makeEl(id),
+    querySelector: (s) => makeEl(s.replace(/^#/, '')),
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+    createElement: (tag) => makeEl(`${tag}-${Object.keys(els).length}`),
+  };
+  globalThis.window = {
+    devicePixelRatio: 1,
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent() {},
+    location: { href: '' },
+    navigator: { userAgent: 'node' },
+    localStorage: { getItem: () => null, setItem: () => {} },
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    value: globalThis.window.navigator,
+    configurable: true,
+    writable: true,
+  });
+
+  try {
+    const appMod = await import(`../js/app.js?gis_crs_test=${Date.now()}`);
+    const hg = globalThis.window.__homegen;
+
+    // Seed a room plus SAMPLE_MUNICIPAL_GIS via loadGISSubsystem
+    hg.apply((n) => {
+      n.rooms = [
+        {
+          id: 'r-main',
+          name: 'Main House',
+          type: 'living',
+          level: 0,
+          x: 0,
+          y: 0,
+          w: 240,
+          h: 180,
+          ceiling: 96,
+          walls: { N: 'paint_white', E: 'paint_white', S: 'paint_white', W: 'paint_white' },
+          floor: 'wood_oak',
+          openings: [],
+          items: [],
+        },
+      ];
+    }, 'Seed room');
+
+    const site4326 = appMod.loadGISSubsystem(appMod.SAMPLE_MUNICIPAL_GIS);
+    const b4326 = getBounds(site4326.features[0].points);
+    const w4326 = b4326.maxX - b4326.minX;
+    const h4326 = b4326.maxY - b4326.minY;
+
+    assert.ok(
+      Math.abs(w4326 - 6928.38) / 6928.38 <= 0.005 && Math.abs(h4326 - 6573.99) / 6573.99 <= 0.005,
+      `loadGISSubsystem parcel (${w4326.toFixed(2)}x${h4326.toFixed(2)}) within ±0.5% of 6928.38x6573.99`
+    );
+    assert.equal(
+      evaluate(hg.doc).violations.filter((v) => v.rule === 'setback-clearance').length,
+      0
+    );
+
+    // Customize segment setback before switching CRS
+    appMod.setGISSegmentSetback('seg-1', 72);
+    assert.equal(hg.doc.site.segments[0].setback, 72);
+
+    // Switch #gis-crs to EPSG:3857 -> EPSG:32610 -> EPSG:4326 via event listener or loadGISSubsystem
+    const crsSelect = globalThis.document.querySelector('#gis-crs');
+    const triggerCrsChange = (nextCrs) => {
+      if (crsSelect) crsSelect.value = nextCrs;
+      const cbs = listeners['gis-crs:change'] || [];
+      if (cbs.length > 0) {
+        for (const cb of cbs) cb({ detail: { value: nextCrs }, target: { value: nextCrs } });
+      } else {
+        appMod.loadGISSubsystem(
+          { type: 'FeatureCollection', features: hg.doc.site.features },
+          {
+            crs: nextCrs,
+            sourceCRS: hg.doc.site.crs,
+            origin: hg.doc.site.origin,
+            preserveSetbacks: true,
+          }
+        );
+      }
+    };
+
+    triggerCrsChange('EPSG:3857');
+    assert.equal(hg.doc.site.crs, 'EPSG:3857');
+    assert.equal(hg.doc.crs.epsg, 'EPSG:3857');
+    assert.equal(hg.doc.crs.geojson.features.length, 2);
+    assert.equal(hg.doc.site.features.length, 2);
+    assert.equal(hg.doc.site.layers.length, 3, 'All lot, easement, and setback layers preserved');
+    assert.equal(
+      hg.doc.site.segments[0].setback,
+      72,
+      'Customized 72in setback preserved on CRS switch'
+    );
+    assert.ok(
+      Math.abs(hg.doc.site.features[0].geometry.coordinates[0][0][0]) > 1000000,
+      'Canonical .geometry reprojected to Web Mercator meters'
+    );
+
+    triggerCrsChange('EPSG:32610');
+    assert.equal(hg.doc.site.crs, 'EPSG:32610');
+    assert.equal(hg.doc.crs.epsg, 'EPSG:32610');
+    assert.equal(hg.doc.site.segments[0].setback, 72);
+
+    triggerCrsChange('EPSG:4326');
+    assert.equal(hg.doc.site.crs, 'EPSG:4326');
+    assert.equal(hg.doc.crs.epsg, 'EPSG:4326');
+    assert.equal(hg.doc.site.segments[0].setback, 72);
+    assert.ok(
+      Math.abs(hg.doc.site.features[0].geometry.coordinates[0][0][0] - -122.4194) < 1e-5,
+      'Canonical .geometry roundtrips cleanly back to WGS84'
+    );
+
+    // Verify fit() frames combined room and site bounds down to 0.02
+    assert.ok(
+      hg.view.scale < 0.2 && hg.view.scale >= 0.02,
+      `Fitted parcel scale (${hg.view.scale}) < 0.2`
+    );
+
+    // Huge site bounds (~30,000 in) clamps cleanly at 0.02
+    hg.doc.site.features.push({
+      type: 'Feature',
+      id: 'far-corner',
+      properties: { layer: 'easement' },
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-122.4194, 37.7749],
+          [-122.41, 37.76],
+        ],
+      },
+      layerKind: 'easement',
+      points: [
+        { x: -20000, y: -20000 },
+        { x: 20000, y: 20000 },
+      ],
+    });
+    appMod.fit();
+    assert.equal(
+      hg.view.scale,
+      0.02,
+      'fit() frames huge combined room and site bounds down to 0.02'
+    );
+  } finally {
+    // Wait for debounced announceZoom / persist timers from app.js to settle before restoring globals
+    await new Promise((r) => setTimeout(r, 450));
+    globalThis.document = prevDocument;
+    globalThis.window = prevWindow;
+    if (prevNavigatorDesc) {
+      Object.defineProperty(globalThis, 'navigator', prevNavigatorDesc);
+    }
+  }
+});

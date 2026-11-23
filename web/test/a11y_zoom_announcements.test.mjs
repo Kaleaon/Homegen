@@ -257,12 +257,12 @@ test('debounced zoom status announcements via #plan-fallback-summary live region
       await new Promise((r) => setTimeout(r, ZOOM_ANNOUNCE_DEBOUNCE_MS + 50));
       assert.deepEqual(textWrites['plan-fallback-summary'], ['Zoom level: 500%']);
 
-      // Clamp to minimum scale (0.4 -> (0.4 / 1.6) * 100 = 25%)
+      // Clamp to minimum scale (0.02 -> (0.02 / 1.6) * 100 = 1%)
       textWrites['plan-fallback-summary'].length = 0;
-      homegen.zoomAt(400, 300, 0.001);
-      assert.equal(homegen.view.scale, 0.4);
+      homegen.zoomAt(400, 300, 0.0001);
+      assert.equal(homegen.view.scale, 0.02);
       await new Promise((r) => setTimeout(r, ZOOM_ANNOUNCE_DEBOUNCE_MS + 50));
-      assert.deepEqual(textWrites['plan-fallback-summary'], ['Zoom level: 25%']);
+      assert.deepEqual(textWrites['plan-fallback-summary'], ['Zoom level: 1%']);
 
       // Populate sample home and verify fit() announces fitted scale
       textWrites['plan-fallback-summary'].length = 0;

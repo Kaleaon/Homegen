@@ -137,7 +137,14 @@ function drawQuadmeshWarpedImage(ctx, img, quadmesh) {
   }
 }
 
-function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, opts = {}) {
+function drawBackground(
+  ctx,
+  bg,
+  onLoaded,
+  view = { scale: 1, ox: 0, oy: 0 },
+  opts = {},
+  state = null
+) {
   if (!bg || !bg.visible || !bg.dataUrl) return;
   const img = getBgImage(bg, onLoaded);
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -165,8 +172,11 @@ function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, op
     const isNonDegenerate = Math.abs(det) >= 1e-12;
 
     if (isFiniteMatrix && isNonDegenerate) {
-      const targetCRS = opts.activeCRS || opts.crs || 'PLAN';
-      const sourceCRS = bg.worldfileCRS || bg.sourceCRS || bg.crs || 'PLAN';
+      const planOrigin = state?.crs?.origin || state?.site?.origin;
+      const defaultTargetCRS = planOrigin ? { epsg: 'PLAN', origin: planOrigin } : 'PLAN';
+      const targetCRS = opts.activeCRS || opts.crs || defaultTargetCRS;
+      const sourceCRS =
+        bg.matrixCRS === 'PLAN' ? 'PLAN' : bg.worldfileCRS || bg.sourceCRS || bg.crs || 'PLAN';
 
       let effA = a,
         effB = b,
@@ -175,7 +185,9 @@ function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, op
         effE = e,
         effF = f;
 
-      if (sourceCRS !== targetCRS && sourceCRS !== 'PLAN') {
+      const isTargetPlan =
+        targetCRS === 'PLAN' || (typeof targetCRS === 'object' && targetCRS?.epsg === 'PLAN');
+      if (sourceCRS !== 'PLAN' && !(sourceCRS === targetCRS && !isTargetPlan)) {
         try {
           const p0 = reproject([e, f], sourceCRS, targetCRS);
           const p1 = reproject([a + e, b + f], sourceCRS, targetCRS);
@@ -285,7 +297,7 @@ export function draw(ctx, state, view, opts = {}) {
   ctx.fillRect(0, 0, w, h);
   ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr);
   if (state.background)
-    drawBackground(ctx, state.background, opts.onLoaded || opts.redraw, view, opts);
+    drawBackground(ctx, state.background, opts.onLoaded || opts.redraw, view, opts, state);
   drawGrid(ctx, view, w / dpr, h / dpr, opts);
   if (state.elevationGrid) drawContours(ctx, state, view, opts);
 
@@ -747,8 +759,6 @@ export function drawRulers(ctx, view, cw, ch, opts = {}) {
 }
 
 const DEFAULT_PLAN_ORIGIN = [-122.4194, 37.7749];
-const INCH_TO_METER = 0.0254;
-
 function niceTickStep(rawStep) {
   if (!Number.isFinite(rawStep) || rawStep <= 0) return 120;
   const exp = Math.pow(10, Math.floor(Math.log10(rawStep)));
@@ -800,7 +810,7 @@ function resolveSpatialReference(state, opts = {}) {
   const crsObj =
     (opts.crs && typeof opts.crs === 'object' ? opts.crs : null) ||
     (state?.crs && typeof state.crs === 'object' ? state.crs : null);
-  const rawOrigin = opts.origin ?? crsObj?.origin;
+  const rawOrigin = opts.origin ?? crsObj?.origin ?? state?.site?.origin;
   if (Array.isArray(rawOrigin) && rawOrigin.length >= 2) {
     const lon = Number(rawOrigin[0]);
     const lat = Number(rawOrigin[1]);
@@ -824,30 +834,9 @@ function resolveSpatialReference(state, opts = {}) {
 
 function projectPlanCoord(planPt, originLonLat, epsg) {
   try {
-    const isDefaultOrigin =
-      Math.abs(originLonLat[0] - DEFAULT_PLAN_ORIGIN[0]) < 1e-9 &&
-      Math.abs(originLonLat[1] - DEFAULT_PLAN_ORIGIN[1]) < 1e-9;
-    if (isDefaultOrigin) {
-      const res = reproject(planPt, 'PLAN', epsg);
-      if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
-        return res;
-      }
-    } else {
-      const originMerc = reproject(originLonLat, 'EPSG:4326', 'EPSG:3857');
-      if (
-        Array.isArray(originMerc) &&
-        Number.isFinite(originMerc[0]) &&
-        Number.isFinite(originMerc[1])
-      ) {
-        const mercPt = [
-          originMerc[0] + planPt[0] * INCH_TO_METER,
-          originMerc[1] - planPt[1] * INCH_TO_METER,
-        ];
-        const res = epsg === 'EPSG:3857' ? mercPt : reproject(mercPt, 'EPSG:3857', epsg);
-        if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
-          return res;
-        }
-      }
+    const res = reproject(planPt, { epsg: 'PLAN', origin: originLonLat }, epsg);
+    if (Array.isArray(res) && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+      return res;
     }
   } catch {
     // Fall back safely on reprojection failure
@@ -1053,7 +1042,8 @@ function drawComplianceScene(ctx, complianceScene, view, opts = {}) {
         ctx.restore();
       }
     } else if (node.type === 'gisEasement') {
-      const pts = node.data.points || node.data.layer?.points;
+      const layer = node.data.layer;
+      const pts = node.data.points || layer?.points;
       if (pts && pts.length >= 2) {
         ctx.save();
         ctx.strokeStyle = '#7e22ce';
@@ -1062,7 +1052,9 @@ function drawComplianceScene(ctx, complianceScene, view, opts = {}) {
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.closePath();
+        if (layer?.closed !== false) {
+          ctx.closePath();
+        }
         ctx.stroke();
         ctx.restore();
       }

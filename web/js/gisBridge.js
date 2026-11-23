@@ -12,6 +12,7 @@ import {
   lineIntersection,
   polygonArea,
 } from './geometry.js';
+import { normalizeCode } from './epsgRegistry.js';
 
 export { getBounds, boundsOverlap, pointInPolygon, lineIntersection, polygonArea };
 
@@ -268,12 +269,45 @@ export class SpatialRTree {
   }
 }
 
+function normalizeOriginObject(origin) {
+  if (!origin) return null;
+  if (Array.isArray(origin) && origin.length >= 2) {
+    const lon = Number(origin[0]);
+    const lat = Number(origin[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { longitude: lon, latitude: lat };
+    }
+  }
+  if (typeof origin === 'object') {
+    const lon = Number(origin.longitude ?? origin.lon ?? origin.x);
+    const lat = Number(origin.latitude ?? origin.lat ?? origin.y);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { longitude: lon, latitude: lat };
+    }
+  }
+  return null;
+}
+
 /**
  * Coordinate projection converting GeoJSON to plan canvas coordinates (inches).
  */
 export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
-  const bounds = targetBounds || { x: 100, y: 100, w: 1000, h: 800 };
-  const crs = options.crs || geojson.crs?.properties?.name || 'EPSG:4326';
+  if (!geojson || typeof geojson !== 'object') {
+    return {
+      crs: options.crs || 'EPSG:4326',
+      origin: normalizeOriginObject(options.origin) || { longitude: -122.4194, latitude: 37.7749 },
+      features: [],
+      segments: [],
+      layers: [],
+    };
+  }
+
+  const rawTargetCRS = options.crs || geojson.crs?.properties?.name || 'EPSG:4326';
+  const crs = normalizeCode(rawTargetCRS) || rawTargetCRS;
+  const rawSourceCRS = options.sourceCRS || geojson.crs?.properties?.name || crs;
+  const sourceCRS = normalizeCode(rawSourceCRS) || rawSourceCRS;
+  const shouldFitBounds = Boolean(targetBounds || options.targetBounds || options.fitToBounds);
+  const bounds = targetBounds || options.targetBounds || { x: 100, y: 100, w: 1000, h: 800 };
 
   let rawFeatures = [];
   if (geojson.type === 'FeatureCollection') {
@@ -281,18 +315,22 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
   } else if (geojson.type === 'Feature') {
     rawFeatures = [geojson];
   } else if (
-    geojson.type === 'Polygon' ||
-    geojson.type === 'MultiPolygon' ||
-    geojson.type === 'LineString'
+    ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString', 'Point', 'MultiPoint'].includes(
+      geojson.type
+    )
   ) {
     rawFeatures = [{ type: 'Feature', geometry: geojson, properties: {} }];
   }
 
+  const filterValidCoords = (arr) =>
+    Array.isArray(arr)
+      ? arr.filter(
+          (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
+        )
+      : [];
+
   const hasValidRawPolygonRing = (rawRing) => {
-    if (!Array.isArray(rawRing) || rawRing.length < 3) return false;
-    const validCoords = rawRing.filter(
-      (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-    );
+    const validCoords = filterValidCoords(rawRing);
     if (validCoords.length < 3) return false;
     const first = validCoords[0];
     const last = validCoords[validCoords.length - 1];
@@ -315,128 +353,207 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     const coords = [];
     if (!geom || !Array.isArray(geom.coordinates)) return coords;
     if (geom.type === 'Point') {
-      if (geom.coordinates.length >= 2) coords.push(geom.coordinates);
+      if (
+        geom.coordinates.length >= 2 &&
+        Number.isFinite(geom.coordinates[0]) &&
+        Number.isFinite(geom.coordinates[1])
+      ) {
+        coords.push(geom.coordinates);
+      }
     } else if (geom.type === 'LineString' || geom.type === 'MultiPoint') {
-      coords.push(
-        ...geom.coordinates.filter(
-          (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-        )
-      );
+      coords.push(...filterValidCoords(geom.coordinates));
     } else if (geom.type === 'MultiLineString') {
       for (const line of geom.coordinates) {
-        if (Array.isArray(line)) {
-          coords.push(
-            ...line.filter(
-              (c) =>
-                Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-            )
-          );
-        }
+        coords.push(...filterValidCoords(line));
       }
     } else if (geom.type === 'Polygon') {
       const outerRing = geom.coordinates[0];
       if (hasValidRawPolygonRing(outerRing)) {
-        coords.push(
-          ...outerRing.filter(
-            (c) =>
-              Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-          )
-        );
+        coords.push(...filterValidCoords(outerRing));
       }
     } else if (geom.type === 'MultiPolygon') {
       for (const poly of geom.coordinates) {
         if (!Array.isArray(poly) || poly.length === 0) continue;
         const outerRing = poly[0];
         if (hasValidRawPolygonRing(outerRing)) {
-          coords.push(
-            ...outerRing.filter(
-              (c) =>
-                Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-            )
-          );
+          coords.push(...filterValidCoords(outerRing));
         }
       }
     }
     return coords;
   };
 
-  let allCoords = [];
+  const allCoords = [];
   for (const feat of rawFeatures) {
-    if (feat.geometry) {
+    if (feat?.geometry) {
       allCoords.push(...extractCoords(feat.geometry));
     }
   }
 
   if (!allCoords.length) {
-    return { crs, features: [], segments: [], layers: [] };
+    return {
+      crs,
+      origin: normalizeOriginObject(options.origin) || { longitude: -122.4194, latitude: 37.7749 },
+      features: [],
+      segments: [],
+      layers: [],
+    };
   }
 
-  const sourceCRS = crs;
+  // Compute WGS84 parcel centroid (or honor explicit options.origin)
+  let minLon = Infinity,
+    minLat = Infinity,
+    maxLon = -Infinity,
+    maxLat = -Infinity;
+  for (const c of allCoords) {
+    const wgs = sourceCRS === 'EPSG:4326' ? c : reproject(c, sourceCRS, 'EPSG:4326');
+    if (Array.isArray(wgs) && Number.isFinite(wgs[0]) && Number.isFinite(wgs[1])) {
+      if (wgs[0] < minLon) minLon = wgs[0];
+      if (wgs[1] < minLat) minLat = wgs[1];
+      if (wgs[0] > maxLon) maxLon = wgs[0];
+      if (wgs[1] > maxLat) maxLat = wgs[1];
+    }
+  }
 
-  // Convert raw coords to WGS84 via reproject, then to planar metric/projected values
-  const projectPoint = (c) => {
-    const wgs84 = reproject(c, sourceCRS, 'EPSG:4326');
-    const lon = wgs84[0];
-    const lat = wgs84[1];
+  const explicitOrigin = normalizeOriginObject(options.origin);
+  const originObj =
+    explicitOrigin ||
+    (Number.isFinite(minLon) && Number.isFinite(minLat)
+      ? { longitude: (minLon + maxLon) / 2, latitude: (minLat + maxLat) / 2 }
+      : { longitude: -122.4194, latitude: 37.7749 });
+  const planTarget = { epsg: 'PLAN', origin: [originObj.longitude, originObj.latitude] };
 
-    if (isNaN(lon) || isNaN(lat)) {
-      return { px: 0, py: 0 };
+  const toTargetCRSCoord = (c) => {
+    if (sourceCRS === crs) return [...c];
+    const conv = reproject(c, sourceCRS, crs);
+    return Array.isArray(conv) ? conv : [...c];
+  };
+
+  let transformCoord;
+  if (shouldFitBounds) {
+    // Legacy opt-in targetBounds normalization
+    const projectPoint = (c) => {
+      const wgs84 = sourceCRS === 'EPSG:4326' ? c : reproject(c, sourceCRS, 'EPSG:4326');
+      const lon = wgs84[0];
+      const lat = wgs84[1];
+
+      if (isNaN(lon) || isNaN(lat)) {
+        return { px: 0, py: 0 };
+      }
+
+      if (sourceCRS === 'EPSG:3857') {
+        return { px: lon, py: lat };
+      }
+
+      const clampedLat = Math.max(-89.9, Math.min(89.9, lat));
+      const rad = (clampedLat * Math.PI) / 180;
+      const px = lon * 111319.49;
+      const py = Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 6378137;
+
+      return {
+        px: isNaN(px) ? lon : px,
+        py: isNaN(py) ? lat : py,
+      };
+    };
+
+    const planarCoords = allCoords.map(projectPoint);
+    let minPx = Infinity,
+      minPy = Infinity,
+      maxPx = -Infinity,
+      maxPy = -Infinity;
+    for (const p of planarCoords) {
+      if (p.px < minPx) minPx = p.px;
+      if (p.py < minPy) minPy = p.py;
+      if (p.px > maxPx) maxPx = p.px;
+      if (p.py > maxPy) maxPy = p.py;
     }
 
-    if (sourceCRS === 'EPSG:3857') {
-      return { px: lon, py: lat };
+    const rangeX = maxPx - minPx || 1;
+    const rangeY = maxPy - minPy || 1;
+
+    const scale = Math.min(bounds.w / rangeX, bounds.h / rangeY);
+    const offsetX = bounds.x + (bounds.w - rangeX * scale) / 2;
+    const offsetY = bounds.y + (bounds.h - rangeY * scale) / 2;
+
+    transformCoord = (cSource) => {
+      const p = projectPoint(cSource);
+      const x = offsetX + (p.px - minPx) * scale;
+      const y = offsetY + (maxPy - p.py) * scale;
+      return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+    };
+  } else {
+    // Unified ground-scale projection via reproject anchored at planTarget.origin
+    transformCoord = (_cSource, cTarget) => {
+      const pt = reproject(cTarget, crs, planTarget);
+      const x = Array.isArray(pt) && Number.isFinite(pt[0]) ? pt[0] : 0;
+      const y = Array.isArray(pt) && Number.isFinite(pt[1]) ? pt[1] : 0;
+      return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+    };
+  }
+
+  const ensureClosedRawRing = (coords) => {
+    if (coords.length < 3) return coords;
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) return coords;
+    return [...coords, [...first]];
+  };
+
+  const buildPolygonComponent = (rawPolyRings) => {
+    if (!Array.isArray(rawPolyRings) || !hasValidRawPolygonRing(rawPolyRings[0])) return null;
+    const targetRings = [];
+    const projectedRings = [];
+    for (let rIdx = 0; rIdx < rawPolyRings.length; rIdx++) {
+      const validRaw = filterValidCoords(rawPolyRings[rIdx]);
+      if (rIdx === 0 && validRaw.length < 3) return null;
+      if (validRaw.length < 3) continue;
+      const targetCoords = validRaw.map(toTargetCRSCoord);
+      const projPts = validRaw.map((c, idx) => transformCoord(c, targetCoords[idx]));
+      targetRings.push(ensureClosedRawRing(targetCoords));
+      projectedRings.push(projPts);
     }
-
-    const clampedLat = Math.max(-89.9, Math.min(89.9, lat));
-    const rad = (clampedLat * Math.PI) / 180;
-    const px = lon * 111319.49;
-    const py = Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 6378137;
-
+    if (!projectedRings.length || !isValidProjectedRing(projectedRings[0])) return null;
     return {
-      px: isNaN(px) ? lon : px,
-      py: isNaN(py) ? lat : py,
+      ring: projectedRings[0],
+      geometry: {
+        type: 'Polygon',
+        coordinates: targetRings,
+      },
+      isClosed: true,
     };
   };
 
-  const planarCoords = allCoords.map(projectPoint);
-  let minPx = Infinity,
-    minPy = Infinity,
-    maxPx = -Infinity,
-    maxPy = -Infinity;
-  for (const p of planarCoords) {
-    if (p.px < minPx) minPx = p.px;
-    if (p.py < minPy) minPy = p.py;
-    if (p.px > maxPx) maxPx = p.px;
-    if (p.py > maxPy) maxPy = p.py;
-  }
-
-  const rangeX = maxPx - minPx || 1;
-  const rangeY = maxPy - minPy || 1;
-
-  // Scale to fit target bounds while maintaining aspect ratio
-  const scale = Math.min(bounds.w / rangeX, bounds.h / rangeY);
-  const offsetX = bounds.x + (bounds.w - rangeX * scale) / 2;
-  const offsetY = bounds.y + (bounds.h - rangeY * scale) / 2;
-
-  const transformCoord = (c) => {
-    const p = projectPoint(c);
-    const x = offsetX + (p.px - minPx) * scale;
-    // Invert Y axis for screen space
-    const y = offsetY + (maxPy - p.py) * scale;
-    return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+  const buildLineComponent = (rawLineCoords) => {
+    const validRaw = filterValidCoords(rawLineCoords);
+    if (validRaw.length < 2) return null;
+    const targetCoords = validRaw.map(toTargetCRSCoord);
+    const projPts = validRaw.map((c, idx) => transformCoord(c, targetCoords[idx]));
+    if (projPts.length < 2) return null;
+    const first = projPts[0];
+    const last = projPts[projPts.length - 1];
+    const isClosed = projPts.length >= 4 && first.x === last.x && first.y === last.y;
+    return {
+      ring: projPts,
+      geometry: {
+        type: 'LineString',
+        coordinates: targetCoords,
+      },
+      isClosed,
+    };
   };
 
-  const transformRings = (rings) =>
-    rings.map((ring) =>
-      Array.isArray(ring)
-        ? ring
-            .filter(
-              (c) =>
-                Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-            )
-            .map(transformCoord)
-        : []
-    );
+  const existingSetbackMap = new Map();
+  if (Array.isArray(options.existingSegments)) {
+    for (const seg of options.existingSegments) {
+      if (!seg) continue;
+      if (seg.ringId !== undefined && seg.edgeIndex !== undefined) {
+        existingSetbackMap.set(`${seg.ringId}:${seg.edgeIndex}`, seg);
+      }
+      if (seg.id) {
+        existingSetbackMap.set(`id:${seg.id}`, seg);
+      }
+    }
+  }
 
   const transformedFeatures = [];
   const segments = [];
@@ -449,54 +566,59 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     if (!geom || !Array.isArray(geom.coordinates)) continue;
 
     const baseId = feat.id || `feat-${nextFeatId++}`;
+    const parentId = feat.parentId || baseId;
+    const sourceGeometryType = feat.sourceGeometryType || geom.type;
     const layerKind =
+      feat.layerKind ||
       feat.properties?.layer ||
       feat.properties?.type ||
       (geom.type.includes('Polygon') ? 'lot' : 'easement');
-    const componentRings = [];
+    const components = [];
 
     if (geom.type === 'Polygon') {
-      const rings = transformRings(geom.coordinates);
-      if (isValidProjectedRing(rings[0])) {
-        componentRings.push(rings[0]);
-      }
+      const comp = buildPolygonComponent(geom.coordinates);
+      if (comp) components.push(comp);
     } else if (geom.type === 'MultiPolygon') {
       for (const polyCoords of geom.coordinates) {
         if (!Array.isArray(polyCoords) || polyCoords.length === 0) continue;
-        const rings = transformRings(polyCoords);
-        if (isValidProjectedRing(rings[0])) {
-          componentRings.push(rings[0]);
-        }
+        const comp = buildPolygonComponent(polyCoords);
+        if (comp) components.push(comp);
       }
     } else if (geom.type === 'LineString') {
-      const linePoints = geom.coordinates
-        .filter(
-          (c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])
-        )
-        .map(transformCoord);
-      if (linePoints.length >= 2) {
-        componentRings.push(linePoints);
+      const comp = buildLineComponent(geom.coordinates);
+      if (comp) components.push(comp);
+    } else if (geom.type === 'MultiLineString') {
+      for (const lineCoords of geom.coordinates) {
+        if (!Array.isArray(lineCoords) || lineCoords.length === 0) continue;
+        const comp = buildLineComponent(lineCoords);
+        if (comp) components.push(comp);
       }
     }
 
-    for (let idx = 0; idx < componentRings.length; idx++) {
-      const ring = componentRings[idx];
-      const componentId = geom.type === 'MultiPolygon' ? `${baseId}-${idx}` : baseId;
+    const isDecomposedMulti = geom.type === 'MultiPolygon' || geom.type === 'MultiLineString';
+
+    for (let idx = 0; idx < components.length; idx++) {
+      const { ring, geometry, isClosed } = components[idx];
+      const componentId = isDecomposedMulti ? `${baseId}-${idx}` : baseId;
+      const componentIndex = isDecomposedMulti ? idx : (feat.componentIndex ?? idx);
 
       transformedFeatures.push({
+        type: 'Feature',
         id: componentId,
-        parentId: baseId,
-        componentIndex: idx,
-        properties: feat.properties || {},
+        parentId,
+        componentIndex,
+        sourceGeometryType,
+        properties: feat.properties ? { ...feat.properties } : {},
+        geometry,
         layerKind,
         points: ring,
       });
 
-      if (layerKind === 'lot' && geom.type !== 'LineString' && isValidProjectedRing(ring)) {
+      if (layerKind === 'lot' && geometry.type === 'Polygon' && isValidProjectedRing(ring)) {
         // Extract segments independently for each closed component ring
         const n = ring.length;
-        const isClosed = ring[0].x === ring[n - 1].x && ring[0].y === ring[n - 1].y;
-        const segCount = isClosed ? n - 1 : n;
+        const ringClosed = ring[0].x === ring[n - 1].x && ring[0].y === ring[n - 1].y;
+        const segCount = ringClosed ? n - 1 : n;
         const ringSegments = [];
 
         for (let i = 0; i < segCount; i++) {
@@ -509,16 +631,25 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
         if (ringSegments.length >= 3) {
           const defaultSetback = feat.properties?.setback ?? options.defaultSetback ?? 36;
           for (const { p1, p2, edgeIndex } of ringSegments) {
+            const segId = `seg-${nextSegId++}`;
+            const prevSeg =
+              existingSetbackMap.get(`${componentId}:${edgeIndex}`) ||
+              existingSetbackMap.get(`id:${segId}`);
             segments.push({
-              id: `seg-${nextSegId++}`,
+              id: segId,
               ringId: componentId,
+              edgeIndex,
               p1,
               p2,
-              setback: defaultSetback,
-              label: feat.properties?.name || `Lot Edge ${edgeIndex + 1}`,
+              pts: [p1, p2],
+              setback: prevSeg?.setback ?? defaultSetback,
+              label: prevSeg?.label || feat.properties?.name || `Lot Edge ${edgeIndex + 1}`,
             });
           }
         }
+      } else {
+        // Track closed state for non-lot features on transformed entry
+        transformedFeatures[transformedFeatures.length - 1].closed = isClosed;
       }
     }
   }
@@ -529,14 +660,17 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
     setbackBufferResult = computeVariableBuffers(segments);
   }
 
-  // Register layers for compliance overlay (one independent layer per component polygon ring)
+  // Register layers for compliance overlay (one independent layer per component ring/line)
   for (const feat of transformedFeatures) {
     const type = feat.layerKind === 'easement' ? 'gisEasement' : 'gisLotLine';
+    const isClosed =
+      feat.geometry?.type === 'Polygon' ? true : feat.closed !== undefined ? feat.closed : false;
     layers.push({
       id: feat.id,
       parentId: feat.parentId,
       componentIndex: feat.componentIndex,
       type,
+      closed: isClosed,
       name: feat.properties.name || (type === 'gisLotLine' ? 'Lot Boundary' : 'Easement'),
       points: feat.points,
       bounds: getBounds(feat.points),
@@ -549,6 +683,7 @@ export function projectGeoJSON(geojson, targetBounds = null, options = {}) {
 
   return {
     crs,
+    origin: originObj,
     features: transformedFeatures,
     segments,
     layers,
@@ -1120,13 +1255,27 @@ export class SpatialBVH3D {
  */
 export class GISBridge {
   constructor(siteState = null) {
-    this.site = siteState || { crs: 'EPSG:4326', features: [], segments: [], layers: [] };
+    this.site = siteState || {
+      crs: 'EPSG:4326',
+      origin: { longitude: -122.4194, latitude: 37.7749 },
+      features: [],
+      segments: [],
+      layers: [],
+    };
     this.rebuildIndex();
   }
 
   importGeoJSON(geojson, options = {}) {
-    const projected = projectGeoJSON(geojson, options.targetBounds, options);
+    const mergedOptions = {
+      ...options,
+      existingSegments:
+        options.preserveSetbacks && Array.isArray(this.site?.segments)
+          ? this.site.segments
+          : options.existingSegments,
+    };
+    const projected = projectGeoJSON(geojson, options.targetBounds, mergedOptions);
     this.site.crs = projected.crs;
+    this.site.origin = projected.origin;
     this.site.features = projected.features;
     this.site.segments = projected.segments;
     this.site.layers = projected.layers;

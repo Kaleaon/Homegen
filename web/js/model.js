@@ -19,6 +19,7 @@ import {
   getRoomBoundingBox,
   polygonArea,
   computeGeoBounds,
+  reproject,
 } from './geometry.js';
 import { isRegisteredEPSG, normalizeCode, getEPSGDefinition } from './epsgRegistry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, ROOM_KIT_BY_ID } from './catalog.js';
@@ -79,6 +80,140 @@ export function normalizeEPSGCode(code) {
   const normalized = normalizeCode(String(code));
   if (/^EPSG:\d+$/.test(normalized)) return normalized;
   return 'EPSG:4326';
+}
+
+export function getEPSGWkt(epsg) {
+  const code = normalizeEPSGCode(epsg);
+  if (code === 'EPSG:3857') {
+    return 'PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1]]';
+  }
+  const projStr = getEPSGDefinition(code) || '';
+  const utmMatch = projStr.match(/\+proj=utm\s+\+zone=(\d+)/);
+  if (utmMatch) {
+    const zone = utmMatch[1];
+    const isSouth = /\+south\b/.test(projStr);
+    const datum = /\+datum=NAD83\b/.test(projStr) ? 'NAD83' : 'WGS 84';
+    return `PROJCS["${datum} / UTM zone ${zone}${isSouth ? 'S' : 'N'}",UNIT["metre",1]]`;
+  }
+  if (/\+units=us-ft\b/.test(projStr)) {
+    return `PROJCS["${code} / US State Plane (ftUS)",UNIT["US survey foot",0.304800609601219]]`;
+  }
+  if (/\+units=ft\b/.test(projStr)) {
+    return `PROJCS["${code}",UNIT["foot",0.3048]]`;
+  }
+  return defaultCRS().wkt;
+}
+
+export function getEPSGUnits(epsg) {
+  const projStr = getEPSGDefinition(normalizeEPSGCode(epsg)) || '';
+  const unitMatch = projStr.match(/\+units=([a-zA-Z0-9_-]+)/);
+  if (unitMatch) return unitMatch[1];
+  return 'inches';
+}
+
+export function buildCanonicalSiteGeoJSON(features = [], epsg = 'EPSG:4326') {
+  const out = [];
+  const multiGroups = new Map();
+
+  for (const feat of features || []) {
+    if (!feat || !feat.geometry || !Array.isArray(feat.geometry.coordinates)) continue;
+    const groupType = feat.sourceGeometryType;
+    const parentId = feat.parentId;
+    if (
+      parentId &&
+      (groupType === 'MultiLineString' || groupType === 'MultiPolygon') &&
+      ((groupType === 'MultiLineString' && feat.geometry.type === 'LineString') ||
+        (groupType === 'MultiPolygon' && feat.geometry.type === 'Polygon'))
+    ) {
+      const key = `${groupType}:${parentId}`;
+      let group = multiGroups.get(key);
+      if (!group) {
+        group = {
+          type: 'Feature',
+          id: parentId,
+          properties: feat.properties ? { ...feat.properties } : {},
+          geometry: {
+            type: groupType,
+            coordinates: [],
+          },
+        };
+        multiGroups.set(key, group);
+        out.push(group);
+      }
+      group.geometry.coordinates.push(feat.geometry.coordinates);
+    } else {
+      out.push({
+        type: 'Feature',
+        id: feat.id,
+        properties: feat.properties ? { ...feat.properties } : {},
+        geometry: {
+          type: feat.geometry.type,
+          coordinates: feat.geometry.coordinates,
+        },
+      });
+    }
+  }
+
+  return {
+    type: 'FeatureCollection',
+    crs: {
+      type: 'name',
+      properties: {
+        name: normalizeEPSGCode(epsg),
+      },
+    },
+    features: out,
+  };
+}
+
+export function normalizeOriginObject(origin, fallback = defaultCRS().origin) {
+  if (Array.isArray(origin) && origin.length >= 2) {
+    const lon = Number(origin[0]);
+    const lat = Number(origin[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { longitude: lon, latitude: lat };
+    }
+  }
+  if (origin && typeof origin === 'object') {
+    const lon = Number(origin.longitude ?? origin.lon ?? origin.x);
+    const lat = Number(origin.latitude ?? origin.lat ?? origin.y);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { longitude: lon, latitude: lat };
+    }
+  }
+  return { ...fallback };
+}
+
+export function syncStateCRS(state, crsOverride = null, originOverride = null) {
+  if (!state || typeof state !== 'object') return defaultCRS();
+  const fallback = defaultCRS();
+  const existing = state.crs && typeof state.crs === 'object' ? state.crs : {};
+  const rawCandidate = crsOverride ?? state.site?.crs ?? existing.epsg ?? fallback.epsg;
+  const epsg = isValidEPSGCode(rawCandidate) ? normalizeEPSGCode(rawCandidate) : fallback.epsg;
+  const epsgChanged = normalizeEPSGCode(existing.epsg) !== epsg;
+  const origin = normalizeOriginObject(
+    originOverride ?? state.site?.origin ?? existing.origin,
+    fallback.origin
+  );
+
+  state.crs = {
+    epsg,
+    proj4: getEPSGDefinition(epsg) || (!epsgChanged && existing.proj4) || fallback.proj4,
+    wkt: !epsgChanged && existing.wkt ? existing.wkt : getEPSGWkt(epsg),
+    origin,
+    units: !epsgChanged && existing.units ? existing.units : getEPSGUnits(epsg),
+    geojson:
+      state.site && Array.isArray(state.site.features)
+        ? buildCanonicalSiteGeoJSON(state.site.features, epsg)
+        : existing.geojson || fallback.geojson,
+  };
+
+  if (state.site && typeof state.site === 'object') {
+    state.site.crs = epsg;
+    state.site.origin = { ...origin };
+  }
+
+  return state.crs;
 }
 
 export function validateLogoSize(dataUrl, maxKb = 500) {
@@ -1334,9 +1469,9 @@ export function deserialize(text) {
       : fallback.epsg;
     s.crs = {
       epsg,
-      proj4: existingCrs.proj4 || fallback.proj4,
-      wkt: existingCrs.wkt || fallback.wkt,
-      origin: existingCrs.origin || fallback.origin,
+      proj4: getEPSGDefinition(epsg) || existingCrs.proj4 || fallback.proj4,
+      wkt: existingCrs.wkt || getEPSGWkt(epsg),
+      origin: normalizeOriginObject(existingCrs.origin, fallback.origin),
       units: existingCrs.units || fallback.units,
       geojson: existingCrs.geojson || fallback.geojson,
     };
@@ -1344,10 +1479,65 @@ export function deserialize(text) {
     const fallback = defaultCRS();
     s.crs.epsg = normalizeEPSGCode(s.crs.epsg);
     s.crs.proj4 = s.crs.proj4 || getEPSGDefinition(s.crs.epsg) || fallback.proj4;
-    s.crs.wkt = s.crs.wkt || fallback.wkt;
-    s.crs.origin = s.crs.origin || fallback.origin;
+    s.crs.wkt = s.crs.wkt || getEPSGWkt(s.crs.epsg);
+    s.crs.origin = normalizeOriginObject(s.crs.origin, fallback.origin);
     s.crs.units = s.crs.units || fallback.units;
     s.crs.geojson = s.crs.geojson || fallback.geojson;
+  }
+
+  if (s.site && typeof s.site === 'object') {
+    const siteEpsg = isValidEPSGCode(s.site.crs) ? normalizeEPSGCode(s.site.crs) : s.crs.epsg;
+    const siteOrigin = normalizeOriginObject(s.site.origin ?? s.crs.origin, s.crs.origin);
+    s.site.crs = siteEpsg;
+    s.site.origin = siteOrigin;
+    const planSource = { epsg: 'PLAN', origin: [siteOrigin.longitude, siteOrigin.latitude] };
+
+    if (Array.isArray(s.site.features)) {
+      for (const feat of s.site.features) {
+        if (!feat || typeof feat !== 'object') continue;
+        feat.type = 'Feature';
+        if (!feat.geometry && Array.isArray(feat.points) && feat.points.length >= 2) {
+          const validPts = feat.points.filter(
+            (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)
+          );
+          if (validPts.length >= 2) {
+            const rawCoords = validPts.map((p) => reproject([p.x, p.y], planSource, siteEpsg));
+            const firstPt = validPts[0];
+            const lastPt = validPts[validPts.length - 1];
+            const isClosedRing =
+              validPts.length >= 4 && firstPt.x === lastPt.x && firstPt.y === lastPt.y;
+            const isPolygon = isClosedRing || (feat.layerKind === 'lot' && validPts.length >= 3);
+            if (isPolygon) {
+              const firstC = rawCoords[0];
+              const lastC = rawCoords[rawCoords.length - 1];
+              const ringCoords =
+                firstC[0] === lastC[0] && firstC[1] === lastC[1]
+                  ? rawCoords
+                  : [...rawCoords, [...firstC]];
+              feat.geometry = {
+                type: 'Polygon',
+                coordinates: [ringCoords],
+              };
+            } else {
+              feat.geometry = {
+                type: 'LineString',
+                coordinates: rawCoords,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(s.site.segments)) {
+      for (const seg of s.site.segments) {
+        if (seg && seg.p1 && seg.p2 && !Array.isArray(seg.pts)) {
+          seg.pts = [seg.p1, seg.p2];
+        }
+      }
+    }
+
+    syncStateCRS(s, siteEpsg, siteOrigin);
   }
   s.settings ||= {};
   s.settings.branding = {
