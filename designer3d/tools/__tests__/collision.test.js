@@ -543,3 +543,207 @@ describe('InteractionLayer bounding box caching', () => {
     expect(afterReplace.placementFeedback.invalid).toBe(false);
   });
 });
+
+describe('Open-interior polygon, polyline, and curved-arc collision checks', () => {
+  test('accepts flush vertical, horizontal, angled, and T-junction shared walls while rejecting interior overlaps', () => {
+    const baseRoom = [
+      { x: 0, y: 0 },
+      { x: 192, y: 0 },
+      { x: 192, y: 168 },
+      { x: 0, y: 168 },
+    ];
+
+    // Flush vertical shared wall at x = 192
+    const flushEast = [
+      { x: 192, y: 0 },
+      { x: 240, y: 0 },
+      { x: 240, y: 120 },
+      { x: 192, y: 120 },
+    ];
+    expect(validatePlacement(flushEast, [baseRoom]).valid).toBe(true);
+
+    // Flush horizontal shared wall at y = 168 (T-junction at x = 120)
+    const flushSouth = [
+      { x: 0, y: 168 },
+      { x: 120, y: 168 },
+      { x: 120, y: 312 },
+      { x: 0, y: 312 },
+    ];
+    expect(validatePlacement(flushSouth, [baseRoom]).valid).toBe(true);
+
+    // Flush angled shared wall along (100, 0) -> (60, 100)
+    const angledLeft = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 60, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const angledRightFlush = [
+      { x: 100, y: 0 },
+      { x: 180, y: 0 },
+      { x: 180, y: 100 },
+      { x: 60, y: 100 },
+    ];
+    expect(validatePlacement(angledRightFlush, [angledLeft]).valid).toBe(true);
+
+    // Angled interior intrusion across shared angled wall
+    const angledIntruding = [
+      { x: 90, y: 0 },
+      { x: 180, y: 0 },
+      { x: 180, y: 100 },
+      { x: 50, y: 100 },
+    ];
+    const angledInvalid = validatePlacement(angledIntruding, [angledLeft]);
+    expect(angledInvalid.valid).toBe(false);
+    expect(angledInvalid.reasons.overlaps).toEqual([0]);
+  });
+
+  test('detects boundary-inscribed rooms via inward normal and edge midpoint probes', () => {
+    const outer = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    // Diamond whose vertices all sit on outer edges without any vertex inside outer
+    const inscribedDiamond = [
+      { x: 50, y: 0 },
+      { x: 100, y: 50 },
+      { x: 50, y: 100 },
+      { x: 0, y: 50 },
+    ];
+    expect(validatePlacement(inscribedDiamond, [outer]).valid).toBe(false);
+
+    // Sub-rectangle sharing 3 walls of outer
+    const threeWallInscribed = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 60 },
+      { x: 0, y: 60 },
+    ];
+    expect(validatePlacement(threeWallInscribed, [outer]).valid).toBe(false);
+  });
+
+  test('handles concave 6-vertex L-shaped room notches for detached, flush, and intruding rooms', () => {
+    const lRoom = [
+      { x: 0, y: 0 },
+      { x: 240, y: 0 },
+      { x: 240, y: 120 },
+      { x: 120, y: 120 },
+      { x: 120, y: 240 },
+      { x: 0, y: 240 },
+    ];
+
+    const detachedInNotch = [
+      { x: 132, y: 132 },
+      { x: 228, y: 132 },
+      { x: 228, y: 228 },
+      { x: 132, y: 228 },
+    ];
+    expect(validatePlacement(detachedInNotch, [lRoom]).valid).toBe(true);
+
+    const flushInNotch = [
+      { x: 120, y: 120 },
+      { x: 240, y: 120 },
+      { x: 240, y: 240 },
+      { x: 120, y: 240 },
+    ];
+    expect(validatePlacement(flushInNotch, [lRoom]).valid).toBe(true);
+
+    const intrudingNotch = [
+      { x: 108, y: 108 },
+      { x: 240, y: 108 },
+      { x: 240, y: 240 },
+      { x: 108, y: 240 },
+    ];
+    expect(validatePlacement(intrudingNotch, [lRoom]).valid).toBe(false);
+  });
+
+  test('allows boundary-snapped 1-point and collinear 2-point polylines while rejecting interior cuts', () => {
+    const lRoom = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 200 },
+      { x: 100, y: 200 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+
+    // 1-point corner snapped on edge and vertex
+    expect(validatePlacement([{ x: 100, y: 100 }], [lRoom]).valid).toBe(true);
+    expect(validatePlacement([{ x: 50, y: 100 }], [lRoom]).valid).toBe(true);
+    expect(validatePlacement([{ x: 150, y: 50 }], [lRoom]).valid).toBe(false);
+
+    // 2-point collinear trace along inner notch wall
+    expect(
+      validatePlacement(
+        [
+          { x: 0, y: 100 },
+          { x: 100, y: 100 },
+        ],
+        [lRoom]
+      ).valid
+    ).toBe(true);
+
+    // 2-point diagonal across open notch space
+    expect(
+      validatePlacement(
+        [
+          { x: 0, y: 100 },
+          { x: 100, y: 200 },
+        ],
+        [lRoom]
+      ).valid
+    ).toBe(true);
+
+    // 2-point segment tracing collinearly then plunging into L-room interior
+    expect(
+      validatePlacement(
+        [
+          { x: 0, y: 100 },
+          { x: 200, y: 100 },
+        ],
+        [lRoom]
+      ).valid
+    ).toBe(false);
+  });
+
+  test('tessellates curved bulge walls before narrow-phase collision checks', () => {
+    // North wall (0, 0) -> (120, 0) with bulge = -0.6 bows outward into y < 0 (up to y = -36)
+    const curvedOutwardRoom = {
+      points: [
+        { x: 0, y: 0 },
+        { x: 120, y: 0 },
+        { x: 120, y: 120 },
+        { x: 0, y: 120 },
+      ],
+      bulges: { N: -0.6, E: 0, S: 0, W: 0 },
+    };
+
+    const neighborAboveChord = [
+      { x: 20, y: -30 },
+      { x: 100, y: -30 },
+      { x: 100, y: -6 },
+      { x: 20, y: -6 },
+    ];
+    expect(validatePlacement(neighborAboveChord, [curvedOutwardRoom]).valid).toBe(false);
+
+    // North wall with bulge = 0.8 bows inward into y > 0 (sagitta = +48"), leaving a recessed pocket near y = 12..30
+    const curvedInwardRoom = {
+      points: [
+        { x: 0, y: 0 },
+        { x: 120, y: 0 },
+        { x: 120, y: 120 },
+        { x: 0, y: 120 },
+      ],
+      bulges: [0.8, 0, 0, 0],
+    };
+    const pocketRoom = [
+      { x: 45, y: 4 },
+      { x: 75, y: 4 },
+      { x: 75, y: 28 },
+      { x: 45, y: 28 },
+    ];
+    expect(validatePlacement(pocketRoom, [curvedInwardRoom]).valid).toBe(true);
+  });
+});

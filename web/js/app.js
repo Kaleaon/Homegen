@@ -1,6 +1,7 @@
 import './k-components.js';
 import {
   WT,
+  EPS,
   WALLS,
   snap,
   wallSeg,
@@ -555,6 +556,8 @@ const roomOf = (state, id) => state.rooms.find((r) => r.id === id);
 const inRect = (r, p, pad = 0) =>
   p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
 const levelRooms = () => doc.rooms.filter((r) => (r.level || 0) === curLevel);
+const toRoomCollisionShape = (rm) =>
+  rm?.bulges ? { points: getRoomPoints(rm), bulges: rm.bulges } : getRoomPoints(rm);
 const roomAt = (p) =>
   levelRooms()
     .filter((r) => inRect(r, p, WT / 2))
@@ -3013,8 +3016,11 @@ export function renderInspector() {
 
       const siblingPolys = levelRooms()
         .filter((rm) => rm.id !== liveRoom.id)
-        .map((rm) => getRoomPoints(rm));
-      const placementCheck = validatePlacement(adjusted.points, siblingPolys);
+        .map(toRoomCollisionShape);
+      const candidateShape = liveRoom.bulges
+        ? { points: adjusted.points, bulges: liveRoom.bulges }
+        : adjusted.points;
+      const placementCheck = validatePlacement(candidateShape, siblingPolys, { tolerance: EPS });
       if (!placementCheck.valid) {
         const msg = placementCheck.reasons.selfIntersecting
           ? 'Wall length causes polygon self-intersection.'
@@ -4889,9 +4895,10 @@ function updatePreview() {
       const edges = extractRoomEdges(levelRooms());
       const roomPv = interaction.previewRoom(hover, {
         edges,
-        existingRooms: levelRooms().map(roomToPolygon),
+        existingRooms: levelRooms(),
         scale: view.scale,
         explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+        tolerance: EPS,
       });
       if (roomPv) {
         preview = { next: doc, ok: !roomPv.invalid, fresh: [], feedback: roomPv };
@@ -5334,8 +5341,10 @@ canvas?.addEventListener('pointermove', (e) => {
       };
 
       const candPoly = roomToPolygon(drag.rect);
-      const existingRooms = doc.rooms.filter((r) => (r.level || 0) === curLevel).map(roomToPolygon);
-      const validation = validatePlacement(candPoly, existingRooms);
+      const existingRooms = doc.rooms
+        .filter((r) => (r.level || 0) === curLevel)
+        .map(toRoomCollisionShape);
+      const validation = validatePlacement(candPoly, existingRooms, { tolerance: EPS });
       const placementFeedback = createPlacementFeedback(candPoly, validation);
 
       preview =
@@ -5418,7 +5427,8 @@ function handleCloseRoom() {
     return;
   }
   const closeRes = interaction.closeRoom({
-    existingRooms: levelRooms().map(roomToPolygon),
+    existingRooms: levelRooms(),
+    tolerance: EPS,
   });
   if (closeRes.ok && closeRes.room?.corners) {
     const pts = closeRes.room.corners;
@@ -5836,9 +5846,10 @@ canvas?.addEventListener('pointerup', () => {
       const p = hover || { x: d.x0, y: d.y0 };
       const cornerRes = interaction.addRoomCorner(p, {
         edges: extractRoomEdges(levelRooms()),
-        existingRooms: levelRooms().map(roomToPolygon),
+        existingRooms: levelRooms(),
         scale: view.scale,
         explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+        tolerance: EPS,
       });
       const placedPt = cornerRes?.corner || p;
       const count = interaction.getCornerCount();
@@ -6079,6 +6090,7 @@ function syncPassiveWallHud() {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     const targetPt = pv?.targetPoint || hover;
     const len = pv?.lengthInches ?? Math.hypot(targetPt.x - anchor.x, targetPt.y - anchor.y);
@@ -6226,6 +6238,7 @@ function activateWallHudByTab(reverse = false) {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     const targetPt = pv?.targetPoint || ptr;
     const len = pv?.lengthInches ?? Math.hypot(targetPt.x - anchor.x, targetPt.y - anchor.y);
@@ -6366,6 +6379,7 @@ function previewWallHudInput(rawVal) {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     if (pv) {
       wallHudState.previewPoint = pv.targetPoint;
@@ -6392,6 +6406,7 @@ function commitWallHudInput(rawValueOverride) {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     if (!res.ok) {
       setWallHudError(res.violations?.[0] || 'Invalid wall segment placement.');
@@ -6453,8 +6468,9 @@ function commitWallHudInput(rawValueOverride) {
     }
     const siblingPolys = levelRooms()
       .filter((rm) => rm.id !== r.id)
-      .map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(nextPts, siblingPolys);
+      .map(toRoomCollisionShape);
+    const candidateShape = r.bulges ? { points: nextPts, bulges: r.bulges } : nextPts;
+    const colCheck = validatePlacement(candidateShape, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = colCheck.reasons.selfIntersecting
         ? 'Wall length causes polygon self-intersection.'
@@ -6496,8 +6512,8 @@ function commitWallHudInput(rawValueOverride) {
     const x = dirX >= 0 ? start.x0 : start.x0 - w;
     const y = dirY >= 0 ? start.y0 : start.y0 - h;
     const candPoly = roomToPolygon({ x, y, w, h });
-    const siblingPolys = levelRooms().map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(candPoly, siblingPolys);
+    const siblingPolys = levelRooms().map(toRoomCollisionShape);
+    const colCheck = validatePlacement(candPoly, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = 'Room placement overlaps an existing room.';
       setWallHudError(msg);
@@ -6537,8 +6553,11 @@ function commitWallHudInput(rawValueOverride) {
 
     const siblingPolys = levelRooms()
       .filter((rm) => rm.id !== r.id)
-      .map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(adjusted.points, siblingPolys);
+      .map(toRoomCollisionShape);
+    const candidateShape = r.bulges
+      ? { points: adjusted.points, bulges: r.bulges }
+      : adjusted.points;
+    const colCheck = validatePlacement(candidateShape, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = colCheck.reasons.selfIntersecting
         ? 'Wall length causes polygon self-intersection.'
@@ -6584,8 +6603,8 @@ function commitWallHudInput(rawValueOverride) {
     const candPoly = roomToPolygon({ x: r.x, y: r.y, w, h });
     const siblingPolys = levelRooms()
       .filter((rm) => rm.id !== r.id)
-      .map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(candPoly, siblingPolys);
+      .map(toRoomCollisionShape);
+    const colCheck = validatePlacement(candPoly, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = 'Resized room overlaps an adjacent room.';
       setWallHudError(msg);

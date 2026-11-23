@@ -181,4 +181,63 @@ describe('Explicit wall length calculations & RoomDrawingTool.addCornerWithLengt
     expect(pvInvalid.invalid).toBe(true);
     expect(pvInvalid.violations[0]).toMatch(/36 in/);
   });
+
+  test('addCornerWithLength, preview, and closeRoom accept edge-snapped rooms sharing centerline walls', () => {
+    const existingRooms = [{ id: 'living', x: 0, y: 0, w: 192, h: 168 }];
+    const tool = new RoomDrawingTool(
+      defaultSettings,
+      new SnapModeState({ grid: true, edge: true })
+    );
+
+    // Snap first corner onto NE corner (192, 0) of existing room
+    const c1 = tool.addCornerWithLength({ x: 192, y: 0 }, null, { existingRooms });
+    expect(c1.ok).toBe(true);
+
+    // Trace collinearly South along shared East wall x = 192 for 120"
+    const pvShared = tool.preview({ x: 192, y: 120 }, 120, { existingRooms });
+    expect(pvShared.valid).toBe(true);
+    expect(pvShared.invalid).toBe(false);
+
+    const c2 = tool.addCornerWithLength({ x: 192, y: 120 }, 120, { existingRooms });
+    expect(c2.ok).toBe(true);
+
+    // Extend East 96" away from existing room
+    const c3 = tool.addCornerWithLength({ x: 288, y: 120 }, 96, { existingRooms });
+    expect(c3.ok).toBe(true);
+
+    // Extend North 120" to (288, 0)
+    const c4 = tool.addCornerWithLength({ x: 288, y: 0 }, 120, { existingRooms });
+    expect(c4.ok).toBe(true);
+
+    // Close flush room against existing room
+    const closed = tool.closeRoom({ existingRooms });
+    expect(closed.ok).toBe(true);
+    expect(closed.room.corners).toEqual([
+      { x: 192, y: 0 },
+      { x: 192, y: 120 },
+      { x: 288, y: 120 },
+      { x: 288, y: 0 },
+    ]);
+  });
+
+  test('closeRoom rejects curved bulge wall that bows into an adjacent room interior', () => {
+    const existingRooms = [{ id: 'north_neighbor', x: 0, y: -120, w: 144, h: 120 }];
+    const tool = new RoomDrawingTool(defaultSettings, new SnapModeState());
+
+    tool.addCorner({ x: 0, y: 0 });
+    tool.addCorner({ x: 144, y: 0 });
+    tool.addCorner({ x: 144, y: 120 });
+    tool.addCorner({ x: 0, y: 120 });
+
+    // Bulge = -0.5 on edge 0 ((0,0)->(144,0)) bows into y < 0 (into north_neighbor)
+    tool.setEdgeBulge(0, -0.5);
+    const rejected = tool.closeRoom({ existingRooms });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.feedback.invalid).toBe(true);
+
+    // Bulge = +0.5 bows inward into y > 0 (away from north_neighbor) and succeeds
+    tool.setEdgeBulge(0, 0.5);
+    const accepted = tool.closeRoom({ existingRooms });
+    expect(accepted.ok).toBe(true);
+  });
 });
