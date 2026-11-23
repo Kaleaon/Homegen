@@ -11,6 +11,10 @@ import {
   bulgeFromRadius,
   parseCurveHudInput,
 } from '../../designer3d/tools/math2d.mjs';
+import {
+  polygonsOverlapOpenInterior,
+  tessellateRoomPolygon,
+} from '../../designer3d/tools/collision.mjs';
 import proj4 from '#proj4';
 import { registerAllEPSG, isRegisteredEPSG, normalizeCode } from './epsgRegistry.js';
 
@@ -1122,31 +1126,15 @@ export function lineSegmentsIntersect(p1, p2, p3, p4) {
   return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
 }
 
-export function polygonsOverlap(polyA, polyB) {
+export function polygonsOverlap(polyA, polyB, eps = EPS) {
   if (!polyA || !polyB || polyA.length < 3 || polyB.length < 3) return false;
-  const boxA = getRoomBoundingBox(polyA);
-  const boxB = getRoomBoundingBox(polyB);
-  if (!rectsOverlap(boxA, boxB, EPS)) return false;
+  const tessA = tessellateRoomPolygon(polyA);
+  const tessB = tessellateRoomPolygon(polyB);
+  const boxA = getRoomBoundingBox(tessA);
+  const boxB = getRoomBoundingBox(tessB);
+  if (!rectsOverlap(boxA, boxB, eps)) return false;
 
-  for (const p of polyA) {
-    if (pointInPolygon(p, polyB)) return true;
-  }
-  for (const p of polyB) {
-    if (pointInPolygon(p, polyA)) return true;
-  }
-
-  const nA = polyA.length;
-  const nB = polyB.length;
-  for (let i = 0; i < nA; i++) {
-    const a1 = polyA[i];
-    const a2 = polyA[(i + 1) % nA];
-    for (let j = 0; j < nB; j++) {
-      const b1 = polyB[j];
-      const b2 = polyB[(j + 1) % nB];
-      if (lineSegmentsIntersect(a1, a2, b1, b2)) return true;
-    }
-  }
-  return false;
+  return polygonsOverlapOpenInterior(tessA, tessB, eps);
 }
 
 export const rectInside = (inner, outer, eps = 0.01) =>
@@ -1175,21 +1163,14 @@ export function pointInPolygon(p, polygon) {
 /** Rooms may touch edge-to-edge but never overlap. */
 export function roomsOverlap(a, b) {
   if (!a || !b) return false;
-  const polyA = getRoomPoints(a);
-  const polyB = getRoomPoints(b);
+  const polyA = tessellateRoomPolygon(getRoomPoints(a), a.bulges);
+  const polyB = tessellateRoomPolygon(getRoomPoints(b), b.bulges);
   // Quick bounding box check
   const boxA = getRoomBoundingBox(polyA);
   const boxB = getRoomBoundingBox(polyB);
   if (!rectsOverlap(boxA, boxB, EPS)) return false;
 
-  // Check vertex inside other polygon
-  for (const pt of polyA) {
-    if (pointInPolygon(pt, polyB)) return true;
-  }
-  for (const pt of polyB) {
-    if (pointInPolygon(pt, polyA)) return true;
-  }
-  return rectsOverlap(boxA, boxB, EPS);
+  return polygonsOverlapOpenInterior(polyA, polyB, EPS);
 }
 
 /** World point of wall-offset `t` plus `depth` inches toward the room interior. */

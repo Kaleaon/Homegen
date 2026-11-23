@@ -76,6 +76,11 @@ export class ElevationGrid {
     elevationUnit,
     unit,
     visible = true,
+    attributionText = null,
+    provider = null,
+    licenseUrl = null,
+    source = null,
+    geoBounds = null,
     _slopeApplied = false,
     _appliedUnitScale = 1,
   } = {}) {
@@ -127,6 +132,11 @@ export class ElevationGrid {
     this.slopeDirectionDeg = sanitizeSlopeDirection(slopeDirectionDeg);
     this.elevationUnit = normalizeElevationUnit(elevationUnit ?? unit ?? 'm');
     this.visible = visible;
+    this.attributionText = attributionText || null;
+    this.provider = provider || null;
+    this.licenseUrl = licenseUrl || null;
+    this.source = source || null;
+    this.geoBounds = geoBounds || null;
     this._slopeApplied = Boolean(_slopeApplied);
     this._appliedSlopePercent = this._slopeApplied ? this.targetSlopePercent : 0;
     this._appliedDirectionDeg = this._slopeApplied ? this.slopeDirectionDeg : 0;
@@ -148,6 +158,11 @@ export class ElevationGrid {
       slopeDirectionDeg: this.slopeDirectionDeg,
       elevationUnit: normalizeElevationUnit(this.elevationUnit),
       visible: this.visible !== false,
+      ...(this.attributionText ? { attributionText: this.attributionText } : {}),
+      ...(this.provider ? { provider: this.provider } : {}),
+      ...(this.licenseUrl ? { licenseUrl: this.licenseUrl } : {}),
+      ...(this.source ? { source: this.source } : {}),
+      ...(this.geoBounds ? { geoBounds: this.geoBounds } : {}),
       _slopeApplied: Boolean(this._slopeApplied),
       _appliedUnitScale: this._appliedUnitScale,
     };
@@ -472,6 +487,11 @@ export function parseGoogleElevationJson(input, options = {}) {
     contourInterval: opts.contourInterval ?? 1.0,
     verticalScale: opts.verticalScale ?? 1.0,
     elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
+    attributionText: opts.attributionText ?? null,
+    provider: opts.provider ?? null,
+    licenseUrl: opts.licenseUrl ?? null,
+    source: opts.source ?? 'google-elevation',
+    geoBounds: opts.geoBounds ?? null,
   });
 }
 
@@ -529,6 +549,11 @@ export function parseImageHeightmap(imageInput, options = {}) {
     contourInterval: opts.contourInterval ?? 1.0,
     verticalScale: opts.verticalScale ?? 1.0,
     elevationUnit: normalizeElevationUnit(opts.elevationUnit ?? opts.unit ?? 'm'),
+    attributionText: opts.attributionText ?? null,
+    provider: opts.provider ?? null,
+    licenseUrl: opts.licenseUrl ?? null,
+    source: opts.source ?? 'heightmap',
+    geoBounds: opts.geoBounds ?? null,
   });
 }
 
@@ -1249,6 +1274,11 @@ export function serializeElevationGrid(grid) {
     slopeDirectionDeg: sanitizeSlopeDirection(grid.slopeDirectionDeg),
     elevationUnit: normalizeElevationUnit(grid.elevationUnit),
     visible: grid.visible !== false,
+    ...(grid.attributionText ? { attributionText: grid.attributionText } : {}),
+    ...(grid.provider ? { provider: grid.provider } : {}),
+    ...(grid.licenseUrl ? { licenseUrl: grid.licenseUrl } : {}),
+    ...(grid.source ? { source: grid.source } : {}),
+    ...(grid.geoBounds ? { geoBounds: grid.geoBounds } : {}),
     _slopeApplied: Boolean(grid._slopeApplied),
     _appliedUnitScale:
       Number.isFinite(grid._appliedUnitScale) && grid._appliedUnitScale > 0

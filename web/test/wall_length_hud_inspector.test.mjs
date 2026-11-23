@@ -427,4 +427,58 @@ test('HUD keyboard shortcuts (Tab, Enter, Escape), zoom/pan re-projection, and I
   const drawnPts = homegen.interaction.getRoomPoints();
   assert.equal(drawnPts.length, 3);
   assert.deepEqual(drawnPts[2], { x: 474, y: 144 });
+
+  // 9. Multi-Level Home template: all 7 Floor 1 rooms succeed in both #wall-length-hud and Inspector
+  homegen.apply((n) => {
+    n.rooms = [];
+  }, 'Reset for Multi-Level');
+  await homegen.selectTemplate('multilevel');
+  homegen.setLevel(0);
+  const floor1RoomSpecs = [
+    { type: 'living', wall: 'N', hudLen: 186, inspLen: 180 },
+    { type: 'hallway', wall: 'E', hudLen: 114, inspLen: 108 },
+    { type: 'bedroom', wall: 'N', hudLen: 156, inspLen: 168 },
+    { type: 'bathroom', wall: 'S', hudLen: 78, inspLen: 90 },
+    { type: 'kitchen', wall: 'E', hudLen: 156, inspLen: 168 },
+    { type: 'laundry', wall: 'E', hudLen: 96, inspLen: 108 },
+    { type: 'stairs', wall: 'E', hudLen: 156, inspLen: 168 },
+  ];
+
+  const floor1Rooms = homegen.doc.rooms.filter((rm) => (rm.level || 0) === 0);
+  assert.equal(floor1Rooms.length, 7, 'buildMultiLevel must have 7 rooms on Floor 1');
+
+  for (const spec of floor1RoomSpecs) {
+    const rm = homegen.doc.rooms.find((r) => (r.level || 0) === 0 && r.type === spec.type);
+    assert.ok(rm, `Floor 1 room of type ${spec.type} must exist`);
+
+    // A. Commit wall length edit via #wall-length-hud
+    const wIdx = ['N', 'E', 'S', 'W'].indexOf(spec.wall);
+    homegen.select(rm.id);
+    homegen.openRoomWallHud(rm, wIdx);
+    hudInput.value = String(spec.hudLen);
+    const hudRes = homegen.commitWallHudInput();
+    assert.equal(
+      hudRes.ok,
+      true,
+      `HUD wall edit on ${rm.name} (${spec.wall}) failed: ${hudRes.error || ''}`
+    );
+    const afterHudRoom = homegen.doc.rooms.find((r) => r.id === rm.id);
+    assert.equal(Math.round(wallLength(afterHudRoom, spec.wall)), spec.hudLen);
+
+    // B. Commit wall length edit via Inspector per-wall input
+    homegen.select(rm.id);
+    homegen.renderInspector();
+    const wallInp = registry.get(`i-wall-len-${spec.wall}`);
+    assert.ok(wallInp, `Inspector input #i-wall-len-${spec.wall} must render for ${rm.name}`);
+    wallInp.value = String(spec.inspLen);
+    wallInp.dispatchEvent({ type: 'change' });
+    const inspErr = registry.get('i-wall-len-error');
+    assert.equal(
+      inspErr.hidden,
+      true,
+      `Inspector wall edit on ${rm.name} (${spec.wall}) failed: ${inspErr.textContent}`
+    );
+    const afterInspRoom = homegen.doc.rooms.find((r) => r.id === rm.id);
+    assert.equal(Math.round(wallLength(afterInspRoom, spec.wall)), spec.inspLen);
+  }
 });

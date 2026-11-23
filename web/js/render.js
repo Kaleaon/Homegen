@@ -1,7 +1,6 @@
 // Canvas plan renderer.
 import {
   WT,
-  WALLS,
   LEGACY_WALL_NAMES,
   wallSeg,
   wallLength,
@@ -10,6 +9,7 @@ import {
   footprint,
   floorAreaSqFt,
   getRoomPoints,
+  getRoomWallKeys,
   getWallBulge,
   getArcParameters,
   tessellateArc,
@@ -22,7 +22,12 @@ import { patternFor } from './patterns.js';
 import { resolveWindowStyle } from './presetRegistry.js';
 import { getToken } from './kthemeTokens.js';
 import { computeMarchingSquares, normalizeElevationUnit } from './elevationEngine.js';
-import { clampOpeningOffset, formatOpeningOffset, normalizeOpeningUnit } from './model.js';
+import {
+  clampOpeningOffset,
+  formatOpeningOffset,
+  normalizeOpeningUnit,
+  resolveGeospatialAttributions,
+} from './model.js';
 import { formatFractionalInches } from './dimensionFormatter.js';
 
 export const fmtLen = (inches, options) => formatFractionalInches(inches, options);
@@ -203,78 +208,99 @@ function drawBackground(ctx, bg, onLoaded, view = { scale: 1, ox: 0, oy: 0 }, op
   }
 
   ctx.restore();
+}
 
-  // Render mandatory attribution badge when attribution/geospatial metadata is active
-  let attrText = bg.attributionText;
-  if (!attrText && bg.provider) {
-    attrText = `Map Data © ${bg.provider}`;
-  } else if (!attrText && bg.isGeospatial) {
-    attrText = 'Geospatial Background Layer';
-  }
-  if (attrText && bg.licenseUrl && !attrText.includes(bg.licenseUrl)) {
-    attrText += ` · ${bg.licenseUrl}`;
-  }
+export function drawGeospatialAttribution(
+  ctx,
+  state,
+  view = { scale: 1, ox: 0, oy: 0 },
+  opts = {}
+) {
+  if (!ctx || !state) return;
+  const resolved = resolveGeospatialAttributions(state, {
+    ...opts,
+    providerPrefix: 'Map Data ©',
+    geospatialFallback: 'Geospatial Background Layer',
+  });
+  if (!resolved.attributions.length && !resolved.licenseUrls.length) return;
 
-  if (attrText) {
-    ctx.save();
-    const dpr = opts.dpr || 1;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1.0;
-
-    const fontSize = 11 * dpr;
-    ctx.font = `${fontSize}px sans-serif`;
-
-    const textMetrics = ctx.measureText(attrText);
-    const logoImg = bg.logoUrl ? getLogoImage(bg.logoUrl, onLoaded) : null;
-    const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
-    const logoWidth = hasLogo ? 16 * dpr : 0;
-    const paddingX = 8 * dpr;
-    const paddingY = 5 * dpr;
-
-    const badgeWidth = textMetrics.width + paddingX * 2 + (hasLogo ? logoWidth + 4 * dpr : 0);
-    const badgeHeight = fontSize + paddingY * 2;
-
-    const imgRight = ((bg.x ?? 0) + w) * (view.scale || 1) * dpr + (view.ox || 0) * dpr;
-    const imgBottom = ((bg.y ?? 0) + h) * (view.scale || 1) * dpr + (view.oy || 0) * dpr;
-    const canvasW = ctx.canvas.width;
-    const canvasH = ctx.canvas.height;
-
-    const margin = 10 * dpr;
-    let badgeRight = Math.min(imgRight - margin, canvasW - margin);
-    let badgeBottom = Math.min(imgBottom - margin, canvasH - margin);
-    badgeRight = Math.max(badgeRight, badgeWidth + margin);
-    badgeBottom = Math.max(badgeBottom, badgeHeight + margin);
-
-    const badgeX = badgeRight - badgeWidth;
-    const badgeY = badgeBottom - badgeHeight;
-
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 1 * dpr;
-
-    if (ctx.roundRect) {
-      ctx.beginPath();
-      ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4 * dpr);
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
-      ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+  const parts = [...resolved.attributions];
+  const joinedSoFar = parts.join(' · ');
+  for (const url of resolved.licenseUrls) {
+    if (!joinedSoFar.includes(url)) {
+      parts.push(url);
     }
-
-    let currentX = badgeX + paddingX;
-    if (hasLogo) {
-      const logoY = badgeY + (badgeHeight - 14 * dpr) / 2;
-      ctx.drawImage(logoImg, currentX, logoY, 14 * dpr, 14 * dpr);
-      currentX += logoWidth + 4 * dpr;
-    }
-
-    ctx.fillStyle = '#f8fafc';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(attrText, currentX, badgeY + badgeHeight / 2);
-
-    ctx.restore();
   }
+  const attrText = parts.join(' · ');
+  if (!attrText) return;
+
+  const bg = state.background && state.background.visible !== false ? state.background : null;
+  const onLoaded = opts.onLoaded || opts.redraw;
+
+  ctx.save();
+  const dpr = opts.dpr || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1.0;
+
+  const fontSize = 11 * dpr;
+  ctx.font = `${fontSize}px sans-serif`;
+
+  const textMetrics = ctx.measureText(attrText);
+  const logoImg = bg && bg.logoUrl ? getLogoImage(bg.logoUrl, onLoaded) : null;
+  const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
+  const logoWidth = hasLogo ? 16 * dpr : 0;
+  const paddingX = 8 * dpr;
+  const paddingY = 5 * dpr;
+
+  const badgeWidth = textMetrics.width + paddingX * 2 + (hasLogo ? logoWidth + 4 * dpr : 0);
+  const badgeHeight = fontSize + paddingY * 2;
+
+  const canvasW = ctx.canvas.width;
+  const canvasH = ctx.canvas.height;
+  const margin = 10 * dpr;
+
+  let badgeRight = canvasW - margin;
+  let badgeBottom = canvasH - margin;
+  if (bg) {
+    const bgW = (bg.width || 800) * (bg.scale ?? 1);
+    const bgH = (bg.height || 600) * (bg.scale ?? 1);
+    const imgRight = ((bg.x ?? 0) + bgW) * (view.scale || 1) * dpr + (view.ox || 0) * dpr;
+    const imgBottom = ((bg.y ?? 0) + bgH) * (view.scale || 1) * dpr + (view.oy || 0) * dpr;
+    badgeRight = Math.min(imgRight - margin, canvasW - margin);
+    badgeBottom = Math.min(imgBottom - margin, canvasH - margin);
+  }
+  badgeRight = Math.max(badgeRight, badgeWidth + margin);
+  badgeBottom = Math.max(badgeBottom, badgeHeight + margin);
+
+  const badgeX = badgeRight - badgeWidth;
+  const badgeY = badgeBottom - badgeHeight;
+
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1 * dpr;
+
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4 * dpr);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+    ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+  }
+
+  let currentX = badgeX + paddingX;
+  if (hasLogo) {
+    const logoY = badgeY + (badgeHeight - 14 * dpr) / 2;
+    ctx.drawImage(logoImg, currentX, logoY, 14 * dpr, 14 * dpr);
+    currentX += logoWidth + 4 * dpr;
+  }
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(attrText, currentX, badgeY + badgeHeight / 2);
+
+  ctx.restore();
 }
 
 export function draw(ctx, state, view, opts = {}) {
@@ -326,6 +352,7 @@ export function draw(ctx, state, view, opts = {}) {
   ) {
     drawSpatialReferenceOverlay(ctx, state, view, opts);
   }
+  drawGeospatialAttribution(ctx, state, view, opts);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (opts.showRulers !== false) {
     drawRulers(ctx, view, w / dpr, h / dpr, opts);
@@ -1580,7 +1607,7 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
 
   ctx.save();
   ctx.translate(s.ax + s.dx * (o.offset + o.width / 2), s.ay + s.dy * (o.offset + o.width / 2));
-  if (ctx.rotate) ctx.rotate(Math.atan2(s.dy, s.dx));
+  ctx.rotate(Math.atan2(s.dy, s.dx));
 
   ctx.fillStyle = 'rgba(120,180,230,.55)';
   ctx.fillRect(-o.width / 2, -1.2, o.width, 2.4);
@@ -1640,12 +1667,12 @@ function drawOpening(ctx, state, room, o, bad) {
   ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
   ctx.fillRect(0, -th / 2, o.width, th);
   const isBad = bad.has(o.id);
-  ctx.strokeStyle = isBad ? '#d33' : '#2d2a26';
-  ctx.lineWidth = 1.2;
-  ctx.fillStyle = 'rgba(120,180,230,.55)';
   if (def.kind === 'window') {
+    ctx.restore();
     drawWindow2D(ctx, room, o, def, isBad);
   } else {
+    ctx.strokeStyle = isBad ? '#d33' : '#2d2a26';
+    ctx.lineWidth = 1.2;
     const dir = o.swing === 'out' ? -1 : 1;
     const hx = 0;
     const hy = 0;
@@ -1670,8 +1697,8 @@ function drawOpening(ctx, state, room, o, bad) {
       ctx.fillStyle = 'rgba(80,60,40,.5)';
       ctx.fillRect(0, -th / 2, o.width, th);
     }
+    ctx.restore();
   }
-  ctx.restore();
 }
 
 function drawItems(ctx, room, bad, selection, flat) {
@@ -2123,7 +2150,7 @@ function findDiffTarget(state, id) {
   if (typeof id === 'string' && id.includes(':')) {
     const [roomId, wallName] = id.split(':');
     const room = state.rooms.find((r) => r.id === roomId);
-    if (room && WALLS.includes(wallName)) {
+    if (room && getRoomWallKeys(room).map(String).includes(wallName)) {
       const a = wallPoint(room, wallName, 0, 0);
       const b = wallPoint(room, wallName, wallLength(room, wallName), 0);
       return {

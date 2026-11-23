@@ -272,17 +272,23 @@ export function resizeRoomWithConstraints(room, handleIndexOrId, pointerPoint, o
       .filter((r) => r.id !== room.id)
       .map((r) => {
         const rPts = r.points || r.corners || r.vertices;
-        if (Array.isArray(rPts) && rPts.length >= 3) {
-          return rPts;
-        }
-        return [
-          { x: r.x, y: r.y },
-          { x: r.x + r.w, y: r.y },
-          { x: r.x + r.w, y: r.y + r.h },
-          { x: r.x, y: r.y + r.h },
-        ];
+        const pts =
+          Array.isArray(rPts) && rPts.length >= 3
+            ? rPts
+            : [
+                { x: r.x, y: r.y },
+                { x: r.x + r.w, y: r.y },
+                { x: r.x + r.w, y: r.y + r.h },
+                { x: r.x, y: r.y + r.h },
+              ];
+        return r.bulges ? { points: pts, bulges: r.bulges } : pts;
       });
-    const colRes = validatePlacement(updatedPoints, existingPolys);
+    const candidateShape = room?.bulges
+      ? { points: updatedPoints, bulges: room.bulges }
+      : updatedPoints;
+    const colRes = validatePlacement(candidateShape, existingPolys, {
+      tolerance: options.tolerance,
+    });
     if (!colRes.valid) {
       collisionValid = false;
       dimValidation.violations.push('Room overlaps an existing room.');

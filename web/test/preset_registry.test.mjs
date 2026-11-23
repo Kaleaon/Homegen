@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OPENINGS } from '../js/catalog.js';
+import { OPENINGS, OPENING_BY_ID } from '../js/catalog.js';
 import * as m from '../js/model.js';
+import { WT, wallSeg } from '../js/geometry.js';
 import { createScene3D } from '../js/scene3d.js';
 import {
   WINDOW_PRESETS,
@@ -20,7 +21,8 @@ import {
   clearPresetCaches,
   getPresetRevision,
 } from '../js/presetRegistry.js';
-import { drawWindow2D } from '../js/render.js';
+import { draw, drawWindow2D } from '../js/render.js';
+import { getToken, invalidateCache } from '../js/kthemeTokens.js';
 
 // Setup headless WebGL and DOM Mocks
 globalThis.cancelAnimationFrame = () => {};
@@ -62,6 +64,8 @@ const mock2d = {
   restore: () => {},
   setTransform: () => {},
   translate: () => {},
+  rotate: () => {},
+  transform: () => {},
 };
 
 const doc = {
@@ -215,38 +219,374 @@ test('3D Scene uses windowBuilder module and retrieves cladding from registry', 
   assert.ok(openingNode.children.length >= 8, 'Window group has frame, pane, and trim elements');
 });
 
+function createAffineRecordingCtx(width = 800, height = 600) {
+  let matrix = [1, 0, 0, 1, 0, 0];
+  let fillStyle = '#000000';
+  let strokeStyle = '#000000';
+  let lineWidth = 1;
+  let globalAlpha = 1;
+  let lineDash = [];
+  const stack = [];
+  const ops = [];
+
+  const applyPoint = (mMat, px, py) => ({
+    x: mMat[0] * px + mMat[2] * py + mMat[4],
+    y: mMat[1] * px + mMat[3] * py + mMat[5],
+  });
+
+  const recordRect = (kind, x, y, w, h) => {
+    const snap = [...matrix];
+    ops.push({
+      kind,
+      x,
+      y,
+      w,
+      h,
+      fillStyle,
+      strokeStyle,
+      lineWidth,
+      matrix: snap,
+      center: applyPoint(snap, x + w / 2, y + h / 2),
+      corners: [
+        applyPoint(snap, x, y),
+        applyPoint(snap, x + w, y),
+        applyPoint(snap, x + w, y + h),
+        applyPoint(snap, x, y + h),
+      ],
+    });
+  };
+
+  const ctx = {
+    canvas: { width, height },
+    ops,
+    get stackDepth() {
+      return stack.length;
+    },
+    get currentMatrix() {
+      return [...matrix];
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set fillStyle(val) {
+      fillStyle = val;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    set strokeStyle(val) {
+      strokeStyle = val;
+    },
+    get lineWidth() {
+      return lineWidth;
+    },
+    set lineWidth(val) {
+      lineWidth = val;
+    },
+    get globalAlpha() {
+      return globalAlpha;
+    },
+    set globalAlpha(val) {
+      globalAlpha = val;
+    },
+    save() {
+      stack.push({
+        matrix: [...matrix],
+        fillStyle,
+        strokeStyle,
+        lineWidth,
+        globalAlpha,
+        lineDash: [...lineDash],
+      });
+    },
+    restore() {
+      assert.ok(stack.length > 0, 'ctx.restore called with matching ctx.save');
+      const prev = stack.pop();
+      matrix = prev.matrix;
+      fillStyle = prev.fillStyle;
+      strokeStyle = prev.strokeStyle;
+      lineWidth = prev.lineWidth;
+      globalAlpha = prev.globalAlpha;
+      lineDash = prev.lineDash;
+    },
+    setTransform(a, b, c, d, e, f) {
+      matrix = [a, b, c, d, e, f];
+    },
+    transform(a, b, c, d, e, f) {
+      const [m0, m1, m2, m3, m4, m5] = matrix;
+      matrix = [
+        m0 * a + m2 * b,
+        m1 * a + m3 * b,
+        m0 * c + m2 * d,
+        m1 * c + m3 * d,
+        m0 * e + m2 * f + m4,
+        m1 * e + m3 * f + m5,
+      ];
+    },
+    translate(tx, ty) {
+      this.transform(1, 0, 0, 1, tx, ty);
+    },
+    rotate(ang) {
+      const cos = Math.cos(ang);
+      const sin = Math.sin(ang);
+      this.transform(cos, sin, -sin, cos, 0, 0);
+    },
+    scale(sx, sy) {
+      this.transform(sx, 0, 0, sy, 0, 0);
+    },
+    fillRect(x, y, w, h) {
+      recordRect('fillRect', x, y, w, h);
+    },
+    strokeRect(x, y, w, h) {
+      recordRect('strokeRect', x, y, w, h);
+    },
+    clearRect() {},
+    beginPath() {},
+    closePath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    fill() {},
+    arc() {},
+    ellipse() {},
+    clip() {},
+    setLineDash(d) {
+      lineDash = Array.isArray(d) ? [...d] : [];
+    },
+    getLineDash() {
+      return [...lineDash];
+    },
+    createPattern() {
+      return {};
+    },
+    measureText(t) {
+      return { width: String(t).length * 6 };
+    },
+    fillText() {},
+    strokeText() {},
+  };
+
+  return ctx;
+}
+
+function assertMatricesClose(actual, expected, eps = 1e-6) {
+  assert.strictEqual(actual.length, 6);
+  for (let i = 0; i < 6; i++) {
+    assert.ok(
+      Number.isFinite(actual[i]) && Math.abs(actual[i] - expected[i]) <= eps,
+      `Matrix component [${i}] mismatch: actual=${actual[i]}, expected=${expected[i]}`
+    );
+  }
+}
+
 test('2D plan renderer reads preset keys to draw matching frame colors and mullion grids', () => {
   const state = m.newState();
-  const room = m.createRoom(state, 'bedroom', 0, 0, 144, 144);
+  const room = m.createRoom(state, 'bedroom', 100, 200, 144, 144);
   const o = m.addOpening(state, room, 'win_hung_36x60', 'N', 36, {
     presetKey: 'craftsman_wood',
   });
+  const def = OPENING_BY_ID[o.type];
 
-  let strokeStyleSet = null;
-  const testCtx = {
-    ...mock2d,
-    set strokeStyle(val) {
-      strokeStyleSet = val;
-    },
-    get strokeStyle() {
-      return strokeStyleSet;
-    },
-    fillRect: () => {},
-    strokeRect: () => {},
-    beginPath: () => {},
-    moveTo: () => {},
-    lineTo: () => {},
-    stroke: () => {},
-  };
-
+  const testCtx = createAffineRecordingCtx();
   assert.doesNotThrow(() => {
-    drawWindow2D(testCtx, room, o, OPENINGS[7], false);
+    drawWindow2D(testCtx, room, o, def, false);
   }, '2D plan rendering helper executes cleanly with window style preset');
 
+  assert.strictEqual(testCtx.stackDepth, 0, 'drawWindow2D balances save/restore');
+  const frameOp = testCtx.ops.find((op) => op.kind === 'strokeRect' && op.w === o.width);
+  assert.ok(frameOp, 'Window frame strokeRect recorded');
   assert.strictEqual(
-    strokeStyleSet,
+    frameOp.strokeStyle,
     '#4a3728',
     '2D plan renderer applied craftsman wood frame color'
+  );
+  assertMatricesClose(frameOp.matrix, [1, 0, 0, 1, 100 + 36 + o.width / 2, 200]);
+
+  // Verify drawWindow2D enforces ctx.rotate unconditionally
+  const incompleteCtx = { ...mock2d, rotate: undefined };
+  assert.throws(
+    () => drawWindow2D(incompleteCtx, room, o, def, false),
+    TypeError,
+    'drawWindow2D requires ctx.rotate and does not silently skip wall rotation'
+  );
+});
+
+test('draw restores plan coordinates before drawWindow2D across N, E, S, W, and angled polygon walls', () => {
+  const state = m.newState();
+  const rectRoom = m.createRoom(state, 'living', 100, 200, 168, 144);
+  const rectOpenings = [
+    m.addOpening(state, rectRoom, 'win_hung_36x60', 'N', 24, { presetKey: 'modern_black' }),
+    m.addOpening(state, rectRoom, 'win_casement_30x48', 'E', 30, { presetKey: 'colonial_white' }),
+    m.addOpening(state, rectRoom, 'win_hung_36x60', 'S', 42, { presetKey: 'craftsman_wood' }),
+    m.addOpening(state, rectRoom, 'win_casement_30x48', 'W', 36, {
+      presetKey: 'industrial_bronze',
+    }),
+  ];
+  // Include a door alongside windows to verify balanced save/restore and door styling
+  m.addOpening(state, rectRoom, 'door_entry_36', 'S', 96);
+
+  // Angled polygon room with diagonal walls
+  const polyPoints = [
+    { x: 340, y: 180 },
+    { x: 480, y: 210 },
+    { x: 520, y: 330 },
+    { x: 400, y: 390 },
+    { x: 310, y: 300 },
+  ];
+  const polyRoom = m.createRoom(state, 'bedroom', 310, 180, 210, 210, {
+    points: polyPoints,
+  });
+  const polyOpenings = [
+    m.addOpening(state, polyRoom, 'win_hung_36x60', '0', 24, { presetKey: 'modern_black' }),
+    m.addOpening(state, polyRoom, 'win_casement_30x48', '1', 20, { presetKey: 'craftsman_wood' }),
+    m.addOpening(state, polyRoom, 'win_hung_30x48', '2', 18, { presetKey: 'colonial_white' }),
+  ];
+
+  const views = [
+    { view: { scale: 1, ox: 0, oy: 0 }, dpr: 1 },
+    { view: { scale: 2.25, ox: -48, oy: 72 }, dpr: 2 },
+  ];
+
+  const th = WT + 0.6;
+
+  for (const { view, dpr } of views) {
+    const drawCtx = createAffineRecordingCtx(1200, 900);
+    draw(drawCtx, state, view, { dpr, showRulers: false });
+    assert.strictEqual(drawCtx.stackDepth, 0, 'draw leaves balanced save/restore stack');
+
+    const cutouts = drawCtx.ops.filter(
+      (op) =>
+        op.kind === 'fillRect' &&
+        op.fillStyle === '#f7f5f0' &&
+        Math.abs(op.h - th) < 1e-6 &&
+        op.x === 0
+    );
+    const frames = drawCtx.ops.filter(
+      (op) =>
+        op.kind === 'strokeRect' && Math.abs(op.h - th) < 1e-6 && Math.abs(op.x + op.w / 2) < 1e-6
+    );
+
+    const allWindows = [
+      ...rectOpenings.map((o) => ({ room: rectRoom, o })),
+      ...polyOpenings.map((o) => ({ room: polyRoom, o })),
+    ];
+    assert.strictEqual(frames.length, allWindows.length, 'Recorded one window frame per window');
+
+    for (let idx = 0; idx < allWindows.length; idx++) {
+      const { room, o } = allWindows[idx];
+      const def = OPENING_BY_ID[o.type];
+      const s = wallSeg(room, o.wall);
+      const scale = view.scale * dpr;
+      const expectedCenter = {
+        x: (s.ax + s.dx * (o.offset + o.width / 2)) * scale + view.ox * dpr,
+        y: (s.ay + s.dy * (o.offset + o.width / 2)) * scale + view.oy * dpr,
+      };
+
+      const frameOp = frames[idx];
+      assert.ok(
+        Math.hypot(frameOp.center.x - expectedCenter.x, frameOp.center.y - expectedCenter.y) < 1e-6,
+        `Window frame ${o.id} on wall ${o.wall} aligns with expected midpoint`
+      );
+
+      const matchingCutout = cutouts.find(
+        (c) =>
+          Math.abs(c.w - o.width) < 1e-6 &&
+          Math.hypot(c.center.x - expectedCenter.x, c.center.y - expectedCenter.y) < 1e-6
+      );
+      assert.ok(
+        matchingCutout,
+        `Wall cutout and styled window frame align for ${o.id} on wall ${o.wall}`
+      );
+
+      // Compare against standalone drawWindow2D in the same plan view space
+      const standaloneCtx = createAffineRecordingCtx(1200, 900);
+      standaloneCtx.setTransform(scale, 0, 0, scale, view.ox * dpr, view.oy * dpr);
+      drawWindow2D(standaloneCtx, room, o, def, false);
+      const standaloneFrame = standaloneCtx.ops.find((op) => op.kind === 'strokeRect');
+      assertMatricesClose(frameOp.matrix, standaloneFrame.matrix);
+    }
+  }
+});
+
+test('drawWindow2D and draw handle bad openings, fallback presets, and zero-length walls', () => {
+  const state = m.newState();
+  const room = m.createRoom(state, 'bedroom', 80, 120, 144, 144);
+  const badWin = m.addOpening(state, room, 'win_hung_36x60', 'E', 30, {
+    presetKey: 'non_existent_fallback_preset',
+  });
+
+  const ctx = createAffineRecordingCtx();
+  draw(
+    ctx,
+    state,
+    { scale: 1.5, ox: 20, oy: 30 },
+    { bad: new Set([badWin.id]), showRulers: false }
+  );
+  assert.strictEqual(ctx.stackDepth, 0);
+
+  const th = WT + 0.6;
+  const badFrame = ctx.ops.find(
+    (op) =>
+      op.kind === 'strokeRect' && Math.abs(op.h - th) < 1e-6 && Math.abs(op.w - badWin.width) < 1e-6
+  );
+  assert.ok(badFrame, 'Bad window frame drawn');
+  assert.strictEqual(
+    badFrame.strokeStyle,
+    getToken('--ktheme-critical', '#d33'),
+    'Violating window draws critical token frame color'
+  );
+
+  // Also verify #d33 when --ktheme-critical resolves to #d33
+  const prevDocEl = globalThis.document.documentElement;
+  const prevGetComputed = globalThis.window.getComputedStyle;
+  try {
+    globalThis.document.documentElement = {};
+    globalThis.window.getComputedStyle = () => ({
+      getPropertyValue: (prop) => (prop === '--ktheme-critical' ? '#d33' : ''),
+    });
+    invalidateCache();
+    const d33Ctx = createAffineRecordingCtx();
+    drawWindow2D(d33Ctx, room, badWin, OPENING_BY_ID[badWin.type], true);
+    const d33Frame = d33Ctx.ops.find((op) => op.kind === 'strokeRect');
+    assert.strictEqual(d33Frame.strokeStyle, '#d33', 'Violating window draws #d33 frame');
+  } finally {
+    globalThis.document.documentElement = prevDocEl;
+    globalThis.window.getComputedStyle = prevGetComputed;
+    invalidateCache();
+  }
+
+  // Fallback preset when not bad uses standard_default (#ffffff)
+  const okCtx = createAffineRecordingCtx();
+  drawWindow2D(okCtx, room, badWin, OPENING_BY_ID[badWin.type], false);
+  const okFrame = okCtx.ops.find((op) => op.kind === 'strokeRect');
+  assert.strictEqual(okFrame.strokeStyle, '#ffffff', 'Fallback preset resolves #ffffff frame');
+
+  // Zero-length wall segment (len === 0) produces finite aligned transforms without NaN
+  const zeroWallRoom = {
+    id: 'r_zero',
+    type: 'bedroom',
+    x: 50,
+    y: 75,
+    w: 0,
+    h: 120,
+    walls: {},
+    openings: [{ id: 'w_zero', type: 'win_hung_36x60', wall: 'N', offset: 0, width: 36 }],
+    items: [],
+  };
+  const zeroCtx = createAffineRecordingCtx();
+  draw(zeroCtx, { rooms: [zeroWallRoom] }, { scale: 1, ox: 0, oy: 0 }, { showRulers: false });
+  const zeroFrame = zeroCtx.ops.find(
+    (op) => op.kind === 'strokeRect' && Math.abs(op.h - th) < 1e-6 && op.w === 36
+  );
+  const zeroCutout = zeroCtx.ops.find(
+    (op) => op.kind === 'fillRect' && op.fillStyle === '#f7f5f0' && op.w === 36
+  );
+  assert.ok(zeroFrame && zeroCutout, 'Zero-length wall renders cutout and window frame');
+  assert.ok(zeroFrame.matrix.every(Number.isFinite), 'Zero-length wall transform is finite');
+  assert.ok(
+    Math.hypot(zeroFrame.center.x - zeroCutout.center.x, zeroFrame.center.y - zeroCutout.center.y) <
+      1e-6,
+    'Zero-length wall cutout and frame stay aligned'
   );
 });
 

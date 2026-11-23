@@ -13,6 +13,7 @@ import {
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { drawStampPDF, drawWatermarkPDF } from './stampEngine.js';
 import { formatFractionalInches } from './dimensionFormatter.js';
+import { resolveGeospatialAttributions } from './model.js';
 
 /**
  * Draws a closed vector polygon path from array of PDF points [{x, y}, ...].
@@ -142,28 +143,17 @@ function formatCRSMetadata(crs, options = {}) {
 }
 
 export function resolvePDFAttributionAndLicensing(docState, options = {}) {
-  const attributions = [];
-  const licenses = [];
+  const resolvedGeo = resolveGeospatialAttributions(docState, {
+    ...options,
+    providerPrefix: 'Map & Geospatial Data ©',
+    geospatialFallback: 'Geospatial Dataset Layer',
+  });
 
-  const attrText = options.attributionText || docState?.background?.attributionText;
-  const provider = options.provider || docState?.background?.provider;
-  const licenseUrl = options.licenseUrl || docState?.background?.licenseUrl;
-  const isGeospatial = options.isGeospatial || docState?.background?.isGeospatial;
-
-  if (attrText) {
-    attributions.push(attrText);
-  } else if (provider) {
-    attributions.push(`Map & Geospatial Data © ${provider}`);
-  } else if (isGeospatial) {
-    attributions.push('Geospatial Dataset Layer');
-  }
-
-  if (licenseUrl) {
-    licenses.push(`License: ${licenseUrl}`);
-  }
+  const attributions = [...resolvedGeo.attributions];
+  const licenses = resolvedGeo.licenseUrls.map((url) => `License: ${url}`);
 
   const licNotice = options.licenseNotice || docState?.settings?.branding?.stamp?.licenseText;
-  if (licNotice) {
+  if (licNotice && !licenses.includes(licNotice)) {
     licenses.push(licNotice);
   }
 

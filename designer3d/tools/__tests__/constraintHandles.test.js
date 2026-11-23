@@ -261,4 +261,46 @@ describe('Constraint Handles & Dynamic Dimension Resizing', () => {
     expect(fmtLenInches(143.99)).toBe('12\' 0"');
     expect(fmtDimensionText(126.5, 102.125)).toBe('10\' 6 1/2" × 8\' 6 1/8"');
   });
+
+  test('resizeRoomWithConstraints succeeds on all 7 Floor 1 rooms of buildMultiLevel when expanding away from neighbors', () => {
+    const floor1Rooms = [
+      { id: 'r1', name: 'Living room', type: 'living', x: 0, y: 0, w: 192, h: 168 },
+      { id: 'r20', name: 'Hallway', type: 'hallway', x: 192, y: 0, w: 48, h: 120 },
+      { id: 'r24', name: 'Bedroom', type: 'bedroom', x: 240, y: 0, w: 144, h: 144 },
+      { id: 'r40', name: 'Bathroom', type: 'bathroom', x: 240, y: 144, w: 66, h: 120 },
+      { id: 'r50', name: 'Kitchen', type: 'kitchen', x: 0, y: 168, w: 120, h: 144 },
+      { id: 'r67', name: 'Laundry', type: 'laundry', x: 240, y: 264, w: 72, h: 84 },
+      { id: 'r77', name: 'Stairs', type: 'stairs', x: 192, y: 120, w: 42, h: 144 },
+    ];
+
+    const validOutwardMoves = [
+      { id: 'r1', handle: 'nw', target: { x: -24, y: 0 } },
+      { id: 'r20', handle: 'nw', target: { x: 192, y: -24 } },
+      { id: 'r24', handle: 'ne', target: { x: 408, y: 0 } },
+      { id: 'r40', handle: 'se', target: { x: 330, y: 264 } },
+      { id: 'r50', handle: 'se', target: { x: 144, y: 336 } },
+      { id: 'r67', handle: 'se', target: { x: 336, y: 372 } },
+      { id: 'r77', handle: 'se', target: { x: 234, y: 288 } },
+    ];
+
+    for (const { id, handle, target } of validOutwardMoves) {
+      const targetRoom = floor1Rooms.find((r) => r.id === id);
+      const res = resizeRoomWithConstraints(targetRoom, handle, target, {
+        existingRooms: floor1Rooms,
+        tolerance: 0.5,
+      });
+      expect(res.isValid).toBe(true);
+      expect(res.violations).toHaveLength(0);
+    }
+
+    // Intruding into neighbor interior is rejected
+    const intruding = resizeRoomWithConstraints(
+      floor1Rooms[0],
+      'ne',
+      { x: 216, y: 0 },
+      { existingRooms: floor1Rooms, tolerance: 0.5 }
+    );
+    expect(intruding.isValid).toBe(false);
+    expect(intruding.violations).toContain('Room overlaps an existing room.');
+  });
 });

@@ -299,3 +299,86 @@ export const defaultRateLimiter = new RateLimiter({
 export function rateLimitedFetch(url, options = {}) {
   return defaultRateLimiter.fetch(url, options);
 }
+
+/**
+ * Per-host rate limit profiles for geospatial providers.
+ * Nominatim and Overpass are strictly capped to 1 request/second with maxConcurrency=1.
+ * All geospatial token buckets are isolated from `defaultRateLimiter` so 3D asset
+ * downloads (e.g. Poly Haven) cannot starve GIS queries.
+ */
+export const GIS_HOST_RATE_LIMITS = {
+  'nominatim.openstreetmap.org': { capacity: 1, refillRate: 1, maxConcurrency: 1 },
+  'overpass-api.de': { capacity: 1, refillRate: 1, maxConcurrency: 1 },
+  'overpass.kumi.systems': { capacity: 1, refillRate: 1, maxConcurrency: 1 },
+  'lz4.overpass-api.de': { capacity: 1, refillRate: 1, maxConcurrency: 1 },
+  'z.overpass-api.de': { capacity: 1, refillRate: 1, maxConcurrency: 1 },
+  'tile.openstreetmap.org': { capacity: 8, refillRate: 4, maxConcurrency: 2 },
+  'basemaps.cartocdn.com': { capacity: 12, refillRate: 6, maxConcurrency: 4 },
+  'a.basemaps.cartocdn.com': { capacity: 12, refillRate: 6, maxConcurrency: 4 },
+  'b.basemaps.cartocdn.com': { capacity: 12, refillRate: 6, maxConcurrency: 4 },
+  'c.basemaps.cartocdn.com': { capacity: 12, refillRate: 6, maxConcurrency: 4 },
+  'basemap.nationalmap.gov': { capacity: 8, refillRate: 4, maxConcurrency: 4 },
+  'epqs.nationalmap.gov': { capacity: 4, refillRate: 2, maxConcurrency: 2 },
+  'tiles.maps.eox.at': { capacity: 8, refillRate: 4, maxConcurrency: 4 },
+  'api.open-meteo.com': { capacity: 4, refillRate: 2, maxConcurrency: 2 },
+  'api.open-elevation.com': { capacity: 2, refillRate: 1, maxConcurrency: 1 },
+  'maps.googleapis.com': { capacity: 10, refillRate: 5, maxConcurrency: 4 },
+};
+
+const DEFAULT_GIS_HOST_LIMIT = { capacity: 4, refillRate: 2, maxConcurrency: 2 };
+const gisRateLimiters = new Map();
+
+export function resolveGisHostKey(urlOrHost) {
+  if (!urlOrHost) return 'gis-default';
+  if (typeof urlOrHost === 'string') {
+    const trimmed = urlOrHost.trim().toLowerCase();
+    if (!trimmed) return 'gis-default';
+    if (!trimmed.includes('://') && !trimmed.startsWith('/')) {
+      const hostOnly = trimmed.split('/')[0].split(':')[0];
+      if (hostOnly.includes('nominatim')) return 'nominatim.openstreetmap.org';
+      if (hostOnly.includes('overpass')) return 'overpass-api.de';
+      return hostOnly || 'gis-default';
+    }
+    try {
+      const parsed = new URL(trimmed, 'https://localhost');
+      const host = parsed.hostname.toLowerCase();
+      if (host.includes('nominatim')) return 'nominatim.openstreetmap.org';
+      if (host.includes('overpass')) return 'overpass-api.de';
+      return host || 'gis-default';
+    } catch {
+      return 'gis-default';
+    }
+  }
+  if (typeof URL !== 'undefined' && urlOrHost instanceof URL) {
+    const host = urlOrHost.hostname.toLowerCase();
+    if (host.includes('nominatim')) return 'nominatim.openstreetmap.org';
+    if (host.includes('overpass')) return 'overpass-api.de';
+    return host || 'gis-default';
+  }
+  if (typeof urlOrHost === 'object' && typeof urlOrHost.url === 'string') {
+    return resolveGisHostKey(urlOrHost.url);
+  }
+  return 'gis-default';
+}
+
+export function getGisRateLimiter(urlOrHost) {
+  const hostKey = resolveGisHostKey(urlOrHost);
+  let limiter = gisRateLimiters.get(hostKey);
+  if (!limiter) {
+    const profile = GIS_HOST_RATE_LIMITS[hostKey] || DEFAULT_GIS_HOST_LIMIT;
+    limiter = new RateLimiter(profile);
+    gisRateLimiters.set(hostKey, limiter);
+  }
+  return limiter;
+}
+
+export function gisRateLimitedFetch(url, options = {}) {
+  const limiter = getGisRateLimiter(url);
+  return limiter.fetch(url, options);
+}
+
+export function clearGisRateLimiters() {
+  for (const limiter of gisRateLimiters.values()) {
+    limiter.clear();
+  }
+}

@@ -1,7 +1,11 @@
 import './k-components.js';
 import {
   WT,
+  EPS,
   WALLS,
+  resolveWallIndex,
+  getRoomWallKeys,
+  pointInPolygon,
   snap,
   wallSeg,
   wallLength,
@@ -130,6 +134,17 @@ import {
   getBounds,
 } from './gisBridge.js';
 import { getEPSGDefinition } from './epsgRegistry.js';
+import {
+  GOOGLE_MAPS_API_KEY_STORAGE,
+  getGoogleMapsApiKey,
+  setGoogleMapsApiKey,
+  clearGoogleMapsApiKey,
+  geocodeLocation,
+  fetchLiveElevationGrid,
+  fetchLiveParcelGeoJSON,
+  stitchMapPresetTiles,
+  fetchGoogleSatelliteBlueprint,
+} from './gisClient.js';
 import {
   buildMultiLevel,
   TEMPLATES,
@@ -557,6 +572,8 @@ const roomOf = (state, id) => state.rooms.find((r) => r.id === id);
 const inRect = (r, p, pad = 0) =>
   p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
 const levelRooms = () => doc.rooms.filter((r) => (r.level || 0) === curLevel);
+const toRoomCollisionShape = (rm) =>
+  rm?.bulges ? { points: getRoomPoints(rm), bulges: rm.bulges } : getRoomPoints(rm);
 const roomAt = (p) =>
   levelRooms()
     .filter((r) => inRect(r, p, WT / 2))
@@ -1637,19 +1654,21 @@ function tryPreview(mutate, options = {}) {
 }
 
 // ------------------------------------------------------------- geometry picking
-function nearestWall(p, maxDist = 14, only = null) {
+export function nearestWall(p, maxDist = 14, only = null) {
   let best = null;
-  for (const room of only ? [only] : levelRooms())
-    for (const wall of WALLS) {
+  for (const room of only ? [only] : levelRooms()) {
+    const pts = getRoomPoints(room);
+    const inside = pointInPolygon(p, pts) ? 0 : 1; // prefer the room the pointer is inside of
+    for (const wall of getRoomWallKeys(room)) {
       const s = wallSeg(room, wall);
       const t = Math.max(0, Math.min(s.len, (p.x - s.ax) * s.dx + (p.y - s.ay) * s.dy));
       const cx = s.ax + s.dx * t;
       const cy = s.ay + s.dy * t;
       const d = Math.hypot(p.x - cx, p.y - cy);
-      const inside = inRect(room, p, 0) ? 0 : 1; // prefer the room the pointer is inside of
-      const score = d + inside * 0.01 * 0 + (inside ? 0.3 : 0);
+      const score = d + (inside ? 0.3 : 0);
       if (d <= maxDist && (!best || score < best.score)) best = { room, wall, t, d, score };
     }
+  }
   return best;
 }
 
@@ -2155,7 +2174,8 @@ export function drawOverlay(c, _state) {
       const roomsToDraw =
         paintScope === 'level' || paintScope === 'plan' ? levelRooms() : [nw.room];
       for (const rm of roomsToDraw) {
-        const wallsToDraw = paintScope === 'single' && rm === nw.room ? [nw.wall] : WALLS;
+        const wallsToDraw =
+          paintScope === 'single' && rm === nw.room ? [nw.wall] : getRoomWallKeys(rm);
         for (const w of wallsToDraw) {
           const a = wallPoint(rm, w, 0, 0);
           const b = wallPoint(rm, w, wallLength(rm, w), 0);
@@ -2513,12 +2533,28 @@ export function renderInspector() {
   const { room, kind, obj } = hit;
   if (kind === 'room') {
     const win = typeof window !== 'undefined' ? window : globalThis;
-    if (!win.__activeUVWall) win.__activeUVWall = 'N';
+    const roomPts = getRoomPoints(room);
+    const wallNameMap = {
+      N: 'North (N)',
+      E: 'East (E)',
+      S: 'South (S)',
+      W: 'West (W)',
+    };
+    const uvWallKeys = getRoomWallKeys(room).map((wk) => String(wk));
+    if (
+      win.__activeUVWall === undefined ||
+      win.__activeUVWall === null ||
+      !uvWallKeys.includes(String(win.__activeUVWall))
+    ) {
+      win.__activeUVWall = uvWallKeys[0];
+    }
     if (!win.__activeAssemblyScope) win.__activeAssemblyScope = 'single';
-    const activeWall = win.__activeUVWall;
+    const activeWall = String(win.__activeUVWall);
+    const activeWallLabel =
+      roomPts.length === 4 ? activeWall : `Wall ${resolveWallIndex(activeWall) + 1}`;
     const activeAssemblyScope = win.__activeAssemblyScope;
     const uv = M.getWallUV(room, activeWall);
-    const wallFinishId = room.walls?.[activeWall] || 'paint_white';
+    const wallFinishId = M.getWallFinish(room, activeWall);
     let activeExtFinId = room.cladding || room.exteriorCladding;
     if (!activeExtFinId && WALL_BY_ID[wallFinishId]?.exterior) {
       activeExtFinId = wallFinishId;
@@ -2527,7 +2563,7 @@ export function renderInspector() {
     const assembly = resolveWallAssembly(
       wallFinishId,
       activeExtFinId,
-      room.wallAssemblyOverrides?.[activeWall]
+      M.getWallAssemblyOverrides(room, activeWall)
     );
     const fmtInches = (v) => Number(Number(v).toFixed(3));
     const finishObj = WALL_BY_ID[wallFinishId];
@@ -2537,13 +2573,6 @@ export function renderInspector() {
         ? `Custom Texture (${wallFinishId.slice(0, 10)})`
         : wallFinishId;
 
-    const roomPts = getRoomPoints(room);
-    const wallNameMap = {
-      N: 'North (N)',
-      E: 'East (E)',
-      S: 'South (S)',
-      W: 'West (W)',
-    };
     const wallRowsHtml = roomPts
       .map((_, wIdx) => {
         const wKey = roomPts.length === 4 ? WALLS[wIdx] : String(wIdx);
@@ -2696,12 +2725,12 @@ export function renderInspector() {
       ${formRow(
         'i-uv-wall',
         'Wall Face',
-        `<select id="i-uv-wall">
-          <option value="N" ${activeWall === 'N' ? 'selected' : ''}>North (N)</option>
-          <option value="E" ${activeWall === 'E' ? 'selected' : ''}>East (E)</option>
-          <option value="S" ${activeWall === 'S' ? 'selected' : ''}>South (S)</option>
-          <option value="W" ${activeWall === 'W' ? 'selected' : ''}>West (W)</option>
-        </select>`
+        `<select id="i-uv-wall">${uvWallKeys
+          .map((wk, idx) => {
+            const label = roomPts.length === 4 ? wallNameMap[wk] : `Wall ${idx + 1}`;
+            return `<option value="${esc(wk)}" ${String(wk) === activeWall ? 'selected' : ''}>${esc(label)}</option>`;
+          })
+          .join('')}</select>`
       )}
       <div class="row" style="margin:6px 0;display:flex;align-items:center;justify-content:space-between;gap:6px">
         <span style="font-size:0.8rem;color:var(--text-muted,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(finishLabel)}">Finish: <b>${esc(finishLabel)}</b></span>
@@ -2785,7 +2814,7 @@ export function renderInspector() {
           `<input id="i-wa-cladding" type="number" step="0.125" min="0" max="24" value="${fmtInches(assembly.claddingThickness)}" aria-label="Exterior cladding thickness in inches">`
         )}
         <div class="row" style="margin:8px 0 6px;display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;padding-top:6px;border-top:1px dashed var(--border,#ddd)">
-          <span>Total Assembly Thickness (${esc(activeWall)})</span>
+          <span>Total Assembly Thickness (${esc(activeWallLabel)})</span>
           <strong id="i-wa-total" aria-live="polite">${fmtInches(assembly.totalThickness)}"</strong>
         </div>
         <div class="row" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:6px">
@@ -3015,8 +3044,11 @@ export function renderInspector() {
 
       const siblingPolys = levelRooms()
         .filter((rm) => rm.id !== liveRoom.id)
-        .map((rm) => getRoomPoints(rm));
-      const placementCheck = validatePlacement(adjusted.points, siblingPolys);
+        .map(toRoomCollisionShape);
+      const candidateShape = liveRoom.bulges
+        ? { points: adjusted.points, bulges: liveRoom.bulges }
+        : adjusted.points;
+      const placementCheck = validatePlacement(candidateShape, siblingPolys, { tolerance: EPS });
       if (!placementCheck.valid) {
         const msg = placementCheck.reasons.selfIntersecting
           ? 'Wall length causes polygon self-intersection.'
@@ -3233,6 +3265,23 @@ export function renderInspector() {
       $('#i-custom-tex-file')?.click();
     });
 
+    const resolveActiveInspectorWall = (r) => {
+      const keys = r ? getRoomWallKeys(r).map((wk) => String(wk)) : uvWallKeys;
+      if (
+        win.__activeUVWall !== undefined &&
+        win.__activeUVWall !== null &&
+        keys.includes(String(win.__activeUVWall))
+      ) {
+        return win.__activeUVWall;
+      }
+      return keys[0] ?? activeWall;
+    };
+
+    const formatInspectorWallLabel = (r, targetWall) => {
+      const pts = getRoomPoints(r);
+      return pts.length === 4 ? String(targetWall) : `Wall ${resolveWallIndex(targetWall) + 1}`;
+    };
+
     $('#i-custom-tex-file')?.addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -3241,7 +3290,7 @@ export function renderInspector() {
         await saveTextureBlob(texId, file, { name: file.name, mimeType: file.type });
         apply((n) => {
           const r = roomOf(n, room.id);
-          if (r) r.walls[win.__activeUVWall || 'N'] = texId;
+          if (r) M.setWallFinish(r, resolveActiveInspectorWall(r), texId);
         }, 'Upload Wall Texture');
         toast(`Uploaded custom texture: ${file.name}`);
         renderInspector();
@@ -3274,7 +3323,7 @@ export function renderInspector() {
           M.applyWallUV(
             n,
             { scaleU, scaleV, rotation, offsetU, offsetV },
-            { scope, room: r, wall: win.__activeUVWall || 'N', level: r?.level || 0 }
+            { scope, room: r, wall: resolveActiveInspectorWall(r), level: r?.level || 0 }
           );
         },
         { quiet: true, label: 'Update Wall UV' }
@@ -3321,7 +3370,7 @@ export function renderInspector() {
         M.applyWallUV(n, M.DEFAULT_UV_TRANSFORM, {
           scope,
           room: r,
-          wall: win.__activeUVWall || 'N',
+          wall: resolveActiveInspectorWall(r),
           level: r?.level || 0,
         });
       }, 'Reset Wall UV');
@@ -3359,7 +3408,7 @@ export function renderInspector() {
     const commitAssemblyUpdate = () => {
       const { clamped, scope } = readAssemblyInputs();
       win.__activeAssemblyScope = scope;
-      const targetWall = win.__activeUVWall || 'N';
+      const targetWall = resolveActiveInspectorWall(room);
       apply((n) => {
         const r = roomOf(n, room.id);
         M.applyWallAssemblyOverrides(n, clamped, {
@@ -3370,7 +3419,7 @@ export function renderInspector() {
         });
       }, 'Update Wall Assembly Thickness');
       const updatedRoom = roomOf(doc, room.id) || room;
-      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      const updatedFinish = M.getWallFinish(updatedRoom, targetWall);
       let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
       if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
         updatedExtFin = updatedFinish;
@@ -3379,13 +3428,14 @@ export function renderInspector() {
       const updatedAssembly = resolveWallAssembly(
         updatedFinish,
         updatedExtFin,
-        updatedRoom.wallAssemblyOverrides?.[targetWall]
+        M.getWallAssemblyOverrides(updatedRoom, targetWall)
       );
       const totalInches = fmtInches(updatedAssembly.totalThickness);
       redraw();
       win.__scene3d?.update?.();
       win.__scene3d?.render?.();
-      const msg = `${updatedRoom.name} ${targetWall} wall assembly updated to ${totalInches} inches total thickness.`;
+      const wallLabel = formatInspectorWallLabel(updatedRoom, targetWall);
+      const msg = `${updatedRoom.name} ${wallLabel} wall assembly updated to ${totalInches} inches total thickness.`;
       announceToLiveRegion(msg);
       win.__scene3d?.announce3DStateChange?.(msg);
     };
@@ -3406,7 +3456,7 @@ export function renderInspector() {
     $('#i-wa-reset')?.addEventListener('click', () => {
       const scope = $('#i-wa-scope')?.value || 'single';
       win.__activeAssemblyScope = scope;
-      const targetWall = win.__activeUVWall || 'N';
+      const targetWall = resolveActiveInspectorWall(room);
       apply((n) => {
         const r = roomOf(n, room.id);
         M.applyWallAssemblyOverrides(n, null, {
@@ -3417,7 +3467,7 @@ export function renderInspector() {
         });
       }, 'Reset Wall Assembly Thickness');
       const updatedRoom = roomOf(doc, room.id) || room;
-      const updatedFinish = updatedRoom.walls?.[targetWall] || 'paint_white';
+      const updatedFinish = M.getWallFinish(updatedRoom, targetWall);
       let updatedExtFin = updatedRoom.cladding || updatedRoom.exteriorCladding;
       if (!updatedExtFin && WALL_BY_ID[updatedFinish]?.exterior) {
         updatedExtFin = updatedFinish;
@@ -3429,7 +3479,8 @@ export function renderInspector() {
       redraw();
       win.__scene3d?.update?.();
       win.__scene3d?.render?.();
-      const msg = `${updatedRoom.name} ${targetWall} wall assembly reset to default ${totalInches} inches total thickness.`;
+      const wallLabel = formatInspectorWallLabel(updatedRoom, targetWall);
+      const msg = `${updatedRoom.name} ${wallLabel} wall assembly reset to default ${totalInches} inches total thickness.`;
       announceToLiveRegion(msg);
       win.__scene3d?.announce3DStateChange?.(msg);
     });
@@ -4891,9 +4942,10 @@ function updatePreview() {
       const edges = extractRoomEdges(levelRooms());
       const roomPv = interaction.previewRoom(hover, {
         edges,
-        existingRooms: levelRooms().map(roomToPolygon),
+        existingRooms: levelRooms(),
         scale: view.scale,
         explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+        tolerance: EPS,
       });
       if (roomPv) {
         preview = { next: doc, ok: !roomPv.invalid, fresh: [], feedback: roomPv };
@@ -5336,8 +5388,10 @@ canvas?.addEventListener('pointermove', (e) => {
       };
 
       const candPoly = roomToPolygon(drag.rect);
-      const existingRooms = doc.rooms.filter((r) => (r.level || 0) === curLevel).map(roomToPolygon);
-      const validation = validatePlacement(candPoly, existingRooms);
+      const existingRooms = doc.rooms
+        .filter((r) => (r.level || 0) === curLevel)
+        .map(toRoomCollisionShape);
+      const validation = validatePlacement(candPoly, existingRooms, { tolerance: EPS });
       const placementFeedback = createPlacementFeedback(candPoly, validation);
 
       preview =
@@ -5420,7 +5474,8 @@ function handleCloseRoom() {
     return;
   }
   const closeRes = interaction.closeRoom({
-    existingRooms: levelRooms().map(roomToPolygon),
+    existingRooms: levelRooms(),
+    tolerance: EPS,
   });
   if (closeRes.ok && closeRes.room?.corners) {
     const pts = closeRes.room.corners;
@@ -5838,9 +5893,10 @@ canvas?.addEventListener('pointerup', () => {
       const p = hover || { x: d.x0, y: d.y0 };
       const cornerRes = interaction.addRoomCorner(p, {
         edges: extractRoomEdges(levelRooms()),
-        existingRooms: levelRooms().map(roomToPolygon),
+        existingRooms: levelRooms(),
         scale: view.scale,
         explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+        tolerance: EPS,
       });
       const placedPt = cornerRes?.corner || p;
       const count = interaction.getCornerCount();
@@ -6081,6 +6137,7 @@ function syncPassiveWallHud() {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     const targetPt = pv?.targetPoint || hover;
     const len = pv?.lengthInches ?? Math.hypot(targetPt.x - anchor.x, targetPt.y - anchor.y);
@@ -6228,6 +6285,7 @@ function activateWallHudByTab(reverse = false) {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     const targetPt = pv?.targetPoint || ptr;
     const len = pv?.lengthInches ?? Math.hypot(targetPt.x - anchor.x, targetPt.y - anchor.y);
@@ -6368,6 +6426,7 @@ function previewWallHudInput(rawVal) {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     if (pv) {
       wallHudState.previewPoint = pv.targetPoint;
@@ -6394,6 +6453,7 @@ function commitWallHudInput(rawValueOverride) {
       existingRooms: levelRooms(),
       scale: view.scale,
       explicitAngleDegrees: snappingBridge.getExplicitAngleDegrees(),
+      tolerance: EPS,
     });
     if (!res.ok) {
       setWallHudError(res.violations?.[0] || 'Invalid wall segment placement.');
@@ -6455,8 +6515,9 @@ function commitWallHudInput(rawValueOverride) {
     }
     const siblingPolys = levelRooms()
       .filter((rm) => rm.id !== r.id)
-      .map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(nextPts, siblingPolys);
+      .map(toRoomCollisionShape);
+    const candidateShape = r.bulges ? { points: nextPts, bulges: r.bulges } : nextPts;
+    const colCheck = validatePlacement(candidateShape, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = colCheck.reasons.selfIntersecting
         ? 'Wall length causes polygon self-intersection.'
@@ -6498,8 +6559,8 @@ function commitWallHudInput(rawValueOverride) {
     const x = dirX >= 0 ? start.x0 : start.x0 - w;
     const y = dirY >= 0 ? start.y0 : start.y0 - h;
     const candPoly = roomToPolygon({ x, y, w, h });
-    const siblingPolys = levelRooms().map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(candPoly, siblingPolys);
+    const siblingPolys = levelRooms().map(toRoomCollisionShape);
+    const colCheck = validatePlacement(candPoly, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = 'Room placement overlaps an existing room.';
       setWallHudError(msg);
@@ -6539,8 +6600,11 @@ function commitWallHudInput(rawValueOverride) {
 
     const siblingPolys = levelRooms()
       .filter((rm) => rm.id !== r.id)
-      .map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(adjusted.points, siblingPolys);
+      .map(toRoomCollisionShape);
+    const candidateShape = r.bulges
+      ? { points: adjusted.points, bulges: r.bulges }
+      : adjusted.points;
+    const colCheck = validatePlacement(candidateShape, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = colCheck.reasons.selfIntersecting
         ? 'Wall length causes polygon self-intersection.'
@@ -6586,8 +6650,8 @@ function commitWallHudInput(rawValueOverride) {
     const candPoly = roomToPolygon({ x: r.x, y: r.y, w, h });
     const siblingPolys = levelRooms()
       .filter((rm) => rm.id !== r.id)
-      .map((rm) => getRoomPoints(rm));
-    const colCheck = validatePlacement(candPoly, siblingPolys);
+      .map(toRoomCollisionShape);
+    const colCheck = validatePlacement(candPoly, siblingPolys, { tolerance: EPS });
     if (!colCheck.valid) {
       const msg = 'Resized room overlaps an adjacent room.';
       setWallHudError(msg);
@@ -7540,6 +7604,37 @@ function updateElevationIntervalLabel(unit) {
   }
 }
 
+function syncGoogleApiKeyInputs(nextKey = null) {
+  const key = nextKey !== null ? setGoogleMapsApiKey(nextKey) : getGoogleMapsApiKey();
+  const gisKeyInput = $('#gis-google-api-key');
+  if (gisKeyInput && gisKeyInput.value !== key) {
+    gisKeyInput.value = key;
+  }
+  const elevKeyInput = $('#elevation-google-key');
+  if (elevKeyInput && elevKeyInput.value !== key) {
+    elevKeyInput.value = key;
+  }
+  return key;
+}
+
+function updateDocCrsOrigin(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  doc.crs = {
+    ...(doc.crs && typeof doc.crs === 'object' ? doc.crs : { epsg: 'EPSG:4326' }),
+    epsg: doc.crs?.epsg || 'EPSG:4326',
+    origin: { latitude: lat, longitude: lon },
+  };
+}
+
+function formatDocOriginQuery() {
+  const origin = doc?.crs?.origin;
+  if (!origin) return '';
+  const lat = Number(origin.latitude ?? origin.lat ?? (Array.isArray(origin) ? origin[1] : NaN));
+  const lon = Number(origin.longitude ?? origin.lon ?? (Array.isArray(origin) ? origin[0] : NaN));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
 function syncElevationDialog(grid) {
   const unit = normalizeElevationUnit(grid?.elevationUnit);
   const unitEl = $('#elevation-unit');
@@ -7548,6 +7643,8 @@ function syncElevationDialog(grid) {
   const slopeEl = $('#elevation-slope-percent');
   const dirEl = $('#elevation-slope-direction');
   const visibleEl = $('#elevation-visible');
+  const queryEl = $('#elevation-location-query');
+  const providerEl = $('#elevation-provider');
 
   if (unitEl) unitEl.value = unit;
   if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
@@ -7555,6 +7652,13 @@ function syncElevationDialog(grid) {
   if (slopeEl) slopeEl.value = String(sanitizeSlopePercent(grid?.targetSlopePercent ?? 0));
   if (dirEl) dirEl.value = String(sanitizeSlopeDirection(grid?.slopeDirectionDeg ?? 0));
   if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
+  if (queryEl && !queryEl.value) {
+    queryEl.value = formatDocOriginQuery();
+  }
+  if (providerEl && grid?.source === 'google-elevation') {
+    providerEl.value = 'google';
+  }
+  syncGoogleApiKeyInputs();
   updateElevationIntervalLabel(unit);
 }
 
@@ -7562,15 +7666,106 @@ $('#elevation-unit')?.addEventListener('change', (e) => {
   updateElevationIntervalLabel(e.target.value);
 });
 
+$('#elevation-google-key')?.addEventListener('change', (e) => {
+  syncGoogleApiKeyInputs(e.target?.value ?? '');
+});
+
+$('#btn-upload-elevation-file')?.addEventListener('click', () => {
+  $('#elevation-file')?.click();
+});
+
+export async function fetchTerrainFromDialog(options = {}) {
+  const statusEl = $('#elevation-fetch-status');
+  const setStatus = (msg) => {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.hidden = !msg;
+  };
+
+  try {
+    const keyInputVal = $('#elevation-google-key')?.value;
+    if (typeof keyInputVal === 'string' && keyInputVal.trim()) {
+      syncGoogleApiKeyInputs(keyInputVal);
+    }
+    const apiKey = options.apiKey ?? getGoogleMapsApiKey();
+    const provider = options.provider ?? $('#elevation-provider')?.value ?? 'open';
+    const rawQuery = options.query ?? $('#elevation-location-query')?.value ?? '';
+    const query = rawQuery.trim() || formatDocOriginQuery();
+
+    const unit = normalizeElevationUnit(
+      options.elevationUnit ?? $('#elevation-unit')?.value ?? 'm'
+    );
+    const rawInterval = parseFloat($('#elevation-contour-interval')?.value ?? '');
+    const contourInterval = Number.isFinite(rawInterval)
+      ? Math.max(0.1, Math.min(50, rawInterval))
+      : 1.0;
+    const rawScale = parseFloat($('#elevation-vertical-scale')?.value ?? '');
+    const verticalScale = Number.isFinite(rawScale) ? Math.max(0.1, Math.min(10, rawScale)) : 1.0;
+    const slopePercent = sanitizeSlopePercent($('#elevation-slope-percent')?.value ?? 0);
+    const directionDegrees = sanitizeSlopeDirection($('#elevation-slope-direction')?.value ?? 0);
+    const visible = $('#elevation-visible')?.checked !== false;
+
+    setStatus('Fetching live terrain elevation grid…');
+
+    const { grid, geocodeResult, geoBounds } = await fetchLiveElevationGrid({
+      query,
+      origin: doc.crs?.origin,
+      geoBounds: query ? null : doc.site?.geoBounds || null,
+      provider,
+      apiKey,
+      elevationUnit: unit,
+      contourInterval,
+      verticalScale,
+      planBounds: { minX: 50, maxX: 1150, minY: 50, maxY: 850 },
+      ...options,
+    });
+
+    if (geocodeResult) {
+      updateDocCrsOrigin(geocodeResult.lat, geocodeResult.lon);
+    }
+    grid.visible = visible;
+    if (slopePercent > 0) {
+      grid.applyGradedSlope({
+        slopePercent,
+        directionDegrees,
+        unitScale: unit === 'ft' ? 1 / 12 : 0.0254,
+      });
+    }
+
+    doc.elevationGrid = grid;
+    doc._cachedContours = await computeContoursAsync(grid);
+    syncElevationDialog(grid);
+    hist.push(doc, 'Fetch Live Terrain');
+    globalThis.window?.__scene3d?.update();
+    redraw();
+    persist();
+    setStatus(
+      `Loaded ${grid.width}x${grid.height} terrain grid (${grid.provider || 'Open Terrain'}, ${doc._cachedContours.length} contour levels).`
+    );
+    toast(`Fetched live terrain elevation (${grid.width}x${grid.height}).`);
+    return { grid, contours: doc._cachedContours, geocodeResult, geoBounds };
+  } catch (err) {
+    setStatus(`Terrain fetch failed: ${err.message}`);
+    toast(`Failed to fetch live terrain: ${err.message}`, true);
+    throw err;
+  }
+}
+
+$('#btn-fetch-elevation')?.addEventListener('click', () => {
+  fetchTerrainFromDialog().catch(() => {});
+});
+
 $('#import-elevation')?.addEventListener('click', (e) => {
-  if (doc.elevationGrid) {
+  const dlg = $('#dlg-elevation');
+  if (dlg) {
     syncElevationDialog(doc.elevationGrid);
-    const dlg = $('#dlg-elevation');
-    if (dlg) {
-      const returnFocusEl = e?.currentTarget || document.activeElement;
+    const returnFocusEl = e?.currentTarget || document.activeElement;
+    if (typeof dlg.showModal === 'function') {
       dlg.showModal();
       const cleanup = trapFocus(dlg, returnFocusEl);
       dlg.addEventListener('close', () => cleanup(), { once: true });
+    } else {
+      dlg.setAttribute('open', '');
     }
   } else {
     $('#elevation-file')?.click();
@@ -8389,6 +8584,27 @@ if (typeof document !== 'undefined') {
   $('#gis-close')?.addEventListener('click', closeGISDialog);
   $('#gis-done')?.addEventListener('click', closeGISDialog);
 
+  $('#gis-google-api-key')?.addEventListener('change', (e) => {
+    const val = e.detail?.value ?? e.target?.value ?? '';
+    syncGoogleApiKeyInputs(val);
+  });
+
+  $('#gis-preview-coords')?.addEventListener('click', () => {
+    previewGISLocation().catch(() => {});
+  });
+
+  $('#gis-fetch-live')?.addEventListener('click', () => {
+    importLiveGISParcels().catch(() => {});
+  });
+
+  $('#gis-import-site-all')?.addEventListener('click', () => {
+    importLiveSiteParcelsAndContours().catch(() => {});
+  });
+
+  $('#gis-fetch-google-satellite')?.addEventListener('click', () => {
+    importGoogleSatelliteSite().catch(() => {});
+  });
+
   $('#gis-load-sample')?.addEventListener('click', () => {
     loadGISSubsystem(SAMPLE_MUNICIPAL_GIS);
     toast('Sample municipal GIS lot loaded successfully.');
@@ -8441,6 +8657,12 @@ if (typeof document !== 'undefined') {
   });
   document.querySelector('label[for="gis-map-preset"]')?.addEventListener('click', () => {
     $('#gis-map-preset')?.focus();
+  });
+  document.querySelector('label[for="gis-search-query"]')?.addEventListener('click', () => {
+    $('#gis-search-query')?.focus();
+  });
+  document.querySelector('label[for="gis-google-api-key"]')?.addEventListener('click', () => {
+    $('#gis-google-api-key')?.focus();
   });
 }
 
@@ -8555,9 +8777,236 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
+function renderGISGeocodePreview(result, errorMessage = null) {
+  const previewEl = $('#gis-geocode-preview');
+  if (!previewEl) return;
+  if (errorMessage) {
+    previewEl.textContent = errorMessage;
+    previewEl.hidden = false;
+    return;
+  }
+  if (!result) {
+    previewEl.textContent = '';
+    previewEl.hidden = true;
+    return;
+  }
+  previewEl.textContent = `Matched: ${result.displayName} (${result.lat.toFixed(5)}, ${result.lon.toFixed(5)}) via ${result.provider || 'Geocoder'}`;
+  previewEl.hidden = false;
+}
+
+export async function previewGISLocation(queryOverride = null, options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const rawQuery = queryOverride ?? $('#gis-search-query')?.value ?? '';
+  const query = rawQuery.trim() || formatDocOriginQuery();
+  try {
+    const result = await geocodeLocation(query, {
+      apiKey: options.apiKey ?? getGoogleMapsApiKey(),
+      ...options,
+    });
+    updateDocCrsOrigin(result.lat, result.lon);
+    renderGISGeocodePreview(result);
+    persist();
+    redraw();
+    return result;
+  } catch (err) {
+    renderGISGeocodePreview(null, `Location lookup failed: ${err.message}`);
+    toast(`Geocoding failed: ${err.message}`, true);
+    throw err;
+  }
+}
+
+export async function importLiveGISParcels(options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const rawQuery = options.query ?? $('#gis-search-query')?.value ?? '';
+  const query = rawQuery.trim();
+
+  try {
+    const { geojson, geocodeResult, geoBounds } = await fetchLiveParcelGeoJSON({
+      query,
+      origin: doc.crs?.origin,
+      apiKey: options.apiKey ?? getGoogleMapsApiKey(),
+      ...options,
+    });
+    if (geocodeResult) {
+      updateDocCrsOrigin(geocodeResult.lat, geocodeResult.lon);
+      renderGISGeocodePreview(geocodeResult);
+    }
+    const site = loadGISSubsystem(geojson, {
+      crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+      attributionText: geojson.metadata?.attributionText || '© OpenStreetMap contributors',
+      provider: geojson.metadata?.provider || 'OpenStreetMap / Overpass API',
+      licenseUrl: geojson.metadata?.licenseUrl || 'https://www.openstreetmap.org/copyright',
+      geoBounds,
+    });
+    toast(`Imported ${geojson.features?.length || 0} live parcel & footprint polygons.`);
+    return { site, geojson, geocodeResult, geoBounds };
+  } catch (err) {
+    renderGISGeocodePreview(null, `Parcel import failed: ${err.message}`);
+    toast(`Live parcel import failed: ${err.message}`, true);
+    throw err;
+  }
+}
+
+export async function importLiveSiteParcelsAndContours(options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const apiKey = options.apiKey ?? getGoogleMapsApiKey();
+  const rawQuery = options.query ?? $('#gis-search-query')?.value ?? '';
+  const query = rawQuery.trim() || formatDocOriginQuery();
+
+  try {
+    const geocodeResult = query ? await geocodeLocation(query, { ...options, apiKey }) : null;
+    if (geocodeResult) {
+      updateDocCrsOrigin(geocodeResult.lat, geocodeResult.lon);
+      renderGISGeocodePreview(geocodeResult);
+    }
+    const sharedBounds = geocodeResult?.boundingBox || options.boundingBox || null;
+    const [parcelRes, elevRes] = await Promise.all([
+      fetchLiveParcelGeoJSON({
+        ...options,
+        query: '',
+        boundingBox: sharedBounds,
+        origin: doc.crs?.origin,
+        apiKey,
+      }),
+      fetchLiveElevationGrid({
+        ...options,
+        query: '',
+        boundingBox: sharedBounds,
+        origin: doc.crs?.origin,
+        apiKey,
+        planBounds: { minX: 50, maxX: 1150, minY: 50, maxY: 850 },
+      }),
+    ]);
+
+    const site = loadGISSubsystem(parcelRes.geojson, {
+      crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+      attributionText:
+        parcelRes.geojson.metadata?.attributionText || '© OpenStreetMap contributors',
+      provider: parcelRes.geojson.metadata?.provider || 'OpenStreetMap / Overpass API',
+      licenseUrl:
+        parcelRes.geojson.metadata?.licenseUrl || 'https://www.openstreetmap.org/copyright',
+      geoBounds: parcelRes.geoBounds,
+    });
+
+    doc.elevationGrid = elevRes.grid;
+    doc._cachedContours = await computeContoursAsync(elevRes.grid);
+    syncElevationDialog(elevRes.grid);
+    globalThis.window?.__scene3d?.update();
+    persist();
+    refresh();
+    toast('Imported aligned site parcel boundaries and topographic contours.');
+    return {
+      site,
+      elevationGrid: doc.elevationGrid,
+      contours: doc._cachedContours,
+      geocodeResult,
+      geoBounds: parcelRes.geoBounds,
+    };
+  } catch (err) {
+    renderGISGeocodePreview(null, `Site import failed: ${err.message}`);
+    toast(`Failed to import site parcels & contours: ${err.message}`, true);
+    throw err;
+  }
+}
+
+export async function importGoogleSatelliteSite(options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const apiKey = (options.apiKey ?? getGoogleMapsApiKey()).trim();
+
+  if (M.isCustomBlueprintBackground(doc.background) && !options.skipConfirm) {
+    const confirmFn = options.confirmFn || confirmDialog;
+    const confirmed = await confirmFn({
+      title: 'Replace Custom Blueprint?',
+      message: 'Replace your uploaded custom blueprint with Google Satellite imagery?',
+      confirmLabel: 'Replace Blueprint',
+      cancelLabel: 'Keep Blueprint',
+      danger: true,
+    });
+    if (!confirmed) return doc.background;
+  }
+
+  try {
+    const rawQuery = options.query ?? $('#gis-search-query')?.value ?? '';
+    const sat = await fetchGoogleSatelliteBlueprint({
+      ...options,
+      query: rawQuery.trim(),
+      origin: doc.crs?.origin,
+      apiKey,
+      targetPlanBounds: { x: 50, y: 50, w: 1100, h: 800 },
+    });
+
+    if (sat.geocodeResult) {
+      updateDocCrsOrigin(sat.geocodeResult.lat, sat.geocodeResult.lon);
+      renderGISGeocodePreview(sat.geocodeResult);
+    }
+
+    doc.background = {
+      dataUrl: sat.dataUrl,
+      x: sat.x,
+      y: sat.y,
+      scale: sat.scale,
+      affineMatrix: sat.affineMatrix,
+      geoBounds: sat.geoBounds,
+      worldfileCRS: 'EPSG:4326',
+      opacity: doc.background?.opacity ?? 0.65,
+      visible: true,
+      locked: false,
+      width: sat.width,
+      height: sat.height,
+      attributionText: sat.attributionText,
+      provider: sat.provider,
+      licenseUrl: sat.licenseUrl,
+      logoUrl: null,
+      isGeospatial: true,
+      presetKey: sat.presetKey,
+    };
+
+    if (options.includeElevation) {
+      const elevRes = await fetchLiveElevationGrid({
+        ...options,
+        boundingBox: sat.geoBounds,
+        origin: doc.crs?.origin,
+        provider: 'google',
+        apiKey,
+        planBounds: { minX: 50, maxX: 1150, minY: 50, maxY: 850 },
+      });
+      doc.elevationGrid = elevRes.grid;
+      doc._cachedContours = await computeContoursAsync(elevRes.grid);
+      syncElevationDialog(elevRes.grid);
+      globalThis.window?.__scene3d?.update();
+    }
+
+    hist.push(doc, 'Import Google Satellite Imagery');
+    persist();
+    refresh();
+    toast('Imported Google Satellite imagery.');
+    return doc.background;
+  } catch (err) {
+    toast(`Google Satellite import failed: ${err.message}`, true);
+    throw err;
+  }
+}
+
 function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  syncGoogleApiKeyInputs();
+  const searchInput = $('#gis-search-query');
+  if (searchInput && !searchInput.value) {
+    searchInput.value = formatDocOriginQuery();
+  }
   const gisCrsSelect = $('#gis-crs');
   if (gisCrsSelect && doc.site?.crs) {
     const opts =
@@ -9218,24 +9667,83 @@ function handleBlueprintImport(file, meta = {}) {
   reader.readAsDataURL(file);
 }
 
-function handleMapPresetSelect(presetKey) {
+let mapPresetRequestSeq = 0;
+
+function syncMapPresetSelectors(value) {
+  const bgSel = $('#bg-map-preset');
+  if (bgSel && bgSel.value !== value) bgSel.value = value;
+  const gisSel = $('#gis-map-preset');
+  if (gisSel && gisSel.value !== value) gisSel.value = value;
+}
+
+export async function handleMapPresetSelect(presetKey, options = {}) {
   if (!presetKey) {
+    mapPresetRequestSeq++;
     if (doc.background) {
-      doc.background.presetKey = null;
+      M.applyMapPreset(doc, '');
       hist.push(doc, 'Clear Map Preset');
       persist();
       refresh();
     }
-    return;
+    syncMapPresetSelectors('');
+    return doc.background || null;
   }
+
+  if (M.isCustomBlueprintBackground(doc.background) && !options.skipConfirm) {
+    const confirmFn = options.confirmFn || confirmDialog;
+    const confirmed = await confirmFn({
+      title: 'Replace Custom Blueprint?',
+      message: 'Replace your uploaded custom blueprint with geospatial map preset imagery?',
+      confirmLabel: 'Replace Blueprint',
+      cancelLabel: 'Keep Blueprint',
+      danger: true,
+    });
+    if (!confirmed) {
+      syncMapPresetSelectors('');
+      return doc.background;
+    }
+  }
+
   const bg = M.applyMapPreset(doc, presetKey);
-  if (bg) {
-    const preset = M.getMapPreset(presetKey);
-    hist.push(doc, `Apply Map Preset: ${preset ? preset.name : presetKey}`);
-    persist();
-    refresh();
-    toast(`Geospatial map provider preset applied: ${preset ? preset.name : presetKey}`);
+  if (!bg) return null;
+
+  const preset = M.getMapPreset(presetKey);
+  syncMapPresetSelectors(bg.presetKey || '');
+  hist.push(doc, `Apply Map Preset: ${preset ? preset.name : presetKey}`);
+  persist();
+  refresh();
+  toast(`Geospatial map provider preset applied: ${preset ? preset.name : presetKey}`);
+
+  const requestSeq = ++mapPresetRequestSeq;
+  try {
+    const stitched = await stitchMapPresetTiles(presetKey, {
+      origin: doc.crs?.origin,
+      targetPlanBounds: { x: 50, y: 50, w: 1100, h: 800 },
+      ...options,
+    });
+    if (
+      requestSeq === mapPresetRequestSeq &&
+      doc.background &&
+      doc.background.presetKey === stitched.presetKey &&
+      !stitched.isOfflineFallback
+    ) {
+      doc.background.dataUrl = stitched.dataUrl;
+      doc.background.width = stitched.width;
+      doc.background.height = stitched.height;
+      doc.background.x = stitched.x ?? doc.background.x;
+      doc.background.y = stitched.y ?? doc.background.y;
+      doc.background.scale = stitched.scale ?? doc.background.scale;
+      doc.background.affineMatrix = stitched.affineMatrix;
+      doc.background.geoBounds = stitched.geoBounds;
+      doc.background.worldfileCRS = 'EPSG:4326';
+      persist();
+      refresh();
+    }
+  } catch {
+    // Keep offline SVG preset fallback when tile network requests fail
   }
+
+  return doc.background;
 }
 
 $('#bg-map-preset')?.addEventListener('change', (e) => {
@@ -10072,6 +10580,10 @@ function initShortcutOverlayUI() {
   }
 }
 
+export function getActiveDoc() {
+  return doc;
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
@@ -10098,6 +10610,7 @@ if (typeof window !== 'undefined')
       return report;
     },
     apply,
+    nearestWall,
     sampleHome,
     openTemplatePicker,
     selectTemplate,
@@ -10160,6 +10673,7 @@ if (typeof window !== 'undefined')
     computeContoursAsync,
     ElevationGrid,
     applyElevationSettings,
+    fetchTerrainFromDialog,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
@@ -10178,6 +10692,15 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     renderGISSegments,
+    previewGISLocation,
+    importLiveGISParcels,
+    importLiveSiteParcelsAndContours,
+    importGoogleSatelliteSite,
+    handleMapPresetSelect,
+    GOOGLE_MAPS_API_KEY_STORAGE,
+    getGoogleMapsApiKey,
+    setGoogleMapsApiKey,
+    clearGoogleMapsApiKey,
     SAMPLE_MUNICIPAL_GIS,
     PLAN_TIER_RANKS,
     getCurrentPlanTier,

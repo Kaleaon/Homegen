@@ -99,6 +99,7 @@ export class InteractionLayer {
         boundingBoxCache: this._boundingBoxCache,
         existingBoundingBoxes: context.existingBoundingBoxes,
         dynamicPolygons: context.dynamicPolygons,
+        tolerance: context.tolerance,
       });
       result.placementFeedback = createPlacementFeedback(movedPolygon, validation, context);
     }
@@ -139,6 +140,7 @@ export class InteractionLayer {
         boundingBoxCache: this._boundingBoxCache,
         existingBoundingBoxes: context.existingBoundingBoxes,
         dynamicPolygons: context.dynamicPolygons,
+        tolerance: context.tolerance,
       });
       result.placementFeedback = createPlacementFeedback(scaledPolygon, validation, context);
     }
@@ -206,6 +208,7 @@ export class InteractionLayer {
         boundingBoxCache: this._boundingBoxCache,
         existingBoundingBoxes: context.existingBoundingBoxes,
         dynamicPolygons: context.dynamicPolygons,
+        tolerance: context.tolerance,
       });
       result.placementFeedback = createPlacementFeedback(movedPolygon, validation, context);
     }
@@ -246,6 +249,7 @@ export class InteractionLayer {
         boundingBoxCache: this._boundingBoxCache,
         existingBoundingBoxes: safeContext.existingBoundingBoxes,
         dynamicPolygons: safeContext.dynamicPolygons,
+        tolerance: safeContext.tolerance,
       });
       result.placementFeedback = createPlacementFeedback(rotatedPolygon, validation, safeContext);
     }
@@ -288,6 +292,7 @@ export class InteractionLayer {
         boundingBoxCache: this._boundingBoxCache,
         existingBoundingBoxes: safeContext.existingBoundingBoxes,
         dynamicPolygons: safeContext.dynamicPolygons,
+        tolerance: safeContext.tolerance,
       });
       result.placementFeedback = createPlacementFeedback(scaledPolygon, validation, safeContext);
     }
