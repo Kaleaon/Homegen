@@ -1577,7 +1577,7 @@ export function drawWindow2D(ctx, room, o, def, isBad) {
 
   ctx.save();
   ctx.translate(s.ax + s.dx * (o.offset + o.width / 2), s.ay + s.dy * (o.offset + o.width / 2));
-  if (ctx.rotate) ctx.rotate(Math.atan2(s.dy, s.dx));
+  ctx.rotate(Math.atan2(s.dy, s.dx));
 
   ctx.fillStyle = 'rgba(120,180,230,.55)';
   ctx.fillRect(-o.width / 2, -1.2, o.width, 2.4);
@@ -1637,12 +1637,12 @@ function drawOpening(ctx, state, room, o, bad) {
   ctx.fillStyle = getToken('--ktheme-bg', '#f7f5f0');
   ctx.fillRect(0, -th / 2, o.width, th);
   const isBad = bad.has(o.id);
-  ctx.strokeStyle = isBad ? '#d33' : '#2d2a26';
-  ctx.lineWidth = 1.2;
-  ctx.fillStyle = 'rgba(120,180,230,.55)';
   if (def.kind === 'window') {
+    ctx.restore();
     drawWindow2D(ctx, room, o, def, isBad);
   } else {
+    ctx.strokeStyle = isBad ? '#d33' : '#2d2a26';
+    ctx.lineWidth = 1.2;
     const dir = o.swing === 'out' ? -1 : 1;
     const hx = 0;
     const hy = 0;
@@ -1667,8 +1667,8 @@ function drawOpening(ctx, state, room, o, bad) {
       ctx.fillStyle = 'rgba(80,60,40,.5)';
       ctx.fillRect(0, -th / 2, o.width, th);
     }
+    ctx.restore();
   }
-  ctx.restore();
 }
 
 function drawItems(ctx, room, bad, selection, flat) {
