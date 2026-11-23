@@ -3013,6 +3013,9 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
   function get3DAttributionText() {
     const state = getState ? getState() : null;
     const parts = [];
+    const pushPart = (text) => {
+      if (text && !parts.includes(text)) parts.push(text);
+    };
 
     // Ground plane map / background layer
     if (state && state.background && state.background.visible !== false) {
@@ -3026,19 +3029,44 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       if (bgAttr && bg.licenseUrl && !bgAttr.includes(bg.licenseUrl)) {
         bgAttr += ` (${bg.licenseUrl})`;
       }
-      if (bgAttr) parts.push(bgAttr);
+      if (bgAttr) pushPart(bgAttr);
+    }
+
+    // Vector parcels / site footprint layer
+    if (
+      state &&
+      state.site &&
+      ((Array.isArray(state.site.features) && state.site.features.length > 0) ||
+        (Array.isArray(state.site.segments) && state.site.segments.length > 0))
+    ) {
+      const site = state.site;
+      let siteAttr = site.attributionText || (site.provider ? `Parcels © ${site.provider}` : '');
+      if (siteAttr && site.licenseUrl && !siteAttr.includes(site.licenseUrl)) {
+        siteAttr += ` (${site.licenseUrl})`;
+      }
+      if (siteAttr) pushPart(siteAttr);
+    }
+
+    // Terrain / elevation mesh layer
+    if (state && state.elevationGrid && state.elevationGrid.visible !== false) {
+      const elev = state.elevationGrid;
+      let elevAttr = elev.attributionText || (elev.provider ? `Elevation © ${elev.provider}` : '');
+      if (elevAttr && elev.licenseUrl && !elevAttr.includes(elev.licenseUrl)) {
+        elevAttr += ` (${elev.licenseUrl})`;
+      }
+      if (elevAttr) pushPart(elevAttr);
     }
 
     // HDRI environment
     if (opts.env && opts.env !== 'studio') {
       const hdriDef = HDRI_ENVS.find((e) => e.id === opts.env);
       const hdriName = hdriDef ? hdriDef.name : opts.env;
-      parts.push(`HDRI Sky: ${hdriName} (CC0 Poly Haven)`);
+      pushPart(`HDRI Sky: ${hdriName} (CC0 Poly Haven)`);
     }
 
     // HD PBR textures
     if (opts.hd) {
-      parts.push('HD Textures © Poly Haven (CC0)');
+      pushPart('HD Textures © Poly Haven (CC0)');
     }
 
     return parts.join(' | ');

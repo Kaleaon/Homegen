@@ -110,6 +110,9 @@ export const MAP_PRESETS = {
     provider: 'OpenStreetMap',
     attributionText: '© OpenStreetMap contributors',
     licenseUrl: 'https://www.openstreetmap.org/copyright',
+    tileUrlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    defaultZoom: 18,
+    maxZoom: 19,
     isGeospatial: true,
     description: 'Open community-mapped global topographic & road base layer',
     dataUrl: createMapPresetSvgDataUrl('OpenStreetMap', '#f1f5f9', '#cbd5e1'),
@@ -121,6 +124,9 @@ export const MAP_PRESETS = {
     provider: 'CARTO',
     attributionText: '© OpenStreetMap contributors, © CARTO',
     licenseUrl: 'https://carto.com/attributions',
+    tileUrlTemplate: 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+    defaultZoom: 18,
+    maxZoom: 20,
     isGeospatial: true,
     description: 'Light-toned minimalist basemap designed for architectural overlays',
     dataUrl: createMapPresetSvgDataUrl('CARTO Positron', '#f8fafc', '#e2e8f0'),
@@ -132,6 +138,10 @@ export const MAP_PRESETS = {
     provider: 'USGS',
     attributionText: 'Map Data © USGS Topo / U.S. Geological Survey',
     licenseUrl: 'https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits',
+    tileUrlTemplate:
+      'https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',
+    defaultZoom: 16,
+    maxZoom: 16,
     isGeospatial: true,
     description: 'Official U.S. Geological Survey national topographic map quadrangle data',
     dataUrl: createMapPresetSvgDataUrl('USGS Topo', '#f0fdf4', '#bbf7d0'),
@@ -144,6 +154,10 @@ export const MAP_PRESETS = {
     attributionText: 'Imagery © Copernicus Sentinel Data',
     licenseUrl:
       'https://sentinels.copernicus.eu/documents/247904/685211/Sentinel_Data_Legal_Notice.pdf',
+    tileUrlTemplate:
+      'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg',
+    defaultZoom: 15,
+    maxZoom: 15,
     isGeospatial: true,
     description: 'European Space Agency Earth observation satellite multispectral imagery',
     dataUrl: createMapPresetSvgDataUrl('Copernicus Sentinel', '#f0f9ff', '#bae6fd'),
@@ -151,6 +165,10 @@ export const MAP_PRESETS = {
 };
 
 export const GEOSPATIAL_MAP_PRESETS = MAP_PRESETS;
+
+export function isCustomBlueprintBackground(bg) {
+  return Boolean(bg && bg.dataUrl && !bg.presetKey);
+}
 
 export function getMapPreset(key) {
   if (!key || typeof key !== 'string') return null;
@@ -173,32 +191,122 @@ export function applyMapPreset(state, presetKeyOrObj, opts = {}) {
 
   if (!preset) {
     if (!presetKeyOrObj && state.background) {
-      state.background.presetKey = null;
+      if (state.background.presetKey) {
+        state.background = null;
+      } else {
+        state.background.presetKey = null;
+      }
     }
     return state.background || null;
   }
 
   const existing = state.background || {};
+  const isCustomBlueprint = isCustomBlueprintBackground(existing);
+  if (isCustomBlueprint && opts.confirmOverwrite === false) {
+    return state.background;
+  }
+
+  const { confirmOverwrite: _ignoredConfirm, ...restOpts } = opts || {};
+  const preservePlacement = !isCustomBlueprint;
+
   state.background = {
-    dataUrl: existing.dataUrl || preset.dataUrl,
-    x: existing.x ?? 0,
-    y: existing.y ?? 0,
-    scale: existing.scale ?? 1,
+    dataUrl: restOpts.dataUrl || preset.dataUrl,
+    x: preservePlacement ? (existing.x ?? 0) : 0,
+    y: preservePlacement ? (existing.y ?? 0) : 0,
+    scale: preservePlacement ? (existing.scale ?? 1) : 1,
     opacity: existing.opacity ?? 0.5,
     visible: existing.visible ?? true,
-    locked: existing.locked ?? false,
-    width: existing.width || 800,
-    height: existing.height || 600,
+    locked: preservePlacement ? (existing.locked ?? false) : false,
+    width: restOpts.width || (preservePlacement && existing.width ? existing.width : 800),
+    height: restOpts.height || (preservePlacement && existing.height ? existing.height : 600),
     attributionText: preset.attributionText,
     provider: preset.provider,
     licenseUrl: preset.licenseUrl,
     logoUrl: preset.logoUrl || null,
     isGeospatial: true,
     presetKey: preset.id,
-    ...opts,
+    ...restOpts,
   };
 
   return state.background;
+}
+
+/**
+ * Aggregates deduplicated attributions and license URLs across all active geospatial layers:
+ * 1. Basemap (`state.background`)
+ * 2. Vector parcels & footprints (`state.site`)
+ * 3. Elevation grid (`state.elevationGrid`)
+ */
+export function resolveGeospatialAttributions(state, options = {}) {
+  const attributions = [];
+  const licenseUrls = [];
+  const providers = [];
+
+  const pushUnique = (arr, value) => {
+    if (!value || typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (trimmed && !arr.includes(trimmed)) {
+      arr.push(trimmed);
+    }
+  };
+
+  const bg = state?.background;
+  const bgVisible = Boolean(bg && bg.visible !== false);
+  const hasExplicitBgOpts = Boolean(
+    options.attributionText || options.provider || options.licenseUrl || options.isGeospatial
+  );
+
+  if (bgVisible || hasExplicitBgOpts) {
+    const bgAttr = options.attributionText || (bgVisible ? bg?.attributionText : null);
+    const bgProv = options.provider || (bgVisible ? bg?.provider : null);
+    const bgLic = options.licenseUrl || (bgVisible ? bg?.licenseUrl : null);
+    const bgGeo = options.isGeospatial || (bgVisible ? bg?.isGeospatial : false);
+    const fallbackFormat = options.providerPrefix || 'Map Data ©';
+
+    if (bgAttr) {
+      pushUnique(attributions, bgAttr);
+    } else if (bgProv) {
+      pushUnique(attributions, `${fallbackFormat} ${bgProv}`);
+    } else if (bgGeo) {
+      pushUnique(attributions, options.geospatialFallback || 'Geospatial Background Layer');
+    }
+    if (bgProv) pushUnique(providers, bgProv);
+    if (bgLic) pushUnique(licenseUrls, bgLic);
+  }
+
+  const site = state?.site;
+  const hasActiveSite = Boolean(
+    site &&
+    ((Array.isArray(site.features) && site.features.length > 0) ||
+      (Array.isArray(site.layers) && site.layers.length > 0) ||
+      (Array.isArray(site.segments) && site.segments.length > 0))
+  );
+  if (hasActiveSite) {
+    if (site.attributionText) {
+      pushUnique(attributions, site.attributionText);
+    } else if (site.provider) {
+      pushUnique(attributions, `Parcels © ${site.provider}`);
+    }
+    if (site.provider) pushUnique(providers, site.provider);
+    if (site.licenseUrl) pushUnique(licenseUrls, site.licenseUrl);
+  }
+
+  const elev = state?.elevationGrid;
+  if (elev && elev.visible !== false) {
+    if (elev.attributionText) {
+      pushUnique(attributions, elev.attributionText);
+    } else if (elev.provider) {
+      pushUnique(attributions, `Elevation © ${elev.provider}`);
+    }
+    if (elev.provider) pushUnique(providers, elev.provider);
+    if (elev.licenseUrl) pushUnique(licenseUrls, elev.licenseUrl);
+  }
+
+  return {
+    attributions,
+    licenseUrls,
+    providers,
+  };
 }
 
 export const DEFAULT_STORY_HEIGHT = 106; // 96" ceiling + 10" slab
@@ -1417,8 +1525,25 @@ export function sampleFinishAt(state, p, level = 0, maxDist = 24) {
   return null;
 }
 
+const SECRET_KEY_FIELD_NAMES = new Set([
+  'googleMapsApiKey',
+  'googleApiKey',
+  'mapsApiKey',
+  'apiKey',
+]);
+
 export function serialize(state) {
-  return JSON.stringify(state, null, 1);
+  return JSON.stringify(
+    state,
+    (key, val) => {
+      if (SECRET_KEY_FIELD_NAMES.has(key)) return undefined;
+      if (typeof val === 'string' && val.startsWith('http') && /[?&]key=[^&]+/i.test(val)) {
+        return val.replace(/([?&])key=[^&]+(&?)/gi, (_, p1, p2) => (p2 ? p1 : ''));
+      }
+      return val;
+    },
+    1
+  );
 }
 export function deserialize(text) {
   const s = JSON.parse(text);

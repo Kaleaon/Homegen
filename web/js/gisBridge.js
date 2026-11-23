@@ -1130,6 +1130,22 @@ export class GISBridge {
     this.site.features = projected.features;
     this.site.segments = projected.segments;
     this.site.layers = projected.layers;
+    const attrText = options.attributionText ?? geojson?.attributionText ?? null;
+    const provider = options.provider ?? geojson?.provider ?? null;
+    const licenseUrl = options.licenseUrl ?? geojson?.licenseUrl ?? null;
+    const geoBounds = options.geoBounds ?? geojson?.geoBounds ?? null;
+    if (attrText !== null || this.site.attributionText === undefined) {
+      this.site.attributionText = attrText;
+    }
+    if (provider !== null || this.site.provider === undefined) {
+      this.site.provider = provider;
+    }
+    if (licenseUrl !== null || this.site.licenseUrl === undefined) {
+      this.site.licenseUrl = licenseUrl;
+    }
+    if (geoBounds !== null) {
+      this.site.geoBounds = geoBounds;
+    }
     this.rebuildIndex();
     return this.site;
   }

@@ -16,6 +16,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,6 +43,9 @@ import com.homegen.designer3d.input.InteractionMode
 import com.homegen.designer3d.rendering.FilamentSurfaceManager
 import com.homegen.electrical.ElectricalLayer
 import com.homegen.electrical.ElectricalOverlayController
+import com.homegen.spatial.GisApiKeyStore
+import com.homegen.spatial.GisIngestionClient
+import com.homegen.spatial.SpatialCoreJni
 import com.homegen.styles.model.DesignStyle
 import com.homegen.styles.ui.DesignStyleBrowser
 import com.homegen.templates.ui.RoomTemplatePanel
@@ -95,6 +99,16 @@ fun HomegenScreen(
     }
     var overlayScreen by remember { mutableStateOf(OverlayScreen.NONE) }
     var activeStyle by remember { mutableStateOf<DesignStyle?>(null) }
+    var showGisDialog by remember { mutableStateOf(false) }
+    var activeGisAttribution by remember { mutableStateOf<String?>(null) }
+
+    val appContext = LocalContext.current
+    val gisKeyStore = remember(appContext) { GisApiKeyStore(appContext) }
+    val gisClient = remember(gisKeyStore) { GisIngestionClient(gisKeyStore) }
+    val spatialCore = remember { SpatialCoreJni() }
+    DisposableEffect(spatialCore) {
+        onDispose { spatialCore.close() }
+    }
 
     val canUndo by commandStack.canUndo.collectAsState()
     val canRedo by commandStack.canRedo.collectAsState()
@@ -310,6 +324,38 @@ fun HomegenScreen(
                 )
             }
 
+            if (showGisDialog) {
+                GisImportDialog(
+                    keyStore = gisKeyStore,
+                    gisClient = gisClient,
+                    spatialCore = spatialCore,
+                    onImported = { bundle ->
+                        val licSuffix = if (bundle.aggregatedLicenses.isNotEmpty()) {
+                            " · " + bundle.aggregatedLicenses.joinToString(" · ")
+                        } else {
+                            ""
+                        }
+                        activeGisAttribution = bundle.aggregatedAttribution + licSuffix
+                        showGisDialog = false
+                    },
+                    onDismiss = { showGisDialog = false },
+                )
+            }
+
+            activeGisAttribution?.let { attr ->
+                if (attr.isNotBlank()) {
+                    KthemeBadge(
+                        text = attr,
+                        variant = KthemeBadgeVariant.Highlight,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 92.dp),
+                        shape = RoundedCornerShape(KthemeComposeTheme.layout.cornerTileDp.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+
             // Adaptive Navigation (Rail >= 720dp vs Bar < 720dp)
             val screenWidth = LocalConfiguration.current.screenWidthDp
             val layoutConfig = KthemeComposeTheme.layout
@@ -336,6 +382,9 @@ fun HomegenScreen(
                     } else {
                         overlayController.disable()
                     }
+                },
+                NavigationToolItem("gis", "GIS", showGisDialog) {
+                    showGisDialog = true
                 },
             )
 
@@ -406,6 +455,9 @@ fun HomegenScreen(
                         }
                         ToolButton("Templates") {
                             overlayScreen = OverlayScreen.ROOM_TEMPLATES
+                        }
+                        ToolButton("GIS", showGisDialog) {
+                            showGisDialog = true
                         }
                         KthemeButton(
                             onClick = {

@@ -304,7 +304,27 @@
     <button value="close" aria-label="Close elevation dialog"><span aria-hidden="true">✕</span></button>
   </form>
   <div class="dlg-body">
-    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals, elevation units, surface slope grading, and 3D vertex displacement scale.</p>
+    <p class="note" style="margin:0 0 12px">Configure topographic contour intervals, elevation units, surface slope grading, and 3D vertex displacement scale, or fetch live terrain elevation grids directly from public or Google APIs.</p>
+    <div class="row">
+      <label for="elevation-location-query">Site Coordinates or Address</label>
+      <input id="elevation-location-query" type="text" placeholder="e.g. 37.7749, -122.4194 or 1600 Amphitheatre Pkwy" autocomplete="off" />
+    </div>
+    <div class="row">
+      <label for="elevation-provider">Terrain API Source</label>
+      <select id="elevation-provider">
+        <option value="open" selected>Open Terrain (Copernicus DEM / Open-Elevation)</option>
+        <option value="google">Google Maps Elevation SDK (Requires API Key)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="elevation-google-key">Google Maps API Key (Local Only)</label>
+      <input id="elevation-google-key" type="password" placeholder="Optional personal Google Maps key" autocomplete="off" />
+    </div>
+    <div class="btns" style="margin:8px 0 12px">
+      <button id="btn-fetch-elevation" class="primary" type="button">Fetch Live Terrain</button>
+      <button id="btn-upload-elevation-file" class="secondary" type="button">Upload Terrain File…</button>
+    </div>
+    <p id="elevation-fetch-status" class="note" role="status" aria-live="polite" hidden style="margin:0 0 12px"></p>
     <div class="row">
       <label for="elevation-unit">Elevation Unit</label>
       <select id="elevation-unit">
@@ -808,6 +828,21 @@
     <k-button type="button" id="gis-close" aria-label="Close GIS modal">✕</k-button>
   </div>
   <div class="dlg-body">
+    <div class="row">
+      <label for="gis-search-query">Site Address or Coordinates</label>
+      <k-input id="gis-search-query" type="text" placeholder="e.g. 123 Main St or 37.7749, -122.4194"></k-input>
+    </div>
+    <div id="gis-geocode-preview" class="note" role="status" aria-live="polite" hidden style="margin: 6px 0 10px;"></div>
+    <div class="row">
+      <label for="gis-google-api-key">Google Maps API Key (Stored Locally)</label>
+      <k-input id="gis-google-api-key" type="password" placeholder="Optional personal key for Google Satellite &amp; Elevation"></k-input>
+    </div>
+    <div class="btns" style="margin: 10px 0;">
+      <k-button type="button" id="gis-preview-coords">Preview Coordinates</k-button>
+      <k-button type="button" id="gis-fetch-live" primary>Import Live Parcels</k-button>
+      <k-button type="button" id="gis-import-site-all" primary>Import Parcels &amp; Contours</k-button>
+      <k-button type="button" id="gis-fetch-google-satellite">Fetch Google Satellite</k-button>
+    </div>
     <div class="row">
       <label for="gis-crs">Coordinate Reference System</label>
       <k-select id="gis-crs">
