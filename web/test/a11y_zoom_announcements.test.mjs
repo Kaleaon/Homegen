@@ -248,7 +248,7 @@ test('debounced zoom status announcements via #plan-fallback-summary live region
   );
 
   await t.test(
-    'boundary scale clamping announces min (25%) and max (500%) limits, and fit() with rooms announces fitted scale',
+    'boundary scale clamping announces min (1%) and max (500%) limits, and fit() with rooms announces fitted scale',
     async () => {
       // Clamp to maximum scale (8 -> (8 / 1.6) * 100 = 500%)
       textWrites['plan-fallback-summary'].length = 0;
@@ -257,12 +257,12 @@ test('debounced zoom status announcements via #plan-fallback-summary live region
       await new Promise((r) => setTimeout(r, ZOOM_ANNOUNCE_DEBOUNCE_MS + 50));
       assert.deepEqual(textWrites['plan-fallback-summary'], ['Zoom level: 500%']);
 
-      // Clamp to minimum scale (0.4 -> (0.4 / 1.6) * 100 = 25%)
+      // Clamp to minimum scale (0.02 -> Math.round((0.02 / 1.6) * 100) = 1%)
       textWrites['plan-fallback-summary'].length = 0;
       homegen.zoomAt(400, 300, 0.001);
-      assert.equal(homegen.view.scale, 0.4);
+      assert.equal(homegen.view.scale, 0.02);
       await new Promise((r) => setTimeout(r, ZOOM_ANNOUNCE_DEBOUNCE_MS + 50));
-      assert.deepEqual(textWrites['plan-fallback-summary'], ['Zoom level: 25%']);
+      assert.deepEqual(textWrites['plan-fallback-summary'], ['Zoom level: 1%']);
 
       // Populate sample home and verify fit() announces fitted scale
       textWrites['plan-fallback-summary'].length = 0;

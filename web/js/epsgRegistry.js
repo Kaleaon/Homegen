@@ -386,3 +386,98 @@ export function getEPSGDefinition(code) {
   if (proj4 && proj4.defs && proj4.defs[normalized]) return proj4.defs[normalized];
   return null;
 }
+
+export const METERS_TO_INCHES = 1 / 0.0254;
+export const US_SURVEY_FOOT_TO_METERS = 1200 / 3937;
+export const INTL_FOOT_TO_METERS = 0.3048;
+
+/**
+ * Extracts the canonical linear unit ('m', 'us-ft', 'ft', 'in', or 'deg') for a CRS code or definition.
+ */
+export function getCRSLinearUnit(codeOrDef) {
+  if (!codeOrDef || typeof codeOrDef !== 'string') return 'm';
+  const raw = codeOrDef.trim();
+  const upper = raw.toUpperCase();
+  if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') return 'in';
+
+  const normalized = normalizeCode(raw);
+  if (normalized === 'EPSG:4326') return 'deg';
+
+  const def =
+    getEPSGDefinition(normalized) || (raw.startsWith('+') || raw.includes('[') ? raw : '');
+  if (typeof def === 'string' && def) {
+    if (/\+proj=longlat\b/i.test(def) || /^GEOGCS\[/i.test(def)) return 'deg';
+    const unitsMatch = def.match(/\+units=([^\s]+)/i);
+    if (unitsMatch) return unitsMatch[1].toLowerCase();
+    const wktUnitMatch = def.match(/UNIT\["([^"]+)"/i);
+    if (wktUnitMatch) {
+      const uName = wktUnitMatch[1].toLowerCase();
+      if (uName.includes('degree')) return 'deg';
+      if ((uName.includes('us') && uName.includes('foot')) || uName.includes('ftus')) {
+        return 'us-ft';
+      }
+      if (uName.includes('foot') || uName.includes('feet')) return 'ft';
+      if (uName.includes('inch')) return 'in';
+      if (uName.includes('metre') || uName.includes('meter')) return 'm';
+    }
+  }
+  return 'm';
+}
+
+/**
+ * Resolves the multiplier converting one unit in a projected CRS directly into plan inches.
+ */
+export function getCRSLinearUnitToInches(codeOrDef, explicitUnits = null) {
+  const unitToken = explicitUnits
+    ? String(explicitUnits).trim().toLowerCase()
+    : getCRSLinearUnit(codeOrDef);
+
+  switch (unitToken) {
+    case 'm':
+    case 'meter':
+    case 'meters':
+    case 'metre':
+    case 'metres':
+      return METERS_TO_INCHES;
+    case 'us-ft':
+    case 'us_ft':
+    case 'ftus':
+    case 'foot_us':
+    case 'us survey foot':
+      return US_SURVEY_FOOT_TO_METERS * METERS_TO_INCHES;
+    case 'ft':
+    case 'foot':
+    case 'feet':
+    case 'international_feet':
+      return INTL_FOOT_TO_METERS * METERS_TO_INCHES;
+    case 'in':
+    case 'inch':
+    case 'inches':
+      return 1;
+    case 'cm':
+      return METERS_TO_INCHES / 100;
+    case 'mm':
+      return METERS_TO_INCHES / 1000;
+    case 'km':
+      return METERS_TO_INCHES * 1000;
+    default:
+      break;
+  }
+
+  const raw = typeof codeOrDef === 'string' ? codeOrDef.trim() : '';
+  const def = getEPSGDefinition(raw) || (raw.startsWith('+') || raw.includes('[') ? raw : '');
+  if (typeof def === 'string' && def) {
+    const toMeterMatch = def.match(/\+to_meter=([0-9.eE+-]+)/i);
+    if (toMeterMatch) {
+      const factor = parseFloat(toMeterMatch[1]);
+      if (Number.isFinite(factor) && factor > 0) return factor * METERS_TO_INCHES;
+    }
+    const wktFactorMatch = def.match(/UNIT\["[^"]+",\s*([0-9.eE+-]+)/i);
+    if (wktFactorMatch && !/^GEOGCS\[/i.test(def)) {
+      const factor = parseFloat(wktFactorMatch[1]);
+      if (Number.isFinite(factor) && factor > 0) return factor * METERS_TO_INCHES;
+    }
+  }
+
+  return METERS_TO_INCHES;
+}

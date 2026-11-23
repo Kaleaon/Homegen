@@ -18,7 +18,7 @@ import {
   lineIntersection as geomLineIntersection,
   polygonArea as geomPolygonArea,
 } from '../js/geometry.js';
-import { newState } from '../js/model.js';
+import { newState, serialize, deserialize } from '../js/model.js';
 import { evaluate } from '../js/codes.js';
 import { ComplianceOverlayScene } from '../js/complianceOverlay.js';
 
@@ -686,4 +686,450 @@ test('MultiPolygon edge cases: empty coordinates and rings with fewer than 3 ver
   assert.equal(mixedRes.segments.length, 4);
   assert.equal(mixedRes.layers.filter((l) => l.type === 'gisLotLine').length, 1);
   assert.equal(mixedRes.layers.filter((l) => l.type === 'gisSetbackBuffer').length, 1);
+});
+
+test('True ground scale: SAMPLE_GEOJSON projects to 6928.38 in x 6573.99 in and centered 900x600 room has 0 setback violations', () => {
+  const state = newState();
+  const bridge = new GISBridge();
+  state.site = bridge.importGeoJSON(SAMPLE_GEOJSON);
+
+  const lotLayer = state.site.layers.find((l) => l.type === 'gisLotLine');
+  assert.ok(lotLayer, 'Must emit gisLotLine layer');
+
+  const lotWidth = Math.round((lotLayer.bounds.maxX - lotLayer.bounds.minX) * 100) / 100;
+  const lotHeight = Math.round((lotLayer.bounds.maxY - lotLayer.bounds.minY) * 100) / 100;
+
+  assert.equal(lotWidth, 6928.38, 'Lot width must equal 6928.38 inches (577.37 ft)');
+  assert.equal(lotHeight, 6573.99, 'Lot height must equal 6573.99 inches (547.83 ft)');
+
+  // Centered 900 in x 600 in room (75 ft x 50 ft) inside the parcel
+  const cx = (lotLayer.bounds.minX + lotLayer.bounds.maxX) / 2;
+  const cy = (lotLayer.bounds.minY + lotLayer.bounds.maxY) / 2;
+  state.rooms = [
+    {
+      id: 'centered-home',
+      name: 'Main Residence',
+      level: 0,
+      type: 'living',
+      x: cx - 450,
+      y: cy - 300,
+      w: 900,
+      h: 600,
+      openings: [],
+      items: [],
+    },
+  ];
+
+  assert.deepEqual(
+    bridge.querySetbackViolations({ x: cx - 450, y: cy - 300, w: 900, h: 600 }),
+    [],
+    'Centered 900x600 room must trigger 0 spatial setback violations'
+  );
+
+  const report = evaluate(state);
+  const setbackViolations = report.violations.filter((v) => v.rule === 'setback-clearance');
+  assert.equal(
+    setbackViolations.length,
+    0,
+    'evaluate() must report 0 setback-clearance errors for centered 900x600 room'
+  );
+
+  // Room encroaching within 12" of the West lot line (< 36" setback) must still trigger violation
+  const encroachingViolations = bridge.querySetbackViolations({
+    x: lotLayer.bounds.minX + 12,
+    y: cy - 100,
+    w: 240,
+    h: 200,
+  });
+  assert.ok(
+    encroachingViolations.some((v) => v.type === 'setback-clearance'),
+    'Room encroaching into 36-inch setback buffer must trigger setback-clearance violation'
+  );
+});
+
+test('True ground scale: 25 ft x 40 ft parcel without targetBounds produces exact 300 in x 480 in across projected linear units', () => {
+  // 1. State Plane US Survey Feet (EPSG:2227, +units=us-ft)
+  const spParcel = {
+    type: 'Feature',
+    id: 'lot-sp',
+    properties: { layer: 'lot' },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [6000000, 2100000],
+          [6000025, 2100000],
+          [6000025, 2100040],
+          [6000000, 2100040],
+          [6000000, 2100000],
+        ],
+      ],
+    },
+  };
+  const projSp = projectGeoJSON(spParcel, null, { crs: 'EPSG:2227' });
+  const spBounds = projSp.layers.find((l) => l.type === 'gisLotLine').bounds;
+  assert.equal(Math.round((spBounds.maxX - spBounds.minX) * 100) / 100, 300);
+  assert.equal(Math.round((spBounds.maxY - spBounds.minY) * 100) / 100, 480);
+
+  // 2. International Feet (+units=ft)
+  const ftProj4 =
+    '+proj=tmerc +lat_0=37.7749 +lon_0=-122.4194 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=ft +no_defs';
+  const ftParcel = {
+    type: 'Feature',
+    id: 'lot-ft',
+    properties: { layer: 'lot' },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [0, 0],
+          [25, 0],
+          [25, 40],
+          [0, 40],
+          [0, 0],
+        ],
+      ],
+    },
+  };
+  const projFt = projectGeoJSON(ftParcel, null, { crs: ftProj4 });
+  const ftBounds = projFt.layers.find((l) => l.type === 'gisLotLine').bounds;
+  assert.equal(Math.round((ftBounds.maxX - ftBounds.minX) * 100) / 100, 300);
+  assert.equal(Math.round((ftBounds.maxY - ftBounds.minY) * 100) / 100, 480);
+
+  // 3. UTM Meters (EPSG:32610, +units=m: 7.62 m x 12.192 m = 25 ft x 40 ft)
+  const utmParcel = {
+    type: 'Feature',
+    id: 'lot-utm',
+    properties: { layer: 'lot' },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [551000, 4180000],
+          [551007.62, 4180000],
+          [551007.62, 4180012.192],
+          [551000, 4180012.192],
+          [551000, 4180000],
+        ],
+      ],
+    },
+  };
+  const projUtm = projectGeoJSON(utmParcel, null, { crs: 'EPSG:32610' });
+  const utmBounds = projUtm.layers.find((l) => l.type === 'gisLotLine').bounds;
+  assert.equal(Math.round((utmBounds.maxX - utmBounds.minX) * 100) / 100, 300);
+  assert.equal(Math.round((utmBounds.maxY - utmBounds.minY) * 100) / 100, 480);
+});
+
+test('MultiLineString: projectGeoJSON emits indexed gisEasement polylines without skewing parcel dimensions', () => {
+  const surveyWithMultiLine = {
+    type: 'FeatureCollection',
+    crs: { properties: { name: 'EPSG:4326' } },
+    features: [
+      SAMPLE_GEOJSON.features[0],
+      {
+        type: 'Feature',
+        id: 'utility-corridor',
+        properties: { name: 'Multi-Part Utility Corridor', layer: 'easement' },
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [
+            // Valid 3-vertex trunk line extending outside parcel
+            [
+              [-122.421, 37.7755],
+              [-122.4184, 37.7745],
+              [-122.416, 37.7745],
+            ],
+            // Degenerate 1-vertex line (must be filtered out)
+            [[-122.418, 37.774]],
+            // Valid 2-vertex lateral branch
+            [
+              [-122.4184, 37.7745],
+              [-122.4184, 37.7734],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
+  const projected = projectGeoJSON(surveyWithMultiLine);
+  const lotLayer = projected.layers.find((l) => l.type === 'gisLotLine');
+  const easementLayers = projected.layers.filter((l) => l.type === 'gisEasement');
+
+  // Parcel dimensions remain exact 6928.38 x 6573.99 despite off-parcel MultiLineString extent
+  assert.equal(Math.round((lotLayer.bounds.maxX - lotLayer.bounds.minX) * 100) / 100, 6928.38);
+  assert.equal(Math.round((lotLayer.bounds.maxY - lotLayer.bounds.minY) * 100) / 100, 6573.99);
+
+  // Two valid polylines emitted as indexed gisEasement features and layers
+  assert.equal(easementLayers.length, 2);
+  assert.equal(easementLayers[0].id, 'utility-corridor-0');
+  assert.equal(easementLayers[0].parentId, 'utility-corridor');
+  assert.equal(easementLayers[0].componentIndex, 0);
+  assert.equal(easementLayers[0].points.length, 3);
+  assert.equal(easementLayers[1].id, 'utility-corridor-1');
+  assert.equal(easementLayers[1].parentId, 'utility-corridor');
+  assert.equal(easementLayers[1].componentIndex, 1);
+  assert.equal(easementLayers[1].points.length, 2);
+
+  // Bare MultiLineString geometry object also projects cleanly
+  const bareMultiLine = projectGeoJSON({
+    type: 'MultiLineString',
+    coordinates: [
+      [
+        [-122.4194, 37.7749],
+        [-122.4184, 37.7749],
+      ],
+      [
+        [-122.4184, 37.7749],
+        [-122.4184, 37.7739],
+      ],
+    ],
+  });
+  assert.equal(bareMultiLine.features.length, 2);
+  assert.equal(bareMultiLine.layers.filter((l) => l.type === 'gisEasement').length, 2);
+  assert.equal(bareMultiLine.segments.length, 0);
+});
+
+test('Site metadata persistence and non-destructive CRS reprojection preserve rawGeoJSON, setbacks, and layers', () => {
+  const state = newState();
+  const bridge = new GISBridge();
+  state.site = bridge.importGeoJSON(SAMPLE_GEOJSON);
+
+  assert.ok(state.site.rawGeoJSON, 'site.rawGeoJSON must be stored');
+  assert.equal(state.site.sourceCRS, 'EPSG:4326');
+  assert.ok(
+    Math.abs(state.site.origin.longitude - -122.4184) < 1e-6 &&
+      Math.abs(state.site.origin.latitude - 37.77415) < 1e-6,
+    'site.origin must match parcel centroid'
+  );
+
+  // Customize setback on first segment
+  bridge.setSegmentSetback('seg-1', 96);
+  assert.equal(state.site.segments.find((s) => s.id === 'seg-1').setback, 96);
+
+  // Verify model serialize/deserialize preserves rawGeoJSON, sourceCRS, origin, and setbacks
+  const restored = deserialize(serialize(state));
+  assert.deepEqual(restored.site.rawGeoJSON, SAMPLE_GEOJSON);
+  assert.equal(restored.site.sourceCRS, 'EPSG:4326');
+  assert.deepEqual(restored.site.origin, state.site.origin);
+  assert.equal(restored.site.segments.find((s) => s.id === 'seg-1').setback, 96);
+
+  // Re-project to EPSG:3857 and EPSG:32610 without losing features, segments, setbacks, or layers
+  const restoredBridge = new GISBridge(restored.site);
+  restoredBridge.reprojectSite('EPSG:3857');
+  assert.equal(restored.site.crs, 'EPSG:3857');
+  assert.equal(restored.site.sourceCRS, 'EPSG:4326');
+  assert.equal(restored.site.features.length, 2);
+  assert.equal(restored.site.segments.length, 4);
+  assert.equal(restored.site.segments.find((s) => s.id === 'seg-1').setback, 96);
+  assert.equal(restored.site.layers.length, 3);
+
+  const mercLot = restored.site.layers.find((l) => l.type === 'gisLotLine');
+  assert.equal(Math.round((mercLot.bounds.maxX - mercLot.bounds.minX) * 100) / 100, 6928.38);
+  assert.equal(Math.round((mercLot.bounds.maxY - mercLot.bounds.minY) * 100) / 100, 6573.99);
+
+  restoredBridge.reprojectSite('EPSG:32610');
+  assert.equal(restored.site.crs, 'EPSG:32610');
+  assert.equal(restored.site.sourceCRS, 'EPSG:4326');
+  assert.equal(restored.site.features.length, 2);
+  assert.equal(restored.site.segments.length, 4);
+  assert.equal(restored.site.segments.find((s) => s.id === 'seg-1').setback, 96);
+  assert.equal(restored.site.layers.length, 3);
+
+  const utmLot = restored.site.layers.find((l) => l.type === 'gisLotLine');
+  const utmEdgeW = Math.hypot(
+    utmLot.points[1].x - utmLot.points[0].x,
+    utmLot.points[1].y - utmLot.points[0].y
+  );
+  const utmEdgeH = Math.hypot(
+    utmLot.points[2].x - utmLot.points[1].x,
+    utmLot.points[2].y - utmLot.points[1].y
+  );
+  assert.ok(
+    Math.abs(utmEdgeW - 6928.38) / 6928.38 < 0.005 &&
+      Math.abs(utmEdgeH - 6573.99) / 6573.99 < 0.005,
+    `UTM Zone 10N parcel edges (${utmEdgeW.toFixed(2)} x ${utmEdgeH.toFixed(2)}) must match ground scale within 0.5%`
+  );
+});
+
+test('App integration: loadGISSubsystem, #gis-crs switching, and fit() with 0 rooms frame site down to 0.02 scale', async () => {
+  const elements = {};
+  const getEl = (id) => {
+    if (!elements[id]) {
+      const listeners = {};
+      const attrs = {};
+      elements[id] = {
+        id,
+        tagName: id === 'plan' ? 'CANVAS' : 'DIV',
+        style: {},
+        dataset: {},
+        hidden: false,
+        checked: true,
+        value: id === 'gis-crs' ? 'EPSG:4326' : '',
+        innerHTML: '',
+        textContent: '',
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+        querySelector: (s) => getEl(s.replace(/^#/, '')),
+        querySelectorAll: () => [],
+        addEventListener(type, fn) {
+          listeners[type] ||= [];
+          listeners[type].push(fn);
+        },
+        removeEventListener() {},
+        dispatchEvent(evt) {
+          for (const cb of listeners[evt.type] || []) cb(evt);
+        },
+        closest: () => null,
+        getAttribute: (k) => (k in attrs ? attrs[k] : null),
+        setAttribute: (k, v) => {
+          attrs[k] = String(v);
+        },
+        removeAttribute: (k) => {
+          delete attrs[k];
+        },
+        hasAttribute: (k) => k in attrs,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+        getContext: () =>
+          new Proxy(
+            {
+              canvas: { width: 800, height: 600 },
+              measureText: () => ({ width: 10 }),
+              createLinearGradient: () => ({ addColorStop() {} }),
+              createPattern: () => ({}),
+            },
+            { get: (t, p) => (p in t ? t[p] : () => {}) }
+          ),
+      };
+    }
+    return elements[id];
+  };
+
+  globalThis.document = {
+    activeElement: getEl('body'),
+    getElementById: (id) => getEl(id),
+    querySelector: (s) => getEl(s.replace(/^#/, '')),
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+    createElement: (tag) => getEl(tag),
+  };
+  globalThis.window = {
+    devicePixelRatio: 1,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => {},
+    location: { href: '' },
+    navigator: { userAgent: 'node' },
+    atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    value: globalThis.window.navigator,
+    configurable: true,
+    writable: true,
+  });
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.ResizeObserver = class {
+    observe() {}
+    disconnect() {}
+  };
+
+  const app = await import('../js/app.js');
+  const homegen = globalThis.window.__homegen;
+
+  // 1. Load SAMPLE_MUNICIPAL_GIS with 0 rooms -> true ground scale + fit() frames site
+  const site = app.loadGISSubsystem(app.SAMPLE_MUNICIPAL_GIS);
+  assert.equal(homegen.doc.rooms.length, 0);
+  const lotLayer = site.layers.find((l) => l.type === 'gisLotLine');
+  assert.equal(Math.round((lotLayer.bounds.maxX - lotLayer.bounds.minX) * 100) / 100, 6928.38);
+  assert.equal(Math.round((lotLayer.bounds.maxY - lotLayer.bounds.minY) * 100) / 100, 6573.99);
+  assert.ok(
+    homegen.view.scale < 0.4 && homegen.view.scale >= 0.02,
+    `fit() with 0 rooms should zoom out below 0.4 (got ${homegen.view.scale}) to frame municipal parcel`
+  );
+
+  // 2. Add a room and customize a segment setback, then switch #gis-crs to EPSG:3857 and EPSG:32610
+  homegen.doc.rooms.push({
+    id: 'r-test',
+    name: 'Studio',
+    level: 0,
+    type: 'living',
+    x: -450,
+    y: -300,
+    w: 900,
+    h: 600,
+    points: [
+      { x: -450, y: -300 },
+      { x: 450, y: -300 },
+      { x: 450, y: 300 },
+      { x: -450, y: 300 },
+    ],
+    openings: [],
+    items: [],
+  });
+  const origRoomVerts = JSON.parse(JSON.stringify(homegen.doc.rooms[0].points));
+  app.setGISSegmentSetback('seg-1', 84);
+
+  const gisCrsEl = getEl('gis-crs');
+  gisCrsEl.value = 'EPSG:3857';
+  gisCrsEl.dispatchEvent({
+    type: 'change',
+    detail: { value: 'EPSG:3857' },
+    target: gisCrsEl,
+  });
+
+  assert.equal(homegen.doc.site.crs, 'EPSG:3857');
+  assert.equal(homegen.doc.crs.epsg, 'EPSG:3857');
+  assert.equal(homegen.doc.site.features.length, 2);
+  assert.equal(homegen.doc.site.segments.length, 4);
+  assert.equal(homegen.doc.site.segments.find((s) => s.id === 'seg-1').setback, 84);
+  assert.equal(homegen.doc.site.layers.length, 3);
+  assert.deepEqual(
+    homegen.doc.rooms[0].points,
+    origRoomVerts,
+    'Room vertices must not mutate on CRS switch'
+  );
+
+  gisCrsEl.value = 'EPSG:32610';
+  gisCrsEl.dispatchEvent({
+    type: 'change',
+    detail: { value: 'EPSG:32610' },
+    target: gisCrsEl,
+  });
+
+  assert.equal(homegen.doc.site.crs, 'EPSG:32610');
+  assert.equal(homegen.doc.crs.epsg, 'EPSG:32610');
+  assert.equal(homegen.doc.site.features.length, 2);
+  assert.equal(homegen.doc.site.segments.length, 4);
+  assert.equal(homegen.doc.site.segments.find((s) => s.id === 'seg-1').setback, 84);
+  assert.equal(homegen.doc.site.layers.length, 3);
+  assert.deepEqual(
+    homegen.doc.rooms[0].points,
+    origRoomVerts,
+    'Room vertices must not mutate on CRS switch'
+  );
+
+  // 3. Multi-acre parcel (> 36,000 in wide) with 0 rooms clamps cleanly to 0.02 minimum zoom floor
+  homegen.doc.rooms = [];
+  const hugeParcel = {
+    type: 'Feature',
+    id: 'ranch-lot',
+    properties: { layer: 'lot' },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [550000, 4180000],
+          [551500, 4180000],
+          [551500, 4181500],
+          [550000, 4181500],
+          [550000, 4180000],
+        ],
+      ],
+    },
+  };
+  app.loadGISSubsystem(hugeParcel, { crs: 'EPSG:32610' });
+  app.fit();
+  assert.equal(homegen.view.scale, 0.02, 'fit() with huge parcel must clamp down to 0.02 scale');
 });

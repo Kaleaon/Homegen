@@ -131,7 +131,9 @@ import {
   projectGeoJSON,
   computeVariableBuffers,
   ensureSpatialIndex,
+  getBounds,
 } from './gisBridge.js';
+import { getEPSGDefinition } from './epsgRegistry.js';
 import {
   GOOGLE_MAPS_API_KEY_STORAGE,
   getGoogleMapsApiKey,
@@ -6872,7 +6874,7 @@ for (const dropTarget of [canvas, $('#blueprint-dropzone')]) {
 }
 
 export function zoomAt(mx, my, f) {
-  const ns = Math.max(0.4, Math.min(8, view.scale * f));
+  const ns = Math.max(0.02, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
   view.oy = my - ((my - view.oy) / view.scale) * ns;
   view.scale = ns;
@@ -6884,19 +6886,66 @@ export function zoomAt(mx, my, f) {
 
 export function fit() {
   const r = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
-  if (!doc.rooms.length) {
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
+
+  for (const q of doc.rooms || []) {
+    if (Number.isFinite(q.x) && Number.isFinite(q.y)) {
+      x0 = Math.min(x0, q.x);
+      y0 = Math.min(y0, q.y);
+      x1 = Math.max(x1, q.x + (q.w || 0));
+      y1 = Math.max(y1, q.y + (q.h || 0));
+    }
+  }
+
+  if (doc.site && Array.isArray(doc.site.layers)) {
+    for (const layer of doc.site.layers) {
+      if (!layer) continue;
+      const b =
+        layer.bounds &&
+        Number.isFinite(layer.bounds.minX) &&
+        Number.isFinite(layer.bounds.minY) &&
+        Number.isFinite(layer.bounds.maxX) &&
+        Number.isFinite(layer.bounds.maxY)
+          ? layer.bounds
+          : Array.isArray(layer.points) && layer.points.length > 0
+            ? getBounds(layer.points)
+            : null;
+      if (
+        b &&
+        Number.isFinite(b.minX) &&
+        Number.isFinite(b.minY) &&
+        Number.isFinite(b.maxX) &&
+        Number.isFinite(b.maxY) &&
+        (b.maxX > b.minX || b.maxY > b.minY)
+      ) {
+        x0 = Math.min(x0, b.minX);
+        y0 = Math.min(y0, b.minY);
+        x1 = Math.max(x1, b.maxX);
+        y1 = Math.max(y1, b.maxY);
+      }
+    }
+  }
+
+  if (
+    !Number.isFinite(x0) ||
+    !Number.isFinite(y0) ||
+    !Number.isFinite(x1) ||
+    !Number.isFinite(y1)
+  ) {
     view = { scale: 1.6, ox: 40, oy: 40 };
     refresh();
     announceZoom(view.scale);
     return;
   }
-  const x0 = Math.min(...doc.rooms.map((q) => q.x));
-  const y0 = Math.min(...doc.rooms.map((q) => q.y));
-  const x1 = Math.max(...doc.rooms.map((q) => q.x + q.w));
-  const y1 = Math.max(...doc.rooms.map((q) => q.y + q.h));
+
+  const spanX = Math.max(1, x1 - x0);
+  const spanY = Math.max(1, y1 - y0);
   view.scale = Math.max(
-    0.4,
-    Math.min(5, Math.min((r.width - 80) / (x1 - x0), (r.height - 80) / (y1 - y0)))
+    0.02,
+    Math.min(5, Math.min((r.width - 80) / spanX, (r.height - 80) / spanY))
   );
   view.ox = (r.width - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.oy = (r.height - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
@@ -8583,8 +8632,23 @@ if (typeof document !== 'undefined') {
 
   $('#gis-crs')?.addEventListener('change', (e) => {
     const crs = e.detail?.value ?? e.target?.value;
-    if (crs && doc.site && doc.site.features) {
-      loadGISSubsystem({ type: 'FeatureCollection', features: doc.site.features }, { crs });
+    if (!crs) return;
+    if (doc.site?.rawGeoJSON) {
+      loadGISSubsystem(doc.site.rawGeoJSON, {
+        crs,
+        sourceCRS: doc.site.sourceCRS,
+        origin: doc.site.origin || doc.crs?.origin,
+        preserveSetbacks: true,
+        skipFit: true,
+      });
+    } else {
+      syncDocCRS(crs, doc.site?.origin || doc.crs?.origin);
+      if (doc.site) {
+        doc.site.crs = M.isValidEPSGCode(crs) ? M.normalizeEPSGCode(crs) : crs;
+      }
+      hist.push(doc, `Set CRS ${crs}`);
+      persist();
+      redraw();
     }
   });
 
@@ -8644,16 +8708,60 @@ const SAMPLE_MUNICIPAL_GIS = {
   ],
 };
 
+function syncDocCRS(crsCode, originOverride = null) {
+  const fallback = M.defaultCRS();
+  const existing = doc.crs && typeof doc.crs === 'object' ? doc.crs : fallback;
+  const epsg = M.isValidEPSGCode(crsCode)
+    ? M.normalizeEPSGCode(crsCode)
+    : existing.epsg || fallback.epsg;
+  const proj4Def = getEPSGDefinition(epsg) || existing.proj4 || fallback.proj4;
+  const resolvedOrigin =
+    originOverride &&
+    typeof originOverride === 'object' &&
+    Number.isFinite(originOverride.longitude) &&
+    Number.isFinite(originOverride.latitude)
+      ? { longitude: originOverride.longitude, latitude: originOverride.latitude }
+      : existing.origin || fallback.origin;
+  doc.crs = {
+    ...existing,
+    epsg,
+    proj4: proj4Def,
+    origin: resolvedOrigin,
+    units: existing.units || fallback.units,
+    geojson: existing.geojson || fallback.geojson,
+  };
+}
+
 export function loadGISSubsystem(geojson, options = {}) {
   const bridge = new GISBridge(doc.site);
+  const resolvedCrs =
+    options.crs ||
+    geojson?.crs?.properties?.name ||
+    $('#gis-crs')?.value ||
+    doc.crs?.epsg ||
+    'EPSG:4326';
   doc.site = bridge.importGeoJSON(geojson, {
-    targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
-    crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+    crs: resolvedCrs,
     ...options,
   });
+  syncDocCRS(doc.site.crs, doc.site.origin);
+  const gisCrsSelect = $('#gis-crs');
+  if (gisCrsSelect && doc.site?.crs) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
+      gisCrsSelect.value = doc.site.crs;
+    }
+  }
   hist.push(doc);
   persist();
-  redraw();
+  if (!options.skipFit && !options.targetBounds && !options.fitToBounds) {
+    fit();
+  } else {
+    redraw();
+  }
   renderGISSegments();
   return doc.site;
 }
@@ -9348,7 +9456,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   setTool({ kind: 'select' });
   resize();
   refresh();
-  if (doc.rooms.length) fit();
+  if (doc.rooms.length || doc.site?.layers?.length) fit();
 
   checkOnboardingOnStartup(() => {
     openWelcomeWizard();
