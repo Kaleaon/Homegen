@@ -68,7 +68,7 @@ function safeProj4(sDef, tDef, pt) {
   return tryProj4(sDef, tDef, pt) || [pt[0], pt[1]];
 }
 
-class SpatialCache {
+export class SpatialCache {
   constructor(maxSize = 2000) {
     this.maxSize = maxSize;
     this.cache = new Map();
@@ -80,18 +80,18 @@ class SpatialCache {
   }
 
   getKey(coords, sourceCRS, targetCRS) {
-    const sStr =
-      typeof sourceCRS === 'string'
-        ? resolveCRSDef(sourceCRS)
-        : sourceCRS?.epsg
-          ? resolveCRSDef(sourceCRS.epsg)
-          : JSON.stringify(sourceCRS);
-    const tStr =
-      typeof targetCRS === 'string'
-        ? resolveCRSDef(targetCRS)
-        : targetCRS?.epsg
-          ? resolveCRSDef(targetCRS.epsg)
-          : JSON.stringify(targetCRS);
+    const sDef = resolveCRSDef(sourceCRS);
+    const tDef = resolveCRSDef(targetCRS);
+    const explicitOrigin = extractExplicitOrigin(sourceCRS) || extractExplicitOrigin(targetCRS);
+    const originSuffix =
+      sDef === 'PLAN' || tDef === 'PLAN' || explicitOrigin
+        ? (() => {
+            const orig = explicitOrigin || DEFAULT_PLAN_ORIGIN;
+            return `@${Math.round(orig[0] * 1e7)},${Math.round(orig[1] * 1e7)}`;
+          })()
+        : '';
+    const sStr = `${sDef}${sDef === 'PLAN' ? originSuffix : ''}`;
+    const tStr = `${tDef}${tDef === 'PLAN' || (sDef !== 'PLAN' && originSuffix) ? originSuffix : ''}`;
     if (typeof coords === 'number') return `${coords}:${sStr}:${tStr}`;
     if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === 'number') {
       if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return null;
@@ -171,41 +171,137 @@ class SpatialCache {
 export const reprojectionCache = new SpatialCache();
 
 const crsDefCache = new Map();
+const DEFAULT_PLAN_ORIGIN = [-122.4194, 37.7749];
+const INCH_TO_METER = 0.0254;
+const CRS_UNIT_TO_METER = {
+  m: 1,
+  meter: 1,
+  meters: 1,
+  'us-ft': 1200 / 3937,
+  ft: 0.3048,
+  foot: 0.3048,
+  feet: 0.3048,
+};
 
 function resolveCRSDef(crs) {
   if (!crs) return 'EPSG:4326';
   if (typeof crs === 'string') {
     const hit = crsDefCache.get(crs);
     if (hit !== undefined) return hit;
-    const upper = crs.trim().toUpperCase();
+    const trimmed = crs.trim();
+    const upper = trimmed.toUpperCase();
     const resolved =
       upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES'
         ? 'PLAN'
-        : normalizeCode(crs) || 'EPSG:4326';
+        : trimmed.startsWith('+')
+          ? trimmed
+          : normalizeCode(crs) || 'EPSG:4326';
     if (crsDefCache.size >= 256) {
       crsDefCache.delete(crsDefCache.keys().next().value);
     }
     crsDefCache.set(crs, resolved);
     return resolved;
   }
+  if (typeof crs === 'number') {
+    return normalizeCode(crs) || 'EPSG:4326';
+  }
   if (typeof crs === 'object') {
+    const rawCode = crs.epsg ?? crs.crs ?? crs.code;
+    if (rawCode !== undefined && rawCode !== null && rawCode !== '') {
+      const upper = String(rawCode).trim().toUpperCase();
+      if (upper === 'PLAN' || upper === 'LOCAL' || upper === 'INCHES') {
+        return 'PLAN';
+      }
+      const normalized = normalizeCode(rawCode);
+      if (normalized && isRegisteredEPSG(normalized)) {
+        return normalized;
+      }
+      if (crs.proj4) return crs.proj4;
+      return resolveCRSDef(String(rawCode));
+    }
     if (crs.proj4) return crs.proj4;
-    if (crs.epsg) return resolveCRSDef(crs.epsg);
+    if (crs.origin) return 'PLAN';
   }
   return 'EPSG:4326';
 }
 
-function getPlanOrigin(crs) {
-  const defaultOrigin = [-122.4194, 37.7749];
-  if (!crs || typeof crs !== 'object') return defaultOrigin;
+function extractExplicitOrigin(crs) {
+  if (!crs || typeof crs !== 'object') return null;
   const o = crs.origin;
-  if (Array.isArray(o) && o.length >= 2) return [Number(o[0]), Number(o[1])];
-  if (o && typeof o === 'object') {
-    const lon = o.longitude ?? o.lon ?? o.x ?? -122.4194;
-    const lat = o.latitude ?? o.lat ?? o.y ?? 37.7749;
-    return [Number(lon), Number(lat)];
+  if (Array.isArray(o) && o.length >= 2) {
+    const lon = Number(o[0]);
+    const lat = Number(o[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) return [lon, lat];
   }
-  return defaultOrigin;
+  if (o && typeof o === 'object') {
+    const rawLon = o.longitude ?? o.lon ?? o.x;
+    const rawLat = o.latitude ?? o.lat ?? o.y;
+    if (rawLon !== undefined && rawLat !== undefined) {
+      const lon = Number(rawLon);
+      const lat = Number(rawLat);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) return [lon, lat];
+    }
+  }
+  return null;
+}
+
+function resolvePlanOrigin(sourceCRS, targetCRS) {
+  return (
+    extractExplicitOrigin(sourceCRS) || extractExplicitOrigin(targetCRS) || DEFAULT_PLAN_ORIGIN
+  );
+}
+
+function getProj4StringForDef(def) {
+  if (!def || def === 'PLAN') return null;
+  if (typeof def === 'string' && def.startsWith('+')) return def;
+  if (proj4 && proj4.defs && proj4.defs[def]) {
+    const entry = proj4.defs[def];
+    if (typeof entry === 'string') return entry;
+  }
+  if (def === 'EPSG:4326') return '+proj=longlat +datum=WGS84 +no_defs +type=crs';
+  if (def === 'EPSG:3857') {
+    return '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs';
+  }
+  return null;
+}
+
+function getCRSProjectionModel(def) {
+  if (def === 'EPSG:4326') return { kind: 'longlat', unitToMeter: 1 };
+  if (def === 'EPSG:3857') return { kind: 'merc', unitToMeter: 1 };
+  if (proj4 && proj4.defs && proj4.defs[def] && typeof proj4.defs[def] === 'object') {
+    const entry = proj4.defs[def];
+    const projName = typeof entry.projName === 'string' ? entry.projName.toLowerCase() : '';
+    if (projName === 'longlat') return { kind: 'longlat', unitToMeter: 1 };
+    if (projName === 'merc') return { kind: 'merc', unitToMeter: 1 };
+    if (typeof entry.units === 'string') {
+      const unitKey = entry.units.toLowerCase();
+      if (CRS_UNIT_TO_METER[unitKey] !== undefined) {
+        return { kind: 'projected', unitToMeter: CRS_UNIT_TO_METER[unitKey] };
+      }
+    }
+    if (Number.isFinite(entry.to_meter) && entry.to_meter > 0) {
+      return { kind: 'projected', unitToMeter: entry.to_meter };
+    }
+    return { kind: 'projected', unitToMeter: 1 };
+  }
+  const projStr = getProj4StringForDef(def);
+  if (!projStr) return { kind: 'unknown', unitToMeter: 1 };
+  if (/\+proj=longlat\b/i.test(projStr)) return { kind: 'longlat', unitToMeter: 1 };
+  if (/\+proj=merc\b/i.test(projStr)) return { kind: 'merc', unitToMeter: 1 };
+
+  const toMeterMatch = projStr.match(/\+to_meter=([0-9.eE+-]+)/);
+  if (toMeterMatch) {
+    const parsed = parseFloat(toMeterMatch[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return { kind: 'projected', unitToMeter: parsed };
+    }
+  }
+  const unitMatch = projStr.match(/\+units=([a-zA-Z0-9_-]+)/);
+  const unitKey = unitMatch ? unitMatch[1].toLowerCase() : 'm';
+  return {
+    kind: 'projected',
+    unitToMeter: CRS_UNIT_TO_METER[unitKey] ?? 1,
+  };
 }
 
 export function reproject(coords, sourceCRS = 'EPSG:4326', targetCRS = 'PLAN') {
@@ -270,46 +366,80 @@ export function reproject(coords, sourceCRS = 'EPSG:4326', targetCRS = 'PLAN') {
     const sDef = resolveCRSDef(sourceCRS);
     const tDef = resolveCRSDef(targetCRS);
 
-    if (sDef === tDef) {
+    if (sDef === tDef && sDef !== 'PLAN') {
       reprojectionCache.set(coords, sourceCRS, targetCRS, coords);
       return coords;
     }
 
-    const INCH_TO_METER = 0.0254;
     let resPt;
 
     if (sDef === 'PLAN' && tDef === 'PLAN') {
-      reprojectionCache.set(coords, sourceCRS, targetCRS, coords);
-      return coords;
-    }
+      const sOrig = extractExplicitOrigin(sourceCRS);
+      const tOrig = extractExplicitOrigin(targetCRS);
+      if (
+        !sOrig ||
+        !tOrig ||
+        (Math.abs(sOrig[0] - tOrig[0]) < 1e-12 && Math.abs(sOrig[1] - tOrig[1]) < 1e-12)
+      ) {
+        reprojectionCache.set(coords, sourceCRS, targetCRS, coords);
+        return coords;
+      }
+      const wgs = reproject([coords[0], coords[1]], sourceCRS, 'EPSG:4326');
+      resPt = reproject(wgs, 'EPSG:4326', targetCRS);
+    } else if (sDef === 'PLAN') {
+      const originLonLat = resolvePlanOrigin(sourceCRS, targetCRS);
+      const model = getCRSProjectionModel(tDef);
+      const groundEastMeters = coords[0] * INCH_TO_METER;
+      const groundNorthMeters = -coords[1] * INCH_TO_METER;
 
-    if (sDef === 'PLAN') {
-      // Plan inches to projected meters (EPSG:3857) relative to origin
-      const originLonLat = getPlanOrigin(sourceCRS);
-      const originMeters = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
-      const xMeters = originMeters[0] + coords[0] * INCH_TO_METER;
-      const yMeters = originMeters[1] - coords[1] * INCH_TO_METER;
-
-      if (tDef === 'EPSG:3857') {
-        resPt = [xMeters, yMeters];
+      if (model.kind === 'longlat' || model.kind === 'merc') {
+        const cosLat = Math.max(1e-6, Math.cos((originLonLat[1] * Math.PI) / 180));
+        const originMerc = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
+        const xMerc = originMerc[0] + groundEastMeters / cosLat;
+        const yMerc = originMerc[1] + groundNorthMeters / cosLat;
+        if (tDef === 'EPSG:3857') {
+          resPt = [xMerc, yMerc];
+        } else {
+          resPt = tryProj4('EPSG:3857', tDef, [xMerc, yMerc]) || [coords[0], coords[1]];
+        }
       } else {
-        resPt = tryProj4('EPSG:3857', tDef, [xMeters, yMeters]) || [coords[0], coords[1]];
+        const originProj = tryProj4('EPSG:4326', tDef, originLonLat);
+        if (!originProj) {
+          resPt = [coords[0], coords[1]];
+        } else {
+          resPt = [
+            originProj[0] + groundEastMeters / model.unitToMeter,
+            originProj[1] + groundNorthMeters / model.unitToMeter,
+          ];
+        }
       }
     } else if (tDef === 'PLAN') {
-      // Source CRS to Plan inches relative to origin
-      const srcMeters =
-        sDef === 'EPSG:3857'
-          ? [coords[0], coords[1]]
-          : tryProj4(sDef, 'EPSG:3857', [coords[0], coords[1]]);
-      if (!srcMeters) {
-        resPt = [coords[0], coords[1]];
-      } else {
-        const originLonLat = getPlanOrigin(targetCRS);
-        const originMeters = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
+      const originLonLat = resolvePlanOrigin(sourceCRS, targetCRS);
+      const model = getCRSProjectionModel(sDef);
 
-        const xInches = (srcMeters[0] - originMeters[0]) / INCH_TO_METER;
-        const yInches = -(srcMeters[1] - originMeters[1]) / INCH_TO_METER;
-        resPt = [xInches, yInches];
+      if (model.kind === 'longlat' || model.kind === 'merc') {
+        const srcMerc =
+          sDef === 'EPSG:3857'
+            ? [coords[0], coords[1]]
+            : tryProj4(sDef, 'EPSG:3857', [coords[0], coords[1]]);
+        if (!srcMerc) {
+          resPt = [coords[0], coords[1]];
+        } else {
+          const cosLat = Math.max(1e-6, Math.cos((originLonLat[1] * Math.PI) / 180));
+          const originMerc = safeProj4('EPSG:4326', 'EPSG:3857', originLonLat);
+          const xInches = ((srcMerc[0] - originMerc[0]) * cosLat) / INCH_TO_METER;
+          const yInches = -((srcMerc[1] - originMerc[1]) * cosLat) / INCH_TO_METER;
+          resPt = [xInches, yInches];
+        }
+      } else {
+        const originProj = tryProj4('EPSG:4326', sDef, originLonLat);
+        if (!originProj) {
+          resPt = [coords[0], coords[1]];
+        } else {
+          const xMeters = (coords[0] - originProj[0]) * model.unitToMeter;
+          const yMeters = (coords[1] - originProj[1]) * model.unitToMeter;
+          resPt = [xMeters / INCH_TO_METER, -yMeters / INCH_TO_METER];
+        }
       }
     } else {
       // Standard CRS to CRS conversion via proj4
@@ -511,8 +641,20 @@ export function worldfileToAffineMatrix(
   if (!parsed) return [1, 0, 0, 1, 0, 0];
 
   const [A, D, B, E, C, F] = parsed;
+  const sDef = resolveCRSDef(sourceCRS);
+  const tDef = resolveCRSDef(targetCRS);
 
-  if (sourceCRS === targetCRS || sourceCRS === 'PLAN') {
+  if (sDef === 'PLAN' && tDef === 'PLAN') {
+    const sOrig = extractExplicitOrigin(sourceCRS);
+    const tOrig = extractExplicitOrigin(targetCRS);
+    if (
+      !sOrig ||
+      !tOrig ||
+      (Math.abs(sOrig[0] - tOrig[0]) < 1e-12 && Math.abs(sOrig[1] - tOrig[1]) < 1e-12)
+    ) {
+      return [A, D, B, E, C, F];
+    }
+  } else if (sDef === tDef) {
     return [A, D, B, E, C, F];
   }
 

@@ -355,3 +355,78 @@ test('exportDXF with elevationGrid finishes under 100 milliseconds client-side b
     `exportDXF with elevationGrid average execution time (${avgDuration.toFixed(2)}ms) must be under 100ms`
   );
 });
+
+test('exportDXF serializes MultiLineString easements and GIS lot segments as LWPOLYLINE entities with synced CRS headers', async () => {
+  const { GISBridge } = await import('../js/gisBridge.js');
+  const { syncStateCRS } = await import('../js/model.js');
+
+  const doc = newState();
+  createRoom(doc, 'living', 0, 0, 240, 180, { name: 'Main Room' });
+
+  const surveyGeoJSON = {
+    type: 'FeatureCollection',
+    crs: { properties: { name: 'EPSG:4326' } },
+    features: [
+      {
+        type: 'Feature',
+        id: 'survey-lot',
+        properties: { name: 'Survey Parcel', layer: 'lot', setback: 36 },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [-122.4194, 37.7749],
+              [-122.4174, 37.7749],
+              [-122.4174, 37.7734],
+              [-122.4194, 37.7734],
+              [-122.4194, 37.7749],
+            ],
+          ],
+        },
+      },
+      {
+        type: 'Feature',
+        id: 'easement-corridors',
+        properties: { name: 'Utility Corridors', layer: 'easement' },
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [
+            [
+              [-122.4192, 37.7747],
+              [-122.4184, 37.7745],
+              [-122.4176, 37.7745],
+            ],
+            [
+              [-122.419, 37.7738],
+              [-122.4178, 37.7738],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
+  const bridge = new GISBridge();
+  doc.site = bridge.importGeoJSON(surveyGeoJSON, { crs: 'EPSG:32610', sourceCRS: 'EPSG:4326' });
+  syncStateCRS(doc, doc.site.crs, doc.site.origin);
+
+  const dxf = exportDXF(doc, { units: 'inches' });
+
+  assert.ok(
+    dxf.includes('999\nGEOSPATIAL_CRS_EPSG: EPSG:32610'),
+    'DXF header reflects switched CRS'
+  );
+  assert.ok(dxf.includes('999\nGEOSPATIAL_UNITS: m'), 'DXF header reflects metric UTM units');
+
+  // Count open LWPOLYLINE entities on A-AREA-POLY: 4 lot segments + 2 MultiLineString corridors = 6 open polylines
+  const openSitePolylines = dxf.match(/LWPOLYLINE\n8\nA-AREA-POLY\n90\n(\d+)\n70\n0/g) || [];
+  assert.equal(
+    openSitePolylines.length,
+    6,
+    'Expected 4 lot segment polylines + 2 MultiLineString corridor LWPOLYLINE entities'
+  );
+  assert.ok(
+    openSitePolylines.some((m) => m.includes('90\n3\n70\n0')),
+    '3-vertex MultiLineString component serialized as LWPOLYLINE'
+  );
+});

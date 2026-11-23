@@ -295,3 +295,164 @@ test('OGC URN CRS Normalization, CRS84 Mapping, and Millimeter-Accurate Plan Rep
     console.warn = origWarn;
   }
 });
+
+test('Topocentric cos(lat0) ground-scale correction and linear unit conversion (m, us-ft, ft)', () => {
+  reprojectionCache.clear();
+  const originSF = { longitude: -122.4184, latitude: 37.77415 };
+  const planSF = { epsg: 'PLAN', origin: originSF };
+
+  // 100 true ground meters East = 100 / 0.0254 = 3937.007874 inches
+  const hundredMetersInInches = 100 / 0.0254;
+
+  // 1. Web Mercator (EPSG:3857): 100 ground meters spans 100 / cos(lat0) Mercator units
+  const cosLat = Math.cos((originSF.latitude * Math.PI) / 180);
+  const mercOrigin = reproject([originSF.longitude, originSF.latitude], 'EPSG:4326', 'EPSG:3857');
+  const mercEast100m = [mercOrigin[0] + 100 / cosLat, mercOrigin[1]];
+  const planFromMerc = reproject(mercEast100m, 'EPSG:3857', planSF);
+  assert.ok(
+    Math.abs(planFromMerc[0] - hundredMetersInInches) < 0.01,
+    `Expected ${hundredMetersInInches.toFixed(2)} in for 100m ground distance in EPSG:3857, got ${planFromMerc[0]}`
+  );
+  assert.ok(Math.abs(planFromMerc[1]) < 0.01);
+
+  const mercRoundtrip = reproject(planFromMerc, planSF, 'EPSG:3857');
+  assert.ok(Math.abs(mercRoundtrip[0] - mercEast100m[0]) < 1e-4);
+  assert.ok(Math.abs(mercRoundtrip[1] - mercEast100m[1]) < 1e-4);
+
+  // 2. Metric UTM (EPSG:32610, +units=m): 100 m = 3937.0079 in
+  const utmOrigin = reproject([originSF.longitude, originSF.latitude], 'EPSG:4326', 'EPSG:32610');
+  const planFromUtm = reproject([utmOrigin[0] + 100, utmOrigin[1] - 50], 'EPSG:32610', planSF);
+  assert.ok(Math.abs(planFromUtm[0] - 100 / 0.0254) < 0.01, 'UTM meters +X converts to inches');
+  assert.ok(Math.abs(planFromUtm[1] - 50 / 0.0254) < 0.01, 'UTM meters -Y converts to +Y inches');
+
+  // 3. US Survey Feet State Plane (EPSG:2227, +units=us-ft): 100 us-ft = 100 * (1200/3937) / 0.0254 in
+  const spOrigin = reproject([originSF.longitude, originSF.latitude], 'EPSG:4326', 'EPSG:2227');
+  const expectedUsFtInches = (100 * (1200 / 3937)) / 0.0254;
+  const planFromUsFt = reproject([spOrigin[0] + 100, spOrigin[1]], 'EPSG:2227', planSF);
+  assert.ok(
+    Math.abs(planFromUsFt[0] - expectedUsFtInches) < 0.01,
+    `Expected ${expectedUsFtInches.toFixed(4)} in for 100 us-ft, got ${planFromUsFt[0]}`
+  );
+
+  // 4. International Feet (+units=ft): 100 ft = 1200 in exact
+  const intlFtProj4 =
+    '+proj=tmerc +lat_0=37.77415 +lon_0=-122.4184 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=ft +no_defs';
+  const planFromIntlFt = reproject([100, -50], intlFtProj4, planSF);
+  assert.ok(Math.abs(planFromIntlFt[0] - 1200) < 1e-4, '100 international ft must equal 1200 in');
+  assert.ok(Math.abs(planFromIntlFt[1] - 600) < 1e-4, '-50 international ft N must equal +600 in');
+  const intlFtBack = reproject([1200, 600], planSF, intlFtProj4);
+  assert.ok(Math.abs(intlFtBack[0] - 100) < 1e-4);
+  assert.ok(Math.abs(intlFtBack[1] - -50) < 1e-4);
+});
+
+test('SpatialCache encodes origin coordinates in getKey and stays within 2000 entries', () => {
+  reprojectionCache.clear();
+  const state = M.newState();
+  const planPt = [240, 180];
+
+  state.crs.origin = { longitude: -122.4194, latitude: 37.7749 };
+  const keyA = reprojectionCache.getKey(planPt, 'PLAN', state.crs);
+  const coordA = reproject(planPt, 'PLAN', state.crs);
+
+  // Mutate doc.crs.origin in place for the exact same planar point and CRS object reference
+  state.crs.origin = { longitude: -73.9857, latitude: 40.7484 };
+  const keyB = reprojectionCache.getKey(planPt, 'PLAN', state.crs);
+  const coordB = reproject(planPt, 'PLAN', state.crs);
+
+  assert.notEqual(keyA, keyB, 'SpatialCache.getKey must encode distinct origin coordinates');
+  assert.ok(Math.abs(coordA[0] - -122.4194) < 0.01, 'First projection anchored in San Francisco');
+  assert.ok(Math.abs(coordB[0] - -73.9857) < 0.01, 'Second projection anchored in New York');
+
+  // Verify inverse direction (CRS -> PLAN) also distinguishes origins
+  const sampleLonLat = [-122.4184, 37.77415];
+  const planAtSF = reproject(sampleLonLat, 'EPSG:4326', {
+    epsg: 'PLAN',
+    origin: [-122.4194, 37.7749],
+  });
+  const planAtCentroid = reproject(sampleLonLat, 'EPSG:4326', {
+    epsg: 'PLAN',
+    origin: [-122.4184, 37.77415],
+  });
+  assert.ok(Math.abs(planAtCentroid[0]) < 1e-4 && Math.abs(planAtCentroid[1]) < 1e-4);
+  assert.ok(Math.abs(planAtSF[0] - planAtCentroid[0]) > 3000);
+
+  // Stress cache beyond 2000 entries and verify memory bound
+  for (let i = 0; i < 2500; i++) {
+    reproject([i, i * 2], 'PLAN', 'EPSG:4326');
+  }
+  assert.ok(
+    reprojectionCache.cache.size <= 2000,
+    `SpatialCache size (${reprojectionCache.cache.size}) must remain <= 2000`
+  );
+});
+
+test('deserialize migrates legacy flattened doc.site.features lacking .geometry and syncs doc.crs', () => {
+  const legacyPlan = {
+    version: 2,
+    name: 'Legacy Parcel Plan',
+    rooms: [],
+    crs: {
+      epsg: 'EPSG:4326',
+      origin: { longitude: -122.4184, latitude: 37.77415 },
+      units: 'inches',
+    },
+    site: {
+      crs: 'EPSG:3857',
+      features: [
+        {
+          id: 'legacy-lot',
+          parentId: 'legacy-lot',
+          componentIndex: 0,
+          properties: { name: 'Legacy Lot', layer: 'lot', setback: 48 },
+          layerKind: 'lot',
+          points: [
+            { x: -600, y: -400 },
+            { x: 600, y: -400 },
+            { x: 600, y: 400 },
+            { x: -600, y: 400 },
+            { x: -600, y: -400 },
+          ],
+        },
+        {
+          id: 'legacy-easement',
+          parentId: 'legacy-easement',
+          componentIndex: 0,
+          properties: { name: 'Utility Line', layer: 'easement' },
+          layerKind: 'easement',
+          points: [
+            { x: -600, y: 200 },
+            { x: 600, y: 200 },
+          ],
+        },
+      ],
+      segments: [
+        {
+          id: 'seg-1',
+          ringId: 'legacy-lot',
+          p1: { x: -600, y: -400 },
+          p2: { x: 600, y: -400 },
+          setback: 48,
+        },
+      ],
+      layers: [],
+    },
+  };
+
+  const migrated = M.deserialize(JSON.stringify(legacyPlan));
+  assert.equal(migrated.crs.epsg, 'EPSG:3857', 'doc.crs.epsg synced to site.crs');
+  assert.equal(migrated.crs.units, 'm', 'doc.crs.units synced to EPSG:3857');
+  assert.equal(
+    migrated.crs.geojson.features.length,
+    2,
+    'doc.crs.geojson populated from migrated site'
+  );
+
+  const lotFeat = migrated.site.features[0];
+  const easeFeat = migrated.site.features[1];
+  assert.equal(lotFeat.type, 'Feature');
+  assert.equal(lotFeat.geometry?.type, 'Polygon');
+  assert.equal(lotFeat.geometry.coordinates[0].length, 5);
+  assert.equal(easeFeat.geometry?.type, 'LineString');
+  assert.equal(easeFeat.geometry.coordinates.length, 2);
+  assert.equal(migrated.site.segments[0].pts.length, 2);
+});

@@ -208,18 +208,50 @@ export function exportDXF(doc, options = {}) {
     }
   }
 
+  const sitePolylines = [];
+  const coveredSiteRingIds = new Set();
   if (doc?.site?.segments && Array.isArray(doc.site.segments)) {
     for (const seg of doc.site.segments) {
-      if (seg.pts && Array.isArray(seg.pts)) {
-        for (const p of seg.pts) {
-          const x = p.x * unitFactor;
-          const y = p.y * unitFactor;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
+      if (!seg) continue;
+      const pts =
+        Array.isArray(seg.pts) && seg.pts.length >= 2
+          ? seg.pts
+          : seg.p1 && seg.p2
+            ? [seg.p1, seg.p2]
+            : null;
+      if (pts) {
+        sitePolylines.push({ pts, closed: false });
+        if (seg.ringId) coveredSiteRingIds.add(seg.ringId);
       }
+    }
+  }
+  if (doc?.site?.features && Array.isArray(doc.site.features)) {
+    for (const feat of doc.site.features) {
+      if (!feat || coveredSiteRingIds.has(feat.id)) continue;
+      if (Array.isArray(feat.points) && feat.points.length >= 2) {
+        const isClosed = feat.geometry?.type === 'Polygon';
+        sitePolylines.push({ pts: feat.points, closed: isClosed });
+        if (feat.id) coveredSiteRingIds.add(feat.id);
+      }
+    }
+  }
+  if (doc?.site?.layers && Array.isArray(doc.site.layers)) {
+    for (const layer of doc.site.layers) {
+      if (!layer || layer.type === 'gisSetbackBuffer' || coveredSiteRingIds.has(layer.id)) continue;
+      if (Array.isArray(layer.points) && layer.points.length >= 2) {
+        sitePolylines.push({ pts: layer.points, closed: layer.closed === true });
+      }
+    }
+  }
+
+  for (const poly of sitePolylines) {
+    for (const p of poly.pts) {
+      const x = p.x * unitFactor;
+      const y = p.y * unitFactor;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
   }
 
@@ -591,18 +623,16 @@ export function exportDXF(doc, options = {}) {
     push(31, '0.0');
   }
 
-  // 4g. Export GIS site polylines if present on A-AREA-POLY or A-WALL-STRC
-  if (doc?.site?.segments && Array.isArray(doc.site.segments)) {
-    for (const seg of doc.site.segments) {
-      if (seg.pts && seg.pts.length >= 2) {
-        push(0, 'LWPOLYLINE');
-        push(8, 'A-AREA-POLY');
-        push(90, seg.pts.length);
-        push(70, 0); // Open polyline for site segment
-        for (const p of seg.pts) {
-          push(10, (p.x * unitFactor).toFixed(4));
-          push(20, (p.y * unitFactor).toFixed(4));
-        }
+  // 4g. Export GIS site polylines if present on A-AREA-POLY
+  for (const poly of sitePolylines) {
+    if (poly.pts && poly.pts.length >= 2) {
+      push(0, 'LWPOLYLINE');
+      push(8, 'A-AREA-POLY');
+      push(90, poly.pts.length);
+      push(70, poly.closed ? 1 : 0);
+      for (const p of poly.pts) {
+        push(10, (p.x * unitFactor).toFixed(4));
+        push(20, (p.y * unitFactor).toFixed(4));
       }
     }
   }

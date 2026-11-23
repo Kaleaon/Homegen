@@ -6808,7 +6808,7 @@ for (const dropTarget of [canvas, $('#blueprint-dropzone')]) {
 }
 
 export function zoomAt(mx, my, f) {
-  const ns = Math.max(0.4, Math.min(8, view.scale * f));
+  const ns = Math.max(0.02, Math.min(8, view.scale * f));
   view.ox = mx - ((mx - view.ox) / view.scale) * ns;
   view.oy = my - ((my - view.oy) / view.scale) * ns;
   view.scale = ns;
@@ -6820,19 +6820,58 @@ export function zoomAt(mx, my, f) {
 
 export function fit() {
   const r = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
-  if (!doc.rooms.length) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+
+  for (const q of doc.rooms) {
+    if (q.x < x0) x0 = q.x;
+    if (q.y < y0) y0 = q.y;
+    if (q.x + q.w > x1) x1 = q.x + q.w;
+    if (q.y + q.h > y1) y1 = q.y + q.h;
+  }
+
+  if (doc.site) {
+    for (const feat of doc.site.features || []) {
+      for (const pt of feat.points || []) {
+        if (pt && Number.isFinite(pt.x) && Number.isFinite(pt.y)) {
+          if (pt.x < x0) x0 = pt.x;
+          if (pt.y < y0) y0 = pt.y;
+          if (pt.x > x1) x1 = pt.x;
+          if (pt.y > y1) y1 = pt.y;
+        }
+      }
+    }
+    for (const layer of doc.site.layers || []) {
+      const b = layer?.bounds;
+      if (
+        b &&
+        Number.isFinite(b.minX) &&
+        Number.isFinite(b.minY) &&
+        Number.isFinite(b.maxX) &&
+        Number.isFinite(b.maxY)
+      ) {
+        if (b.minX < x0) x0 = b.minX;
+        if (b.minY < y0) y0 = b.minY;
+        if (b.maxX > x1) x1 = b.maxX;
+        if (b.maxY > y1) y1 = b.maxY;
+      }
+    }
+  }
+
+  if (!Number.isFinite(x0) || !Number.isFinite(y0)) {
     view = { scale: 1.6, ox: 40, oy: 40 };
     refresh();
     announceZoom(view.scale);
     return;
   }
-  const x0 = Math.min(...doc.rooms.map((q) => q.x));
-  const y0 = Math.min(...doc.rooms.map((q) => q.y));
-  const x1 = Math.max(...doc.rooms.map((q) => q.x + q.w));
-  const y1 = Math.max(...doc.rooms.map((q) => q.y + q.h));
+
+  const spanX = Math.max(1, x1 - x0);
+  const spanY = Math.max(1, y1 - y0);
   view.scale = Math.max(
-    0.4,
-    Math.min(5, Math.min((r.width - 80) / (x1 - x0), (r.height - 80) / (y1 - y0)))
+    0.02,
+    Math.min(5, Math.min((r.width - 80) / spanX, (r.height - 80) / spanY))
   );
   view.ox = (r.width - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.oy = (r.height - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
@@ -7358,8 +7397,10 @@ $('#save-zip')?.addEventListener('click', async () => {
   }
 });
 export function exportGeoJSON(state, targetEPSG = 'EPSG:4326') {
-  const sourceCRS = state?.crs || M.defaultCRS();
+  const docCRS = state?.crs || M.defaultCRS();
+  const planSourceCRS = { ...docCRS, epsg: 'PLAN' };
   const targetCRS = M.isValidEPSGCode(targetEPSG) ? M.normalizeEPSGCode(targetEPSG) : targetEPSG;
+  const targetEPSGName = typeof targetCRS === 'string' ? targetCRS : targetCRS.epsg || 'EPSG:4326';
   const features = [];
 
   for (const room of state?.rooms || []) {
@@ -7371,7 +7412,7 @@ export function exportGeoJSON(state, targetEPSG = 'EPSG:4326') {
       [room.x, room.y],
     ];
 
-    const cornersTarget = reproject(cornersPlan, sourceCRS, targetCRS);
+    const cornersTarget = reproject(cornersPlan, planSourceCRS, targetCRS);
 
     features.push({
       type: 'Feature',
@@ -7394,7 +7435,7 @@ export function exportGeoJSON(state, targetEPSG = 'EPSG:4326') {
 
     for (const item of room.items || []) {
       const itemPlan = [room.x + item.x, room.y + item.y];
-      const itemTarget = reproject(itemPlan, sourceCRS, targetCRS);
+      const itemTarget = reproject(itemPlan, planSourceCRS, targetCRS);
       features.push({
         type: 'Feature',
         id: item.id,
@@ -7412,13 +7453,33 @@ export function exportGeoJSON(state, targetEPSG = 'EPSG:4326') {
     }
   }
 
+  if (state?.site && Array.isArray(state.site.features) && state.site.features.length > 0) {
+    const siteSourceCRS = state.site.crs || docCRS.epsg || 'EPSG:4326';
+    const canonicalSite = M.buildCanonicalSiteGeoJSON(state.site.features, siteSourceCRS);
+    for (const siteFeat of canonicalSite.features) {
+      const reprojGeom =
+        siteSourceCRS === targetEPSGName
+          ? siteFeat.geometry
+          : reproject(siteFeat.geometry, siteSourceCRS, targetCRS);
+      features.push({
+        type: 'Feature',
+        id: siteFeat.id,
+        geometry: reprojGeom,
+        properties: {
+          ...siteFeat.properties,
+          siteFeature: true,
+        },
+      });
+    }
+  }
+
   return {
     type: 'FeatureCollection',
     name: state?.name || 'Homegen Floorplan',
     crs: {
       type: 'name',
       properties: {
-        name: typeof targetCRS === 'string' ? targetCRS : targetCRS.epsg || 'EPSG:4326',
+        name: targetEPSGName,
       },
     },
     features,
@@ -7430,7 +7491,8 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
   if (!geojson) throw new Error('Invalid GeoJSON content');
 
   const sourceEPSG = opts.sourceEPSG || geojson.crs?.properties?.name || 'EPSG:4326';
-  const targetCRS = state?.crs || M.defaultCRS();
+  const docCRS = state?.crs || M.defaultCRS();
+  const planTargetCRS = { ...docCRS, epsg: 'PLAN' };
 
   let features = [];
   if (geojson.type === 'FeatureCollection') {
@@ -7444,6 +7506,13 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
   let importedCount = 0;
   for (const feature of features) {
     if (!feature || !feature.geometry) continue;
+    if (
+      feature.properties?.siteFeature ||
+      feature.properties?.layer === 'lot' ||
+      feature.properties?.layer === 'easement'
+    ) {
+      continue;
+    }
     const geom = feature.geometry;
     let rings = [];
 
@@ -7455,7 +7524,7 @@ export function importGeoJSON(geojsonInput, state, opts = {}) {
 
     for (const ring of rings) {
       if (!ring || ring.length < 3) continue;
-      const planPts = reproject(ring, sourceEPSG, targetCRS);
+      const planPts = reproject(ring, sourceEPSG, planTargetCRS);
       const xs = planPts.map((p) => p[0]);
       const ys = planPts.map((p) => p[1]);
       const minX = Math.min(...xs);
@@ -8367,8 +8436,27 @@ if (typeof document !== 'undefined') {
 
   $('#gis-crs')?.addEventListener('change', (e) => {
     const crs = e.detail?.value ?? e.target?.value;
-    if (crs && doc.site && doc.site.features) {
-      loadGISSubsystem({ type: 'FeatureCollection', features: doc.site.features }, { crs });
+    if (!crs) return;
+    if (doc.site && Array.isArray(doc.site.features) && doc.site.features.length > 0) {
+      const prevCRS = doc.site.crs || doc.crs?.epsg || 'EPSG:4326';
+      loadGISSubsystem(
+        {
+          type: 'FeatureCollection',
+          crs: { type: 'name', properties: { name: prevCRS } },
+          features: doc.site.features,
+        },
+        {
+          crs,
+          sourceCRS: prevCRS,
+          origin: doc.site.origin || doc.crs?.origin,
+          preserveSetbacks: true,
+        }
+      );
+    } else {
+      M.syncStateCRS(doc, crs, doc.crs?.origin);
+      hist.push(doc);
+      persist();
+      redraw();
     }
   });
 
@@ -8423,15 +8511,74 @@ const SAMPLE_MUNICIPAL_GIS = {
 };
 
 export function loadGISSubsystem(geojson, options = {}) {
+  const defaultOrigin = M.defaultCRS().origin;
+  const docOrigin = doc.crs?.origin;
+  const hasCustomDocOrigin =
+    Boolean(docOrigin) &&
+    (Math.abs((docOrigin.longitude ?? defaultOrigin.longitude) - defaultOrigin.longitude) > 1e-9 ||
+      Math.abs((docOrigin.latitude ?? defaultOrigin.latitude) - defaultOrigin.latitude) > 1e-9);
+  const anchorOrigin =
+    options.origin ||
+    doc.site?.origin ||
+    (hasCustomDocOrigin || doc.background?.isGeospatial ? docOrigin : null);
+  const targetCRS =
+    options.crs ||
+    $('#gis-crs')?.value ||
+    geojson?.crs?.properties?.name ||
+    doc.crs?.epsg ||
+    'EPSG:4326';
+  const sourceCRS = options.sourceCRS || geojson?.crs?.properties?.name || targetCRS;
+
   const bridge = new GISBridge(doc.site);
   doc.site = bridge.importGeoJSON(geojson, {
-    targetBounds: { x: 50, y: 50, w: 1100, h: 800 },
-    crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
     ...options,
+    crs: targetCRS,
+    sourceCRS,
+    ...(anchorOrigin ? { origin: anchorOrigin } : {}),
   });
+
+  M.syncStateCRS(doc, doc.site.crs, doc.site.origin);
+
+  const gisCrsSelect = $('#gis-crs');
+  if (gisCrsSelect && doc.site?.crs) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
+      gisCrsSelect.value = doc.site.crs;
+    }
+  }
+
+  if (doc.background?.worldfileParams && doc.background?.worldfileCRS) {
+    const planCRS = { epsg: 'PLAN', origin: doc.crs.origin };
+    doc.background.affineMatrix = worldfileToAffineMatrix(
+      doc.background.worldfileParams,
+      doc.background.worldfileCRS,
+      planCRS
+    );
+    doc.background.matrixCRS = 'PLAN';
+    doc.background.x = doc.background.affineMatrix[4];
+    doc.background.y = doc.background.affineMatrix[5];
+    doc.background.scale = Math.hypot(
+      doc.background.affineMatrix[0],
+      doc.background.affineMatrix[1]
+    );
+    doc.background.geoBounds = computeGeoBounds(
+      doc.background.affineMatrix,
+      doc.background.width || 1000,
+      doc.background.height || 1000,
+      planCRS
+    );
+  }
+
   hist.push(doc);
   persist();
-  redraw();
+  if (options.autoFit !== false) {
+    fit();
+  } else {
+    redraw();
+  }
   renderGISSegments();
   return doc.site;
 }
@@ -8458,6 +8605,14 @@ function openGISDialog() {
         : [];
     if (!opts.length || opts.some((opt) => opt.value === doc.site.crs)) {
       gisCrsSelect.value = doc.site.crs;
+    }
+  } else if (gisCrsSelect && doc.crs?.epsg) {
+    const opts =
+      typeof gisCrsSelect.querySelectorAll === 'function'
+        ? Array.from(gisCrsSelect.querySelectorAll('option'))
+        : [];
+    if (!opts.length || opts.some((opt) => opt.value === doc.crs.epsg)) {
+      gisCrsSelect.value = doc.crs.epsg;
     }
   }
   const gisMapSelect = $('#gis-map-preset');
@@ -8974,7 +9129,8 @@ function applyCalibration(p1, p2, distPx, valStr) {
   } else {
     bg.affineMatrix = [bg.scale, 0, 0, bg.scale, bg.x, bg.y];
   }
-  bg.geoBounds = computeGeoBounds(bg.affineMatrix, bg.width || 1000, bg.height || 1000, 'PLAN');
+  const planCRS = { epsg: 'PLAN', origin: doc.crs?.origin };
+  bg.geoBounds = computeGeoBounds(bg.affineMatrix, bg.width || 1000, bg.height || 1000, planCRS);
 
   hist.push(doc, 'Calibrate Blueprint');
   persist();
@@ -8987,9 +9143,10 @@ function applyCalibration(p1, p2, distPx, valStr) {
 function apply3PointCalibration(srcPts, dstPts) {
   if (!doc.background) return false;
   try {
+    const planCRS = { epsg: 'PLAN', origin: doc.crs?.origin };
     const dstPlanPts = (dstPts || []).map((p) => {
       if (p.crs && p.crs !== 'PLAN') {
-        const re = reproject([p.x, p.y], p.crs, 'PLAN');
+        const re = reproject([p.x, p.y], p.crs, planCRS);
         return { x: re[0], y: re[1] };
       }
       return p;
@@ -8998,10 +9155,11 @@ function apply3PointCalibration(srcPts, dstPts) {
     const matrix = solveAffineTransform(srcPts, dstPlanPts);
     const bg = doc.background;
     bg.affineMatrix = matrix;
+    bg.matrixCRS = 'PLAN';
     bg.x = matrix[4];
     bg.y = matrix[5];
     bg.scale = Math.hypot(matrix[0], matrix[1]);
-    bg.geoBounds = computeGeoBounds(matrix, bg.width || 1000, bg.height || 1000, 'PLAN');
+    bg.geoBounds = computeGeoBounds(matrix, bg.width || 1000, bg.height || 1000, planCRS);
 
     hist.push(doc, 'Calibrate Blueprint (3-Point)');
     persist();
@@ -9064,9 +9222,10 @@ function handleBlueprintImport(file, meta = {}) {
       const parsedWld = parseWorldfile(worldfileRaw);
       let affineMatrix;
       let sourceCRS = meta.crs || meta.sourceCRS || meta.epsg || doc.crs?.epsg || 'EPSG:4326';
+      const planCRS = { epsg: 'PLAN', origin: doc.crs?.origin };
 
       if (parsedWld) {
-        affineMatrix = worldfileToAffineMatrix(parsedWld, sourceCRS, 'PLAN');
+        affineMatrix = worldfileToAffineMatrix(parsedWld, sourceCRS, planCRS);
       } else if (Array.isArray(meta.affineMatrix) && meta.affineMatrix.length >= 6) {
         affineMatrix = meta.affineMatrix.slice(0, 6).map(Number);
       } else {
@@ -9076,7 +9235,7 @@ function handleBlueprintImport(file, meta = {}) {
       const geoBounds =
         meta.geoBounds && typeof meta.geoBounds === 'object'
           ? meta.geoBounds
-          : computeGeoBounds(affineMatrix, w, h, 'PLAN');
+          : computeGeoBounds(affineMatrix, w, h, planCRS);
 
       doc.background = {
         dataUrl: finalDataUrl,
@@ -9084,6 +9243,8 @@ function handleBlueprintImport(file, meta = {}) {
         y: affineMatrix[5],
         scale: Math.hypot(affineMatrix[0], affineMatrix[1]),
         affineMatrix,
+        matrixCRS: 'PLAN',
+        worldfileParams: parsedWld || null,
         geoBounds,
         worldfileCRS: sourceCRS,
         opacity: meta.opacity ?? 0.5,
