@@ -1024,6 +1024,11 @@ test('App integration: loadGISSubsystem, #gis-crs switching, and fit() with 0 ro
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
   };
+  Object.defineProperty(globalThis, 'navigator', {
+    value: globalThis.window.navigator,
+    configurable: true,
+    writable: true,
+  });
   globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
   globalThis.ResizeObserver = class {
     observe() {}
