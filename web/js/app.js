@@ -129,6 +129,17 @@ import {
   ensureSpatialIndex,
 } from './gisBridge.js';
 import {
+  GOOGLE_MAPS_API_KEY_STORAGE,
+  getGoogleMapsApiKey,
+  setGoogleMapsApiKey,
+  clearGoogleMapsApiKey,
+  geocodeLocation,
+  fetchLiveElevationGrid,
+  fetchLiveParcelGeoJSON,
+  stitchMapPresetTiles,
+  fetchGoogleSatelliteBlueprint,
+} from './gisClient.js';
+import {
   buildMultiLevel,
   TEMPLATES,
   TEMPLATE_BY_ID,
@@ -7491,6 +7502,37 @@ function updateElevationIntervalLabel(unit) {
   }
 }
 
+function syncGoogleApiKeyInputs(nextKey = null) {
+  const key = nextKey !== null ? setGoogleMapsApiKey(nextKey) : getGoogleMapsApiKey();
+  const gisKeyInput = $('#gis-google-api-key');
+  if (gisKeyInput && gisKeyInput.value !== key) {
+    gisKeyInput.value = key;
+  }
+  const elevKeyInput = $('#elevation-google-key');
+  if (elevKeyInput && elevKeyInput.value !== key) {
+    elevKeyInput.value = key;
+  }
+  return key;
+}
+
+function updateDocCrsOrigin(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  doc.crs = {
+    ...(doc.crs && typeof doc.crs === 'object' ? doc.crs : { epsg: 'EPSG:4326' }),
+    epsg: doc.crs?.epsg || 'EPSG:4326',
+    origin: { latitude: lat, longitude: lon },
+  };
+}
+
+function formatDocOriginQuery() {
+  const origin = doc?.crs?.origin;
+  if (!origin) return '';
+  const lat = Number(origin.latitude ?? origin.lat ?? (Array.isArray(origin) ? origin[1] : NaN));
+  const lon = Number(origin.longitude ?? origin.lon ?? (Array.isArray(origin) ? origin[0] : NaN));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
 function syncElevationDialog(grid) {
   const unit = normalizeElevationUnit(grid?.elevationUnit);
   const unitEl = $('#elevation-unit');
@@ -7499,6 +7541,8 @@ function syncElevationDialog(grid) {
   const slopeEl = $('#elevation-slope-percent');
   const dirEl = $('#elevation-slope-direction');
   const visibleEl = $('#elevation-visible');
+  const queryEl = $('#elevation-location-query');
+  const providerEl = $('#elevation-provider');
 
   if (unitEl) unitEl.value = unit;
   if (intervalEl) intervalEl.value = String(grid?.contourInterval ?? 1.0);
@@ -7506,6 +7550,13 @@ function syncElevationDialog(grid) {
   if (slopeEl) slopeEl.value = String(sanitizeSlopePercent(grid?.targetSlopePercent ?? 0));
   if (dirEl) dirEl.value = String(sanitizeSlopeDirection(grid?.slopeDirectionDeg ?? 0));
   if (visibleEl) visibleEl.checked = grid ? grid.visible !== false : true;
+  if (queryEl && !queryEl.value) {
+    queryEl.value = formatDocOriginQuery();
+  }
+  if (providerEl && grid?.source === 'google-elevation') {
+    providerEl.value = 'google';
+  }
+  syncGoogleApiKeyInputs();
   updateElevationIntervalLabel(unit);
 }
 
@@ -7513,15 +7564,106 @@ $('#elevation-unit')?.addEventListener('change', (e) => {
   updateElevationIntervalLabel(e.target.value);
 });
 
+$('#elevation-google-key')?.addEventListener('change', (e) => {
+  syncGoogleApiKeyInputs(e.target?.value ?? '');
+});
+
+$('#btn-upload-elevation-file')?.addEventListener('click', () => {
+  $('#elevation-file')?.click();
+});
+
+export async function fetchTerrainFromDialog(options = {}) {
+  const statusEl = $('#elevation-fetch-status');
+  const setStatus = (msg) => {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.hidden = !msg;
+  };
+
+  try {
+    const keyInputVal = $('#elevation-google-key')?.value;
+    if (typeof keyInputVal === 'string' && keyInputVal.trim()) {
+      syncGoogleApiKeyInputs(keyInputVal);
+    }
+    const apiKey = options.apiKey ?? getGoogleMapsApiKey();
+    const provider = options.provider ?? $('#elevation-provider')?.value ?? 'open';
+    const rawQuery = options.query ?? $('#elevation-location-query')?.value ?? '';
+    const query = rawQuery.trim() || formatDocOriginQuery();
+
+    const unit = normalizeElevationUnit(
+      options.elevationUnit ?? $('#elevation-unit')?.value ?? 'm'
+    );
+    const rawInterval = parseFloat($('#elevation-contour-interval')?.value ?? '');
+    const contourInterval = Number.isFinite(rawInterval)
+      ? Math.max(0.1, Math.min(50, rawInterval))
+      : 1.0;
+    const rawScale = parseFloat($('#elevation-vertical-scale')?.value ?? '');
+    const verticalScale = Number.isFinite(rawScale) ? Math.max(0.1, Math.min(10, rawScale)) : 1.0;
+    const slopePercent = sanitizeSlopePercent($('#elevation-slope-percent')?.value ?? 0);
+    const directionDegrees = sanitizeSlopeDirection($('#elevation-slope-direction')?.value ?? 0);
+    const visible = $('#elevation-visible')?.checked !== false;
+
+    setStatus('Fetching live terrain elevation grid…');
+
+    const { grid, geocodeResult, geoBounds } = await fetchLiveElevationGrid({
+      query,
+      origin: doc.crs?.origin,
+      geoBounds: query ? null : doc.site?.geoBounds || null,
+      provider,
+      apiKey,
+      elevationUnit: unit,
+      contourInterval,
+      verticalScale,
+      planBounds: { minX: 50, maxX: 1150, minY: 50, maxY: 850 },
+      ...options,
+    });
+
+    if (geocodeResult) {
+      updateDocCrsOrigin(geocodeResult.lat, geocodeResult.lon);
+    }
+    grid.visible = visible;
+    if (slopePercent > 0) {
+      grid.applyGradedSlope({
+        slopePercent,
+        directionDegrees,
+        unitScale: unit === 'ft' ? 1 / 12 : 0.0254,
+      });
+    }
+
+    doc.elevationGrid = grid;
+    doc._cachedContours = await computeContoursAsync(grid);
+    syncElevationDialog(grid);
+    hist.push(doc, 'Fetch Live Terrain');
+    globalThis.window?.__scene3d?.update();
+    redraw();
+    persist();
+    setStatus(
+      `Loaded ${grid.width}x${grid.height} terrain grid (${grid.provider || 'Open Terrain'}, ${doc._cachedContours.length} contour levels).`
+    );
+    toast(`Fetched live terrain elevation (${grid.width}x${grid.height}).`);
+    return { grid, contours: doc._cachedContours, geocodeResult, geoBounds };
+  } catch (err) {
+    setStatus(`Terrain fetch failed: ${err.message}`);
+    toast(`Failed to fetch live terrain: ${err.message}`, true);
+    throw err;
+  }
+}
+
+$('#btn-fetch-elevation')?.addEventListener('click', () => {
+  fetchTerrainFromDialog().catch(() => {});
+});
+
 $('#import-elevation')?.addEventListener('click', (e) => {
-  if (doc.elevationGrid) {
+  const dlg = $('#dlg-elevation');
+  if (dlg) {
     syncElevationDialog(doc.elevationGrid);
-    const dlg = $('#dlg-elevation');
-    if (dlg) {
-      const returnFocusEl = e?.currentTarget || document.activeElement;
+    const returnFocusEl = e?.currentTarget || document.activeElement;
+    if (typeof dlg.showModal === 'function') {
       dlg.showModal();
       const cleanup = trapFocus(dlg, returnFocusEl);
       dlg.addEventListener('close', () => cleanup(), { once: true });
+    } else {
+      dlg.setAttribute('open', '');
     }
   } else {
     $('#elevation-file')?.click();
@@ -8340,6 +8482,27 @@ if (typeof document !== 'undefined') {
   $('#gis-close')?.addEventListener('click', closeGISDialog);
   $('#gis-done')?.addEventListener('click', closeGISDialog);
 
+  $('#gis-google-api-key')?.addEventListener('change', (e) => {
+    const val = e.detail?.value ?? e.target?.value ?? '';
+    syncGoogleApiKeyInputs(val);
+  });
+
+  $('#gis-preview-coords')?.addEventListener('click', () => {
+    previewGISLocation().catch(() => {});
+  });
+
+  $('#gis-fetch-live')?.addEventListener('click', () => {
+    importLiveGISParcels().catch(() => {});
+  });
+
+  $('#gis-import-site-all')?.addEventListener('click', () => {
+    importLiveSiteParcelsAndContours().catch(() => {});
+  });
+
+  $('#gis-fetch-google-satellite')?.addEventListener('click', () => {
+    importGoogleSatelliteSite().catch(() => {});
+  });
+
   $('#gis-load-sample')?.addEventListener('click', () => {
     loadGISSubsystem(SAMPLE_MUNICIPAL_GIS);
     toast('Sample municipal GIS lot loaded successfully.');
@@ -8377,6 +8540,12 @@ if (typeof document !== 'undefined') {
   });
   document.querySelector('label[for="gis-map-preset"]')?.addEventListener('click', () => {
     $('#gis-map-preset')?.focus();
+  });
+  document.querySelector('label[for="gis-search-query"]')?.addEventListener('click', () => {
+    $('#gis-search-query')?.focus();
+  });
+  document.querySelector('label[for="gis-google-api-key"]')?.addEventListener('click', () => {
+    $('#gis-google-api-key')?.focus();
   });
 }
 
@@ -8447,9 +8616,236 @@ export function setGISSegmentSetback(segmentId, setbackDistance) {
   return doc.site;
 }
 
+function renderGISGeocodePreview(result, errorMessage = null) {
+  const previewEl = $('#gis-geocode-preview');
+  if (!previewEl) return;
+  if (errorMessage) {
+    previewEl.textContent = errorMessage;
+    previewEl.hidden = false;
+    return;
+  }
+  if (!result) {
+    previewEl.textContent = '';
+    previewEl.hidden = true;
+    return;
+  }
+  previewEl.textContent = `Matched: ${result.displayName} (${result.lat.toFixed(5)}, ${result.lon.toFixed(5)}) via ${result.provider || 'Geocoder'}`;
+  previewEl.hidden = false;
+}
+
+export async function previewGISLocation(queryOverride = null, options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const rawQuery = queryOverride ?? $('#gis-search-query')?.value ?? '';
+  const query = rawQuery.trim() || formatDocOriginQuery();
+  try {
+    const result = await geocodeLocation(query, {
+      apiKey: options.apiKey ?? getGoogleMapsApiKey(),
+      ...options,
+    });
+    updateDocCrsOrigin(result.lat, result.lon);
+    renderGISGeocodePreview(result);
+    persist();
+    redraw();
+    return result;
+  } catch (err) {
+    renderGISGeocodePreview(null, `Location lookup failed: ${err.message}`);
+    toast(`Geocoding failed: ${err.message}`, true);
+    throw err;
+  }
+}
+
+export async function importLiveGISParcels(options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const rawQuery = options.query ?? $('#gis-search-query')?.value ?? '';
+  const query = rawQuery.trim();
+
+  try {
+    const { geojson, geocodeResult, geoBounds } = await fetchLiveParcelGeoJSON({
+      query,
+      origin: doc.crs?.origin,
+      apiKey: options.apiKey ?? getGoogleMapsApiKey(),
+      ...options,
+    });
+    if (geocodeResult) {
+      updateDocCrsOrigin(geocodeResult.lat, geocodeResult.lon);
+      renderGISGeocodePreview(geocodeResult);
+    }
+    const site = loadGISSubsystem(geojson, {
+      crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+      attributionText: geojson.metadata?.attributionText || '© OpenStreetMap contributors',
+      provider: geojson.metadata?.provider || 'OpenStreetMap / Overpass API',
+      licenseUrl: geojson.metadata?.licenseUrl || 'https://www.openstreetmap.org/copyright',
+      geoBounds,
+    });
+    toast(`Imported ${geojson.features?.length || 0} live parcel & footprint polygons.`);
+    return { site, geojson, geocodeResult, geoBounds };
+  } catch (err) {
+    renderGISGeocodePreview(null, `Parcel import failed: ${err.message}`);
+    toast(`Live parcel import failed: ${err.message}`, true);
+    throw err;
+  }
+}
+
+export async function importLiveSiteParcelsAndContours(options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const apiKey = options.apiKey ?? getGoogleMapsApiKey();
+  const rawQuery = options.query ?? $('#gis-search-query')?.value ?? '';
+  const query = rawQuery.trim() || formatDocOriginQuery();
+
+  try {
+    const geocodeResult = query ? await geocodeLocation(query, { ...options, apiKey }) : null;
+    if (geocodeResult) {
+      updateDocCrsOrigin(geocodeResult.lat, geocodeResult.lon);
+      renderGISGeocodePreview(geocodeResult);
+    }
+    const sharedBounds = geocodeResult?.boundingBox || options.boundingBox || null;
+    const [parcelRes, elevRes] = await Promise.all([
+      fetchLiveParcelGeoJSON({
+        ...options,
+        query: '',
+        boundingBox: sharedBounds,
+        origin: doc.crs?.origin,
+        apiKey,
+      }),
+      fetchLiveElevationGrid({
+        ...options,
+        query: '',
+        boundingBox: sharedBounds,
+        origin: doc.crs?.origin,
+        apiKey,
+        planBounds: { minX: 50, maxX: 1150, minY: 50, maxY: 850 },
+      }),
+    ]);
+
+    const site = loadGISSubsystem(parcelRes.geojson, {
+      crs: options.crs || $('#gis-crs')?.value || 'EPSG:4326',
+      attributionText:
+        parcelRes.geojson.metadata?.attributionText || '© OpenStreetMap contributors',
+      provider: parcelRes.geojson.metadata?.provider || 'OpenStreetMap / Overpass API',
+      licenseUrl:
+        parcelRes.geojson.metadata?.licenseUrl || 'https://www.openstreetmap.org/copyright',
+      geoBounds: parcelRes.geoBounds,
+    });
+
+    doc.elevationGrid = elevRes.grid;
+    doc._cachedContours = await computeContoursAsync(elevRes.grid);
+    syncElevationDialog(elevRes.grid);
+    globalThis.window?.__scene3d?.update();
+    persist();
+    refresh();
+    toast('Imported aligned site parcel boundaries and topographic contours.');
+    return {
+      site,
+      elevationGrid: doc.elevationGrid,
+      contours: doc._cachedContours,
+      geocodeResult,
+      geoBounds: parcelRes.geoBounds,
+    };
+  } catch (err) {
+    renderGISGeocodePreview(null, `Site import failed: ${err.message}`);
+    toast(`Failed to import site parcels & contours: ${err.message}`, true);
+    throw err;
+  }
+}
+
+export async function importGoogleSatelliteSite(options = {}) {
+  const keyInput = $('#gis-google-api-key')?.value;
+  if (typeof keyInput === 'string' && keyInput.trim()) {
+    syncGoogleApiKeyInputs(keyInput);
+  }
+  const apiKey = (options.apiKey ?? getGoogleMapsApiKey()).trim();
+
+  if (M.isCustomBlueprintBackground(doc.background) && !options.skipConfirm) {
+    const confirmFn = options.confirmFn || confirmDialog;
+    const confirmed = await confirmFn({
+      title: 'Replace Custom Blueprint?',
+      message: 'Replace your uploaded custom blueprint with Google Satellite imagery?',
+      confirmLabel: 'Replace Blueprint',
+      cancelLabel: 'Keep Blueprint',
+      danger: true,
+    });
+    if (!confirmed) return doc.background;
+  }
+
+  try {
+    const rawQuery = options.query ?? $('#gis-search-query')?.value ?? '';
+    const sat = await fetchGoogleSatelliteBlueprint({
+      ...options,
+      query: rawQuery.trim(),
+      origin: doc.crs?.origin,
+      apiKey,
+      targetPlanBounds: { x: 50, y: 50, w: 1100, h: 800 },
+    });
+
+    if (sat.geocodeResult) {
+      updateDocCrsOrigin(sat.geocodeResult.lat, sat.geocodeResult.lon);
+      renderGISGeocodePreview(sat.geocodeResult);
+    }
+
+    doc.background = {
+      dataUrl: sat.dataUrl,
+      x: sat.x,
+      y: sat.y,
+      scale: sat.scale,
+      affineMatrix: sat.affineMatrix,
+      geoBounds: sat.geoBounds,
+      worldfileCRS: 'EPSG:4326',
+      opacity: doc.background?.opacity ?? 0.65,
+      visible: true,
+      locked: false,
+      width: sat.width,
+      height: sat.height,
+      attributionText: sat.attributionText,
+      provider: sat.provider,
+      licenseUrl: sat.licenseUrl,
+      logoUrl: null,
+      isGeospatial: true,
+      presetKey: sat.presetKey,
+    };
+
+    if (options.includeElevation) {
+      const elevRes = await fetchLiveElevationGrid({
+        ...options,
+        boundingBox: sat.geoBounds,
+        origin: doc.crs?.origin,
+        provider: 'google',
+        apiKey,
+        planBounds: { minX: 50, maxX: 1150, minY: 50, maxY: 850 },
+      });
+      doc.elevationGrid = elevRes.grid;
+      doc._cachedContours = await computeContoursAsync(elevRes.grid);
+      syncElevationDialog(elevRes.grid);
+      globalThis.window?.__scene3d?.update();
+    }
+
+    hist.push(doc, 'Import Google Satellite Imagery');
+    persist();
+    refresh();
+    toast('Imported Google Satellite imagery.');
+    return doc.background;
+  } catch (err) {
+    toast(`Google Satellite import failed: ${err.message}`, true);
+    throw err;
+  }
+}
+
 function openGISDialog() {
   const dlg = $('#dlg-gis');
   if (!dlg) return;
+  syncGoogleApiKeyInputs();
+  const searchInput = $('#gis-search-query');
+  if (searchInput && !searchInput.value) {
+    searchInput.value = formatDocOriginQuery();
+  }
   const gisCrsSelect = $('#gis-crs');
   if (gisCrsSelect && doc.site?.crs) {
     const opts =
@@ -9110,24 +9506,83 @@ function handleBlueprintImport(file, meta = {}) {
   reader.readAsDataURL(file);
 }
 
-function handleMapPresetSelect(presetKey) {
+let mapPresetRequestSeq = 0;
+
+function syncMapPresetSelectors(value) {
+  const bgSel = $('#bg-map-preset');
+  if (bgSel && bgSel.value !== value) bgSel.value = value;
+  const gisSel = $('#gis-map-preset');
+  if (gisSel && gisSel.value !== value) gisSel.value = value;
+}
+
+export async function handleMapPresetSelect(presetKey, options = {}) {
   if (!presetKey) {
+    mapPresetRequestSeq++;
     if (doc.background) {
-      doc.background.presetKey = null;
+      M.applyMapPreset(doc, '');
       hist.push(doc, 'Clear Map Preset');
       persist();
       refresh();
     }
-    return;
+    syncMapPresetSelectors('');
+    return doc.background || null;
   }
+
+  if (M.isCustomBlueprintBackground(doc.background) && !options.skipConfirm) {
+    const confirmFn = options.confirmFn || confirmDialog;
+    const confirmed = await confirmFn({
+      title: 'Replace Custom Blueprint?',
+      message: 'Replace your uploaded custom blueprint with geospatial map preset imagery?',
+      confirmLabel: 'Replace Blueprint',
+      cancelLabel: 'Keep Blueprint',
+      danger: true,
+    });
+    if (!confirmed) {
+      syncMapPresetSelectors('');
+      return doc.background;
+    }
+  }
+
   const bg = M.applyMapPreset(doc, presetKey);
-  if (bg) {
-    const preset = M.getMapPreset(presetKey);
-    hist.push(doc, `Apply Map Preset: ${preset ? preset.name : presetKey}`);
-    persist();
-    refresh();
-    toast(`Geospatial map provider preset applied: ${preset ? preset.name : presetKey}`);
+  if (!bg) return null;
+
+  const preset = M.getMapPreset(presetKey);
+  syncMapPresetSelectors(bg.presetKey || '');
+  hist.push(doc, `Apply Map Preset: ${preset ? preset.name : presetKey}`);
+  persist();
+  refresh();
+  toast(`Geospatial map provider preset applied: ${preset ? preset.name : presetKey}`);
+
+  const requestSeq = ++mapPresetRequestSeq;
+  try {
+    const stitched = await stitchMapPresetTiles(presetKey, {
+      origin: doc.crs?.origin,
+      targetPlanBounds: { x: 50, y: 50, w: 1100, h: 800 },
+      ...options,
+    });
+    if (
+      requestSeq === mapPresetRequestSeq &&
+      doc.background &&
+      doc.background.presetKey === stitched.presetKey &&
+      !stitched.isOfflineFallback
+    ) {
+      doc.background.dataUrl = stitched.dataUrl;
+      doc.background.width = stitched.width;
+      doc.background.height = stitched.height;
+      doc.background.x = stitched.x ?? doc.background.x;
+      doc.background.y = stitched.y ?? doc.background.y;
+      doc.background.scale = stitched.scale ?? doc.background.scale;
+      doc.background.affineMatrix = stitched.affineMatrix;
+      doc.background.geoBounds = stitched.geoBounds;
+      doc.background.worldfileCRS = 'EPSG:4326';
+      persist();
+      refresh();
+    }
+  } catch {
+    // Keep offline SVG preset fallback when tile network requests fail
   }
+
+  return doc.background;
 }
 
 $('#bg-map-preset')?.addEventListener('change', (e) => {
@@ -9964,6 +10419,10 @@ function initShortcutOverlayUI() {
   }
 }
 
+export function getActiveDoc() {
+  return doc;
+}
+
 // test hook for automated browser checks
 if (typeof window !== 'undefined')
   window.__homegen = {
@@ -10052,6 +10511,7 @@ if (typeof window !== 'undefined')
     computeContoursAsync,
     ElevationGrid,
     applyElevationSettings,
+    fetchTerrainFromDialog,
     onboardingTour,
     openWelcomeWizard,
     closeWelcomeWizard,
@@ -10070,6 +10530,15 @@ if (typeof window !== 'undefined')
     openGISDialog,
     closeGISDialog,
     renderGISSegments,
+    previewGISLocation,
+    importLiveGISParcels,
+    importLiveSiteParcelsAndContours,
+    importGoogleSatelliteSite,
+    handleMapPresetSelect,
+    GOOGLE_MAPS_API_KEY_STORAGE,
+    getGoogleMapsApiKey,
+    setGoogleMapsApiKey,
+    clearGoogleMapsApiKey,
     SAMPLE_MUNICIPAL_GIS,
     PLAN_TIER_RANKS,
     getCurrentPlanTier,
