@@ -1345,9 +1345,49 @@ export function deserialize(text) {
     s.crs.epsg = normalizeEPSGCode(s.crs.epsg);
     s.crs.proj4 = s.crs.proj4 || getEPSGDefinition(s.crs.epsg) || fallback.proj4;
     s.crs.wkt = s.crs.wkt || fallback.wkt;
-    s.crs.origin = s.crs.origin || fallback.origin;
+    s.crs.origin = s.crs.origin || s.site?.origin || fallback.origin;
     s.crs.units = s.crs.units || fallback.units;
     s.crs.geojson = s.crs.geojson || fallback.geojson;
+  }
+  if (s.site && typeof s.site === 'object') {
+    const rawOrigin = s.site.origin;
+    let siteOrigin = null;
+    if (Array.isArray(rawOrigin) && rawOrigin.length >= 2) {
+      const lon = Number(rawOrigin[0]);
+      const lat = Number(rawOrigin[1]);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) {
+        siteOrigin = { longitude: lon, latitude: lat };
+      }
+    } else if (rawOrigin && typeof rawOrigin === 'object') {
+      const lon = Number(rawOrigin.longitude ?? rawOrigin.lon ?? rawOrigin.x);
+      const lat = Number(rawOrigin.latitude ?? rawOrigin.lat ?? rawOrigin.y);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) {
+        siteOrigin = { longitude: lon, latitude: lat };
+      }
+    }
+    const siteCrs = s.site.crs
+      ? isValidEPSGCode(s.site.crs)
+        ? normalizeEPSGCode(s.site.crs)
+        : String(s.site.crs)
+      : s.crs.epsg;
+    const siteSourceCrs = s.site.sourceCRS
+      ? isValidEPSGCode(s.site.sourceCRS)
+        ? normalizeEPSGCode(s.site.sourceCRS)
+        : String(s.site.sourceCRS)
+      : siteCrs;
+    s.site.crs = siteCrs;
+    s.site.sourceCRS = siteSourceCrs;
+    s.site.origin = siteOrigin || (s.crs?.origin ? { ...s.crs.origin } : null);
+    s.site.rawGeoJSON =
+      s.site.rawGeoJSON && typeof s.site.rawGeoJSON === 'object' ? s.site.rawGeoJSON : null;
+    s.site.features = Array.isArray(s.site.features) ? s.site.features : [];
+    s.site.segments = Array.isArray(s.site.segments) ? s.site.segments : [];
+    s.site.layers = Array.isArray(s.site.layers) ? s.site.layers : [];
+    if (s.site.spatialIndex && typeof s.site.spatialIndex.querySetbackViolations !== 'function') {
+      delete s.site.spatialIndex;
+    }
+  } else {
+    s.site = null;
   }
   s.settings ||= {};
   s.settings.branding = {
