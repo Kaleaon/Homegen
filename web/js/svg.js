@@ -1,7 +1,15 @@
 // SVG exporter module for Homegen.
 // Generates CAD-compatible, structured vector SVG documents with title block, graphic scale bar, and room schedule.
 
-import { WT, WALLS, wallSeg, wallPoint, interior, floorAreaSqFt } from './geometry.js';
+import {
+  WT,
+  getRoomPoints,
+  getRoomWallKeys,
+  wallSeg,
+  wallPoint,
+  interior,
+  floorAreaSqFt,
+} from './geometry.js';
 import { ROOM_TYPES, ITEM_BY_ID, OPENING_BY_ID } from './catalog.js';
 import { getPalette } from './kthemeTokens.js';
 import { computeMarchingSquares } from './elevationEngine.js';
@@ -234,14 +242,22 @@ ${themeCssVars}
   svgParts.push('  <g id="floors">');
   svgParts.push('    <g id="floor-fills">');
   for (const r of rooms) {
-    const rx = px(r.x);
-    const ry = py(r.y);
-    const rw = pLen(r.w);
-    const rh = pLen(r.h);
+    const pts = getRoomPoints(r);
     const color = ROOM_TYPES[r.type]?.color || '#faf8f5';
-    svgParts.push(
-      `      <rect x="${rx.toFixed(2)}" y="${ry.toFixed(2)}" width="${rw.toFixed(2)}" height="${rh.toFixed(2)}" fill="${color}" stroke="#d0cbc0" stroke-width="0.5" />`
-    );
+    if (pts.length === 4) {
+      const rx = px(r.x);
+      const ry = py(r.y);
+      const rw = pLen(r.w);
+      const rh = pLen(r.h);
+      svgParts.push(
+        `      <rect x="${rx.toFixed(2)}" y="${ry.toFixed(2)}" width="${rw.toFixed(2)}" height="${rh.toFixed(2)}" fill="${color}" stroke="#d0cbc0" stroke-width="0.5" />`
+      );
+    } else {
+      const polyPts = pts.map((p) => `${px(p.x).toFixed(2)},${py(p.y).toFixed(2)}`).join(' ');
+      svgParts.push(
+        `      <polygon points="${polyPts}" fill="${color}" stroke="#d0cbc0" stroke-width="0.5" />`
+      );
+    }
 
     if (r.type === 'stairs') {
       const ir = interior(r);
@@ -268,31 +284,55 @@ ${themeCssVars}
   // --- Group 2: Walls ---
   svgParts.push('  <g id="walls">');
   for (const r of rooms) {
-    for (const wall of WALLS) {
+    for (const wall of getRoomWallKeys(r)) {
       const s = wallSeg(r, wall);
-      const horizontal = s.dx === 1;
       const len = s.len;
-      const side = horizontal ? s.ny : s.nx;
-      const inner = side > 0 ? [0, WT / 2] : [-WT / 2, 0];
-      const outer = side > 0 ? [-WT / 2, 0] : [0, WT / 2];
+      const isHorizontal = Math.abs(s.dy) < 1e-6;
+      const isVertical = Math.abs(s.dx) < 1e-6;
+      if (isHorizontal || isVertical) {
+        const side = isHorizontal ? s.ny : s.nx;
+        const inner = side > 0 ? [0, WT / 2] : [-WT / 2, 0];
+        const outer = side > 0 ? [-WT / 2, 0] : [0, WT / 2];
+        const minAlongX = Math.min(s.ax, s.ax + s.dx * len);
+        const minAlongY = Math.min(s.ay, s.ay + s.dy * len);
 
-      // Structure rect
-      const outAx = px(s.ax + (horizontal ? -WT / 2 : outer[0]));
-      const outAy = py(s.ay + (horizontal ? outer[0] : -WT / 2));
-      const outW = pLen(horizontal ? len + WT : WT / 2);
-      const outH = pLen(horizontal ? WT / 2 : len + WT);
-      svgParts.push(
-        `    <rect class="wall-struct" x="${outAx.toFixed(2)}" y="${outAy.toFixed(2)}" width="${outW.toFixed(2)}" height="${outH.toFixed(2)}"/>`
-      );
+        // Structure rect
+        const outAx = px(isHorizontal ? minAlongX - WT / 2 : s.ax + outer[0]);
+        const outAy = py(isHorizontal ? s.ay + outer[0] : minAlongY - WT / 2);
+        const outW = pLen(isHorizontal ? len + WT : WT / 2);
+        const outH = pLen(isHorizontal ? WT / 2 : len + WT);
+        svgParts.push(
+          `    <rect class="wall-struct" x="${outAx.toFixed(2)}" y="${outAy.toFixed(2)}" width="${outW.toFixed(2)}" height="${outH.toFixed(2)}"/>`
+        );
 
-      // Finish rect
-      const inAx = px(s.ax + (horizontal ? -WT / 2 : inner[0]));
-      const inAy = py(s.ay + (horizontal ? inner[0] : -WT / 2));
-      const inW = pLen(horizontal ? len + WT : WT / 2);
-      const inH = pLen(horizontal ? WT / 2 : len + WT);
-      svgParts.push(
-        `    <rect class="wall-finish" x="${inAx.toFixed(2)}" y="${inAy.toFixed(2)}" width="${inW.toFixed(2)}" height="${inH.toFixed(2)}"/>`
-      );
+        // Finish rect
+        const inAx = px(isHorizontal ? minAlongX - WT / 2 : s.ax + inner[0]);
+        const inAy = py(isHorizontal ? s.ay + inner[0] : minAlongY - WT / 2);
+        const inW = pLen(isHorizontal ? len + WT : WT / 2);
+        const inH = pLen(isHorizontal ? WT / 2 : len + WT);
+        svgParts.push(
+          `    <rect class="wall-finish" x="${inAx.toFixed(2)}" y="${inAy.toFixed(2)}" width="${inW.toFixed(2)}" height="${inH.toFixed(2)}"/>`
+        );
+      } else {
+        const bandQuad = (d0, d1) => {
+          const p0x = s.ax - (s.dx * WT) / 2 + s.nx * d0;
+          const p0y = s.ay - (s.dy * WT) / 2 + s.ny * d0;
+          const p1x = s.ax + s.dx * (len + WT / 2) + s.nx * d0;
+          const p1y = s.ay + s.dy * (len + WT / 2) + s.ny * d0;
+          const p2x = s.ax + s.dx * (len + WT / 2) + s.nx * d1;
+          const p2y = s.ay + s.dy * (len + WT / 2) + s.ny * d1;
+          const p3x = s.ax - (s.dx * WT) / 2 + s.nx * d1;
+          const p3y = s.ay - (s.dy * WT) / 2 + s.ny * d1;
+          return [
+            `${px(p0x).toFixed(2)},${py(p0y).toFixed(2)}`,
+            `${px(p1x).toFixed(2)},${py(p1y).toFixed(2)}`,
+            `${px(p2x).toFixed(2)},${py(p2y).toFixed(2)}`,
+            `${px(p3x).toFixed(2)},${py(p3y).toFixed(2)}`,
+          ].join(' ');
+        };
+        svgParts.push(`    <polygon class="wall-struct" points="${bandQuad(-WT / 2, 0)}"/>`);
+        svgParts.push(`    <polygon class="wall-finish" points="${bandQuad(0, WT / 2)}"/>`);
+      }
     }
   }
   svgParts.push('  </g>');

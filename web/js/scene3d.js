@@ -5,7 +5,6 @@ import { RoomEnvironment } from '#three/addons/RoomEnvironment.js';
 import { HDRLoader } from '#three/addons/HDRLoader.js';
 import {
   WT,
-  WALLS,
   wallSeg,
   wallLength,
   wallNeighbors,
@@ -15,6 +14,7 @@ import {
   csgExteriorCladdingIntervals,
   lv,
   getRoomPoints,
+  getRoomWallKeys,
   getRoomBoundingBox,
   resolveWallIndex,
   getArcParameters,
@@ -42,7 +42,7 @@ import {
 import { buildWindow3DMesh } from './windowBuilder.js';
 import { buildDoor3DMesh } from './doorBuilder.js';
 import { getTextureUrl } from './textureStore.js';
-import { getWallUV, moveRoom } from './model.js';
+import { getWallFinish, getWallUV, getWallAssemblyOverrides, moveRoom } from './model.js';
 import { normalizeElevationUnit } from './elevationEngine.js';
 import { getToken, subscribe } from './kthemeTokens.js';
 import { rateLimitedFetch } from './rateLimiter.js';
@@ -1507,7 +1507,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
       // Walls & Openings (keyed by `${room.id}:wall:${wall}`)
       if (showWalls) {
-        const wallKeys = pts.length === 4 ? WALLS : pts.map((_, i) => i);
+        const wallKeys = getRoomWallKeys(room);
         for (const wall of wallKeys) {
           const wallKey = `${room.id}:wall:${wall}`;
           activeKeys.add(wallKey);
@@ -1521,15 +1521,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const isDoor = o.kind === 'door' || OPENING_BY_ID[o.type]?.kind === 'door';
             return isDoor ? resolveDoorStyle(o) : null;
           });
-          const finishId = room.walls[wall] || room.walls[resolveWallIndex(wall)];
+          const finishId = getWallFinish(room, wall);
           let extFinId = room.cladding || room.exteriorCladding;
-          if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
-            extFinId = room.walls[wall];
+          if (!extFinId && finishId && WALL_BY_ID[finishId]?.exterior) {
+            extFinId = finishId;
           }
           const extFin = getCladdingMaterial(extFinId);
           extFinId = extFin.id || extFinId || 'cladding_siding_white';
-          const wallOverrides = room.wallAssemblyOverrides?.[wall] || null;
-          const wallAssembly = resolveWallAssembly(finishId, extFinId, wallOverrides || {});
+          const resolvedOverrides = getWallAssemblyOverrides(room, wall);
+          const wallOverrides =
+            Object.keys(resolvedOverrides).length > 0 ? resolvedOverrides : null;
+          const wallAssembly = resolveWallAssembly(finishId, extFinId, resolvedOverrides);
           const wallSig = JSON.stringify({
             pts,
             bulge: getWallBulge(room, wall),
@@ -1596,17 +1598,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
             const t = it.offset;
             const defaultWallZ = def.shape === 'switch' ? 48 : 16;
             const y = Number.isFinite(it.z) ? it.z : defaultWallZ;
-            const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
+            const finishId = getWallFinish(room, it.wall);
             let extFinId = room.cladding || room.exteriorCladding;
-            if (!extFinId && room.walls[it.wall] && WALL_BY_ID[room.walls[it.wall]]?.exterior) {
-              extFinId = room.walls[it.wall];
+            if (!extFinId && finishId && WALL_BY_ID[finishId]?.exterior) {
+              extFinId = finishId;
             }
             const extFin = getCladdingMaterial(extFinId);
             extFinId = extFin.id || extFinId || 'cladding_siding_white';
             const wAssembly = resolveWallAssembly(
               finishId,
               extFinId,
-              room.wallAssemblyOverrides?.[it.wall]
+              getWallAssemblyOverrides(room, it.wall)
             );
             const itemDepthOff = wAssembly.totalThickness / 2 + 0.3;
             itemNode.position.set(
@@ -2295,7 +2297,7 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
 
   function buildWall(group, state, room, wall, e, H) {
     const len = wallLength(room, wall);
-    const finishId = room.walls[wall] || room.walls[resolveWallIndex(wall)];
+    const finishId = getWallFinish(room, wall);
     const fin = WALL_BY_ID[finishId] || WALL_BY_ID.paint_white;
     const wallUV = getWallUV(room, wall);
     const base = plain('#efece4', 0.9);
@@ -2307,14 +2309,14 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
     });
 
     let extFinId = room.cladding || room.exteriorCladding;
-    if (!extFinId && room.walls[wall] && WALL_BY_ID[room.walls[wall]]?.exterior) {
-      extFinId = room.walls[wall];
+    if (!extFinId && finishId && WALL_BY_ID[finishId]?.exterior) {
+      extFinId = finishId;
     }
     const extFin = getCladdingMaterial(extFinId);
     extFinId = extFin.id || extFinId || 'cladding_siding_white';
     const sidingMat = finishMaterial(extFin, len, room.ceiling, extFinId, 0.85);
 
-    const wallOverrides = room.wallAssemblyOverrides?.[wall];
+    const wallOverrides = getWallAssemblyOverrides(room, wall);
     const assembly = resolveWallAssembly(finishId, extFinId, wallOverrides);
     const wallThick = assembly.totalThickness;
 
@@ -2644,17 +2646,17 @@ export function createScene3D(canvas, getState, getLevel, callbacks = {}) {
       const t = it.offset;
       const defaultWallZ = def.shape === 'switch' ? 48 : 16;
       const y = Number.isFinite(it.z) ? it.z : defaultWallZ;
-      const finishId = room.walls[it.wall] || room.walls[resolveWallIndex(it.wall)];
+      const finishId = getWallFinish(room, it.wall);
       let extFinId = room.cladding || room.exteriorCladding;
-      if (!extFinId && room.walls[it.wall] && WALL_BY_ID[room.walls[it.wall]]?.exterior) {
-        extFinId = room.walls[it.wall];
+      if (!extFinId && finishId && WALL_BY_ID[finishId]?.exterior) {
+        extFinId = finishId;
       }
       const extFin = getCladdingMaterial(extFinId);
       extFinId = extFin.id || extFinId || 'cladding_siding_white';
       const wAssembly = resolveWallAssembly(
         finishId,
         extFinId,
-        room.wallAssemblyOverrides?.[it.wall]
+        getWallAssemblyOverrides(room, it.wall)
       );
       const itemDepthOff = wAssembly.totalThickness / 2 + 0.3;
       const m = wallAlignedBox(room, it.wall, 2.8, 4.5, 0.6, plain('#f5f3ee', 0.5));
