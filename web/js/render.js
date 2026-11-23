@@ -1,7 +1,6 @@
 // Canvas plan renderer.
 import {
   WT,
-  WALLS,
   LEGACY_WALL_NAMES,
   wallSeg,
   wallLength,
@@ -10,6 +9,7 @@ import {
   footprint,
   floorAreaSqFt,
   getRoomPoints,
+  getRoomWallKeys,
   getWallBulge,
   getArcParameters,
   tessellateArc,
@@ -2120,7 +2120,7 @@ function findDiffTarget(state, id) {
   if (typeof id === 'string' && id.includes(':')) {
     const [roomId, wallName] = id.split(':');
     const room = state.rooms.find((r) => r.id === roomId);
-    if (room && WALLS.includes(wallName)) {
+    if (room && getRoomWallKeys(room).map(String).includes(wallName)) {
       const a = wallPoint(room, wallName, 0, 0);
       const b = wallPoint(room, wallName, wallLength(room, wallName), 0);
       return {

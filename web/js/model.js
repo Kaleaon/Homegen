@@ -5,7 +5,9 @@ import {
   EPS,
   WALLS,
   LEGACY_WALL_NAMES,
+  LEGACY_WALL_MAP,
   resolveWallIndex,
+  getRoomWallKeys,
   getWallBulge as geomGetWallBulge,
   snap,
   wallSeg,
@@ -17,6 +19,7 @@ import {
   lv,
   getRoomPoints,
   getRoomBoundingBox,
+  pointInPolygon,
   polygonArea,
   computeGeoBounds,
 } from './geometry.js';
@@ -411,13 +414,13 @@ export const DEFAULT_UV_TRANSFORM = {
   offsetV: 0,
 };
 
-export function createDefaultWallUV() {
-  return {
-    N: { ...DEFAULT_UV_TRANSFORM },
-    E: { ...DEFAULT_UV_TRANSFORM },
-    S: { ...DEFAULT_UV_TRANSFORM },
-    W: { ...DEFAULT_UV_TRANSFORM },
-  };
+export function createDefaultWallUV(room = null) {
+  const keys = room ? getRoomWallKeys(room) : WALLS;
+  const out = {};
+  for (const w of keys) {
+    out[w] = { ...DEFAULT_UV_TRANSFORM };
+  }
+  return out;
 }
 
 export function createMeshGraphFromPolygon(points, baseZ = 0, zOffsets = null) {
@@ -503,6 +506,24 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
           { x, y: y + h },
         ];
   const bbox = getRoomBoundingBox(points);
+  const wallKeys = getRoomWallKeys({ points });
+  const defaultFinish = opts.wallFinish ?? 'paint_white';
+  const rawWalls = opts.walls && typeof opts.walls === 'object' ? opts.walls : {};
+  const walls = { ...rawWalls };
+  for (const w of wallKeys) {
+    if (walls[w] === undefined) {
+      walls[w] = getWallFinish({ points, walls: rawWalls }, w, defaultFinish);
+    }
+  }
+  const rawWallUV = opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : {};
+  const wallUV = { ...rawWallUV };
+  for (const w of wallKeys) {
+    if (wallUV[w] === undefined) {
+      wallUV[w] = getWallUV({ points, wallUV: rawWallUV }, w);
+    } else {
+      wallUV[w] = getWallUV({ points, wallUV }, w);
+    }
+  }
   const room = {
     id: nid(state, 'r'),
     type,
@@ -516,14 +537,8 @@ export function createRoom(state, type, x, y, w, h, opts = {}) {
     ceiling: opts.ceiling ?? 96,
     floor: opts.floor ?? 'floor_oak',
     cladding: opts.cladding ?? undefined,
-    walls: {
-      N: opts.wallFinish ?? 'paint_white',
-      E: opts.wallFinish ?? 'paint_white',
-      S: opts.wallFinish ?? 'paint_white',
-      W: opts.wallFinish ?? 'paint_white',
-      ...(opts.walls || {}),
-    },
-    wallUV: opts.wallUV ? JSON.parse(JSON.stringify(opts.wallUV)) : createDefaultWallUV(),
+    walls,
+    wallUV,
     ...(opts.wallAssemblyOverrides
       ? { wallAssemblyOverrides: JSON.parse(JSON.stringify(opts.wallAssemblyOverrides)) }
       : {}),
@@ -883,6 +898,16 @@ export function updateRoomPoints(room, points, state = null) {
   const ceilingZ = room.ceilingMesh?.VertexZArray || null;
   room.floorMesh = createMeshGraphFromPolygon(room.points, 0, floorZ);
   room.ceilingMesh = createMeshGraphFromPolygon(room.points, room.ceiling ?? 96, ceilingZ);
+  room.walls ||= {};
+  room.wallUV ||= {};
+  for (const w of getRoomWallKeys(room)) {
+    if (room.walls[w] === undefined) {
+      room.walls[w] = getWallFinish(room, w);
+    }
+    if (room.wallUV[w] === undefined) {
+      room.wallUV[w] = getWallUV(room, w);
+    }
+  }
   for (const o of room.openings) {
     const clamped = clampOpeningOffset(room, o.wall, o.offset, o.width);
     const len = wallLength(room, o.wall);
@@ -1092,10 +1117,99 @@ export function setWallBulge(room, wall, bulge, state = null) {
   return cleanBulge;
 }
 
+function isValidWallKey(wall) {
+  if (wall === undefined || wall === null || wall === '') return false;
+  if (typeof wall === 'number') return Number.isFinite(wall) && wall >= 0;
+  return typeof wall === 'string' && wall.trim() !== '';
+}
+
+function parseWallIndex(wall) {
+  if (typeof wall === 'number') {
+    return Number.isFinite(wall) && wall >= 0 ? Math.trunc(wall) : null;
+  }
+  if (typeof wall === 'string') {
+    const trimmed = wall.trim();
+    if (LEGACY_WALL_MAP[trimmed] !== undefined) return LEGACY_WALL_MAP[trimmed];
+    if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+  }
+  return null;
+}
+
+function resolveCanonicalWallKey(room, wall) {
+  if (!isValidWallKey(wall)) return null;
+  const idx = parseWallIndex(wall);
+  if (idx === null) return String(wall).trim();
+  const pts = getRoomPoints(room);
+  if (pts.length === 4 && idx < LEGACY_WALL_NAMES.length) {
+    return LEGACY_WALL_NAMES[idx];
+  }
+  return idx;
+}
+
+function getWallLookupKeys(room, wall) {
+  if (!isValidWallKey(wall)) return [];
+  const keys = [];
+  const pushKey = (k) => {
+    if (k !== undefined && k !== null && k !== '') {
+      const str = String(k);
+      if (!keys.some((existing) => String(existing) === str)) {
+        keys.push(k);
+      }
+    }
+  };
+  const canonical = resolveCanonicalWallKey(room, wall);
+  const idx = parseWallIndex(wall);
+  pushKey(wall);
+  pushKey(canonical);
+  if (idx !== null) {
+    pushKey(idx);
+    if (idx >= 0 && idx < LEGACY_WALL_NAMES.length) {
+      pushKey(LEGACY_WALL_NAMES[idx]);
+    }
+  }
+  return keys;
+}
+
+function clearNonCanonicalWallAliases(map, room, wall, canonicalKey) {
+  if (!map || typeof map !== 'object') return;
+  const canonicalStr = String(canonicalKey);
+  for (const k of getWallLookupKeys(room, wall)) {
+    if (String(k) !== canonicalStr && Object.prototype.hasOwnProperty.call(map, k)) {
+      delete map[k];
+    }
+  }
+}
+
+export function getWallFinish(room, wall, fallback = 'paint_white') {
+  if (!room || !isValidWallKey(wall)) return fallback;
+  if (!room.walls || typeof room.walls !== 'object') return fallback;
+  for (const k of getWallLookupKeys(room, wall)) {
+    const val = room.walls[k];
+    if (typeof val === 'string' && val !== '') return val;
+  }
+  return fallback;
+}
+
+export function setWallFinish(room, wall, finishId) {
+  if (!room || !isValidWallKey(wall) || !finishId) return;
+  room.walls ||= {};
+  const canonicalKey = resolveCanonicalWallKey(room, wall);
+  if (canonicalKey === null) return;
+  clearNonCanonicalWallAliases(room.walls, room, wall, canonicalKey);
+  room.walls[canonicalKey] = finishId;
+}
+
 export function getWallUV(room, wall) {
-  if (!room || !wall) return { ...DEFAULT_UV_TRANSFORM };
+  if (!room || !isValidWallKey(wall)) return { ...DEFAULT_UV_TRANSFORM };
   room.wallUV ||= {};
-  const uv = room.wallUV[wall] || {};
+  let uv = null;
+  for (const k of getWallLookupKeys(room, wall)) {
+    if (room.wallUV[k] && typeof room.wallUV[k] === 'object') {
+      uv = room.wallUV[k];
+      break;
+    }
+  }
+  uv ||= {};
   return {
     scaleU: typeof uv.scaleU === 'number' ? uv.scaleU : 1.0,
     scaleV: typeof uv.scaleV === 'number' ? uv.scaleV : 1.0,
@@ -1106,10 +1220,13 @@ export function getWallUV(room, wall) {
 }
 
 export function setWallUV(room, wall, params = {}) {
-  if (!room || !wall) return;
+  if (!room || !isValidWallKey(wall)) return;
   room.wallUV ||= {};
   const current = getWallUV(room, wall);
-  room.wallUV[wall] = {
+  const canonicalKey = resolveCanonicalWallKey(room, wall);
+  if (canonicalKey === null) return;
+  clearNonCanonicalWallAliases(room.wallUV, room, wall, canonicalKey);
+  room.wallUV[canonicalKey] = {
     scaleU: typeof params.scaleU === 'number' ? params.scaleU : current.scaleU,
     scaleV: typeof params.scaleV === 'number' ? params.scaleV : current.scaleV,
     rotation: typeof params.rotation === 'number' ? params.rotation : current.rotation,
@@ -1121,27 +1238,27 @@ export function setWallUV(room, wall, params = {}) {
 export function applyWallUV(state, params, { scope = 'single', room, wall, level = 0 } = {}) {
   const applyToRoomWall = (r, w) => setWallUV(r, w, params);
   if (scope === 'plan') {
-    for (const r of state.rooms) for (const w of WALLS) applyToRoomWall(r, w);
+    for (const r of state.rooms) for (const w of getRoomWallKeys(r)) applyToRoomWall(r, w);
   } else if (scope === 'level') {
     for (const r of state.rooms.filter((rm) => (rm.level || 0) === level))
-      for (const w of WALLS) applyToRoomWall(r, w);
+      for (const w of getRoomWallKeys(r)) applyToRoomWall(r, w);
   } else if (scope === 'room') {
-    if (room) for (const w of WALLS) applyToRoomWall(room, w);
+    if (room) for (const w of getRoomWallKeys(room)) applyToRoomWall(room, w);
   } else {
-    if (room && wall) applyToRoomWall(room, wall);
+    if (room && isValidWallKey(wall)) applyToRoomWall(room, wall);
   }
 }
 
 export function applyWallFinish(state, finishId, { scope = 'single', room, wall, level = 0 } = {}) {
   if (scope === 'plan') {
-    for (const r of state.rooms) for (const w of WALLS) r.walls[w] = finishId;
+    for (const r of state.rooms) for (const w of getRoomWallKeys(r)) setWallFinish(r, w, finishId);
   } else if (scope === 'level') {
     for (const r of state.rooms.filter((rm) => (rm.level || 0) === level))
-      for (const w of WALLS) r.walls[w] = finishId;
+      for (const w of getRoomWallKeys(r)) setWallFinish(r, w, finishId);
   } else if (scope === 'room') {
-    if (room) for (const w of WALLS) room.walls[w] = finishId;
+    if (room) for (const w of getRoomWallKeys(room)) setWallFinish(room, w, finishId);
   } else {
-    if (room && wall) room.walls[wall] = finishId;
+    if (room && isValidWallKey(wall)) setWallFinish(room, wall, finishId);
   }
 }
 
@@ -1174,21 +1291,30 @@ export function clampWallAssemblyOverrides(overrides) {
 }
 
 export function getWallAssemblyOverrides(room, wall) {
-  if (!room || wall == null || wall === '') return {};
-  const existing = room.wallAssemblyOverrides?.[wall];
-  if (!existing || typeof existing !== 'object') return {};
-  return clampWallAssemblyOverrides(existing);
+  if (!room || !isValidWallKey(wall)) return {};
+  if (!room.wallAssemblyOverrides || typeof room.wallAssemblyOverrides !== 'object') return {};
+  for (const k of getWallLookupKeys(room, wall)) {
+    const existing = room.wallAssemblyOverrides[k];
+    if (existing && typeof existing === 'object') {
+      return clampWallAssemblyOverrides(existing);
+    }
+  }
+  return {};
 }
 
 export function setWallAssemblyOverrides(room, wall, overrides) {
-  if (!room || wall == null || wall === '') return;
+  if (!room || !isValidWallKey(wall)) return;
+  const canonicalKey = resolveCanonicalWallKey(room, wall);
+  if (canonicalKey === null) return;
   const isReset =
     overrides == null ||
     overrides.reset === true ||
     (typeof overrides === 'object' && Object.keys(overrides).length === 0);
   if (isReset) {
     if (room.wallAssemblyOverrides && typeof room.wallAssemblyOverrides === 'object') {
-      delete room.wallAssemblyOverrides[wall];
+      for (const k of getWallLookupKeys(room, wall)) {
+        delete room.wallAssemblyOverrides[k];
+      }
     }
     return;
   }
@@ -1196,7 +1322,8 @@ export function setWallAssemblyOverrides(room, wall, overrides) {
   if (Object.keys(sanitized).length === 0) return;
   room.wallAssemblyOverrides ||= {};
   const current = getWallAssemblyOverrides(room, wall);
-  room.wallAssemblyOverrides[wall] = {
+  clearNonCanonicalWallAliases(room.wallAssemblyOverrides, room, wall, canonicalKey);
+  room.wallAssemblyOverrides[canonicalKey] = {
     ...current,
     ...sanitized,
   };
@@ -1207,30 +1334,26 @@ export function applyWallAssemblyOverrides(
   overrides,
   { scope = 'single', room, wall, level = 0 } = {}
 ) {
-  const getWallKeysForRoom = (r) => {
-    const pts = getRoomPoints(r);
-    return pts.length === 4 ? WALLS : [...WALLS, ...pts.map((_, i) => i)];
-  };
   if (scope === 'plan') {
     if (!state || !Array.isArray(state.rooms)) return;
     for (const r of state.rooms) {
       const target = ensureRoomCopy(state, r);
-      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+      for (const w of getRoomWallKeys(target)) setWallAssemblyOverrides(target, w, overrides);
     }
   } else if (scope === 'level') {
     if (!state || !Array.isArray(state.rooms)) return;
     for (const r of state.rooms.filter((rm) => (rm.level || 0) === level)) {
       const target = ensureRoomCopy(state, r);
-      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+      for (const w of getRoomWallKeys(target)) setWallAssemblyOverrides(target, w, overrides);
     }
   } else if (scope === 'room') {
     const target = ensureRoomCopy(state, room);
     if (target) {
-      for (const w of getWallKeysForRoom(target)) setWallAssemblyOverrides(target, w, overrides);
+      for (const w of getRoomWallKeys(target)) setWallAssemblyOverrides(target, w, overrides);
     }
   } else {
     const target = ensureRoomCopy(state, room);
-    if (target && wall != null && wall !== '') {
+    if (target && isValidWallKey(wall)) {
       setWallAssemblyOverrides(target, wall, overrides);
     }
   }
@@ -1249,18 +1372,19 @@ export function applyFloorFinish(state, finishId, { scope = 'single', room, leve
 export function nearestWallOnLevel(state, p, level = 0, maxDist = 24, onlyRoom = null) {
   let best = null;
   const rooms = onlyRoom ? [onlyRoom] : state.rooms.filter((r) => (r.level || 0) === level);
-  for (const room of rooms)
-    for (const wall of WALLS) {
+  for (const room of rooms) {
+    const pts = getRoomPoints(room);
+    const inside = pointInPolygon(p, pts) ? 0 : 1;
+    for (const wall of getRoomWallKeys(room)) {
       const s = wallSeg(room, wall);
       const t = Math.max(0, Math.min(s.len, (p.x - s.ax) * s.dx + (p.y - s.ay) * s.dy));
       const cx = s.ax + s.dx * t;
       const cy = s.ay + s.dy * t;
       const d = Math.hypot(p.x - cx, p.y - cy);
-      const inside =
-        p.x >= room.x && p.x <= room.x + room.w && p.y >= room.y && p.y <= room.y + room.h ? 0 : 1;
       const score = d + inside * 0.3;
       if (d <= maxDist && (!best || score < best.score)) best = { room, wall, t, d, score };
     }
+  }
   return best;
 }
 
@@ -1281,7 +1405,13 @@ export function roomAtOnLevel(state, p, level = 0) {
 
 export function sampleFinishAt(state, p, level = 0, maxDist = 24) {
   const nw = nearestWallOnLevel(state, p, level, maxDist);
-  if (nw) return { kind: 'wall', finishId: nw.room.walls[nw.wall], room: nw.room, wall: nw.wall };
+  if (nw)
+    return {
+      kind: 'wall',
+      finishId: getWallFinish(nw.room, nw.wall),
+      room: nw.room,
+      wall: nw.wall,
+    };
   const r = roomAtOnLevel(state, p, level);
   if (r) return { kind: 'floor', finishId: r.floor, room: r };
   return null;
@@ -1379,6 +1509,7 @@ export function deserialize(text) {
     r.openings ||= [];
     r.items ||= [];
     if (r.level == null) r.level = 0;
+    r.walls ||= {};
     r.wallUV ||= {};
     const pts = getRoomPoints(r);
     r.points = pts;
@@ -1387,7 +1518,10 @@ export function deserialize(text) {
     r.y = bbox.y;
     r.w = bbox.w;
     r.h = bbox.h;
-    for (const w of WALLS) {
+    for (const w of getRoomWallKeys(r)) {
+      if (r.walls[w] === undefined) {
+        r.walls[w] = getWallFinish(r, w);
+      }
       r.wallUV[w] = getWallUV(r, w);
     }
     if (r.wallAssemblyOverrides && typeof r.wallAssemblyOverrides === 'object') {

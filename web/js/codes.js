@@ -5,10 +5,11 @@
 import {
   WT,
   EPS,
-  WALLS,
   resolveWallIndex,
   getRoomWallKeys,
+  getRoomPoints,
   getRoomClearSpan,
+  polygonCentroid,
   polygonsOverlap,
   wallLength,
   wallArcLength,
@@ -32,7 +33,7 @@ import {
   itemToPolygon,
 } from './geometry.js';
 import { ITEM_BY_ID, OPENING_BY_ID, ROOM_TYPES, openingMetrics } from './catalog.js';
-import { addItem, addOpening, createRoom } from './model.js';
+import { addItem, addOpening, createRoom, getWallFinish, setWallFinish } from './model.js';
 import { ensureSpatialIndex } from './gisBridge.js';
 
 const MOISTURE_ROOMS = new Set(['bathroom', 'laundry']);
@@ -430,13 +431,17 @@ export function cloneStateForTrial(state) {
     res.rooms = state.rooms.map((room) => {
       const r = cleanCloneObject(room);
       if (room.walls) r.walls = cleanCloneObject(room.walls);
-      if (room.wallUV) {
-        r.wallUV = {
-          N: cleanCloneObject(room.wallUV.N),
-          E: cleanCloneObject(room.wallUV.E),
-          S: cleanCloneObject(room.wallUV.S),
-          W: cleanCloneObject(room.wallUV.W),
-        };
+      if (room.wallUV && typeof room.wallUV === 'object') {
+        r.wallUV = {};
+        for (const [k, v] of Object.entries(room.wallUV)) {
+          if (v !== undefined) r.wallUV[k] = cleanCloneObject(v);
+        }
+      }
+      if (room.wallAssemblyOverrides && typeof room.wallAssemblyOverrides === 'object') {
+        r.wallAssemblyOverrides = {};
+        for (const [k, v] of Object.entries(room.wallAssemblyOverrides)) {
+          if (v !== undefined) r.wallAssemblyOverrides[k] = cleanCloneObject(v);
+        }
       }
       if (room.openings) {
         r.openings = room.openings.map((o) => {
@@ -930,7 +935,7 @@ export function evaluate(state, options = {}) {
         for (const other of room.items)
           if (
             other.id > it.id &&
-            other.wall === it.wall &&
+            resolveWallIndex(other.wall) === resolveWallIndex(it.wall) &&
             ITEM_BY_ID[other.type].mount === 'wall' &&
             Math.abs(other.offset - it.offset) < 6
           )
@@ -1000,7 +1005,7 @@ export function evaluate(state, options = {}) {
           { fixable: true }
         );
       for (const w of getRoomWallKeys(room))
-        if (!WALL_WET(room.walls?.[w]))
+        if (!WALL_WET(getWallFinish(room, w, null)))
           R(
             'wet-wall',
             'IRC R702.4 / practice',
@@ -1320,7 +1325,10 @@ function doorPreference(room, other) {
 
 function addExteriorWindow(state, roomId, types, baseReport = null) {
   const room = state.rooms.find((r) => r.id === roomId);
-  const walls = [...WALLS].sort((a, b) => wallLength(room, b) - wallLength(room, a));
+  if (!room) return null;
+  const walls = [...getRoomWallKeys(room)].sort(
+    (a, b) => wallLength(room, b) - wallLength(room, a)
+  );
   for (const type of types) {
     const def = OPENING_BY_ID[type];
     for (const wall of walls) {
@@ -1336,7 +1344,12 @@ function addExteriorWindow(state, roomId, types, baseReport = null) {
 
 const center = (room) => {
   const ir = interior(room);
-  return { x: ir.x + ir.w / 2, y: ir.y + ir.h / 2 };
+  const bboxMid = { x: ir.x + ir.w / 2, y: ir.y + ir.h / 2 };
+  const innerPoly = interiorPolygonData(room);
+  if (polygonContainsRect(innerPoly, { x: bboxMid.x - 4, y: bboxMid.y - 4, w: 8, h: 8 })) {
+    return bboxMid;
+  }
+  return polygonCentroid(innerPoly.points);
 };
 
 function addCeiling(state, roomId, type, dx = 0, dy = 0, baseReport = null) {
@@ -1435,9 +1448,8 @@ export function autoComply(state, options = {}) {
           addDiff(r.id, 'modify', 'floor', `${r.name}: moisture-resistant floor`);
         }
         for (const w of getRoomWallKeys(r))
-          if (!WALL_WET(r.walls?.[w]) && shouldFix(`${r.id}:${w}`)) {
-            r.walls ||= {};
-            r.walls[w] = r.type === 'bathroom' ? 'wall_tile_white' : 'paint_white';
+          if (!WALL_WET(getWallFinish(r, w, null)) && shouldFix(`${r.id}:${w}`)) {
+            setWallFinish(r, w, r.type === 'bathroom' ? 'wall_tile_white' : 'paint_white');
             addDiff(
               `${r.id}:${w}`,
               'modify',
@@ -1546,7 +1558,7 @@ export function autoComply(state, options = {}) {
           .filter((r) => order.includes(r.type) || true);
         outer: for (const r of cands) {
           if (!shouldFix(r.id)) continue;
-          for (const wall of WALLS) {
+          for (const wall of getRoomWallKeys(r)) {
             const spans = freeSpans(state, r, wall, { exterior: true, minLen: 36 });
             if (spans.length) {
               const openId = tryOpening(state, r.id, 'door_entry_36', wall, spans, 36, {}, rep());
@@ -1576,9 +1588,10 @@ export function autoComply(state, options = {}) {
               ? 'door_interior_30'
               : 'door_interior_32';
         const w = OPENING_BY_ID[type].w;
-        const nbrs = WALLS.flatMap((wall) =>
-          wallNeighbors(state.rooms, r, wall).map((n) => ({ wall, room: n.room }))
-        )
+        const nbrs = getRoomWallKeys(r)
+          .flatMap((wall) =>
+            wallNeighbors(state.rooms, r, wall).map((n) => ({ wall, room: n.room }))
+          )
           .filter((n) => cx.reachable.has(n.room.id))
           .sort((a, b) => doorPreference(r, b.room) - doorPreference(r, a.room));
         for (const n of nbrs) {
@@ -1657,15 +1670,24 @@ export function autoComply(state, options = {}) {
       }
       if (needsLight && !get().items.some((i) => i.type === 'switch')) {
         const cands = [];
-        for (const wall of WALLS)
+        const roomWalls = getRoomWallKeys(get());
+        for (const wall of roomWalls)
           for (const { o, from, to } of wallOpenings(state, get(), wall)) {
             if (o.kind !== 'door') continue;
             const dp = wallPoint(get(), wall, (from + to) / 2, 0);
-            for (const w2 of WALLS)
+            for (const w2 of roomWalls) {
+              const w2Openings = wallOpenings(state, get(), w2);
               for (let t2 = 8; t2 <= wallLength(get(), w2) - 8; t2 += 4) {
+                if (
+                  w2Openings.some(
+                    (op) => op.o.kind === 'door' && t2 > op.from - 2 && t2 < op.to + 2
+                  )
+                )
+                  continue;
                 const p = wallPoint(get(), w2, t2, 0);
                 cands.push({ w2, t2, d: Math.hypot(p.x - dp.x, p.y - dp.y) });
               }
+            }
           }
         cands.sort((a, b) => a.d - b.d);
         for (const cd of cands.slice(0, 40)) {
@@ -1728,8 +1750,16 @@ export function autoComply(state, options = {}) {
         Math.max(ir.w, ir.h) >= 120 &&
         !get().items.some((i) => ITEM_BY_ID[i.type].shape === 'outlet')
       ) {
-        const wall = ir.w >= ir.h ? 'N' : 'W';
-        const itemId = addWallItem(state, id, 'outlet', wall, wallLength(get(), wall) / 2, rep());
+        const curRoom = get();
+        const wall =
+          getRoomPoints(curRoom).length === 4
+            ? ir.w >= ir.h
+              ? 'N'
+              : 'W'
+            : [...getRoomWallKeys(curRoom)].sort(
+                (a, b) => wallLength(curRoom, b) - wallLength(curRoom, a)
+              )[0];
+        const itemId = addWallItem(state, id, 'outlet', wall, wallLength(curRoom, wall) / 2, rep());
         if (itemId) addDiff(itemId, 'add', 'item', `${r.name}: added hallway outlet`);
       }
       if (r.type === 'bathroom') {
@@ -1748,7 +1778,7 @@ export function autoComply(state, options = {}) {
         };
         if (!near() || !hasG) {
           if (lav) {
-            outer3: for (const wall of WALLS) {
+            outer3: for (const wall of getRoomWallKeys(get())) {
               const len = wallLength(get(), wall);
               for (let t2 = 8; t2 <= len - 8; t2 += 4) {
                 const p = wallPoint(get(), wall, t2, 0);
@@ -1763,12 +1793,13 @@ export function autoComply(state, options = {}) {
               }
             }
           } else {
+            const firstWall = getRoomWallKeys(get())[0];
             const itemId = addWallItem(
               state,
               id,
               'outlet_gfci',
-              'N',
-              wallLength(get(), 'N') / 2,
+              firstWall,
+              wallLength(get(), firstWall) / 2,
               rep()
             );
             if (itemId) addDiff(itemId, 'add', 'item', `${r.name}: added GFCI outlet`);

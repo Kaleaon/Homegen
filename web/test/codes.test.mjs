@@ -853,7 +853,7 @@ test('autoComply remediates non-compliant moisture finishes across all numeric s
 
 test('polygonal wet rooms without explicit numeric wall keys receive moisture-resistant finishes and preserve cardinal rooms', () => {
   const s = m.newState();
-  // Polygonal bathroom created without opts.walls leaves numeric keys 0..5 undefined
+  // Legacy polygonal bathroom with only cardinal non-wet finishes (numeric keys 0..5 omitted)
   const polyBath = m.createRoom(s, 'bathroom', 0, 0, 144, 144, {
     points: [
       { x: 0, y: 0 },
@@ -864,6 +864,7 @@ test('polygonal wet rooms without explicit numeric wall keys receive moisture-re
       { x: 0, y: 144 },
     ],
   });
+  polyBath.walls = { N: 'wp_floral', E: 'wp_floral', S: 'wp_floral', W: 'wp_floral' };
   // Standard 4-wall rectangular bathroom uses N, E, S, W keys
   const rectBath = m.createRoom(s, 'bathroom', 200, 0, 96, 120, {
     wallFinish: 'wp_floral',
